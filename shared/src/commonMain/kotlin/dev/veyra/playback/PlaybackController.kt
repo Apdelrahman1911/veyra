@@ -12,7 +12,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.selects.select
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlin.random.Random
+
+private const val GRACEFUL_SHUTDOWN_TIMEOUT_MS = 5_000L
 
 /**
  * Single application-lifetime owner of two saved queue contexts and one native transport.
@@ -35,6 +39,11 @@ class PlaybackController(
     // covers prompt-cancellation/undelivered-element races as well as stale generations.
     private val resourceCleanupScope = CoroutineScope(SupervisorJob() + dispatcher)
     private val resourceCleanup = Channel<ResourceCleanup>(Channel.UNLIMITED)
+    private val cleanupCompletion = CompletableDeferred<Throwable?>()
+    private val nativeCloseLock = Mutex()
+    private val nativeCloseCompletion = CompletableDeferred<Throwable?>()
+    private val closeLock = Mutex()
+    private val closeCompletion = CompletableDeferred<Throwable?>()
     private val cleanupJob: Job
     private val engineOperationJob: Job
     private val messages = Channel<Message>(256, onUndeliveredElement = ::discardMessage)
@@ -70,7 +79,6 @@ class PlaybackController(
     private var nativeReleaseFailure: AppFailure? = null
     private var stagedNext: StagedNext? = null
     private var suppressedNext: Pair<Long, String>? = null
-    private var engineClosed = false
     private var historyStartedMs = 0L
     /** A stop/retry generation is a callback barrier, not a new listening occurrence. */
     private var historyGeneration = 0L
@@ -84,19 +92,30 @@ class PlaybackController(
     init {
         require(checkpointIntervalMs > 0)
         cleanupJob = resourceCleanupScope.launch {
-            var cleanupFailure: AppFailure? = null
+            var cleanupFailure: Throwable? = null
             try {
                 for (work in resourceCleanup) {
                     when (work) {
                         is ResourceCleanup.Close -> try { work.resource.close() }
-                        catch (_: Exception) {
-                            cleanupFailure = AppFailure(FailureCode.UNEXPECTED, "Playback resource cleanup failed")
+                        catch (error: Throwable) {
+                            // Even a resource which throws cancellation must not skip later closes.
+                            // Preserve that cancellation for close(), rather than losing it in a Job.
+                            cleanupFailure = combineCloseFailures(cleanupFailure,
+                                closeFailureOf(error, "Playback resource cleanup failed"))
                             messages.trySend(Message.ResourceCleanupFailed)
                         }
-                        is ResourceCleanup.Fence -> work.result.complete(cleanupFailure)
+                        is ResourceCleanup.Fence -> work.result.complete(cleanupFailure?.let {
+                            AppFailure(FailureCode.UNEXPECTED, "Playback resource cleanup failed")
+                        })
                     }
                 }
-            } finally { resourceCleanupScope.cancel() }
+            } catch (error: Throwable) {
+                cleanupFailure = combineCloseFailures(cleanupFailure,
+                    closeFailureOf(error, "Playback resource cleanup failed"))
+            } finally {
+                cleanupCompletion.complete(cleanupFailure)
+                resourceCleanupScope.cancel()
+            }
         }
         job.invokeOnCompletion { resourceCleanup.close() }
         engineOperationJob = ownerScope.launch {
@@ -141,8 +160,9 @@ class PlaybackController(
                 job.cancel()
                 withContext(NonCancellable) {
                     engineOperationJob.cancelAndJoin()
-                    try { engine.stop(reserveGeneration()) } catch (_: Exception) { /* close is the final native barrier. */ }
-                    if (!engineClosed) { engineClosed = true; engine.close() }
+                    // SupervisorJob/join do not propagate a child's exception to public close().
+                    // Keep the actual result, including stop failure, for every later caller.
+                    finishNativeClose()
                 }
             }
         }
@@ -175,16 +195,76 @@ class PlaybackController(
      */
     suspend fun releaseForAssetRemoval(mediaId: String): PlaybackResult = request { Message.ReleaseAsset(mediaId, it) }
 
+    /** Drain all owners once; a failed shutdown remains failed on every subsequent call. */
     suspend fun close() {
+        var failure: Throwable? = null
         try {
-            if (job.isActive) request { Message.Shutdown(it) }
-        } finally {
             withContext(NonCancellable) {
-                job.cancelAndJoin()
-                if (!engineClosed) { engineClosed = true; engine.close() }
-                cleanupJob.join()
+                closeLock.withLock {
+                    if (!closeCompletion.isCompleted) {
+                        var closingFailure: Throwable? = null
+                        try {
+                            if (job.isActive) {
+                                // A full native-operation mailbox can prevent the actor from even
+                                // accepting Shutdown. Bound only this graceful checkpoint attempt;
+                                // actual native/resource release below is still fully awaited.
+                                val result = withTimeoutOrNull(GRACEFUL_SHUTDOWN_TIMEOUT_MS) {
+                                    request { Message.Shutdown(it) }
+                                } ?: throw VeyraException(AppFailure(FailureCode.UNEXPECTED,
+                                    "Playback shutdown checkpoint timed out"))
+                                result.getOrThrow()
+                            }
+                        } catch (error: Throwable) {
+                            closingFailure = closeFailureOf(error, "Playback shutdown checkpoint failed")
+                        }
+                        job.cancelAndJoin() // Includes retired/cancellation-delayed resolvers.
+                        // The actor may never have started when its parent was already cancelled.
+                        // Cancel the mailboxes in that case too, disposing any undelivered owners.
+                        messages.cancel()
+                        positions.cancel()
+                        engineOperations.cancel()
+                        closingFailure = combineCloseFailures(closingFailure, finishNativeClose())
+                        cleanupJob.join()
+                        closingFailure = combineCloseFailures(closingFailure, cleanupCompletion.await())
+                        closeCompletion.complete(closingFailure)
+                    }
+                    failure = closeCompletion.await()
+                }
             }
+            currentCoroutineContext().ensureActive()
+        } catch (cancelled: CancellationException) {
+            // NonCancellable guarantees the drain, not successful completion to a cancelled caller.
+            // Caller cancellation is not cached as a failure for later, still-active close callers.
+            failure?.takeUnless { it === cancelled }?.let(cancelled::addSuppressed)
+            throw cancelled
         }
+        failure?.let { throw it }
+    }
+
+    /** Called only after native work has stopped, both by the actor and its never-started fallback. */
+    private suspend fun finishNativeClose(): Throwable? = nativeCloseLock.withLock {
+        if (!nativeCloseCompletion.isCompleted) {
+            var failure: Throwable? = null
+            try { engine.stop(reserveGeneration()) }
+            catch (error: Throwable) { failure = closeFailureOf(error, "Native playback stop failed") }
+            try { engine.close() }
+            catch (error: Throwable) {
+                failure = combineCloseFailures(failure, closeFailureOf(error, "Native playback close failed"))
+            }
+            nativeCloseCompletion.complete(failure)
+        }
+        nativeCloseCompletion.await()
+    }
+
+    private fun closeFailureOf(error: Throwable, detail: String): Throwable = when (error) {
+        is CancellationException, is VeyraException -> error
+        else -> VeyraException(AppFailure(FailureCode.UNEXPECTED, detail))
+    }
+
+    private fun combineCloseFailures(first: Throwable?, next: Throwable?): Throwable? {
+        if (first == null) return next
+        if (next != null && next !== first) first.addSuppressed(next)
+        return first
     }
 
     private suspend fun request(create: (CompletableDeferred<PlaybackResult>) -> Message): PlaybackResult {

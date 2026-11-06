@@ -40,6 +40,7 @@ internal class RoomLibraryPersistence private constructor(
                         check(rows == LibraryRows()) { "Partial database seed; refusing to erase orphaned data" }
                         val empty = AppSnapshot()
                         dao.writeDifference(rows, empty.toRows())
+                        verifyWrittenSnapshot(dao, empty)
                         empty
                     } else rows.toSnapshot().also(::validateLibrarySnapshot)
                 }
@@ -78,6 +79,7 @@ internal class RoomLibraryPersistence private constructor(
                 val next = proposed.copy(schemaVersion = AppSnapshot.CURRENT_SCHEMA, revision = previous.revision + 1)
                 validateLibraryTransition(previous, next)
                 dao.writeDifference(before, next.toRows())
+                verifyWrittenSnapshot(dao, next)
                 // Immediate transaction commit also checks all deferred foreign-key constraints.
                 next
             }
@@ -146,5 +148,13 @@ internal class RoomLibraryPersistence private constructor(
     private fun requireOpen(): VeyraDatabase {
         check(opened && !closed) { "Database is not open" }
         return requireNotNull(database)
+    }
+
+    private suspend fun verifyWrittenSnapshot(dao: LibraryDao, expected: AppSnapshot) {
+        // Room @Upsert may absorb a uniqueness conflict and update zero rows. Triggers can also
+        // ignore writes without throwing. Never publish a revision/graph that SQLite did not store.
+        // This readback remains inside the same IMMEDIATE transaction, before its commit.
+        val actual = dao.readRows().toSnapshot().also(::validateLibrarySnapshot)
+        check(actual == expected) { "Relational write did not match the intended snapshot" }
     }
 }

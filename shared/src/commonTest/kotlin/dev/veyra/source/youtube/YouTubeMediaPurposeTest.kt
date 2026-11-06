@@ -166,8 +166,9 @@ class YouTubeMediaPurposeTest {
             val streaming = buildJsonObject { put(if (kind == TransportKind.HLS) "hlsManifestUrl" else "dashManifestUrl", manifest) }
             val master = """
                 #EXTM3U
-                #EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="sound",NAME="English",LANGUAGE="en",DEFAULT=YES,URI="audio.m3u8"
-                #EXT-X-STREAM-INF:BANDWIDTH=400000,RESOLUTION=640x360,CODECS="avc1.4d401f,mp4a.40.2",AUDIO="sound"
+                #EXT-X-STREAM-INF:BANDWIDTH=128000,CODECS="mp4a.40.2"
+                audio.m3u8
+                #EXT-X-STREAM-INF:BANDWIDTH=400000,RESOLUTION=640x360,CODECS="avc1.4d401f,mp4a.40.2"
                 never-selected-video.m3u8
             """.trimIndent()
             val child = "#EXTM3U\n#EXT-X-MAP:URI=\"audio.mp4\",BYTERANGE=\"16@0\"\n#EXTINF:3,\n#EXT-X-BYTERANGE:16@16\naudio.mp4\n#EXT-X-ENDLIST"
@@ -185,7 +186,8 @@ class YouTubeMediaPurposeTest {
             }, downloader = YouTubeDownloader { plan, path, _ ->
                 transfers++; assertEquals(id, plan.mediaId); assertEquals(kind, plan.primary.transport)
                 assertEquals(TrackRole.AUDIO, plan.primary.role); assertNull(plan.audio)
-                assertEquals("en", plan.primary.audioLanguage); assertEquals("mp4a.40.2", plan.primary.codecs)
+                assertEquals(if (kind == TransportKind.DASH) "en" else null, plan.primary.audioLanguage)
+                assertEquals("mp4a.40.2", plan.primary.codecs)
                 assertEquals(32L, TransferPlanning.totalBytes(plan))
                 assertTrue(plan.primary.segments.isNotEmpty())
                 // Actual remux output is not constrained to the acquisition byte sum.
@@ -202,5 +204,30 @@ class YouTubeMediaPurposeTest {
                 assertEquals(if (kind == TransportKind.HLS) 6 else 4, requests.size)
             } finally { source.close() }
         }
+    }
+
+    @Test fun anExternalHlsAudioRenditionWithoutAParsedCodecIsNotAssumedToBeAac() = runTest {
+        val manifest = "$mediaOrigin/master.m3u8"
+        val master = """
+            #EXTM3U
+            #EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="sound",NAME="English",LANGUAGE="en",DEFAULT=YES,URI="audio.m3u8"
+            #EXT-X-STREAM-INF:BANDWIDTH=400000,RESOLUTION=640x360,CODECS="avc1.4d401f,mp4a.40.2",AUDIO="sound"
+            video.m3u8
+        """.trimIndent()
+        val requests = mutableListOf<String>()
+        val source = YouTubeMediaSource(YouTubeClient(ResearchTransport { request ->
+            requests += request.url
+            ResearchResponse(request.url, 200, when (request.url) {
+                watchUrl -> "<script>var ytInitialPlayerResponse=${player(buildJsonObject { put("hlsManifestUrl", manifest) })};</script>"
+                manifest -> master
+                else -> error("Unknown-codec renditions must fail before media playlist/download execution")
+            })
+        }, downloader = YouTubeDownloader { _, _, _ -> error("Never guess AAC from a generic audio/mp4 rendition") }))
+        try {
+            assertEquals(FailureCode.UNSUPPORTED_CODEC, assertFailsWith<VeyraException> {
+                source.resolve(item, engine, ResolvePurpose.DOWNLOAD)
+            }.failure.code)
+            assertEquals(listOf(watchUrl, manifest), requests)
+        } finally { source.close() }
     }
 }

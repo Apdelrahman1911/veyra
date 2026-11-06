@@ -542,7 +542,15 @@ class PlaybackControllerTest {
             assertEquals(1, closeCalls)
             // A later successful native stop does not prove that a failed bridge close succeeded.
             assertIs<PlaybackResult.Failure>(f.controller.releaseForAssetRemoval("first"))
-        } finally { resolveGate.complete(Unit); f.close() }
+            val failure = assertFailsWith<VeyraException> { f.controller.close() }
+            assertEquals("Playback resource cleanup failed", failure.failure.detail)
+            assertSame(failure, assertFailsWith<VeyraException> { f.controller.close() })
+            assertEquals(1, closeCalls)
+        } finally {
+            resolveGate.complete(Unit)
+            try { assertFailsWith<VeyraException> { f.controller.close() } }
+            finally { f.store.close() }
+        }
     }
 
     @Test fun failedNativeStopVetoesDeletionWithoutInfiniteAutomaticStopRetries() = runTest {

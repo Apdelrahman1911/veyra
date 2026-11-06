@@ -234,7 +234,7 @@ class DownloadFiles(directory: String, val fileSystem: FileSystem = FileSystem.S
 
     suspend fun sha256(path: Path): String = withContext(Dispatchers.IO) {
         val safe = ownedPath(path.toString())
-        storageOperation {
+        val digest = storageOperation {
             HashingSource.sha256(fileSystem.source(safe)).use { hashing ->
                 val buffer = Buffer()
                 while (hashing.read(buffer, 64L * 1024) != -1L) {
@@ -244,6 +244,10 @@ class DownloadFiles(directory: String, val fileSystem: FileSystem = FileSystem.S
                 hashing.hash.hex()
             }
         }
+        // EOF and Source.close can themselves block. A same-IO withContext return does not
+        // replace this check: never hand a cancelled hash to the native validation stage.
+        currentCoroutineContext().ensureActive()
+        digest
     }
 
     suspend fun verifiedFile(asset: OfflineAsset): Path = withContext(Dispatchers.IO) {

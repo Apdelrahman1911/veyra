@@ -69,6 +69,9 @@ internal fun validateLibrarySnapshot(snapshot: AppSnapshot) {
     require(snapshot.history.map { it.id }.distinct().size == snapshot.history.size)
     require(snapshot.history.all { it.mediaId in snapshot.media && it.lastPositionMs >= 0 && validBinding(it.executionBindingId, it.mediaId) })
     require(snapshot.downloads.values.map { it.mediaId }.distinct().size == snapshot.downloads.size)
+    val assets = snapshot.downloads.values.mapNotNull { it.asset }
+    require(assets.map { it.id }.distinct().size == assets.size) { "Offline asset identities must be unique" }
+    require(assets.map { it.uri }.distinct().size == assets.size) { "Offline asset files must have one owner" }
     snapshot.downloads.forEach { (id, d) ->
         require(id == d.id && id.isNotBlank() && d.mediaId in snapshot.media && d.bytesDownloaded >= 0 && d.attemptCount >= 0 && d.automaticRetryCount >= 0)
         require(d.totalBytes == null || d.totalBytes >= 0)

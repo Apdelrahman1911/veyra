@@ -100,10 +100,12 @@ internal class PlaybackTestEngine : CrossfadeAudioEngine {
     var staged: Load? = null
     var currentSpeed = 1f
     var closed = false
+    var closeCalls = 0
     var autoReady = true
     var autoSeek = true
     var beforePrepare: (suspend () -> Unit)? = null
     var beforeStop: (suspend () -> Unit)? = null
+    var beforeClose: (suspend () -> Unit)? = null
     var beforeConfirm: (suspend () -> Unit)? = null
     var beforeCancelNext: (suspend () -> Unit)? = null
 
@@ -174,14 +176,14 @@ internal class PlaybackTestEngine : CrossfadeAudioEngine {
         if (staged?.generation == nextGeneration) clearStage()
         cancellations += generation to nextGeneration
     }
-    override suspend fun close() { closeActive(); closed = true; eventsChannel.close() }
+    override suspend fun close() { closeCalls++; beforeClose?.invoke(); closeActive(); closed = true; eventsChannel.close() }
     private suspend fun clearStage() { staged?.source?.resource?.close(); staged = null }
     private suspend fun closeActive() { clearStage(); active?.source?.resource?.close(); active = null }
     suspend fun emit(event: EngineEvent) { eventsChannel.send(event) }
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
-internal class PlaybackFixture(val testScope: TestScope, initial: AppSnapshot = AppSnapshot()) {
+internal class PlaybackFixture(val testScope: TestScope, initial: AppSnapshot = AppSnapshot(), ownerScope: CoroutineScope = testScope) {
     val dispatcher = StandardTestDispatcher(testScope.testScheduler)
     val persistence = PlaybackTestPersistence(initial)
     val store = LibraryStore(persistence, dispatcher)
@@ -191,7 +193,7 @@ internal class PlaybackFixture(val testScope: TestScope, initial: AppSnapshot = 
         override fun epochMs(): Long = 1_000_000 + testScope.testScheduler.currentTime
         override fun monotonicMs(): Long = testScope.testScheduler.currentTime
     }
-    val controller = PlaybackController(store, engine, resolver, testScope, clock, dispatcher)
+    val controller = PlaybackController(store, engine, resolver, ownerScope, clock, dispatcher)
     val state get() = controller.state.value
 
     suspend fun command(command: PlaybackCommand) { controller.dispatch(command).getOrThrow(); testScope.runCurrent() }
@@ -212,5 +214,5 @@ internal class PlaybackFixture(val testScope: TestScope, initial: AppSnapshot = 
         event(EngineEvent.Position(state.generation, position, state.durationMs))
         testScope.advanceTimeBy(250); testScope.runCurrent()
     }
-    suspend fun close() { controller.close(); store.close() }
+    suspend fun close() { try { controller.close() } finally { store.close() } }
 }

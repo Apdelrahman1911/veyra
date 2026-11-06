@@ -131,6 +131,9 @@ private fun <T, K> difference(old: List<T>, next: List<T>, key: (T) -> K): Diffe
     check(before.size == old.size && after.size == next.size) { "Duplicate relational identity" }
     return Difference(
         old.filter { key(it) !in after },
-        next.filter { before[key(it)] != it },
+        // Release changed scalar unique values before a new identity tries to use one. Room's
+        // @Upsert can silently no-op on a non-PK conflict followed by UPDATE of an absent PK.
+        // Cyclic unique-value swaps still fail transactionally; never use destructive REPLACE.
+        next.filter { key(it) in before && before[key(it)] != it } + next.filter { key(it) !in before },
     )
 }

@@ -198,7 +198,8 @@ class AppSourceResolver(
             ?: rejectLocal(record, AppFailure(FailureCode.CORRUPT_MEDIA, "offline_asset_missing"))
         val binding = asset.executionBindingId?.let { store.state.value.playbackBindings[it] }
         if (asset.mediaId != item.id || binding == null || record.executionBindingId != binding.id ||
-            asset.executionBindingId != binding.id || asset.kind != OfflineAssetKind.FILE) {
+            asset.executionBindingId != binding.id || asset.kind != OfflineAssetKind.FILE ||
+            asset.representationId.isNullOrBlank() || record.representationId != asset.representationId) {
             rejectLocal(record, AppFailure(FailureCode.CORRUPT_MEDIA, "offline_execution_binding_mismatch"))
         }
         try { requireMatchingBinding(binding, item); requireVideo(binding) }

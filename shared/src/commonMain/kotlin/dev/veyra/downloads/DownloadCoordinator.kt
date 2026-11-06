@@ -534,7 +534,7 @@ class DownloadCoordinator(
                     }.getOrThrow()
                     // Intent is ALREADY durable. Rename inside the next exact CAS is short and cannot
                     // run after a winning cancel/removal transaction. A failed SQLite commit is replayable.
-                    commitFinalization(intent, owner, claim.lifecycleGeneration, alreadyPublished = false)
+                    commitFinalization(intent, owner, claim.lifecycleGeneration, binding, alreadyPublished = false)
                 } finally { withContext(NonCancellable) { heartbeat.cancelAndJoin() } }
             }
         } catch (error: CancellationException) { cancelled = failure == null; throw error }
@@ -630,7 +630,7 @@ class DownloadCoordinator(
     }
 
     private suspend fun commitFinalization(intent: DownloadFinalization, claimant: String, lifecycleGeneration: Long,
-        alreadyPublished: Boolean): Boolean {
+        expectedBinding: PlaybackBinding, alreadyPublished: Boolean): Boolean {
         var committed = false
         var verifiedBinding: PlaybackBinding? = null
         val asset = OfflineAsset("${intent.downloadId}-${intent.attemptId ?: intent.validatorGeneration}", intent.mediaId,
@@ -645,6 +645,8 @@ class DownloadCoordinator(
                 return@update snapshot
             requireMaterializedBinding(snapshot, record, intent.mediaId, intent.executionBindingId, intent.representationId)
             verifiedBinding = snapshot.playbackBindings.getValue(intent.executionBindingId!!)
+            if (verifiedBinding != expectedBinding)
+                throw VeyraException(AppFailure(FailureCode.CORRUPT_MEDIA, "offline_execution_binding_changed"))
             if (record.asset != null && record.asset.uri != intent.finalPath)
                 throw VeyraException(AppFailure(FailureCode.RECOVERY_REQUIRED, "prior_asset_requires_cleanup"))
             if (!alreadyPublished) files.atomicPublish(intent.stagingPath, intent.finalPath)
@@ -888,11 +890,13 @@ class DownloadCoordinator(
     private suspend fun recoverFinalization(id: String) {
         withMaintenance(id, MaintenanceKind.FINALIZATION) { claim ->
             val intent = claim.intent!!
+            var verifiedBinding: PlaybackBinding? = null
             try {
                 store.update { snapshot ->
                     if (!matchesMaintenance(snapshot, claim)) throw CancellationException("Finalization identity revoked")
                     requireMaterializedBinding(snapshot, snapshot.downloads.getValue(id), intent.mediaId,
                         intent.executionBindingId, intent.representationId)
+                    verifiedBinding = snapshot.playbackBindings.getValue(intent.executionBindingId!!)
                     snapshot
                 }.getOrThrow()
                 val destination = files.ownedPath(intent.finalPath)
@@ -905,7 +909,7 @@ class DownloadCoordinator(
                 validate(asset)
                 files.verifiedFile(asset)
                 currentCoroutineContext().ensureActive()
-                commitFinalization(intent, claim.leaseOwner, claim.lifecycleGeneration, alreadyPublished = published)
+                commitFinalization(intent, claim.leaseOwner, claim.lifecycleGeneration, verifiedBinding!!, alreadyPublished = published)
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) {
                 store.update { snapshot ->
@@ -1054,7 +1058,7 @@ class DownloadCoordinator(
     private fun materializedBindingMatches(snapshot: AppSnapshot, record: DownloadRecord, mediaId: String,
         bindingId: String?, representationId: String?): Boolean {
         val binding = bindingId?.let(snapshot.playbackBindings::get) ?: return false
-        return record.mediaId == mediaId && record.executionBindingId == bindingId && record.representationId == representationId &&
+        return !representationId.isNullOrBlank() && record.mediaId == mediaId && record.executionBindingId == bindingId && record.representationId == representationId &&
             binding.mediaId == mediaId && binding.selectionOrdinal == 0 && binding.firstResultKind == FirstResultKind.VIDEO &&
             binding.queryTitle.isNotBlank() && binding.selectedVideoId == binding.firstResultId && VIDEO_ID.matches(binding.firstResultId) &&
             (binding.firstResultUrl == null || binding.firstResultUrl == "https://www.youtube.com/watch?v=${binding.firstResultId}")

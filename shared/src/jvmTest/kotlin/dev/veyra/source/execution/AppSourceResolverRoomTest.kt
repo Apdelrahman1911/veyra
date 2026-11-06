@@ -187,6 +187,49 @@ class AppSourceResolverRoomTest {
         assertNoGateway()
     }
 
+    private fun rejectRepresentationAfterRoomRestart(assetRepresentation: String?, recordRepresentation: String?) = checkCase {
+        val invalidAsset = asset.copy(representationId = assetRepresentation)
+        store.update { snapshot -> snapshot.copy(
+            settings = snapshot.settings.copy(offlineOnly = true),
+            downloads = snapshot.downloads + (record.id to record.copy(
+                asset = invalidAsset, representationId = recordRepresentation)),
+        ) }.getOrThrow()
+        reopen()
+        assertEquals(DownloadStatus.COMPLETE, store.state.value.downloads.getValue(record.id).status)
+        assertEquals(FailureCode.CORRUPT_MEDIA, assertFailsWith<VeyraException> {
+            resolver().resolve(item, EngineCapabilities(), offlineOnly = true)
+        }.failure.code)
+        assertEquals(0, validations, "Malformed representation provenance must fail before native use")
+        assertEquals(DownloadStatus.FAILED, store.state.value.downloads.getValue(record.id).status)
+        assertEquals(invalidAsset, store.state.value.downloads.getValue(record.id).asset)
+        assertTrue(Files.isRegularFile(Path.of(asset.uri)), "Keep owned bytes for explicit recovery/removal")
+        reopen()
+        assertEquals(DownloadStatus.FAILED, store.state.value.downloads.getValue(record.id).status)
+        store.update { it.copy(settings = it.settings.copy(offlineOnly = false)) }.getOrThrow()
+        assertEquals(FailureCode.CORRUPT_MEDIA, assertFailsWith<VeyraException> {
+            resolver().resolve(item, EngineCapabilities(), offlineOnly = false)
+        }.failure.code)
+        assertEquals(0, validations)
+        assertEquals(binding, store.state.value.playbackBindings[binding.id])
+        assertNoGateway()
+    }
+
+    @Test fun missingAssetRepresentationIsRejectedBeforeNativeValidationAfterRoomRestart() {
+        rejectRepresentationAfterRoomRestart(null, null)
+    }
+
+    @Test fun blankAssetRepresentationIsRejectedEvenWhenRecordMatchesAfterRoomRestart() {
+        for (blank in listOf("", " \t\n")) rejectRepresentationAfterRoomRestart(blank, blank)
+    }
+
+    @Test fun missingRecordRepresentationIsRejectedBeforeNativeValidationAfterRoomRestart() {
+        rejectRepresentationAfterRoomRestart("authored-kmpyt-representation", null)
+    }
+
+    @Test fun mismatchedRecordRepresentationIsRejectedBeforeNativeValidationAfterRoomRestart() {
+        rejectRepresentationAfterRoomRestart("authored-kmpyt-representation", "authored-other-representation")
+    }
+
     @Test fun unsupportedEngineDoesNotRelabelAValidArtifactAsCorrupt() = checkCase {
         assertEquals(FailureCode.UNSUPPORTED_CODEC, assertFailsWith<VeyraException> {
             resolver().resolve(item, EngineCapabilities(mimeTypes = setOf("audio/mp4"), codecs = setOf("aac")), offlineOnly = true)

@@ -108,7 +108,7 @@ internal fun AppSnapshot.toRows(): LibraryRows = LibraryRows(
     bindings = playbackBindings.values.map { b -> PlaybackBindingEntity(b.id, b.mediaId, b.queryTitle, b.firstResultKind, b.firstResultId, b.firstResultTitle, b.firstResultUrl, b.selectedVideoId, b.resolvedEpochMs, b.selectionOrdinal) },
     progress = progress.map { (id, p) -> MediaProgressEntity(id, p.positionMs, p.durationMs, p.played, p.updatedEpochMs, p.sessionId, p.generation, p.sequence, p.executionBindingId) },
     history = history.mapIndexed { index, h -> HistoryEntity(h.id, h.mediaId, h.startedEpochMs, h.lastPositionMs, h.endedNaturally, h.executionBindingId, index) },
-    assets = downloads.values.mapNotNull { it.asset }.distinctBy { it.id }.map { a ->
+    assets = downloads.values.mapNotNull { it.asset }.map { a ->
         OfflineAssetEntity(a.id, a.mediaId, a.uri, a.sizeBytes, a.kind, a.mimeType, a.codecs, a.sha256, a.representationId,
             a.validatorGeneration, a.completedEpochMs, a.executionBindingId, a.measuredDurationMs)
     },

@@ -197,7 +197,7 @@ class DownloadRecoveryRoomTest {
         val gateway = DownloadTestGateway()
         val a = coordinator(first, gateway, beforeDelete = { cleanup.stop() })
         a.start()
-        assertEquals(DownloadStatus.FAILED, first.flush().getOrThrow().downloads[seeded.record.id]?.status)
+        eventually(first) { it.downloads[seeded.record.id]?.status == DownloadStatus.FAILED }
         assertEquals(0, validationCount.get(), "Hash corruption must be rejected before decoder validation")
         a.resume(seeded.record.id)
         cleanup.entered.await()

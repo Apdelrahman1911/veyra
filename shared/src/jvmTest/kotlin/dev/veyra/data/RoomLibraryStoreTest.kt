@@ -148,11 +148,36 @@ class RoomLibraryStoreTest {
             val receipt = DownloadFinalization("download", "music-1", "stage.part", "final.m4a", "a".repeat(64), 500, "attempt")
             first.update { old -> old.copy(downloads = old.downloads + ("download" to old.downloads.getValue("download").copy(activeAttemptId = attempt.id, attemptCount = 1)),
                 downloadAttempts = mapOf(attempt.id to attempt), downloadFinalizations = mapOf("download" to receipt)) }.getOrThrow()
-            assertEquals(receipt, second.flush().getOrThrow().downloadFinalizations["download"])
-            // Bypass domain validation to prove the actual SQL UNIQUE constraint as well.
+            val beforeDuplicate = second.flush().getOrThrow()
+            assertEquals(receipt, beforeDuplicate.downloadFinalizations["download"])
+            // Room @Upsert can absorb a non-PK uniqueness conflict and UPDATE an absent new PK
+            // (zero rows). A raw INSERT is required to prove the SQL UNIQUE constraint itself.
             val existing = db.libraryDao().readDownloads().single()
-            assertFailsWith<Exception> { db.useWriterConnection { connection -> connection.immediateTransaction { db.libraryDao().upsertDownloads(listOf(existing.copy(id = "duplicate"))) } } }
-            assertEquals(1, db.libraryDao().readDownloads().size)
+            val duplicateFailure = assertFailsWith<Exception> {
+                db.useWriterConnection { connection -> connection.immediateTransaction {
+                    val columns = connection.usePrepared("PRAGMA table_info(downloads)") { statement ->
+                        buildList { while (statement.step()) add(statement.getText(1)) }
+                    }
+                    val names = columns.joinToString(", ") { "\"${it.replace("\"", "\"\"")}\"" }
+                    val values = columns.joinToString(", ") { if (it == "id") "?" else "\"${it.replace("\"", "\"\"")}\"" }
+                    connection.usePrepared("INSERT INTO downloads ($names) SELECT $values FROM downloads WHERE id = ?") { statement ->
+                        statement.bindText(1, "duplicate")
+                        statement.bindText(2, existing.id)
+                        statement.step()
+                    }
+                } }
+            }
+            assertTrue(duplicateFailure.message.orEmpty().contains("UNIQUE constraint failed: downloads.mediaId"))
+            assertEquals(listOf(existing), db.libraryDao().readDownloads())
+            assertEquals(beforeDuplicate, first.flush().getOrThrow())
+            // The public store rejects duplicate media ownership before any SQL row is touched.
+            assertIs<StoreResult.Failure>(first.update { old -> old.copy(downloads = old.downloads +
+                ("duplicate" to old.downloads.getValue("download").copy(id = "duplicate"))) })
+            assertEquals(beforeDuplicate, first.flush().getOrThrow())
+            val afterDuplicate = second.flush().getOrThrow()
+            assertEquals(beforeDuplicate, afterDuplicate)
+            assertEquals(attempt, afterDuplicate.downloadAttempts[attempt.id])
+            assertEquals(receipt, afterDuplicate.downloadFinalizations["download"])
         } finally { first.close(); second.close() }
     }
 
