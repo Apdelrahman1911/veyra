@@ -1,0 +1,133 @@
+name: Veyra manual verification
+
+# Manual-only until the lead has reviewed the final source and boundary gates.
+# No publish, pull_request_target, paid runner, cache, or artifact-storage action.
+on:
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: Target group to verify
+        type: choice
+        options: [all, desktop, android, ios]
+        default: all
+      package_desktop:
+        description: Generate native installers (no upload or OS installation)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: veyra-verify-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CI: 'true'
+  VEYRA_GRADLE_WORKERS: '1'
+
+jobs:
+  desktop:
+    if: ${{ github.event.repository.private == false && (inputs.scope == 'all' || inputs.scope == 'desktop') }}
+    name: Desktop (${{ matrix.label }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - {label: Linux x64, runner: ubuntu-24.04, system: Linux, arch: x64}
+          - {label: Windows x64, runner: windows-2022, system: Windows, arch: x64}
+          - {label: macOS arm64, runner: macos-15, system: Darwin, arch: arm64}
+          - {label: macOS x64, runner: macos-15-intel, system: Darwin, arch: x64}
+    env:
+      VEYRA_EXPECTED_OS: ${{ matrix.system }}
+      VEYRA_EXPECTED_ARCH: ${{ matrix.arch }}
+      BUILD_PACKAGES: ${{ inputs.package_desktop }}
+    steps:
+      - name: Checkout without global Git configuration or retained credentials
+        id: checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1; reviewed workspace-only auth path
+        with:
+          persist-credentials: false
+          set-safe-directory: false
+          submodules: false
+      - name: Initialize the pinned public source dependency in an owned environment
+        run: scripts/checkout-submodule.sh
+      - name: Test current native desktop target
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then
+            export DEVELOPER_DIR=/Applications/Xcode_26.0.1.app/Contents/Developer
+            test -d "$DEVELOPER_DIR"
+          fi
+          args=(desktop)
+          if [ "$BUILD_PACKAGES" = true ]; then args+=(--package); fi
+          scripts/ci.sh "${args[@]}"
+      - name: Report actual discovered tests and remaining physical gates
+        if: ${{ always() && steps.checkout.outcome == 'success' }}
+        env:
+          VEYRA_JOB_STATUS: ${{ job.status }}
+        run: scripts/dev.sh python3 -B scripts/verification-summary.py --phase desktop
+
+  android:
+    if: ${{ github.event.repository.private == false && (inputs.scope == 'all' || inputs.scope == 'android') }}
+    name: Android compile, unit tests and lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      VEYRA_EXPECTED_OS: Linux
+      VEYRA_EXPECTED_ARCH: x64
+    steps:
+      - name: Checkout without global Git configuration or retained credentials
+        id: checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+          set-safe-directory: false
+          submodules: false
+      - run: scripts/checkout-submodule.sh
+      - name: Build APK and execute JVM Android tests (not instrumentation)
+        run: scripts/ci.sh android
+      - name: Report exact verification level
+        if: ${{ always() && steps.checkout.outcome == 'success' }}
+        env:
+          VEYRA_JOB_STATUS: ${{ job.status }}
+        run: scripts/dev.sh python3 -B scripts/verification-summary.py --phase android
+
+  ios:
+    if: ${{ github.event.repository.private == false && (inputs.scope == 'all' || inputs.scope == 'ios') }}
+    name: iOS full Swift host compile (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - {runner: macos-15, arch: arm64}
+          - {runner: macos-15-intel, arch: x64}
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.0.1.app/Contents/Developer
+      VEYRA_EXPECTED_OS: Darwin
+      VEYRA_EXPECTED_ARCH: ${{ matrix.arch }}
+    steps:
+      - name: Checkout without global Git configuration or retained credentials
+        id: checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+          set-safe-directory: false
+          submodules: false
+      - run: scripts/checkout-submodule.sh
+      - name: Compile native tests and full unsigned simulator/device applications
+        run: scripts/ci.sh ios
+      - name: Report compile-only native status (no simulator or physical run)
+        if: ${{ always() && steps.checkout.outcome == 'success' }}
+        env:
+          VEYRA_JOB_STATUS: ${{ job.status }}
+        run: scripts/dev.sh python3 -B scripts/verification-summary.py --phase ios
