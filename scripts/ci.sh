@@ -48,6 +48,14 @@ mkdir -p .work/verification
 python3 -B scripts/verification-summary.py --metadata-only --phase "$mode"
 python3 -B scripts/tests/test_tooling.py
 python3 -B scripts/tests/test_verification.py
+python3 -B scripts/tests/test_package_notices.py
+# Authored Python-only safety regressions; neither Android Stage 0 nor its
+# separately approved strace/fork experiment runs automatically in CI.
+python3 -B scripts/tests/test_android_preflight.py
+# This is the source-only consistency check, not a production dependency or
+# binary-release certification. Actual release inventories must be generated on
+# the matching target and passed explicitly; see verification/package-notices.md.
+python3 -B scripts/package-notices.py --check
 python3 -B scripts/tests/test_design_resources.py
 python3 -B scripts/verify-design-resources.py
 

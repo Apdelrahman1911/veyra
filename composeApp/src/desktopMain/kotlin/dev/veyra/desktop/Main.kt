@@ -31,21 +31,35 @@ import dev.veyra.app.AppInitialization
 import dev.veyra.app.VeyraApp
 import dev.veyra.desktop.audio.DesktopSelfTest
 import dev.veyra.desktop.runtime.AlreadyRunningException
+import dev.veyra.desktop.runtime.CentralProofPhase
 import dev.veyra.desktop.runtime.DesktopNativeRuntime
+import dev.veyra.desktop.runtime.DesktopOptions
 import dev.veyra.desktop.runtime.DesktopProcessContext
 import dev.veyra.desktop.runtime.DesktopRuntimeConfig
+import dev.veyra.desktop.runtime.DesktopStartupJobs
+import dev.veyra.desktop.runtime.DesktopVerificationOutcome
+import dev.veyra.desktop.runtime.desktopResultWriteFailure
+import dev.veyra.desktop.runtime.desktopVerificationFailure
+import dev.veyra.desktop.runtime.finishDesktopVerification
+import dev.veyra.desktop.runtime.parseDesktopOptions
+import dev.veyra.desktop.runtime.writeDesktopVerificationResult
 import dev.veyra.desktop.session.DesktopMediaSession
+import dev.veyra.desktop.verification.CentralListeningProof
+import dev.veyra.desktop.verification.CentralListeningProofFailure
 import dev.veyra.model.LanguagePreference
 import dev.veyra.model.ThemeMode
 import dev.veyra.playback.PlaybackCommand
 import dev.veyra.ui.design.VeyraTheme
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -62,48 +76,38 @@ import java.awt.SystemTray
 import java.awt.TrayIcon
 import java.awt.geom.Path2D
 import java.awt.image.BufferedImage
-import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.StandardCopyOption.ATOMIC_MOVE
-import java.nio.file.StandardCopyOption.REPLACE_EXISTING
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.system.exitProcess
-
-private data class Options(
-    val dataDirectory: Path = DesktopProcessContext.defaultDirectory(),
-    val fixture: Path? = null,
-    val result: Path? = null,
-    val silentAudio: Boolean = false,
-    val uiSmoke: Boolean = false,
-)
 
 fun main(args: Array<String>) {
     if (args.contains("--help")) {
-        println("Veyra [--data-dir <directory>] [--self-test <audio-file> --silent-audio] [--self-test-result <owned-json-file>] [--ui-smoke]")
+        println("Veyra [--data-dir <directory>] [--silent-audio] [--self-test <audio-file> | --ui-smoke | --central-proof online|offline] [--verification-result <json-file>]")
+        println("Central proof requires an explicit dedicated --data-dir. Result files must be directly inside <data-dir>/verification/results/ and end in .json; --self-test-result is an alias.")
         return
     }
-    val options = try { parseOptions(args) } catch (_: Exception) { System.err.println("Invalid arguments; use --help."); exitProcess(2) }
+    val options = try { parseDesktopOptions(args) } catch (_: Exception) { System.err.println("Invalid arguments; use --help."); exitProcess(2) }
     val context = try { DesktopProcessContext.acquire(options.dataDirectory) }
     catch (_: AlreadyRunningException) { System.err.println("Veyra is already running for this data directory."); exitProcess(73) }
     catch (_: Exception) { System.err.println("Veyra cannot use the selected data directory."); exitProcess(1) }
     try { DesktopNativeRuntime.initializeProcessPaths(context.dataDirectory) }
-    catch (_: Exception) { context.close(); System.err.println("Veyra cannot initialize private runtime storage."); exitProcess(1) }
-    if (options.fixture != null) {
-        var success = false
-        val report = try {
-            runBlocking { DesktopSelfTest.run(options.fixture, DesktopRuntimeConfig(context.dataDirectory, options.silentAudio)) }.also { success = true }
-        } catch (error: Throwable) {
-            "{\"success\":false,\"silentAudio\":${options.silentAudio},\"error\":\"${error.javaClass.simpleName}\"}"
-        }
-        try { writeResult(context, options.result, report) } catch (_: Exception) { success = false; System.err.println("Could not write the requested self-test result.") }
-        context.close()
-        exitProcess(if (success) 0 else 1)
-    }
+    catch (_: Throwable) { runCatching { context.close() }; System.err.println("Veyra cannot initialize private runtime storage."); exitProcess(1) }
     val lifetime = DesktopLifetime(context)
-    val shutdown = Thread({ runBlocking { lifetime.close() } }, "Veyra-shutdown")
+    val shutdown = Thread({
+        try { runBlocking { lifetime.close() } }
+        catch (_: Throwable) { System.err.println("Veyra runtime cleanup requires recovery.") }
+    }, "Veyra-shutdown")
     Runtime.getRuntime().addShutdownHook(shutdown)
+    if (options.fixture != null || options.centralProof != null) {
+        val code = try { runHeadlessVerification(options, context, lifetime) }
+        finally { runCatching { Runtime.getRuntime().removeShutdownHook(shutdown) } }
+        exitProcess(code)
+    }
     var exitCode = 0
+    val pendingReport = AtomicReference<String?>()
+    var finalReport: DesktopVerificationOutcome? = null
     try {
         application {
             var visible by remember { mutableStateOf(true) }
@@ -131,10 +135,10 @@ fun main(args: Array<String>) {
             }
             fun show() { EventQueue.invokeLater { visible = true } }
             LaunchedEffect(Unit) {
-                lifetime.bootstrapJob = coroutineContext[Job]
+                if (!lifetime.startupJobs.admit(DesktopStartupJobs.Kind.PLATFORM, coroutineContext[Job]!!)) return@LaunchedEffect
                 try {
-                    val services = DesktopPlatformServices.create(context, options.silentAudio)
-                    lifetime.services = services
+                    val services = DesktopPlatformServices.create(context, options.silentAudio,
+                        onOwned = { lifetime.services = it })
                     val app = AppContainer(services, lifetime.scope)
                     lifetime.container = app
                     container = app
@@ -144,7 +148,7 @@ fun main(args: Array<String>) {
             }
             DisposableEffect(language) {
                 val installed = if (SystemTray.isSupported() && !options.uiSmoke)
-                    installTray(arabic, ::show, { lifetime.scope.launch { container?.playback?.dispatch(PlaybackCommand.PlayPause) } }, ::quit)
+                    installTray(arabic, ::show, { lifetime.submitMediaCallback { container?.playback?.dispatch(PlaybackCommand.PlayPause) } }, ::quit)
                 else null
                 tray = installed
                 onDispose { installed?.let { SystemTray.getSystemTray().remove(it) } }
@@ -159,13 +163,14 @@ fun main(args: Array<String>) {
                 val app = container
                 LaunchedEffect(app) {
                     if (app != null) {
-                        lifetime.sessionJob = coroutineContext[Job]
+                        if (!lifetime.startupJobs.admit(DesktopStartupJobs.Kind.MEDIA_SESSION, coroutineContext[Job]!!)) return@LaunchedEffect
                         val services = lifetime.services!!
-                        lifetime.session = DesktopMediaSession.create(context, window, lifetime.scope, app.playback.state,
-                            command = { command -> lifetime.scope.launch { app.playback.dispatch(command) } },
+                        DesktopMediaSession.create(context, window, lifetime.scope, app.playback.state,
+                            command = { command -> lifetime.submitMediaCallback { app.playback.dispatch(command) } },
                             raise = ::show, quit = { EventQueue.invokeLater(::quit) },
-                            setVolume = { value -> lifetime.scope.launch { services.engine.setGain(value) } },
-                            outputChanged = { lifetime.scope.launch { services.engine.outputChanged() } })
+                            setVolume = { value -> lifetime.submitMediaCallback { services.engine.setGain(value) } },
+                            outputChanged = { lifetime.submitMediaCallback { services.engine.outputChanged() } },
+                            onOwned = { lifetime.session = it })
                     }
                 }
                 if (app != null) VeyraApp(app, Modifier.fillMaxSize())
@@ -200,86 +205,150 @@ fun main(args: Array<String>) {
                     delay(500)
                     val report = "{\"success\":$ready,\"uiSmoke\":true,\"silentAudio\":${options.silentAudio},\"physicalAudioVerified\":false}"
                     exitCode = if (ready) 0 else 1
-                    try { withContext(Dispatchers.IO) { writeResult(context, options.result, report) } }
-                    catch (_: Exception) { exitCode = 1 }
-                    finally { quit() }
+                    // A rendered frame is not successful shutdown. Publish only after every
+                    // native/source/Room owner and the process lock have actually closed.
+                    pendingReport.set(report)
+                    quit()
                 }
             }
         }
+    } catch (_: Throwable) {
+        exitCode = 1
+        System.err.println("Veyra could not complete its desktop session.")
     } finally {
-        try { runBlocking { lifetime.close() } }
-        catch (_: Throwable) { exitCode = 1; System.err.println("Veyra runtime cleanup requires recovery.") }
-        Runtime.getRuntime().removeShutdownHook(shutdown)
+        if (options.uiSmoke) {
+            finalReport = runBlocking {
+                finishDesktopVerification(pendingReport.get()?.takeIf { exitCode == 0 }
+                    ?: desktopVerificationFailure(options, "ui_smoke_incomplete"), lifetime::close)
+            }
+            if (finalReport?.ownersClosed != true) exitCode = 1
+        } else {
+            try { runBlocking { lifetime.close() } }
+            catch (_: Throwable) { exitCode = 1; System.err.println("Veyra runtime cleanup requires recovery.") }
+        }
+        runCatching { Runtime.getRuntime().removeShutdownHook(shutdown) }
     }
+    finalReport?.let { if (publishVerification(context, options.result, it) != 0) exitCode = 1 }
     exitProcess(exitCode)
 }
 
-private class DesktopLifetime(private val context: DesktopProcessContext) {
+private fun runHeadlessVerification(options: DesktopOptions, context: DesktopProcessContext, lifetime: DesktopLifetime): Int {
+    val candidate = try {
+        runBlocking {
+            // The JVM shutdown hook can run during headless initialization too.
+            // Publish this job before any proof/native owner is allocated, so
+            // lifetime.close retires admission and joins us before closing them.
+            check(lifetime.startupJobs.admit(DesktopStartupJobs.Kind.PLATFORM, coroutineContext[Job]!!)) {
+                "Desktop verification startup has already retired."
+            }
+            val fixture = options.fixture
+            if (fixture != null) DesktopSelfTest.run(fixture, DesktopRuntimeConfig(context.dataDirectory, options.silentAudio))
+            else {
+                val proof = CentralListeningProof(options.silentAudio).also { lifetime.verification = it }
+                val services = DesktopPlatformServices.create(context, options.silentAudio, proof.executionPolicy(),
+                    onOwned = { lifetime.services = it })
+                val app = AppContainer(services, lifetime.scope, gateway = proof.gateway(services.youtube)).also { lifetime.container = it }
+                app.initialize() // Exactly one production container/store/engine, initialized once.
+                when (options.centralProof) {
+                    CentralProofPhase.ONLINE -> proof.runOnline(app)
+                    CentralProofPhase.OFFLINE -> proof.runOffline(app)
+                    null -> error("Verification phase is missing")
+                }
+            }
+        }
+    } catch (failure: CentralListeningProofFailure) {
+        failure.report // Typed, bounded partial evidence; no native/source exception text.
+    } catch (_: Throwable) {
+        desktopVerificationFailure(options, "verification_operation_failed")
+    }
+    val outcome = runBlocking { finishDesktopVerification(candidate, lifetime::close) }
+    return publishVerification(context, options.result, outcome)
+}
+
+private fun publishVerification(context: DesktopProcessContext, destination: Path?, outcome: DesktopVerificationOutcome): Int {
+    var report = outcome.report
+    var success = outcome.success
+    if (!outcome.ownersClosed) System.err.println("Veyra runtime cleanup requires recovery.")
+    try { writeDesktopVerificationResult(context, destination, report) }
+    catch (_: Exception) {
+        success = false
+        report = desktopResultWriteFailure(report)
+        System.err.println("Could not write the requested verification result.")
+    }
+    println(report) // Never print a success before required cleanup and requested-file publication.
+    if (System.out.checkError()) success = false
+    return if (success) 0 else 1
+}
+
+internal class DesktopLifetime(
+    private val context: DesktopProcessContext,
+    callbackDispatcher: CoroutineDispatcher = Dispatchers.Default,
+    private val reportCallbackFailure: (String) -> Unit = { System.err.println(it) },
+) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val callbackJob = SupervisorJob(scope.coroutineContext[Job])
+    private val callbackScope = CoroutineScope(callbackJob + callbackDispatcher)
+    private val callbackAdmission = Any()
     @Volatile var services: DesktopPlatformServices? = null
     @Volatile var container: AppContainer? = null
     @Volatile var session: DesktopMediaSession? = null
-    @Volatile var bootstrapJob: Job? = null
-    @Volatile var sessionJob: Job? = null
+    @Volatile var verification: AutoCloseable? = null
+    val startupJobs = DesktopStartupJobs()
     private val closing = AtomicBoolean()
     private val closed = CompletableDeferred<Unit>()
-    suspend fun close() = withContext(NonCancellable + Dispatchers.IO) {
-        if (!closing.compareAndSet(false, true)) { closed.await(); return@withContext }
-        var failure: Throwable? = null
-        suspend fun release(action: suspend () -> Unit) {
-            try { action() } catch (error: Throwable) { if (failure == null) failure = error }
-        }
-        try {
-            release { bootstrapJob?.let { it.cancel(); it.join() } }
-            release { sessionJob?.let { it.cancel(); it.join() } }
-            release { session?.close() }
-            release { container?.close() }
-            // Also protect partial initialization; every owner close is idempotent. Attempt all
-            // cleanup even if an earlier owner failed, retaining the first failure for every waiter.
-            services?.let { service ->
-                release { service.closeMediaRuntime() }
-                release { service.engine.close() }
-                release { service.youtube.close() }
-                release { service.store.close() }
+
+    /** Native/tray callbacks only enqueue here; they never synchronously wait for work or close.
+     * Quit deliberately uses the host scope instead, so it cannot join its own callback job. */
+    fun submitMediaCallback(action: suspend () -> Unit): Boolean = synchronized(callbackAdmission) {
+        if (closing.get() || !callbackJob.isActive) return@synchronized false
+        // DEFAULT start attaches the child before releasing admission. If the parent is
+        // cancelled concurrently, the queued child cannot execute its callback body.
+        callbackScope.launch {
+            if (closing.get()) return@launch // Drop an admitted but not-yet-started callback.
+            try { action() }
+            catch (_: CancellationException) { /* Normal callback retirement; no raw cause is logged. */ }
+            catch (_: Throwable) {
+                // Source/native errors can contain private URLs. Neither the diagnostic nor
+                // a failing diagnostic sink may forward an arbitrary Throwable to the handler.
+                try { reportCallbackFailure("Veyra could not complete a media-control action.") }
+                catch (_: Throwable) { /* A diagnostic must not bypass callback cleanup. */ }
             }
-        } finally {
-            release { context.close() }
-            val error = failure
-            if (error == null) closed.complete(Unit) else closed.completeExceptionally(error)
-            scope.cancel()
         }
-        failure?.let { throw it }
+        true
     }
-}
 
-private fun parseOptions(args: Array<String>): Options {
-    var value = Options()
-    var index = 0
-    while (index < args.size) {
-        fun path(): Path { index++; require(index < args.size); return Path.of(args[index]).toAbsolutePath().normalize() }
-        value = when (args[index]) {
-            "--data-dir" -> value.copy(dataDirectory = path())
-            "--self-test" -> value.copy(fixture = path())
-            "--self-test-result" -> value.copy(result = path())
-            "--silent-audio" -> value.copy(silentAudio = true)
-            "--ui-smoke" -> value.copy(uiSmoke = true)
-            else -> error("Unknown option")
+    suspend fun close(): Unit = withContext(NonCancellable) {
+        // Retire callback admission before the first dispatcher switch. The same gate covers
+        // child attachment, so cancelAndJoin below cannot miss a successfully admitted child.
+        val ownsClose = synchronized(callbackAdmission) { closing.compareAndSet(false, true) }
+        withContext(Dispatchers.IO) finishClose@{
+            if (!ownsClose) { closed.await(); return@finishClose }
+            var failure: Throwable? = null
+            suspend fun release(action: suspend () -> Unit) {
+                try { action() } catch (error: Throwable) { if (failure == null) failure = error }
+            }
+            try {
+                // Retire both admissions before awaiting either job. A late Compose
+                // effect must not allocate an owner after this close took its snapshot.
+                for (job in startupJobs.retire()) release { job.cancel(); job.join() }
+                // Includes suspended callbacks and their non-cancellable finalizers. Keep
+                // session/engine/source/store/context owners alive until every callback ends.
+                release { callbackJob.cancelAndJoin() }
+                release { session?.close() }
+                release { container?.close() }
+                // Also protect partial initialization; every owner close is idempotent. Attempt all
+                // cleanup even if an earlier owner failed, retaining the first failure for every waiter.
+                release { services?.closeAcquiredResources() }
+                release { verification?.close() }
+            } finally {
+                release { context.close() }
+                val error = failure
+                if (error == null) closed.complete(Unit) else closed.completeExceptionally(error)
+                scope.cancel()
+            }
+            failure?.let { throw it }
         }
-        index++
     }
-    require(value.fixture == null || !value.uiSmoke)
-    require(value.result == null || value.fixture != null || value.uiSmoke)
-    return value
-}
-
-private fun writeResult(context: DesktopProcessContext, result: Path?, report: String) {
-    println(report)
-    if (result == null) return
-    val destination = context.ownedPath(result)
-    DesktopProcessContext.privateDirectory(destination.parent)
-    val stage = Files.createTempFile(destination.parent, ".result-", ".json")
-    try { Files.writeString(stage, report + "\n"); Files.move(stage, destination, ATOMIC_MOVE, REPLACE_EXISTING) }
-    finally { Files.deleteIfExists(stage) }
 }
 
 private fun installTray(arabic: Boolean, show: () -> Unit, playPause: () -> Unit, quit: () -> Unit): TrayIcon? = runCatching {

@@ -258,6 +258,8 @@ enum class TextKey(internal val english: String, internal val arabic: String) {
     Publisher("Publisher", "الناشر"),
     StartOver("Start over", "البدء من جديد"),
     StartOverConfirm("Start this episode from the beginning? Your previous position can be restored with Undo.", "هل تريد بدء الحلقة من أولها؟ يمكنك استعادة الموضع السابق باستخدام التراجع."),
+    PodcastProgressRecordingChanged("Saved position: {0}, from a previous recording. This recording will play from the beginning.", "موضع الاستماع المحفوظ: {0}، من تسجيل سابق. سيبدأ تشغيل هذا التسجيل من البداية."),
+    PodcastProgressRecordingUnverified("Saved position: {0}. Playback resumes there only if the selected recording matches.", "موضع الاستماع المحفوظ: {0}. يُستأنف التشغيل من هذا الموضع فقط إذا تطابق التسجيل المختار مع التسجيل السابق."),
     MarkPlayed("Mark as played", "تحديد كمستمَع إليها"),
     MarkUnplayed("Mark as unplayed", "تحديد كغير مستمَع إليها"),
     SaveForLater("Save for later", "حفظ لوقت لاحق"),

@@ -97,6 +97,9 @@ internal fun providerName(provider: SourceProvider): String {
 internal fun AppSnapshot.downloadFor(mediaId: String): DownloadRecord? = downloads.values.firstOrNull { it.mediaId == mediaId }
 internal fun DownloadRecord?.isReady(): Boolean = this != null && status == DownloadStatus.COMPLETE &&
     asset?.let { it.mediaId == mediaId && it.sizeBytes > 0L && it.uri.isNotBlank() } == true
+/** A materialized file awaiting a session integrity check is not an active transfer or Ready. */
+internal fun DownloadRecord?.isRecheckingAsset(): Boolean = this != null && asset != null && !cleanupPending &&
+    status in setOf(DownloadStatus.VERIFYING, DownloadStatus.NEEDS_FOREGROUND)
 internal fun AppSnapshot.isSaved(item: MediaItem): Boolean =
     if (item.kind == MediaKind.EPISODE) item.id in savedEpisodeIds else item.id in favoriteIds
 
@@ -174,7 +177,9 @@ internal fun MediaActionsMenu(
             DropdownMenuItem(text = { Text(strings.text(TextKey.AddToEnd)) }, onClick = { dispatch(MusicUiAction.Enqueue(item, playNext = false)) })
             DropdownMenuItem(text = { Text(strings.text(savedActionLabel(item, snapshot.isSaved(item)))) }, onClick = { dispatch(MusicUiAction.ToggleFavorite(item)) })
             if (item.kind == MediaKind.MUSIC) DropdownMenuItem(text = { Text(strings.text(TextKey.AddToPlaylist)) }, onClick = { menu = false; picker = true })
-            if (download.isReady()) {
+            if (download != null && (download.isReady() || download.isRecheckingAsset())) {
+                if (download.isRecheckingAsset()) DropdownMenuItem(text = { Text(strings.downloadStatus(download.status)) }, onClick = {},
+                    modifier = Modifier.testTag("menu-download-status-${item.id}"), enabled = false)
                 DropdownMenuItem(text = { Text(strings.text(TextKey.RemoveDownload)) }, onClick = { menu = false; removeDownload = true })
             } else if (download != null && download.status !in setOf(DownloadStatus.CANCELLED, DownloadStatus.COMPLETE)) {
                 when (download.status) {

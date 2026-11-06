@@ -1,12 +1,19 @@
 package dev.veyra.ui.music
 
 import androidx.compose.foundation.layout.size
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.captureToImage
@@ -15,6 +22,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
@@ -67,7 +75,7 @@ class TrackDetailFlowsTest {
         assertTrue(actions.isEmpty())
         scrollTo("track-play")
         ui.onNodeWithTag("track-play").performClick()
-        assertEquals(listOf(MusicUiAction.Play(track)), actions)
+        assertEquals(listOf<MusicUiAction>(MusicUiAction.Play(track)), actions)
     }
 
     @Test fun currentTrackControlsPreserveTheCurrentOccurrenceAndLibraryActionsAreIndependent() {
@@ -81,7 +89,7 @@ class TrackDetailFlowsTest {
         ui.onNodeWithTag("track-favorite").performClick()
         ui.onNodeWithTag("track-play-next").performClick()
         ui.onNodeWithTag("track-enqueue").performClick()
-        assertEquals(listOf(MusicUiAction.TogglePlayPause, MusicUiAction.ToggleFavorite(track),
+        assertEquals(listOf<MusicUiAction>(MusicUiAction.TogglePlayPause, MusicUiAction.ToggleFavorite(track),
             MusicUiAction.Enqueue(track, true), MusicUiAction.Enqueue(track, false)), actions)
     }
 
@@ -126,13 +134,13 @@ class TrackDetailFlowsTest {
         ui.onNodeWithTag("track-source-link").assertIsNotEnabled()
         scrollTo("track-license-link")
         ui.onNodeWithTag("track-license-link").assertIsNotEnabled()
-        assertEquals(listOf(MusicUiAction.ToggleFavorite(track), MusicUiAction.Enqueue(track, false)), actions)
+        assertEquals(listOf<MusicUiAction>(MusicUiAction.ToggleFavorite(track), MusicUiAction.Enqueue(track, false)), actions)
     }
 
-    @Test fun verifyingIsNotReadyAndCancellationUsesTheDownloadId() {
+    @Test fun activeFinalizationIsNotReadyAndCancellationUsesTheDownloadId() {
         val actions = mutableListOf<MusicUiAction>()
-        val record = DownloadRecord("job-id", track.id, DownloadStatus.VERIFYING, bytesDownloaded = 100, totalBytes = 100,
-            asset = OfflineAsset("not-final", track.id, "file:///not-final/audio.m4a", 100))
+        // The coordinator publishes OfflineAsset only when finalization commits COMPLETE.
+        val record = DownloadRecord("job-id", track.id, DownloadStatus.VERIFYING, bytesDownloaded = 100, totalBytes = 100)
         ui.setContent { VeyraTheme(false, LanguagePreference.ENGLISH) {
             TrackDetailScreen(snapshot().copy(downloads = mapOf(record.id to record)), track.id, PlaybackState(),
                 { actions += it }, Modifier.size(900.dp, 720.dp), options)
@@ -141,7 +149,49 @@ class TrackDetailFlowsTest {
         ui.onNodeWithText(strings.text(TextKey.DownloadVerifying)).assertIsDisplayed()
         ui.onNodeWithTag("track-downloaded-audio").assertDoesNotExist()
         ui.onNodeWithTag("track-download-cancel").performClick()
-        assertEquals(listOf(MusicUiAction.CancelDownload(record.id)), actions)
+        assertEquals(listOf<MusicUiAction>(MusicUiAction.CancelDownload(record.id)), actions)
+    }
+
+    @Test fun recheckingExistingAssetsRemainUnavailableOfflineAndRemovalRequiresConfirmation() {
+        val actions = mutableListOf<MusicUiAction>()
+        var record by mutableStateOf(DownloadRecord("owned-file", track.id, DownloadStatus.VERIFYING,
+            bytesDownloaded = 100, totalBytes = 100, asset = OfflineAsset("asset", track.id, "file:///owned/audio.m4a", 100)))
+        ui.setContent { VeyraTheme(false, LanguagePreference.ENGLISH) {
+            TrackDetailScreen(snapshot().copy(downloads = mapOf(record.id to record), settings = AppSettings(offlineOnly = true)),
+                track.id, PlaybackState(), { actions += it }, Modifier.size(900.dp, 720.dp), options)
+        } }
+        listOf(DownloadStatus.VERIFYING, DownloadStatus.NEEDS_FOREGROUND).forEachIndexed { index, status ->
+            ui.runOnIdle { record = record.copy(status = status) }
+            scrollTo("track-play")
+            ui.onNodeWithTag("track-play").assertIsNotEnabled()
+            scrollTo("track-download")
+            ui.onNodeWithText(strings.downloadStatus(status)).assertIsDisplayed()
+            ui.onNodeWithTag("track-downloaded-audio").assertDoesNotExist()
+            listOf("pause", "resume", "cancel", "start").forEach { action ->
+                ui.onNodeWithTag("track-download-$action").assertDoesNotExist()
+            }
+            ui.onNodeWithTag("track-download-remove").performClick()
+            assertEquals(index, actions.size)
+            ui.onNodeWithTag("cancel-action").performClick()
+            assertEquals(index, actions.size)
+            ui.onNodeWithTag("track-download-remove").performClick()
+            ui.onNodeWithTag("confirm-action").performClick()
+            assertEquals(List<MusicUiAction>(index + 1) { MusicUiAction.RemoveDownload(record.id) }, actions)
+        }
+    }
+
+    @Test fun foregroundRestrictedTransfersWithoutAnAssetStillOfferResumeAndCancel() {
+        val actions = mutableListOf<MusicUiAction>()
+        val record = DownloadRecord("unfinished", track.id, DownloadStatus.NEEDS_FOREGROUND)
+        ui.setContent { VeyraTheme(false, LanguagePreference.ENGLISH) {
+            TrackDetailScreen(snapshot().copy(downloads = mapOf(record.id to record)), track.id, PlaybackState(),
+                { actions += it }, Modifier.size(900.dp, 720.dp), options)
+        } }
+        scrollTo("track-download-resume")
+        ui.onNodeWithTag("track-download-resume").assertIsEnabled().performClick()
+        ui.onNodeWithTag("track-download-cancel").performClick()
+        ui.onNodeWithTag("track-download-remove").assertDoesNotExist()
+        assertEquals(listOf<MusicUiAction>(MusicUiAction.ResumeDownload(record.id), MusicUiAction.CancelDownload(record.id)), actions)
     }
 
     @Test fun playlistAndPublicPageIntentsDoNotStartPlayback() {
@@ -158,7 +208,7 @@ class TrackDetailFlowsTest {
         ui.onNodeWithTag("track-source-link").performClick()
         scrollTo("track-license-link")
         ui.onNodeWithTag("track-license-link").performClick()
-        assertEquals(listOf(MusicUiAction.AddToPlaylist(playlist.id, track),
+        assertEquals(listOf<MusicUiAction>(MusicUiAction.AddToPlaylist(playlist.id, track),
             MusicUiAction.OpenSourcePage("https://example.org/source-page"), MusicUiAction.OpenSourcePage("https://example.org/license")), actions)
     }
 
@@ -170,14 +220,18 @@ class TrackDetailFlowsTest {
         ui.onNodeWithTag("track-missing").assertIsDisplayed()
         ui.onNodeWithTag("track-play").assertDoesNotExist()
         ui.onNodeWithTag("track-back").performClick()
-        assertEquals(listOf(MusicUiAction.NavigateBack), actions)
+        assertEquals(listOf<MusicUiAction>(MusicUiAction.NavigateBack), actions)
     }
 
     @Test fun narrowLargeArabicDetailsKeepWrappedActionsAndFixedBackReachable() {
         val actions = mutableListOf<MusicUiAction>()
         ui.setContent { CompositionLocalProvider(LocalDensity provides Density(1f, 1.75f)) {
             VeyraTheme(true, LanguagePreference.ARABIC) {
-                TrackDetailScreen(snapshot(), track.id, PlaybackState(), { actions += it }, Modifier.size(320.dp, 600.dp), options)
+                // The real app supplies a Surface. Match its background/content color rather
+                // than capture an unhosted transparent screen with default black text.
+                Surface(Modifier.size(320.dp, 600.dp), color = MaterialTheme.colorScheme.background) {
+                    TrackDetailScreen(snapshot(), track.id, PlaybackState(), { actions += it }, options = options)
+                }
             }
         } }
         ui.onNodeWithTag("track-back").assertIsDisplayed()
@@ -186,12 +240,15 @@ class TrackDetailFlowsTest {
         ui.onNodeWithTag("track-enqueue").assertIsDisplayed().performClick()
         capture("track-ar-dark-large-actions.png")
         ui.onNodeWithTag("track-back").assertIsDisplayed().performClick()
-        assertEquals(listOf(MusicUiAction.Enqueue(track, false), MusicUiAction.NavigateBack), actions)
+        assertEquals(listOf<MusicUiAction>(MusicUiAction.Enqueue(track, false), MusicUiAction.NavigateBack), actions)
     }
 
     private fun scrollTo(tag: String) { ui.onNodeWithTag("track-detail-content").performScrollToNode(hasTestTag(tag)) }
 
     private fun capture(name: String) {
+        ui.onNodeWithTag("track-detail").performMouseInput { moveTo(Offset(1f, 1f)); exit() }
+        ui.mainClock.advanceTimeBy(300L)
+        ui.waitForIdle()
         val bitmap = ui.onNodeWithTag("track-detail").captureToImage()
         val pixels = bitmap.toPixelMap()
         val output = BufferedImage(bitmap.width, bitmap.height, BufferedImage.TYPE_INT_ARGB)

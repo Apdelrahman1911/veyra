@@ -17,6 +17,7 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
@@ -59,6 +60,7 @@ import kotlin.test.assertTrue
  * is constructed. Run through the approved repository-owned display/cache helper. Bounds and
  * semantics assertions are not native screen-reader, Arabic-shaping or audible-output evidence.
  */
+@OptIn(ExperimentalTestApi::class)
 class SettingsScreenTest {
     @get:Rule val compose = createComposeRule()
 
@@ -119,7 +121,7 @@ class SettingsScreenTest {
             .assertTextEquals(english.text(TextKey.CrossfadeSavedUnsupported))
         compose.onNodeWithTag("settings-crossfade").assertIsOn().assertIsEnabled().performClick()
         compose.onNodeWithTag("settings-crossfade").assertIsOff().assertIsNotEnabled()
-        compose.runOnIdle { assertEquals(listOf(SettingsAction.SetCrossfadeEnabled(false)), actions) }
+        compose.runOnIdle { assertEquals(listOf<SettingsAction>(SettingsAction.SetCrossfadeEnabled(false)), actions) }
     }
 
     @Test fun allFourPresetsEmitDurationOnlyAgainstTheLatestPersistedSettings() {
@@ -139,7 +141,7 @@ class SettingsScreenTest {
             compose.onNodeWithTag("settings-crossfade-duration-$duration").assertIsEnabled().performClick()
         }
         compose.runOnIdle {
-            assertEquals(listOf(2_000L, 3_000L, 4_000L, 5_000L).map { SettingsAction.SetCrossfadeDuration(it) }, actions)
+            assertEquals<List<SettingsAction>>(listOf(2_000L, 3_000L, 4_000L, 5_000L).map { SettingsAction.SetCrossfadeDuration(it) }, actions)
             assertEquals(initialLatest.copy(crossfadeDurationMs = 5_000), latest)
             assertEquals(false, latest.crossfadeEnabled, "Choosing a duration must not silently enable native playback")
         }
@@ -156,15 +158,17 @@ class SettingsScreenTest {
         } }
         scrollTo("settings-crossfade-custom")
         compose.onNodeWithTag("settings-crossfade-custom").performTextReplacement("٣٠٫٠٠١")
+        compose.onNodeWithTag("settings-crossfade-custom")
             .assert(SemanticsMatcher.expectValue(SemanticsProperties.Error, arabic.text(TextKey.CrossfadeDurationInvalid)))
         scrollTo("settings-crossfade-apply")
         compose.onNodeWithTag("settings-crossfade-apply").assertIsNotEnabled()
         compose.runOnIdle { assertTrue(actions.isEmpty()) }
 
         scrollTo("settings-crossfade-custom")
-        compose.onNodeWithTag("settings-crossfade-custom").performTextReplacement("٣٫١٢٥").performImeAction()
+        compose.onNodeWithTag("settings-crossfade-custom").performTextReplacement("٣٫١٢٥")
+        compose.onNodeWithTag("settings-crossfade-custom").performImeAction()
         compose.runOnIdle {
-            assertEquals(listOf(SettingsAction.SetCrossfadeDuration(3_125)), actions)
+            assertEquals(listOf<SettingsAction>(SettingsAction.SetCrossfadeDuration(3_125)), actions)
             assertEquals(3_125L, settings.crossfadeDurationMs)
         }
         scrollTo("settings-crossfade-apply")
@@ -279,7 +283,7 @@ class SettingsScreenTest {
         scrollTo(tag)
         compose.onNodeWithTag(tag).performSemanticsAction(SemanticsActions.RequestFocus) { it() }.assertIsFocused()
         compose.onNodeWithTag(tag).performKeyInput { keyDown(Key.Spacebar); keyUp(Key.Spacebar) }
-        compose.runOnIdle { assertEquals(listOf(SettingsAction.SetCrossfadeDuration(4_000)), actions) }
+        compose.runOnIdle { assertEquals(listOf<SettingsAction>(SettingsAction.SetCrossfadeDuration(4_000)), actions) }
     }
 
     @Test fun arabicTwoHundredPercentControlsStayInsideANarrowScrollableFrame() {
@@ -300,7 +304,8 @@ class SettingsScreenTest {
             val frame = compose.onNodeWithTag("settings-test-frame").getUnclippedBoundsInRoot()
             val control = compose.onNodeWithTag(tag).assertIsDisplayed().getUnclippedBoundsInRoot()
             assertTrue(control.left >= frame.left && control.right <= frame.right, "$tag must remain inside the narrow frame")
-            assertTrue(control.width >= 48.dp && control.height >= 48.dp, "$tag keeps a minimum 48dp control target")
+            assertTrue(control.right - control.left >= 48.dp && control.bottom - control.top >= 48.dp,
+                "$tag keeps a minimum 48dp control target")
         }
         compose.runOnIdle { assertEquals(LayoutDirection.Rtl, direction) }
     }

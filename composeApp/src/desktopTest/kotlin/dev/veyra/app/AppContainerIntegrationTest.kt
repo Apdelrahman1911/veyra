@@ -92,6 +92,9 @@ class AppContainerIntegrationTest {
         val preparations = ConcurrentLinkedQueue<Preparation>()
         val prepared = Channel<Preparation>(Channel.UNLIMITED)
         val closeCalls = AtomicInteger()
+        val seekRequests = ConcurrentLinkedQueue<Triple<Long, Long, Long>>()
+        val seekStarted = Channel<Triple<Long, Long, Long>>(Channel.UNLIMITED)
+        @Volatile var completeSeeks = true
         @Volatile var beforeStop: suspend (Long) -> Unit = {}
 
         override suspend fun prepare(source: ResolvedPlayable, startPositionMs: Long, generation: Long) = lock.withLock {
@@ -111,7 +114,18 @@ class AppContainerIntegrationTest {
             if (generation == this.generation) callbacks.send(EngineEvent.StateChanged(generation, EnginePhase.PAUSED, false, rate))
         }
         override suspend fun seek(positionMs: Long, seekSequence: Long, generation: Long) = lock.withLock {
-            if (generation == this.generation) callbacks.send(EngineEvent.SeekCompleted(generation, seekSequence, positionMs))
+            if (generation == this.generation) {
+                val request = Triple(generation, seekSequence, positionMs)
+                seekRequests += request
+                seekStarted.send(request)
+                if (completeSeeks) completeSeek(request)
+            }
+        }
+        suspend fun completeSeek(request: Triple<Long, Long, Long>) {
+            callbacks.send(EngineEvent.SeekCompleted(request.first, request.second, request.third))
+        }
+        suspend fun position(positionMs: Long) = lock.withLock {
+            callbacks.send(EngineEvent.Position(generation, positionMs, 12_345L))
         }
         override suspend fun setRate(speed: Float, generation: Long) = lock.withLock {
             if (generation == this.generation) rate = speed
@@ -561,6 +575,70 @@ class AppContainerIntegrationTest {
         assertTrue(reopened.gateway.transfers.isEmpty())
         assertTrue(reopened.platform.validations.isNotEmpty(), "Owned hash and fake native contract must both be checked")
         reopened.assertNoNetwork()
+    }
+
+    @Test fun podcastStartOverIsAtomicWithDelayedSeekAndRetainsTheOfflineRecording() = checkCase {
+        val fixture = newFixture()
+        val original = item(title = "Complete restart episode — إعادة الحلقة من بدايتها")
+        fixture.gateway.onDownload = ::writeFakeTransfer
+        val first = fixture.play(original)
+        val binding = assertNotNull(first.source.executionBinding)
+        fixture.app.onPodcastAction(PodcastAction.Download(original.id))
+        val downloaded = fixture.store.state.first { snapshot -> snapshot.downloads.values.any { it.status == DownloadStatus.COMPLETE } }
+            .downloads.values.single()
+        fixture.app.changeSettings { it.copy(offlineOnly = true) }
+        fixture.store.state.first { it.settings.offlineOnly }
+        val offline = fixture.play(original)
+        assertTrue(offline.source.isLocal)
+        fixture.platform.engine.position(4_500)
+        fixture.app.playback.state.first { it.positionMs == 4_500L }
+        fixture.app.playback.dispatch(PlaybackCommand.FlushProgress).getOrThrow()
+
+        fixture.platform.engine.completeSeeks = false
+        fixture.app.playback.dispatch(PlaybackCommand.Seek(6_000)).getOrThrow()
+        fixture.app.playback.state.first { it.pendingSeekMs == 6_000L }
+        // The controller publishes seek intent before the native operation is admitted.
+        // Await the actual fake-engine call, rather than relying on dispatcher timing.
+        val pending = fixture.platform.engine.seekStarted.receive()
+        assertEquals(offline.generation, pending.first)
+        assertEquals(6_000L, pending.third)
+        val queries = fixture.gateway.queries.toList()
+
+        // Exercise the real UI-action adapter, controller, transactions and local resolver.
+        // Native samples and authored NON-AUDIO validation remain deliberate fakes.
+        fixture.app.onPodcastAction(PodcastAction.StartOver(original.id))
+        val restarted = fixture.platform.engine.prepared.receive()
+        fixture.app.playback.state.first { it.generation == restarted.generation && it.isPlaying }
+        assertTrue(restarted.generation > offline.generation)
+        assertEquals(0L, restarted.positionMs)
+        assertTrue(restarted.source.isLocal)
+        assertEquals(binding, restarted.source.executionBinding)
+        assertEquals(1, fixture.platform.engine.seekRequests.size, "Start Over must not seek the outgoing generation then lose that seek")
+        fixture.app.playback.dispatch(PlaybackCommand.FlushProgress).getOrThrow()
+        assertEquals(0L, fixture.store.state.value.progress[original.id]?.positionMs)
+        val retained = fixture.store.state.value.downloads.getValue(downloaded.id)
+        assertEquals(DownloadStatus.COMPLETE, retained.status)
+        assertEquals(downloaded.mediaId, retained.mediaId)
+        assertEquals(downloaded.executionBindingId, retained.executionBindingId)
+        assertEquals(downloaded.asset, retained.asset)
+        assertContentEquals(NON_AUDIO, Files.readAllBytes(Path.of(assertNotNull(retained.asset).uri)))
+        assertEquals(queries, fixture.gateway.queries.toList(), "Offline restart must not perform a new search")
+
+        fixture.platform.engine.completeSeek(pending)
+        // Both samples traverse the same fake event channel. Position itself may be
+        // conflated by the controller; the awaited FlushProgress below also fences the
+        // earlier critical seek event before the final persisted-position assertion.
+        fixture.platform.engine.position(1_000)
+        fixture.app.playback.state.first { it.positionMs == 1_000L && it.pendingSeekMs == null }
+        fixture.app.playback.dispatch(PlaybackCommand.FlushProgress).getOrThrow()
+        assertEquals(1_000L, fixture.store.state.value.progress[original.id]?.positionMs)
+        fixture.app.close()
+        val reopened = newFixture()
+        assertEquals(1_000L, reopened.store.state.value.progress[original.id]?.positionMs)
+        assertEquals(PlaybackPhase.PAUSED, reopened.app.playback.state.value.phase)
+        assertTrue(reopened.platform.engine.preparations.isEmpty())
+        reopened.assertNoNetwork()
+        fixture.assertNoNetwork()
     }
 
     @Test fun offlineSearchCancelsPendingHttpAndPublishesFailureRatherThanAnEndlessSpinner() = checkCase {

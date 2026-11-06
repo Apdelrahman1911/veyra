@@ -334,19 +334,24 @@ fun EpisodeDetailScreen(
                 item(key = "audio-policy") {
                     if (row.binding == null) PodcastAudioResolutionNotice() else PodcastEpisodeProvenance(row, onAction)
                 }
-                if (row.inProgress) item(key = "episode-progress") {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (row.canResume) item(key = "episode-progress") {
+                    Column(modifier = Modifier.testTag("podcast-progress-current"),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(strings.format(TextKey.ResumeAt, strings.mediaTime(row.positionMs)),
-                            style = MaterialTheme.typography.titleMedium)
+                            modifier = Modifier.testTag("podcast-progress-resume"), style = MaterialTheme.typography.titleMedium)
                         podcastProgressFraction(row.positionMs, row.progressDurationMs)?.let { fraction ->
-                            LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth())
+                            LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth()
+                                .testTag("podcast-listening-progress-${row.episode.id}"))
                         }
                         podcastRemainingMs(row.positionMs, row.progressDurationMs)?.let { remaining ->
                             Text(strings.format(TextKey.MediaRemaining, strings.spokenDuration(remaining)),
-                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.testTag("podcast-progress-remaining"), style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
+                }
+                if (podcastHistoricalProgressNoticeKey(row) != null) item(key = "historical-progress") {
+                    PodcastHistoricalProgressNotice(row)
                 }
                 item(key = "episode-actions") {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

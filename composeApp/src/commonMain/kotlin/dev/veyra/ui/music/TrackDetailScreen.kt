@@ -209,6 +209,7 @@ private fun TrackDuration(label: TextKey, durationMs: Long?) {
 private fun TrackDownloadSection(item: MediaItem, record: DownloadRecord?, offline: Boolean, onAction: (MusicUiAction) -> Unit, options: MusicUiOptions) {
     val strings = LocalStrings.current
     val ready = record.isReady()
+    val rechecking = record.isRecheckingAsset()
     val supported = item.source.provider in options.downloadableProviders
     var remove by remember(record?.id) { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().testTag("track-download"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -232,14 +233,14 @@ private fun TrackDownloadSection(item: MediaItem, record: DownloadRecord?, offli
             record.failure?.let { ErrorState(strings.errorFor(it)) }
         }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            when (record?.status) {
+            if (!rechecking) when (record?.status) {
                 DownloadStatus.QUEUED, DownloadStatus.RESOLVING, DownloadStatus.RUNNING -> TextButton({ onAction(MusicUiAction.PauseDownload(record.id)) }, modifier = Modifier.heightIn(min = 48.dp).testTag("track-download-pause")) { Text(strings.text(TextKey.PauseDownload)) }
                 DownloadStatus.PAUSED, DownloadStatus.WAITING_NETWORK, DownloadStatus.NEEDS_FOREGROUND, DownloadStatus.FAILED -> TextButton({ onAction(MusicUiAction.ResumeDownload(record.id)) }, enabled = supported && !offline, modifier = Modifier.heightIn(min = 48.dp).testTag("track-download-resume")) { Text(strings.text(if (record.status == DownloadStatus.FAILED) TextKey.Retry else TextKey.ResumeDownload)) }
                 DownloadStatus.VERIFYING -> Unit
                 DownloadStatus.COMPLETE, DownloadStatus.CANCELLED, null -> if (!ready && supported) OutlinedButton({ onAction(MusicUiAction.Download(item)) }, enabled = !offline, modifier = Modifier.heightIn(min = 48.dp).testTag("track-download-start")) { Text(strings.text(if (record == null) TextKey.Download else TextKey.Retry)) }
             }
-            if (record != null && record.status !in setOf(DownloadStatus.COMPLETE, DownloadStatus.CANCELLED)) TextButton({ onAction(MusicUiAction.CancelDownload(record.id)) }, modifier = Modifier.heightIn(min = 48.dp).testTag("track-download-cancel")) { Text(strings.text(TextKey.CancelDownload)) }
-            if (record?.status == DownloadStatus.COMPLETE) TextButton({ remove = true }, modifier = Modifier.heightIn(min = 48.dp).testTag("track-download-remove")) { Text(strings.text(TextKey.RemoveDownload)) }
+            if (record != null && !rechecking && record.status !in setOf(DownloadStatus.COMPLETE, DownloadStatus.CANCELLED)) TextButton({ onAction(MusicUiAction.CancelDownload(record.id)) }, modifier = Modifier.heightIn(min = 48.dp).testTag("track-download-cancel")) { Text(strings.text(TextKey.CancelDownload)) }
+            if (record?.status == DownloadStatus.COMPLETE || rechecking) TextButton({ remove = true }, modifier = Modifier.heightIn(min = 48.dp).testTag("track-download-remove")) { Text(strings.text(TextKey.RemoveDownload)) }
         }
         if (!supported && !ready) Text(strings.text(TextKey.SourceRightsRequired), style = MaterialTheme.typography.bodySmall)
     }

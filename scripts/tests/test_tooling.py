@@ -63,6 +63,91 @@ class ScopedToolingTests(unittest.TestCase):
         )
         self.assertEqual(result.stdout.strip(), repr(["a b", "Arabic ڤيرا", "--literal"]))
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux guarded display context")
+    def test_owned_display_authentication_survives_nested_scoped_wrappers(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="display-env-test-", dir=TMP) as directory:
+            root = Path(directory)
+            scripts = root / "scripts"
+            scripts.mkdir()
+            for name in ("env.sh", "dev.sh"):
+                shutil.copy2(TOOLS / name, scripts / name)
+            runtime = root / ".work/runtime"
+            runtime.mkdir(parents=True)
+            authority = runtime / "xauth-fixture1234"
+            authority.write_bytes(b"authored file-validation fixture, not an X11 credential")
+            authority.chmod(0o600)
+            environment = dict(os.environ, VEYRA_DISPLAY_AUTHORITY=str(authority),
+                               XAUTHORITY=str(authority), DISPLAY="127.0.0.1:12345",
+                               VEYRA_DISPLAY_MOUNT_NAMESPACE=os.readlink("/proc/self/ns/mnt"))
+            result = subprocess.run(
+                ["bash", str(scripts / "dev.sh"), "bash", str(scripts / "dev.sh"),
+                 sys.executable, "-B", "-c", "import os;print(os.environ['XAUTHORITY'])"],
+                env=environment, text=True, capture_output=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), str(authority))
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux guarded display context")
+    def test_untrusted_or_stale_display_authentication_context_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="display-env-test-", dir=TMP) as directory:
+            root = Path(directory)
+            scripts = root / "scripts"
+            scripts.mkdir()
+            for name in ("env.sh", "dev.sh"):
+                shutil.copy2(TOOLS / name, scripts / name)
+            runtime = root / ".work/runtime"
+            runtime.mkdir(parents=True)
+            authority = runtime / "xauth-fixture1234"
+            authority.write_bytes(b"authored file-validation fixture")
+            authority.chmod(0o600)
+            environment = dict(os.environ, VEYRA_DISPLAY_AUTHORITY=str(authority),
+                               XAUTHORITY=str(authority), DISPLAY="127.0.0.1:12345",
+                               VEYRA_DISPLAY_MOUNT_NAMESPACE=os.readlink("/proc/self/ns/mnt"))
+            cases = [
+                {"VEYRA_DISPLAY_MOUNT_NAMESPACE": "not-the-current-namespace"},
+                {"XAUTHORITY": str(runtime / "other")},
+                {"DISPLAY": ":12345"}, {"DISPLAY": "127.0.0.1:65535"},
+                {"VEYRA_DISPLAY_AUTHORITY": str(root / "xauth-fixture1234"),
+                 "XAUTHORITY": str(root / "xauth-fixture1234")},
+            ]
+            for changed in cases:
+                with self.subTest(changed=sorted(changed)):
+                    result = subprocess.run(["bash", str(scripts / "dev.sh"), "true"],
+                                            env=dict(environment, **changed), text=True, capture_output=True)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("invalid owned display", result.stderr)
+            for modification in ("permissions", "empty", "symlink", "hardlink"):
+                with self.subTest(modification=modification):
+                    authority.unlink()
+                    authority.write_bytes(b"authored file-validation fixture")
+                    authority.chmod(0o600)
+                    if modification == "permissions":
+                        authority.chmod(0o644)
+                    elif modification == "empty":
+                        authority.write_bytes(b"")
+                    elif modification == "symlink":
+                        target = runtime / "target"
+                        target.write_bytes(b"fixture")
+                        authority.unlink()
+                        authority.symlink_to(target)
+                    else:
+                        os.link(authority, runtime / "second-link")
+                    result = subprocess.run(["bash", str(scripts / "dev.sh"), "true"],
+                                            env=environment, text=True, capture_output=True)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("invalid owned display", result.stderr)
+
+    def test_unmarked_inherited_xauthority_is_not_preserved(self) -> None:
+        environment = dict(os.environ, XAUTHORITY="/not-an-owned-display-cookie")
+        environment.pop("VEYRA_DISPLAY_AUTHORITY", None)
+        result = subprocess.run(
+            ["bash", str(TOOLS / "dev.sh"), sys.executable, "-B", "-c",
+             "import os; print(os.environ['XAUTHORITY'])"],
+            env=environment, text=True, capture_output=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(Path(result.stdout.strip()).resolve(), ROOT / ".work/runtime/Xauthority")
+
     @unittest.skipUnless(sys.platform.startswith("linux"), "Linux namespace identity check")
     def test_namespace_mounts_refused_in_callers_namespace(self) -> None:
         namespace = os.readlink("/proc/self/ns/mnt")

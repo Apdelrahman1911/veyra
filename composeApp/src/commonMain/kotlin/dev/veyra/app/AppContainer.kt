@@ -356,12 +356,14 @@ class AppContainer(
     private fun context(item: MediaItem) = if (item.kind == MediaKind.EPISODE) QueueContext.PODCAST else QueueContext.MUSIC
     private suspend fun command(command: PlaybackCommand) { playback.dispatch(command).getOrThrow() }
 
-    private suspend fun play(items: List<MediaItem>, shuffle: Boolean = false) {
+    private suspend fun play(items: List<MediaItem>, shuffle: Boolean = false, startFromBeginning: Boolean = false) {
         require(items.isNotEmpty())
         val selected = items.map(::current)
         val selectedContext = context(selected.first())
         require(selected.all { context(it) == selectedContext })
-        command(PlaybackCommand.Play(selectedContext, selected, shuffle = if (selectedContext == QueueContext.MUSIC) shuffle else false))
+        command(PlaybackCommand.Play(selectedContext, selected,
+            shuffle = if (selectedContext == QueueContext.MUSIC) shuffle else false,
+            startFromBeginning = startFromBeginning))
         cacheArtwork(selected)
     }
 
@@ -574,7 +576,7 @@ class AppContainer(
                 mutablePodcastDetails.update { it.copy(options = it.options + (action.showId to action.options)) }
             }
             is PodcastAction.PlayEpisode -> play(listOf(episode(action.mediaId)))
-            is PodcastAction.StartOver -> { command(PlaybackCommand.ResetProgress(action.mediaId)); play(listOf(episode(action.mediaId))) }
+            is PodcastAction.StartOver -> play(listOf(episode(action.mediaId)), startFromBeginning = true)
             is PodcastAction.SetPlayed -> command(PlaybackCommand.MarkPlayed(action.mediaId, action.played))
             is PodcastAction.SetSaved -> store.update { old ->
                 require(old.media[action.mediaId]?.kind == MediaKind.EPISODE)

@@ -22,6 +22,17 @@ if [ "${1:-}" = --inside ]; then
         command -v "$tool" >/dev/null 2>&1 || { printf 'Existing %s required; no installation/fallback.\n' "$tool" >&2; exit 1; }
     done
 
+    # Optional Android no-guest audit: mask filesystem Unix service sockets.
+    # A network namespace alone does not hide /run (or its /var/run alias).
+    # Normal display callers do not request this and retain the existing view.
+    native_run_mask=""
+    if [ "${1:-}" = --mask-run ]; then
+        [ "$#" -ge 4 ] && [ "${3:-}" = -- ] || exit 2
+        native_run_mask="$2"; shift 3
+    fi
+    [ "$#" -gt 0 ] || exit 2
+    export VEYRA_NATIVE_RUN_MASK="$native_run_mask"
+
     # The identity checks above precede EVERY mount operation, including
     # propagation changes. -n avoids any mtab write. Only bind-remount flags
     # change: do not remount an underlying shared filesystem superblock.
@@ -40,6 +51,30 @@ backing = {
     Path('/var/lib/xkb'): work / 'cache' / 'xkb',
     Path('/dev/shm'): work / 'shm',
 }
+def service_mask(root, value):
+    if not value:
+        return None
+    source = Path(value)
+    expected_parent = root / '.work/android/runs'
+    if (not source.is_absolute() or str(source) != value
+            or source.name != 'service-runtime' or source.parent.parent != expected_parent
+            or not re.fullmatch(r'preflight-[A-Za-z0-9_-]{6,64}', source.parent.name)):
+        raise SystemExit('Refusing an invalid per-run service mask')
+    for ancestor in (source, *source.parents):
+        if ancestor == root:
+            break
+        if ancestor.is_symlink():
+            raise SystemExit('Refusing a symlinked per-run service mask')
+    if (not source.is_dir() or source.stat().st_uid != os.getuid()
+            or source.stat().st_mode & 0o077 or any(source.iterdir())):
+        raise SystemExit('An empty private owned service-mask directory is required')
+    if Path('/var/run').resolve(strict=True) != Path('/run'):
+        raise SystemExit('The /var/run service alias needs a separate reviewed mask')
+    return source
+
+run_mask = service_mask(root, os.environ.get('VEYRA_NATIVE_RUN_MASK', ''))
+if run_mask is not None:
+    backing[Path('/run')] = run_mask
 for target, source in backing.items():
     if not target.is_dir() or target.is_symlink():
         raise SystemExit('Existing plain scratch mount target required: ' + str(target))
@@ -79,13 +114,26 @@ if readonly(root):
     raise SystemExit('Repository did not remain writable')
 for target, source in backing.items():
     mount('--bind', source, target)
+    if run_mask is not None and target == Path('/run'):
+        mount('-o', 'remount,bind,ro', target)
     a, b = target.stat(), source.stat()
-    if (a.st_dev, a.st_ino) != (b.st_dev, b.st_ino) or readonly(target):
+    expected_readonly = run_mask is not None and target == Path('/run')
+    if (a.st_dev, a.st_ino) != (b.st_dev, b.st_ino) or readonly(target) != expected_readonly:
         raise SystemExit('Repository-backed mount identity failed: ' + str(target))
+if run_mask:
+    a, b = Path('/var/run').stat(), Path(run_mask).stat()
+    if (a.st_dev, a.st_ino) != (b.st_dev, b.st_ino) or not readonly(Path('/var/run')):
+        raise SystemExit('The /var/run service alias was not masked')
+
+# The existing no-mask check stays unchanged. Only an explicitly validated
+# /run mask can hide mountinfo descendants below that one service alias.
+def repository_backed_mount(target, root, backing, run_mask):
+    return (target.is_relative_to(root) or target in backing
+            or (run_mask is not None and target.is_relative_to(Path('/run'))))
 
 # Check the effective view, not duplicate/hidden lines in mountinfo.
 for target in mountpoints():
-    if target.is_relative_to(root) or target in backing:
+    if repository_backed_mount(target, root, backing, run_mask):
         continue
     if not readonly(target):
         raise SystemExit('Unexpected writable system mount: ' + str(target))

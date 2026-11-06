@@ -131,7 +131,7 @@ class VeyraApplication : Application() {
     internal fun nativeLabelsContext() = nativeLanguageContext(this, nativeLanguage.value)
 
     /** Main-only service lifecycle callback; interruption is tagged by the originating native deck. */
-    internal fun onPlaybackServiceLost() { engine.foregroundServiceLost() }
+    internal fun onPlaybackServiceLost(failure: AppFailure? = null) { engine.foregroundServiceLost(failure) }
 
     /** Workers may await an attempt, but a failed attempt never poisons later explicit recovery. */
     suspend fun awaitContainer(): AppContainer = constructed.await().also {

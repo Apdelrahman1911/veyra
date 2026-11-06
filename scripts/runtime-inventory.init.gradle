@@ -179,12 +179,16 @@ gradle.projectsEvaluated {
             }
             components.keySet().findAll { !it.startsWith('project:') && !poms.containsKey(it) }.each { pomFailures.add(it) }
 
-            def inputNames = ['settings.gradle.kts', 'build.gradle.kts', 'gradle.properties',
+            def requiredInputNames = ['settings.gradle.kts', 'build.gradle.kts', 'gradle.properties',
                 'gradle/libs.versions.toml', 'gradle/kmpyt.commit', 'gradle/wrapper/gradle-wrapper.properties',
                 'composeApp/build.gradle.kts', 'shared/build.gradle.kts',
                 'third_party/kmpYT/settings.gradle.kts', 'third_party/kmpYT/build.gradle.kts',
                 'third_party/kmpYT/kmpyt/build.gradle.kts', 'third_party/kmpYT/gradle.properties',
-                'third_party/kmpYT/gradle/libs.versions.toml', 'scripts/runtime-inventory.init.gradle']
+                'scripts/runtime-inventory.init.gradle']
+            if (requiredInputNames.any { !new File(root.toFile(), it).isFile() }) {
+                throw new GradleException('Critical production build/pin fingerprint input is missing')
+            }
+            def inputNames = requiredInputNames + ['third_party/kmpYT/gradle/libs.versions.toml']
             def buildInputs = inputNames.collect { new File(root.toFile(), it) }.findAll { it.isFile() }.collect(recordFile)
             def pin = new File(root.toFile(), 'gradle/kmpyt.commit').getText('UTF-8').trim()
             if (!(pin ==~ /[0-9a-f]{40}/)) throw new GradleException('A full immutable kmpYT commit pin is required')

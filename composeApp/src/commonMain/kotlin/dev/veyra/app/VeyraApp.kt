@@ -21,10 +21,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
-import androidx.compose.ui.semantics.LiveRegionMode
-import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import dev.veyra.generated.resources.Res
@@ -188,7 +186,8 @@ fun VeyraApp(container: AppContainer, modifier: Modifier = Modifier) {
                                     }
                                 }
                                 if (!navigation.playerOpen && displayPlayer.currentItem != null) {
-                                    MiniPlayer(snapshot, displayPlayer, container::onMusicAction, options = options)
+                                    MiniPlayer(snapshot, displayPlayer, container::onMusicAction, options = options,
+                                        compactHeight = shortWindow)
                                 }
                                 if (!useRail && !navigation.playerOpen && !navigation.queueOpen) {
                                     AppBottomNavigation(navigation.destination, density.fontScale >= 1.5f || windowWidth < 360.dp,
@@ -227,73 +226,6 @@ private fun StartupFailure(failure: AppFailure, canRecover: Boolean, onRestore: 
     )
 }
 
-/** A compact status opens details; large text must not consume the whole phone/landscape player. */
-@Composable
-private fun MediaRuntimeIndicator(status: MediaRuntimeStatus, offline: Boolean, prepare: () -> Unit) {
-    val strings = LocalStrings.current
-    var showDetails by remember { mutableStateOf(false) }
-    val phaseKey = when (status.phase) {
-        MediaRuntimePhase.READY -> TextKey.PlaybackToolsReady
-        MediaRuntimePhase.REQUIRED -> TextKey.PlaybackTools
-        MediaRuntimePhase.VERIFYING -> TextKey.PlaybackToolsVerifying
-        MediaRuntimePhase.DOWNLOADING -> TextKey.PlaybackToolsDownloading
-        MediaRuntimePhase.INSTALLING -> TextKey.PlaybackToolsInstalling
-        MediaRuntimePhase.ERROR -> TextKey.PlaybackToolsFailed
-    }
-    val active = status.phase in setOf(MediaRuntimePhase.VERIFYING, MediaRuntimePhase.DOWNLOADING, MediaRuntimePhase.INSTALLING)
-    Surface(color = if (status.phase == MediaRuntimePhase.ERROR) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceContainer) {
-        Column(Modifier.fillMaxWidth().testTag("media-runtime-status")) {
-            TextButton(onClick = { showDetails = true }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("media-runtime-open")) {
-                Text(strings.text(phaseKey), maxLines = 2, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
-            }
-            if (active) {
-                val total = status.totalBytes?.takeIf { it > 0 }
-                if (status.phase == MediaRuntimePhase.DOWNLOADING && total != null) {
-                    LinearProgressIndicator(progress = { (status.completedBytes.toDouble() / total).toFloat().coerceIn(0f, 1f) },
-                        modifier = Modifier.fillMaxWidth().testTag("media-runtime-progress"))
-                } else LinearProgressIndicator(Modifier.fillMaxWidth().testTag("media-runtime-progress"))
-            }
-        }
-    }
-    if (showDetails) AlertDialog(
-        onDismissRequest = { showDetails = false },
-        modifier = Modifier.testTag("media-runtime-details"),
-        title = { Text(strings.text(TextKey.PlaybackTools)) },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(strings.text(phaseKey))
-                status.component?.let { component ->
-                    val componentKey = when (component) {
-                        MediaRuntimeComponent.NODE -> TextKey.PlaybackToolNode
-                        MediaRuntimeComponent.CHROMIUM -> TextKey.PlaybackToolChromium
-                        MediaRuntimeComponent.FFMPEG -> TextKey.PlaybackToolFfmpeg
-                    }
-                    Text(strings.format(TextKey.PlaybackToolsComponent, strings.text(componentKey)))
-                }
-                if (status.phase == MediaRuntimePhase.DOWNLOADING) {
-                    val completed = strings.byteSize(status.completedBytes.coerceAtLeast(0))
-                    Text(status.totalBytes?.takeIf { it > 0 }?.let { strings.format(TextKey.PlaybackToolsDownloadProgress, completed, strings.byteSize(it)) }
-                        ?: strings.format(TextKey.PlaybackToolsDownloadedBytes, completed))
-                }
-                status.failure?.let { Text(strings.errorFor(it), color = MaterialTheme.colorScheme.error) }
-                Text(strings.text(TextKey.PlaybackToolsRequired))
-                Text(strings.text(TextKey.PlaybackToolsPrivacy))
-                if (offline) Text(strings.text(TextKey.Offline))
-            }
-        },
-        confirmButton = {
-            if (!active && status.phase != MediaRuntimePhase.READY) TextButton(onClick = prepare, enabled = !offline,
-                modifier = Modifier.testTag("media-runtime-prepare")) {
-                Text(strings.text(if (status.phase == MediaRuntimePhase.ERROR) TextKey.Retry else TextKey.PlaybackToolsPrepare))
-            } else TextButton(onClick = { showDetails = false }) { Text(strings.text(TextKey.Close)) }
-        },
-        dismissButton = {
-            if (!active && status.phase != MediaRuntimePhase.READY) TextButton(onClick = { showDetails = false }) { Text(strings.text(TextKey.Close)) }
-        },
-    )
-}
-
 private val primaryDestinations = listOf(AppDestination.LISTEN, AppDestination.SEARCH, AppDestination.PODCASTS, AppDestination.LIBRARY)
 private fun AppDestination.label() = when (this) {
     AppDestination.LISTEN -> TextKey.Listen
@@ -324,13 +256,13 @@ private fun AppNavigationRail(selected: AppDestination, expanded: Boolean, short
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 primaryDestinations.forEach { destination ->
                     if (expanded) NavigationDrawerItem(
-                    label = { Text(strings.text(destination.label())) }, selected = destination == selected,
+                    label = { Text(strings.text(destination.label()), Modifier.fillMaxWidth()) }, selected = destination == selected,
                     onClick = { select(destination) }, icon = { Icon(destination.icon(), null) },
                     modifier = Modifier.heightIn(min = 56.dp).testTag("nav-${destination.name}"),
                     ) else NavigationRailItem(
                     selected = destination == selected, onClick = { select(destination) },
                     icon = { Icon(destination.icon(), strings.text(destination.label())) },
-                    label = { Text(strings.text(destination.label())) }, alwaysShowLabel = false,
+                    label = { NavigationLabel(destination) }, alwaysShowLabel = false,
                     modifier = Modifier.testTag("nav-${destination.name}"),
                     )
                 }
@@ -346,14 +278,32 @@ private fun AppNavigationRail(selected: AppDestination, expanded: Boolean, short
 @Composable
 private fun AppBottomNavigation(selected: AppDestination, compactLabels: Boolean, select: (AppDestination) -> Unit) {
     val strings = LocalStrings.current
+    val hasSelectedPrimary = selected in primaryDestinations
     NavigationBar {
         primaryDestinations.forEach { destination ->
-            NavigationBarItem(selected = destination == selected, onClick = { select(destination) },
-                icon = { Icon(destination.icon(), strings.text(destination.label())) },
-                label = { Text(strings.text(destination.label())) }, alwaysShowLabel = !compactLabels,
-                modifier = Modifier.testTag("nav-${destination.name}"))
+            val isSelected = destination == selected
+            // Material3's item imposes weight(1f) internally. Give each item its own Row
+            // rather than shrinking or clipping the selected Arabic/large-text label.
+            // In compact mode inactive icons retain 48dp targets; the selected label gets
+            // the remaining width. The slots still follow the app's RTL direction.
+            val slot = if (compactLabels && hasSelectedPrimary && !isSelected) Modifier.width(48.dp)
+                else Modifier.weight(1f)
+            Row(slot) {
+                NavigationBarItem(selected = isSelected, onClick = { select(destination) },
+                    icon = { Icon(destination.icon(), strings.text(destination.label())) },
+                    label = if (!compactLabels || isSelected) ({ NavigationLabel(destination) }) else null,
+                    modifier = Modifier.testTag("nav-${destination.name}"))
+            }
         }
     }
+}
+
+@Composable
+private fun NavigationLabel(destination: AppDestination) {
+    // The label owns its bounded slot, not only the natural width of a short word. This
+    // keeps centered/wrapped text and its semantics paragraph on the same constraints;
+    // it does not shrink text, cap lines or hide overflow at large Arabic text sizes.
+    Text(LocalStrings.current.text(destination.label()), Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
 }
 
 @Composable

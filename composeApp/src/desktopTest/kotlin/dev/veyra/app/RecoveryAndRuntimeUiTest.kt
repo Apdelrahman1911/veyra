@@ -2,6 +2,7 @@ package dev.veyra.app
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -10,6 +11,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -98,6 +100,7 @@ class RecoveryAndRuntimeUiTest {
         await { app.container.navigation.value.destination == AppDestination.SETTINGS }
         control("media-runtime-open")
         ui.onNodeWithTag("media-runtime-open").performClick()
+        capture("fixture-runtime-en-320x760-font100-offline-required", "media-runtime-details")
         control("media-runtime-prepare").assertIsNotEnabled()
             .assertTextEquals(english.text(TextKey.PlaybackToolsPrepare)).performClick()
         readable("media-runtime-details", english.text(TextKey.PlaybackToolsRequired))
@@ -125,6 +128,7 @@ class RecoveryAndRuntimeUiTest {
         await { app.runtimePrepareCalls.get() == 1 && app.runtime.value.phase == MediaRuntimePhase.DOWNLOADING }
         ui.onNodeWithTag("media-runtime-prepare").assertDoesNotExist()
         progress(0.25f)
+        capture("fixture-runtime-en-960x720-font100-progress-initial", "media-runtime-details")
         readable("media-runtime-details", english.format(TextKey.PlaybackToolsDownloadProgress,
             english.byteSize(16), english.byteSize(64)))
         closeRuntime(english).performClick()
@@ -148,6 +152,7 @@ class RecoveryAndRuntimeUiTest {
         capture("fixture-runtime-ar-320x760-font200-progress")
         ui.onNodeWithTag("media-runtime-open").performClick()
         visible(ui.onNodeWithTag("media-runtime-details"), "runtime dialog")
+        capture("fixture-runtime-ar-320x760-font200-details-initial", "media-runtime-details")
         readable("media-runtime-details", arabic.format(TextKey.PlaybackToolsComponent,
             arabic.text(TextKey.PlaybackToolChromium)))
         readable("media-runtime-details", arabic.format(TextKey.PlaybackToolsDownloadProgress,
@@ -180,6 +185,7 @@ class RecoveryAndRuntimeUiTest {
     ) { app ->
         control("media-runtime-open").performClick()
         visible(ui.onNodeWithTag("media-runtime-details"), "runtime error dialog")
+        capture("fixture-runtime-ar-320x760-font200-typed-error-initial", "media-runtime-details")
         readable("media-runtime-details", arabic.errorFor(AppFailure(FailureCode.NETWORK_UNAVAILABLE)))
         readable("media-runtime-details", arabic.format(TextKey.PlaybackToolsComponent,
             arabic.text(TextKey.PlaybackToolFfmpeg)))
@@ -203,7 +209,8 @@ class RecoveryAndRuntimeUiTest {
             ui.onNodeWithTag("recovery-restore").performScrollTo()
             control("recovery-restore").performClick()
             visible(ui.onNodeWithTag("recovery-confirm-dialog"), "recovery confirmation")
-            readable("recovery-confirm-dialog", arabic.text(TextKey.RecoveryBackupPrompt))
+            // The prompt itself owns its scroll semantics, rather than a scrollable ancestor.
+            readable("recovery-confirm-dialog", arabic.text(TextKey.RecoveryBackupPrompt), scroll = false)
             control("recovery-confirm")
             control("recovery-cancel")
             assertUnrestored(app, library)
@@ -247,8 +254,8 @@ class RecoveryAndRuntimeUiTest {
         // The missing-backup failure differs from the invalid-primary failure, proving this is
         // the completed explicit attempt, not the still-queued initial Failed state.
         await {
-            app.container.initialization.value is AppInitialization.Failed &&
-                (app.store.status.value as? StoreStatus.Failed)?.failure?.let { it != initialFailure } == true
+            (app.container.initialization.value as? AppInitialization.Failed)?.failure?.let { it != initialFailure } == true &&
+                app.store.lastFailure.value?.let { it != initialFailure } == true
         }
         assertUnrestored(app, library)
         ui.onNodeWithTag("recovery-restore").performScrollTo().assertIsDisplayed()
@@ -313,7 +320,11 @@ class RecoveryAndRuntimeUiTest {
         }
         setContent {
             CompositionLocalProvider(LocalDensity provides Density(1f, 2f)) {
-                VeyraTheme(darkTheme = true, language = LanguagePreference.ARABIC) { LicensesScreen(reader) }
+                VeyraTheme(darkTheme = true, language = LanguagePreference.ARABIC) {
+                    // Match the real app's themed surface/content color. Capturing a bare lazy
+                    // list otherwise yields black text on transparency, not a dark-theme scene.
+                    Surface(Modifier.fillMaxSize().testTag("fixture-legal-host")) { LicensesScreen(reader) }
+                }
             }
         }
         val screen = ScreenCase(this, 320, 760)
@@ -333,7 +344,7 @@ class RecoveryAndRuntimeUiTest {
         }
         assertEquals(LEGAL_NAMES.dropLast(1).map { "files/legal/$it" } + "files/licenses/${LEGAL_NAMES.last()}", requested.toList())
         onAllNodesWithText(DIAGNOSTIC_SENTINEL, substring = true, useUnmergedTree = true).assertCountEquals(0)
-        screen.capture("fixture-legal-ar-320x760-font200-one-missing", "licenses-screen")
+        screen.capture("fixture-legal-ar-320x760-font200-one-missing", "fixture-legal-host")
     }
 
     private fun settingsSnapshot(arabic: Boolean = false, offline: Boolean = false): AppSnapshot = CoreShellTestFixture.snapshot(
@@ -418,8 +429,8 @@ class RecoveryAndRuntimeUiTest {
         fun viewport(tag: String) {
             ui.waitForIdle()
             val actual = ui.onNodeWithTag(tag).assertIsDisplayed().getUnclippedBoundsInRoot()
-            assertEquals(width.dp, actual.width, "The scene, not just an inner Box, has the claimed width")
-            assertEquals(height.dp, actual.height, "The scene has the claimed height")
+            assertEquals(width.dp, actual.right - actual.left, "The scene, not just an inner Box, has the claimed width")
+            assertEquals(height.dp, actual.bottom - actual.top, "The scene has the claimed height")
         }
 
         fun control(tag: String): SemanticsNodeInteraction = visible(ui.onNodeWithTag(tag), tag, control = true)
@@ -427,13 +438,15 @@ class RecoveryAndRuntimeUiTest {
         fun visible(node: SemanticsNodeInteraction, label: String, control: Boolean = false): SemanticsNodeInteraction {
             node.assertIsDisplayed()
             val actual = node.getUnclippedBoundsInRoot()
+            val actualWidth = actual.right - actual.left
+            val actualHeight = actual.bottom - actual.top
             val clipped = node.fetchSemanticsNode().boundsInRoot
             assertTrue(actual.left.value >= -1f && actual.top.value >= -1f &&
                 actual.right.value <= width + 1f && actual.bottom.value <= height + 1f,
                 "$label must fit the actual ${width}x$height scene: $actual")
-            assertTrue(clipped.width + 1f >= actual.width.value && clipped.height + 1f >= actual.height.value,
+            assertTrue(clipped.width + 1f >= actualWidth.value && clipped.height + 1f >= actualHeight.value,
                 "$label must not pass merely because its clipped intersection is visible: $actual / $clipped")
-            if (control) assertTrue(actual.width.value >= 48f && actual.height.value >= 48f,
+            if (control) assertTrue(actualWidth >= 48.dp && actualHeight >= 48.dp,
                 "$label must retain its 48dp target: $actual")
             return node
         }
@@ -444,8 +457,27 @@ class RecoveryAndRuntimeUiTest {
             node.assertIsDisplayed()
             val layouts = mutableListOf<TextLayoutResult>()
             node.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
-            assertTrue(layouts.isNotEmpty() && layouts.none { it.hasVisualOverflow }, "Text must wrap, not truncate: $text")
             val actual = node.getUnclippedBoundsInRoot()
+            val diagnostics = buildString {
+                appendLine("Text: $text")
+                appendLine("Unclipped node: $actual; clipped node: ${node.fetchSemanticsNode().boundsInRoot}")
+                layouts.forEach { layout ->
+                    appendLine("Layout size=${layout.size}; paragraph=${layout.multiParagraph.width}x${layout.multiParagraph.height}; " +
+                        "constraints=${layout.layoutInput.constraints}; widthOverflow=${layout.didOverflowWidth}; " +
+                        "heightOverflow=${layout.didOverflowHeight}; exceededLines=${layout.multiParagraph.didExceedMaxLines}")
+                    repeat(minOf(layout.lineCount, 12)) { line ->
+                        appendLine("Line $line: left=${layout.getLineLeft(line)} right=${layout.getLineRight(line)} " +
+                            "top=${layout.getLineTop(line)} bottom=${layout.getLineBottom(line)} ellipsis=${layout.isLineEllipsized(line)}")
+                    }
+                }
+            }
+            val readable = layouts.isNotEmpty() && layouts.none { it.hasVisualOverflow }
+            val captureError = if (!readable) {
+                runCatching {
+                    capture("fixture-text-overflow-${width}x${height}-${text.hashCode().toUInt().toString(16)}", parent, diagnostics)
+                }.exceptionOrNull()
+            } else null
+            assertTrue(readable, "Text must wrap, not truncate: $diagnostics\nCapture error: $captureError")
             assertTrue(actual.left.value >= -1f && actual.right.value <= width + 1f,
                 "Scrollable text must stay horizontally within the real scene: $actual")
         }
@@ -467,7 +499,7 @@ class RecoveryAndRuntimeUiTest {
             ui.onNodeWithTag("legal-document-$name").assertExists()
         }
 
-        fun capture(name: String, tag: String = "veyra-app") {
+        fun capture(name: String, tag: String = "veyra-app", diagnostics: String = "") {
             require(name.startsWith("fixture-") && name.matches(Regex("[a-z0-9-]+")))
             val bitmap = ui.onNodeWithTag(tag).captureToImage()
             val pixels = bitmap.toPixelMap()
@@ -487,7 +519,7 @@ class RecoveryAndRuntimeUiTest {
                 No media acquisition, live source, catalog sockets, external browser or audible output.
                 A generated file means only this test reached capture; inspect it independently.
                 Run after lead slot: scripts/with-display.sh scripts/gradle.sh :composeApp:desktopTest --tests dev.veyra.app.RecoveryAndRuntimeUiTest
-            """.trimIndent() + "\n")
+            """.trimIndent() + "\n" + diagnostics)
         }
     }
 

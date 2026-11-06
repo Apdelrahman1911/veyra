@@ -14,7 +14,6 @@ import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import dev.veyra.app.R
 import dev.veyra.app.VeyraApplication
-import dev.veyra.model.AppFailure
 import dev.veyra.model.FailureCode
 import dev.veyra.model.VeyraException
 import dev.veyra.platform.audio.PlaybackNotificationProvider
@@ -33,18 +32,45 @@ class PlaybackService : MediaSessionService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var startupHoldUntil = 0L
     private var holdJob: Job? = null
+    private var labelsJob: Job? = null
+    private var notificationRevision = 0L
     private var attached = false
+    private val foregroundGuard = PlaybackForegroundFailureGuard(
+        retireLocal = {
+            attached = false
+            startupHoldUntil = 0
+            holdJob?.cancel(); holdJob = null
+            labelsJob?.cancel(); labelsJob = null
+            clearListener()
+        },
+        detachOwner = { app.playbackForeground.detached(this) },
+        silenceOwner = { failure -> app.onPlaybackServiceLost(failure) },
+        removeOwnedSession = {
+            // Media3 removeSession unconditionally clears the shared session's listener. Never
+            // let a stale service callback remove a successor's attachment/listener.
+            if (isSessionAdded(app.mediaSession.session)) removeSession(app.mediaSession.session)
+        },
+        stopService = { stopSelf() },
+    )
 
     override fun onCreate() {
         super.onCreate()
-        updateNativeLabels()
+        setListener(object : MediaSessionService.Listener {
+            override fun onForegroundServiceStartNotAllowedException() { foregroundGuard.rejected() }
+        })
+        // Attach before any fallible notification setup so a pending Play receives its failure.
+        app.playbackForeground.attached(this)
+        if (!foregroundGuard.attempt { updateNativeLabels() }) return
         addSession(app.mediaSession.session)
         attached = true
-        app.playbackForeground.attached(this)
-        scope.launch { app.nativeLanguage.drop(1).collect { updateNativeLabels() } }
+        labelsJob = scope.launch {
+            app.nativeLanguage.drop(1).collect { foregroundGuard.attempt { updateNativeLabels() } }
+        }
     }
 
     private fun updateNativeLabels() {
+        // Old language collectors must not overwrite the successor's shared channel/notice.
+        if (!app.playbackForeground.owns(this)) { foregroundGuard.rejected(); return }
         val labels = app.nativeLabelsContext()
         if (Build.VERSION.SDK_INT >= 26) {
             val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
@@ -54,7 +80,14 @@ class PlaybackService : MediaSessionService() {
             channel.name = labels.getString(R.string.playback_channel)
             manager.createNotificationChannel(channel)
         }
-        setMediaNotificationProvider(PlaybackNotificationProvider(labels) { app.playback.value.activeContext })
+        val revision = ++notificationRevision
+        setMediaNotificationProvider(GuardedPlaybackNotificationProvider(
+            PlaybackNotificationProvider(labels) { app.playback.value.activeContext },
+            foregroundGuard,
+            // Provider replacement (language change) and service replacement are independent.
+            // Neither an old translation nor a retired service may publish delayed artwork.
+            isCurrent = { attached && revision == notificationRevision && app.playbackForeground.owns(this) },
+        ))
         if (attached) {
             if (!app.playback.value.isPlaying && SystemClock.elapsedRealtime() < startupHoldUntil) {
                 (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).notify(NOTIFICATION_ID, startupNotification())
@@ -63,14 +96,23 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
-    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession = app.mediaSession.session
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? =
+        if (foregroundGuard.retired || !app.playbackForeground.owns(this)) null else app.mediaSession.session
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // A playback-start request must satisfy Android's foreground deadline even while source
         // resolution or the native decoder is not yet playing. Media3 handles later media actions.
+        // Media3 can resolve an intent's session URI directly, bypassing onGetSession.
+        if (!app.playbackForeground.owns(this)) foregroundGuard.rejected()
+        if (foregroundGuard.retired) return START_NOT_STICKY
         if (intent?.action == ACTION_START) {
             try { ensurePlaybackForeground() }
-            catch (_: VeyraException) { app.playbackForeground.failed(this); stopSelf(startId) }
+            catch (failure: VeyraException) {
+                if (failure.failure.code != FailureCode.BACKGROUND_RESTRICTED) throw failure
+                // The guard already retired this identity, silenced native output and stopped us.
+                // Do not dispatch Media3 commands after the foreground allowance was rejected.
+                return START_NOT_STICKY
+            }
         }
         super.onStartCommand(intent, flags, startId)
         // A killed process restores paused; never use sticky restart as an autoplay mechanism.
@@ -78,7 +120,8 @@ class PlaybackService : MediaSessionService() {
     }
 
     internal fun ensurePlaybackForeground() {
-        try {
+        if (!app.playbackForeground.owns(this)) foregroundGuard.rejected()
+        foregroundGuard.requireForeground {
             startupHoldUntil = SystemClock.elapsedRealtime() + 5_000
             val notification = startupNotification()
             if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
@@ -90,27 +133,31 @@ class PlaybackService : MediaSessionService() {
                 startupHoldUntil = 0
                 if (attached) updateFromSession()
             }
-        } catch (_: Exception) {
-            startupHoldUntil = 0
-            app.playbackForeground.failed(this)
-            throw VeyraException(AppFailure(FailureCode.BACKGROUND_RESTRICTED, "playback_foreground_service"))
         }
     }
 
     override fun onUpdateNotification(session: MediaSession, startInForegroundRequired: Boolean) {
-        // Do not allow an initial paused session notification to demote the service between its
-        // foreground ACK and the target-35+ audio-focus request. There is no indefinite hold.
-        if (!startInForegroundRequired && !session.player.isPlaying && SystemClock.elapsedRealtime() < startupHoldUntil) return
-        super.onUpdateNotification(session, startInForegroundRequired)
+        if (!app.playbackForeground.owns(this)) foregroundGuard.rejected()
+        if (!attached && !foregroundGuard.retired) return // Only the synchronous addSession setup.
+        foregroundGuard.frameworkUpdate(startInForegroundRequired) {
+            // Do not demote the service between its foreground ACK and target-35+ audio focus.
+            // This bounded hold never suppresses a requested foreground promotion/refusal.
+            if (!startInForegroundRequired && !session.player.isPlaying && SystemClock.elapsedRealtime() < startupHoldUntil) return@frameworkUpdate
+            // Keep Media3's internal false/rejected-Play result, but never log a private OS cause.
+            // Manual hold/language refreshes catch the framework signal with their outer guard.
+            super.onUpdateNotification(session, startInForegroundRequired)
+        }
     }
 
     private fun updateFromSession() {
-        val session = app.mediaSession.session
-        super.onUpdateNotification(session, app.playback.value.isPlaying ||
-            (app.playback.value.desiredPlaying && app.playback.value.isBuffering))
-        if (!app.playback.value.isPlaying && !app.playback.value.desiredPlaying) {
-            if (Build.VERSION.SDK_INT >= 24) stopForeground(STOP_FOREGROUND_DETACH)
-            else { @Suppress("DEPRECATION") stopForeground(false) }
+        foregroundGuard.attempt {
+            val session = app.mediaSession.session
+            onUpdateNotification(session, app.playback.value.isPlaying ||
+                (app.playback.value.desiredPlaying && app.playback.value.isBuffering))
+            if (!foregroundGuard.retired && !app.playback.value.isPlaying && !app.playback.value.desiredPlaying) {
+                if (Build.VERSION.SDK_INT >= 24) stopForeground(STOP_FOREGROUND_DETACH)
+                else { @Suppress("DEPRECATION") stopForeground(false) }
+            }
         }
     }
 
@@ -122,14 +169,8 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
-        attached = false
-        val lostOwner = app.playbackForeground.detached(this)
-        scope.cancel()
-        removeSession(app.mediaSession.session)
-        // A service disappearing must not leave unowned background audio. Do not destroy the
-        // application engine/session or enqueue an unscoped Pause against a later service.
-        if (lostOwner) app.onPlaybackServiceLost()
-        super.onDestroy()
+        try { foregroundGuard.destroyed() }
+        finally { scope.cancel(); clearListener(); super.onDestroy() }
     }
 
     private fun startupNotification(): Notification {
