@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Veyra</string>
+    <string name="playback_channel">Playback</string>
+    <string name="playback_preparing">Preparing your audio…</string>
+    <string name="playback_play">Play</string>
+    <string name="playback_pause">Pause</string>
+    <string name="playback_previous">Previous track</string>
+    <string name="playback_next">Next track</string>
+    <string name="playback_skip_back">Skip backward</string>
+    <string name="playback_skip_forward">Skip forward</string>
+    <string name="download_channel">Downloads</string>
+    <string name="download_active">Saving audio for offline listening</string>
+</resources>

@@ -13,7 +13,7 @@ Why this choice:
 - Audio-only use avoids video surfaces, Compose interop and rendering requirements at the API level. Some platform graphics libraries remain ELF dependencies of this particular build.
 - Using the native runtime only avoids MediaMP 0.5.3's Kotlin **2.3.20** / Compose **1.12.0** wrapper dependency. Veyra controls its own playback lifecycle and platform media-session integration.
 
-**Release gates, not footnotes:** the Linux runtime is published as **GPLv3**, unlike the LGPL Windows/macOS builds. The lead proposes GPL-compatible Veyra application distribution; upstream `kmpYT` licensing permission and complete corresponding source for redistributed native binaries must be resolved before public binary release. Missing media runtime or incompatible OS is an explicit startup/capability error, never silent fallback to a developer-installed executable.
+**Release gates, not footnotes:** the Linux runtime is published as **GPLv3**, unlike the LGPL Windows/macOS builds. Veyra has adopted GPL-3.0-or-later; the owner authorized MIT adoption for `kmpYT` (D007). Complete dependency/contribution audit and corresponding source for redistributed native binaries remain required before public binary release. Missing media runtime or incompatible OS is an explicit startup/capability error, never silent fallback to a developer-installed executable.
 
 ## Exact artifacts and platform boundaries
 
@@ -27,9 +27,9 @@ All coordinates below have group `org.openani.mediamp`, version `0.5.3`, and art
 | `macos-x64` | 25,402,220 | `7c9bda187618d851cc258378126d1afdb48202561b476e9aaaab45947406edf0` | Build flags target macOS 12.0; LGPL2.1+ |
 | `macos-arm64` | 21,753,403 | `1ed2def130d751d5c14add0995726670de6426bc4cf868353e963a5c363a656f` | Build flags target macOS 12.0; LGPL2.1+ |
 
-The Linux JAR was downloaded and its digest checked against Maven's published SHA-256. Other rows have published POM, digest and HTTP size checks, **not** on-platform execution or locally recomputed binary digests. Pin and verify every downloaded platform artifact in the build; a digest fetched from the same server is reproducibility/integrity evidence, not independent publisher authentication.
+All five original JARs were downloaded and their complete SHA-256 values independently recomputed locally against the pins above. The non-Linux manifest inventory is `.work/desktop-audio/artifacts/nonlinux-manifests.json`: Windows uses `libmpv-2.dll`; both macOS archives contain `libmpv.2.dylib` and `libmpv.dylib`. This verifies archive layout/integrity, **not** Windows/macOS linking or execution. A digest fetched from the same server is reproducibility/integrity evidence, not independent publisher authentication.
 
-Recommended initial supported desktop release matrix: **Windows 11 x64, macOS 12+ x64 and arm64, Ubuntu 24.04+ x64 desktop**. These are proposed supported floors, not all verified systems. Windows ARM64 is a native-runtime capability, not a promise that the selected Compose/Skiko/JDK/installer stack supports it; keep it gated. No Linux ARM64 artifact is available in this runtime family. Do not advertise generic Linux or Ubuntu 22.04/Debian 12 compatibility.
+The accepted desktop release matrix (PLAN.md) is **Windows 10+ x64, macOS 13+ x64 and arm64, Ubuntu 24.04+ x64 desktop**. These are supported-target requirements, not all verified systems. Windows ARM64 is a native-runtime capability, not a promise that the selected Compose/Skiko/JDK/installer stack supports it; keep it gated. No Linux ARM64 artifact is available in this runtime family. Do not advertise generic Linux or Ubuntu 22.04/Debian 12 compatibility.
 
 The Linux archive expands to **76,228,251 bytes** and contains duplicate soname/version filenames. Preserve the tested closure first; reducing duplicates must retain correct sonames and pass a fresh load test. It includes `libavcodec.so.62`, `libavformat.so.62`, `libavutil.so.60`, `libmpv.so.2`, libass, libplacebo, OpenSSL, font shaping libraries and selected X11 extensions. `$ORIGIN` RUNPATH resolves sibling bundled libraries.
 
@@ -77,10 +77,14 @@ Native test command and outputs:
 | WAV PCM fixture | Rejected as unrecognized format; this particular FFmpeg build lacks WAV demuxer despite PCM decoder support |
 | HTML named `.mp3` | Rejected as unrecognized format |
 | Half-truncated WebM | **Opened successfully and ended with normal EOF**, while emitting an incomplete-file warning; reported original duration still looked plausible |
+| Real public HPR4764 podcast, native HTTPS | Ahuka's CC-BY-SA-4.0 episode opened through its HTTPS redirector with `tls-verify=yes` and the host CA file; MP3 decoded, position advanced, seek to 60 seconds then back to five seconds continued playing, speed 1.5 was applied |
+| Same podcast after full download, fresh network-isolated process | 3,284,906 bytes matched HTTP Content-Length, SHA-256 `3bd3d328bca98a2af68dfe8daf7eaa503f9e117d5d4b2932af23d6663d24f093`; fresh libmpv opened the final **local path** inside `unshare --net`, advanced/seeked both ways at speed 1.5; an explicit egress control returned `ENETUNREACH` |
+
+Real-podcast probe: `.work/desktop-audio/probes/probe_real_podcast.py`, with `podcast-{remote,download,offline}-results.json` and `offline-network.strace`. `strace -f -e trace=network` recorded only the deliberate denied AF_INET egress control, no other AF_INET/AF_INET6 activity. The native-reported duration was **410.344229 seconds**, illustrating that native duration should not be silently replaced with a differing directory estimate. Public enclosure: `https://hub.hackerpublicradio.org/ccdn.php?filename=/eps/hpr4764/hpr4764.mp3`; [episode/license page](https://hackerpublicradio.org/eps/hpr4764/index.html). Media remains a local ignored test fixture, not a shipped asset.
 
 The speed setting and media progression are verified, but short-window measurements around asynchronous seeks are not precise tempo conformance measurements. Pitch correction was reported enabled; no spectral/audible pitch proof has been performed.
 
-**These are native-engine transport/codec/control tests, not audible-listening evidence, clean-machine install evidence, Compose UI evidence, real Bluetooth routing evidence, or successful YouTube extraction.** Windows/macOS cannot be executed on this Linux VPS. Null-sink progression must never stand in for physical/audio-server verification.
+**These are native-engine transport/codec/control and cold local-file tests, not audible-listening evidence, clean-machine install evidence, Veyra downloader/database evidence, Compose UI evidence, real Bluetooth routing evidence, or successful YouTube extraction.** The HTTPS probe used the host CA file, not an already packaged CA solution. Windows/macOS cannot be executed on this Linux VPS. Null-sink progression must never stand in for physical/audio-server verification.
 
 ## Common contract and adapter responsibilities
 
@@ -181,6 +185,91 @@ libmpv exposes `audio-device-list`, `audio-device` and audio reconfiguration eve
 3. **Release assurance:** packaged bundled-JDK executable on each supported OS/architecture, dependency closure, controlled JNA/native extraction, real output/media-session gates and **full GPL/LGPL corresponding source** are separate from Linux ctypes success. No system package installs to conceal gaps, no unsupported architectures or signing claims.
 
 Review received from `verification_ci_research` and `integration_feasibility` concurs on those separation-of-proof and licensing gates. See also [verification/CI](verification-ci.md), [source integration](integration-feasibility.md) and [mobile audio](mobile-audio.md).
+
+## Implementation checkpoint — 2026-11-06
+
+**Verification status:** the first real `:composeApp:compileKotlinDesktop` invocation
+passed shared JVM/Room compilation but failed on two root UI receiver errors and one
+desktop cross-module nullable-hash smart cast. The latter is fixed in source; another
+build is required. Evidence: `.work/desktop-first-compile.log`. Desktop authored tests
+and Windows/macOS C++/Objective-C++ have **not yet been executed** at this checkpoint.
+
+- `MpvAudioDeck` owns one native handle/thread. `DesktopAudioEngine` is the public
+  coroutine-actor dual-deck adapter: muted/paused preload, native-clock equal-power
+  overlap, lossless proposal/ACK, generation attribution, prompt native wakeup and
+  idempotent ephemeral-source ownership. Outgoing ownership stays cancellable until
+  the shared coordinator durably commits and ACKs; incoming ordinary events remain
+  private before ACK.
+- MUSIC uses fixed −3.5 dB master headroom (`CrossfadeMix.MUSIC_GAIN`, approximately
+  0.66834), including crossfade-disabled playback. EPISODE uses unity gain and never
+  stages automatic overlap. Correlated peak sum is bounded to approximately 0.9454;
+  ordinary cancellation uses a coordinated 60 ms convex return, while pause/stop
+  silence immediately. These are implementation/math claims, **not a measured
+  native limiter or physical-output claim**.
+- `stop` destroys/joins the outgoing handle before returning the asset-removal
+  barrier, then recreates idle; `cancelNext` similarly destroys the staged handle.
+  Mere acceptance of an mpv stop command is not a Windows file-release guarantee.
+- Native asset validation uses a separate full-decoding NULL handle, size/hash checks,
+  corrupt/incomplete warnings and a typed finite validation timeout. Bundled Mozilla
+  CA roots are pinned; positive bundled-CA HTTPS and negative TLS behavior tests still
+  need execution. The old direct HPR probe is decoder research, **not D005 proof**.
+- `DesktopProcessContext` acquires a private data-directory lock before Room/audio.
+  Cross-review reproduced a POSIX hazard: closing a second same-process descriptor
+  after `OverlappingFileLockException` releases the owner's kernel lock. A canonical
+  process registry now rejects duplicates **before open**, remains reserved through
+  close, and makes repeated close harmless. An authored fresh-JVM regression checks
+  the kernel lock before/after rejected probes and after release; awaiting execution.
+- Main now hosts `AppContainer`/`VeyraApp`, tray/quit behavior, private CLI data/result
+  paths, real native self-test, frame-render UI smoke and ordered cleanup. A missing
+  system session is degraded capability, not a reason to construct another player.
+  MPRIS has a private-bus regression; Windows SMTC HWND and macOS MediaPlayer bridges
+  are source-only. Linux default-route monitoring remains to be implemented.
+- `/proc/asound/cards` reports **no soundcards**, and `/dev/snd` has only seq/timer.
+  Physical desktop listening/crossfade remains an unmet requirement. NULL or virtual
+  PulseAudio output must not be relabeled as physical evidence.
+
+### Clean-machine source helpers — in progress, not provisioned yet
+
+The upstream runtime-options commit `84afce07b7f996a316847212e094a507711f9141`
+accepts vetted absolute Node/Chromium paths and scopes the child temporary directory
+without changing global environment variables. Root added cancellable
+`PlatformServices.prepareMediaRuntime` and setup status. Acquisition invokes the
+suspend gate; synchronous `YouTubeJavaScriptRuntime.prepare` must **not** download
+helpers. Offline library/startup and local playback do not depend on helpers.
+Upstream source review confirms search/home/channel/playlist/more use only the
+public browse transport; `details()` calls inspect and may require the gate too.
+
+Official Node22 **v22.23.4** archives and complete checksums/licenses were fetched
+under `.work/desktop-audio/helper-research/`. Linux x64, Windows x64, macOS x64/arm64
+digests all match official SHASUMS. Node/npm are not installed globally or executed.
+
+Official Chromium snapshots were fetched and inventoried, not executed:
+
+| Platform | Revision | Archive bytes | SHA-256 |
+|---|---:|---:|---|
+| Linux x64 | 1737260 | 261,911,787 | `a8b703d4d92fecda979b944dae5c2b8bad4ebd1968c6134d16f09b249a39dc9b` |
+| Windows x64 | 1737213 | 382,475,232 | `746fcbb8b65ed4d0e6a7f0dac07ad24f7cb5c835af57bc0296c547f92be1cf98` |
+| macOS x64 | 1737266 | 205,961,875 | `840c1cca12dbf1b7c29990da762efbf14105799443c9987faef2b8e05540b443` |
+| macOS arm64 | 1737272 | 185,964,695 | `a18cd36657ae51a308c56e6ce8902ec4e7fd041328b50a6bc6a7b54bd6177d86` |
+
+Their immutable Git revision receipts, full path/mode/size manifests and URLs are
+in that research directory. Each macOS archive has five contained framework
+symlinks. No standalone license/credits file exists in these ZIPs; Chromium's BSD
+root license has been fetched, but complete bundled-third-party notices still need
+resolution. No Chrome sandbox-disabling flag is permitted. Root execution sandbox
+refusal must be reported truthfully.
+
+Commons Compress1.28.0 is approved for bounded safe archive extraction (Apache2;
+dependency closure audit pending). Planned installer uses private staging, whole
+archive pins, bounded streaming, contained links only, executable permissions,
+atomic commit, cancellation and retryable visible setup failure. It must never
+execute an unverified archive or use a developer's PATH tool as a silent fallback.
+
+For HLS/DASH remux downloads, the accepted direction is a minimal CLI built from
+pinned official FFmpeg source on matching hosts, bundled next to native helpers.
+Static SABR single-audio materialization does not itself require FFmpeg. Exact
+feature closure/source pin/build tests and packaged execution are still pending;
+this direction is not a claim that FFmpeg is already bundled or usable.
 
 ## Primary sources
 

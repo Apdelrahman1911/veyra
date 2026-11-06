@@ -1,40 +1,48 @@
 # Veyra — resumable state
 
-Last updated: 2026-11-06 UTC. Formal Goal: **active**, created with the Goal tool; no token budget requested.
+Updated 2026-11-06 UTC. Formal Goal: **active/incomplete**; no token budget requested. Read `PLAN.md`, `DECISIONS.md`, then verify files, tests and upstream checks before continuing.
 
-## Current phase
-**M0 research + M1 feasibility.** No application implementation or GitHub repository creation yet. Workspace was empty at start. All ten available agent slots are active (lead + nine research workstreams).
+## Project and ownership
+- **https://github.com/Apdelrahman1911/veyra**, public; public main is still planning revision `a12da5f`. Local `feat/veyra-integration` contains a local implementation checkpoint, **not a verified release**. Additional working patches may follow it; do not lose unstaged agent work. Publication awaits upstream availability and checks.
+- M0 source-linked research/cross-review is complete. M2 foundations, M3 central listening integration and M4/M5 functionality/native verification are in progress. No app artifacts, GUI screenshots or physical-device success claimed yet.
+- Authoritative owner updates: D005 complete-title → first ordered kmpYT search result for **all** media, metadata-only RSS/Commons; D006 normalized Room; D008 full durable/resumable/background queue; D009 native music-only crossfade with **physical audible verification**. No alternate acquisition engine, JSON database or quiet scope reduction.
+- All nine subagent creation requests explicitly used `gpt-6-astra`, `max`, non-full fork and were accepted. No effective-runtime attestation is exposed; one regional rate limit was recovered without model substitution. Lead + nine current agents are assigned; use existing agents, exclusive file scopes in PLAN.
+- Only modify Veyra/kmpYT. All tool homes/temp/probes/cleanup stay project-local. Use `scripts/gradle.sh`, serialize heavy builds, never touch other workloads. Free standard public Actions runners only, no paid runners/artifact-storage assumptions.
 
-## Verified environment
-- Authenticated GitHub identity: `Apdelrahman1911`; admin/write access to public `Apdelrahman1911/kmpYT` verified using GitHub API. No credentials recorded.
-- VPS: Ubuntu 24.04.4, Linux x86_64, 12 CPUs, ~31 GiB RAM total but ~4 GiB available/no swap, ~36 GiB free disk at start. Respect other workloads; do not change them.
-- Installed read-only tools include JDK 21, Gradle, Node 24, Chrome, FFmpeg/ffprobe, Android SDK (platform 36/build-tools 36), Xvfb, PulseAudio.
-- Upstream cloned inside project: `.work/kmpYT`, revision `533562f781304338f72b27d32cfe5fb7a83dc3a8`. Read `.work/kmpYT/AGENTS.md` before edits. Upstream cross-platform workflow 42063400390 reports success; this is **not Veyra verification**.
-- Initial PocketTerminal milestone notification accepted. No delivery retry needed.
+## Actual builds/tests
+- Toolchain: Kotlin2.2.21/Compose1.9.3/AGP8.13.2/Gradle8.13/JDK21 (JVM17); Room2.8.5/SQLite2.6.2/KSP2.2.21-2.0.4. Room JVM KSP/exported schema2 compiled.
+- Shared **third** run `.work/shared-tests-third.log`: production and test compilation succeeded; **247 JUnit records,241 passed,6 failures,0 skips**. One failure is class initialization (8 Room methods did not execute). Corrections: nonvoid JUnit method, fake nullable duration fallback, exact same-video oEmbed test fixture. One **real playback defect**: a failed native stop allowed an already queued resolver event to overwrite ERROR; fresh-generation barrier fix pending rerun. Do not call this suite green.
+- Passed subsets from that same run: **41 download Room/files/lease/recovery tests**, **117 resolver/network/discovery/artwork tests**, **18 other Room/migration/process/fault tests**. Evidence copied under `.work/{download-tests-checkpoint,architecture/evidence/shared-third,execution-resolver-tests,artwork-cache-tests}`. Fake acquisition/native validators are not audio proof.
+- Android production compilation **passed**: `:composeApp:compileDebugKotlinAndroid`,52 tasks, `.work/android-main-first-compile.log`. Includes actual kmpYT Android and shared Room KSP/Android; not instrumentation, emulator or physical playback. Subsequent source changes need final revalidation.
+- First desktop compile `.work/desktop-first-compile.log` found3 source errors; all3 corrected, rerun pending. Since then concrete helper runtime/new tests were added, not compiled yet.
+- Root AppContainer13 integration tests, connected shell/UI and native platform tests are authored and await their actual runs. Startup recovery, per-document bundled legal reading, asynchronous download effects, offline resource handoff cleanup and compact runtime details are wired, not yet root-tested.
+- Lead verified tooling7/7, reporting6/6, design negative regressions48/48. Static audit493 bilingual keys/87 Kotlin files, font provenance/OFL and contrast passed; not rendered RTL or physical accessibility evidence.
 
-## Team and model evidence
-All nine spawn requests explicitly supplied `model: gpt-6-astra`, `reasoning_effort: max`, `fork_turns: none`, and were accepted without an unavailable-model error. `list_agents` confirms all are active. The tools expose no effective-runtime model/reasoning attestation; child agents likewise cannot independently inspect it. Do not claim independent verification that is not available.
+## kmpYT revisions and evidence
+- Baseline `533562f781304338f72b27d32cfe5fb7a83dc3a8`.
+- Current app submodule + `gradle/kmpyt.commit` + staged gitlink **`c0a08090fe7dbd76e20216559b8184ad2cccde63`**, local only until publication. Includes tested first-result (`2aae01e`), explicit runtime (`84afce0`), progressive checkpoint safety (`acc8d1e`), owned bounded native SABR resources (`316e749`) and licensed/scoped-CI ancestry. Bootstrap passed. Do not change pin during a build.
+- Last lead-checked upstream targeted suite **103 tests,0 failures/errors/skips,12 suites**:16 resume,9 lifecycle,7 bounded protocol,5 real loopback/FFmpeg decode/seek plus supporting tests. `.work/kmpyt-native-playback-final-tests.log`, `.work/kmpyt-evidence/native-playback-final/`. Not full corpus/mobile/live source/physical audio.
+- Editable upstream `.work/kmpYT`; publication worktree `.work/kmpYT-publish`, branch `feat/central-media-execution`, current head **`a3a8c5b`** merges scoped FFmpeg CI repair and removes duplicate branch+PR matrices. Lead reran10/10 scoped tooling + official-license validator. Not pushed yet; root owns publication/pin.
+- New audit finding: baseline SABR resume stores sensitive source session/checkpoint fields; a separate privacy-safe byte-receipt repair and iOS redirect/scope/lock parity are being implemented/tested upstream. Progressive schema2 guarantees must not be claimed for unchanged SABR checkpoints.
+- Real approved-channel search/metadata succeeded; source extraction returns **LOGIN_REQUIRED / confirm not bot,0 formats**. Only approved @oPiiLz channel may be live-tested. No cookies, proxies or bypass. Direct licensed RSS helper experiments do **not** satisfy D005.
 
-| Agent | Exclusive initial deliverable |
-|---|---|
-| music_ux_research | docs/research/music-ux.md |
-| podcast_ux_research | docs/research/podcast-ux.md |
-| design_a11y_research | docs/research/design-accessibility.md |
-| kmpyt_audit | docs/research/kmpyt-audit.md |
-| architecture_research | docs/research/architecture.md |
-| mobile_audio_research | docs/research/mobile-audio.md |
-| desktop_audio_research | docs/research/desktop-runtime.md |
-| verification_ci_research | docs/research/verification-ci.md |
-| integration_feasibility | docs/research/integration-feasibility.md; .work/feasibility |
+## Licensing (owner permission/audit resolved; delivery still gated)
+- Owner-authorized official MIT committed **`e8754184b37b8c30fa89956908f09cda7f56732e`**, accurate `2026 abdelrahman fahmy and kmpYT contributors` attribution. **[kmpYT PR1](https://github.com/Apdelrahman1911/kmpYT/pull/1)** latest pushed head `2cf2cc68b4e079fb3432a0f2f7b501be3943e5cd`; not merged yet.
+- Lead + independent audit:15 baseline commits/sole owner contributor,151 paths; standard SPDX MIT text, unmodified CC0/wrapper/reference notices;142 POM-family records, not exact binary SBOM. MIT and Apache2 are GPLv3-compatible; JUnit EPL stays test-only. See `verification/licensing.md`.
+- Latest license/provenance CI passed. Linux JVM passed after scoped pinned FFmpeg source build/real remux+decode prerequisite; Windows391 tests/3 Chromium failures/1 skip under diagnosis. Android library assemble/lint passed then instrumentation intentionally failed before unaudited emulator launch. Apple jobs pending. Native red/unexecuted checks are not successes; no protections/checks disabled.
+- All5 local legal UI resource files now generated from actual licensed pin, exact hash check passed. Final per-platform production inventories/notices/corresponding-source closure remain; generated notices explicitly say binary redistribution is **not ready**.
+- Desktop Node/Chromium pinned installer authored with archive/per-file validation and no PATH fallback; required packaged FFmpeg recipe/wiring and runtime closure in progress. The Chromium snapshot credits resource is only a401-byte sample, **not usable complete third-party notices**.
 
-## Early risks (not final conclusions)
-- Upstream README's approved-channel live extraction last reported `AUTHORIZATION_REQUIRED` and no media. Search/data success does not establish playable audio. Diagnose source/network restrictions separately from application/library bugs; no bypasses or fake success.
-- Upstream has no declared project license. Owner-authorized development is not a third-party redistribution license; resolve/notate redistribution scope without inventing permissions.
-- Desktop extraction has Node/Chromium runtime requirements, and some combining paths need FFmpeg. Clean-machine packaging remains unproven.
-- Native Apple/Windows execution requires CI, not inference from Linux.
+## Environment and release gates
+- Ubuntu24.04 x64 VPS, JDK21/Node24/Chrome/FFmpeg/SDK36/Xvfb installed read-only. Around33GiB free disk; Veyra `.work` ~3.1GiB, preserve caches/reviewed evidence, selectively remove only disposable project outputs.
+- Read-only device inventory found **0 Android transports,0 USB products,no Xcode/no physical audio output**. `/dev/snd` has sequencer/timer only. Mandatory physical crossfade is unmet, not replaced by mocks/null sink/simulator.
+- Native libmpv0.41/FFmpeg8.0.1 authored-codec seek/speed/null-sink tests and licensed HPR download/restarted network-namespace helper playback passed earlier (`research/desktop-runtime.md`); **not Veyra/D005 end-to-end or physical audio proof**.
+- Linux guarded display maps temporary/XKB/shm to this repo inside private read-only/capability-dropped mounts (`scripts/with-display.sh`, `verification/boundary.md`). Never use unguarded Xvfb/xvfb-run. Earlier host XKB cache write was reported; guard trace verified, root GUI execution still pending.
 
-## Next concrete actions
-1. Finish source-linked reports, cross-review, and settle implementation/toolchain/packaging tradeoffs with evidence.
-2. Finalize `PLAN.md` and `DECISIONS.md` with required/optional scope and acceptance tests.
-3. Create public `Apdelrahman1911/veyra` (fallback name if occupied), then initialize reproducible foundations and isolate all tool write locations.
-4. Prove the real search → extraction → playback/seek → download → restart/network-disconnected playback path early. Run independent app work while diagnosing external limits.
+## Immediate next actions / build queue
+1. **Exclusive heavy slot: mobile**, next `:composeApp:compileDebugAndroidTestKotlinAndroid` after the completed Android main compile. Root coherent download projection and sticky-close fixes plus download maintenance are now landed; test-source execution will compile them. **Desktop next** (`:composeApp:desktopTest --tests 'dev.veyra.desktop.*'`), then shared regression rerun/root+guarded GUI tests and runtime inventory. Check actual sessions before starting another build.
+2. Architect fixes playback generation barrier/test compilation; podcast owner implements deferred-maintenance/startup verification projection after mobile freeze, with design independent review. Root now aliases coherent `downloads.presentation` (COMPLETE→VERIFYING until session validation); never combine fresh Room with a stale projected download map. Verify that binding mutations/removal cannot inherit old Ready status.
+3. Root has added recovery/runtime test tags, scrollable recovery dialog and sticky-close/final-save propagation; design owns RecoveryAndRuntimeUiTest, music owns connected shell/keyboard fixtures, integration owns AppContainer tests and compliant approved-first-result native listening harness.
+4. CI diagnoses Windows Chromium and native containment, runs exact runtime inventory after slot; desktop finishes FFmpeg/helper/runtime code and native tests. All native ownership failures must remain sticky and veto file removal.
+5. Review/merge upstream licensing with truthful checks, publish reviewed central-source branch, pin only tested revisions, commit/push Veyra checkpoint; then public per-platform build matrix/artifacts subject to notices/signing.
+6. Real central search→play→seek→download→process restart→native-network-disabled playback, rendered bilingual UX, physical crossfade and remaining platform artifacts are essential unmet gates. Continue all independent work; **do not mark Goal complete**.

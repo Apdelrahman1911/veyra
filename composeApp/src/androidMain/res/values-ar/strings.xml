@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ڤيرا</string>
+    <string name="playback_channel">التشغيل</string>
+    <string name="playback_preparing">جارٍ تجهيز الصوت…</string>
+    <string name="playback_play">تشغيل</string>
+    <string name="playback_pause">إيقاف مؤقت</string>
+    <string name="playback_previous">المقطع السابق</string>
+    <string name="playback_next">المقطع التالي</string>
+    <string name="playback_skip_back">تخطي للخلف</string>
+    <string name="playback_skip_forward">تخطي للأمام</string>
+    <string name="download_channel">التنزيلات</string>
+    <string name="download_active">جارٍ حفظ الصوت للاستماع دون اتصال</string>
+</resources>

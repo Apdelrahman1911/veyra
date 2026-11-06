@@ -2,16 +2,18 @@
 
 Research date: **2026-11-06 UTC**. Scope: Android, iOS, Windows, macOS, Linux; English/Arabic; real source discovery and offline listening. This document separates measured source behavior from implementation plans and platform claims.
 
+**Authoritative update after the initial probes:** [D005/D006/D008/D009](../DECISIONS.md) supersede the earlier independent-feed media proposal. RSS/Apple/Commons are **discovery metadata only**. Every fresh media selection, including YouTube-discovered items, submits its complete accurate title to kmpYT and binds the **first raw result**; collections/unavailable/unknown cards must not be skipped for a later video. The complete-title bound is 16,384 UTF-16 code units: reject overflow, never truncate. Only kmpYT acquires media. Historical direct-enclosure/Commons probes below are not the current app listening gate and must not be repeated as a fallback. Original-source rights do not establish rights to the selected YouTube recording. Room persistence and physical-device music crossfade verification remain mandatory.
+
 ## Decision summary
 
 1. **Keep a real kmpYT adapter, but do not promise live YouTube audio on this network.** Public discovery works; the approved video returns a sign-in/bot restriction and no playable formats. That is not evidence of a Veyra parser, network, or player defect. Do not bypass it, manufacture media, or substitute another recording silently.
-2. **The earliest independent full-audio fixture is an explicitly CC-licensed public podcast.** Apple Search API → Hacker Public Radio → publisher RSS → selected MP3 is reachable without credentials. Its episode page explicitly licenses the selected content. A separately vetted Commons **music** recording also exposes a real MP3 derivative; its rate limits need handling. Neither path proves YouTube playback.
+2. **Genuine metadata discovery works independently of media authorization.** Apple Search API and real English/Arabic feeds are reachable. Earlier licensed HPR/Commons direct-media experiments remain supporting historical evidence only; fresh app selections must execute their full-title first kmpYT result, without an independent enclosure/Commons media path or fallback.
 3. **Test the application player early on every available host.** FFmpeg inspection/decoding, HTTP ranges, downloaded hashes, and a fresh offline helper process are supporting evidence only. They cannot establish actual application playback, native background controls, or five-platform completion.
-4. **Source rights and software rights are separate gates.** kmpYT has no project license at the pinned revision according to the source audit; public GitHub visibility is not a redistribution license. Public podcast access also does not imply unrestricted redistribution. Preserve attribution and distinguish personal-use feeds from CC fixtures.
+4. **Source rights and software rights are separate gates.** MIT adoption is owner-authorized and the lead's baseline licensing review is complete; the previous permission/audit blocker is resolved. Safe upstream publication, final reproducible pin, and per-binary notices/source compliance are separate delivery work. Public podcast access still does not imply unrestricted redistribution. See [licensing verification](../verification/licensing.md).
 
 ## Evidence: public network probes
 
-All probes ran from this VPS with Python standard-library HTTPS requests, no login, cookies, developer keys, proxy workarounds, or invented YouTube client profiles. YouTube media was not requested. Responses were parsed in memory; stored reports retain public metadata/statuses, not watch HTML, signed media URLs, session headers, or credentials.
+These **historical, pre-D005** probes ran from this VPS with Python standard-library HTTPS requests, no login, cookies, developer keys, proxy workarounds, or invented YouTube client profiles. YouTube media was not requested. Responses were parsed in memory; stored reports retain public metadata/statuses, not watch HTML, signed media URLs, session headers, or credentials.
 
 Untracked supporting artifacts under `.work/feasibility/`:
 
@@ -35,25 +37,9 @@ The minimal independent Python channel parser only counted legacy renderers. Its
 
 **Stop condition:** when inspection returns authorization required, no compatible source exists to play/download. Present an actionable source-specific message and an explicit “Open in YouTube” action. Do not retry with spoofed clients, scraped accounts, cookies, unauthorized relays, or invented formats. A successful offline fixture must not turn this restriction into a reported live YouTube success.
 
-Real adapter flow from the audited API:
+The current production path is `AppContainer → PlaybackController → AppSourceResolver → YouTubeKmpMediaGateway → kmpYT`. The resolver persists the full-query/raw-first receipt **before** execution or a known first-entry failure. It never resolves the original publisher enclosure or chooses the first surviving video in a filtered display page. An approved live run must additionally verify the selected video's uploader against the authorized channel before requesting media bytes; if the raw first result is outside the live-test authorization, stop rather than choose another result.
 
-```kotlin
-val results = youtube.search("oPiiLz")
-val channel = youtube.channel("@oPiiLz")
-val report = youtube.inspect(selected.url)
-// In an authorized live test, verify uploaderChannelId against channel.channelId
-// before requesting any media bytes. Restriction reports stop the flow here.
-val selection = youtube.select(report, audioOnly = true)
-// An absent selection is unavailable/unsupported, never a fabricated URL.
-// Mandatory: verify the exact selected MIME/container/codec against the actual
-// native player. audioOnly selection checks downloadability, NOT decoder support.
-val request = youtube.playbackPlan(report, requireNotNull(selection))
-// Pass request to the actual platform player. playbackPlan() is not a player.
-val transfer = youtube.plan(report, selection)
-youtube.download(transfer, destinationPath)
-```
-
-Use the current inspected report's selection IDs, preserve required headers/transport, and distinguish unsupported transport from authorization/network failure. Do not log or persist signed source URLs. Preserve stable video identity and re-inspect only with an explicit expiry/retry policy. See `kmpyt-audit.md` for exact capability constraints and software-license findings.
+The selected report/representation must remain bound to that receipt. Distinguish unsupported transport from authorization/network failure. Download previews describe central acquisition transport while advertising the materialized output MIME/codec; native local-file compatibility is checked as progressive output, not native SABR support. A central-owned streaming bridge is remote even when its exact typed endpoint is IPv4 loopback; no arbitrary local URL becomes trusted or offline-ready. Do not log/persist signed URLs. See `kmpyt-audit.md` for current capability and source restrictions.
 
 ### No-key podcast discovery and genuine Arabic content
 
@@ -95,7 +81,7 @@ Selected from the live HPR directory result and RSS:
 - Bounded media probe: HTTP 206, `audio/mpeg`, `Content-Range: bytes 0-4095/3284906`.
 - HPR's general licensing explanation: <https://hackerpublicradio.org/about.html>; specific episode license takes precedence over general defaults.
 
-Preserve creator/title/source/license attribution wherever a fixture is distributed. Do not commit downloaded media or scraped publisher HTML to the repository. Tests should opt into downloading to private ignored workspace storage. The current RSS exposes only recent episodes, so a durable live test must either choose a newly eligible small CC episode and record its real GUID or explicitly resolve this known archive item; it must not pretend an archived episode was returned by a search/feed when it was not.
+Preserve creator/title/source/license attribution wherever a fixture is distributed. Do not commit downloaded media or scraped publisher HTML. Historical source bytes remain in ignored workspace storage; this section does not authorize new direct-media requests. The observed RSS exposed only recent episodes, so do not pretend an archived item was returned by a fresh search/feed. Current live tests use genuine discovered metadata and the central full-title/raw-first policy, with separate authorization/rights checks for the selected recording.
 
 The enclosure redirects among several real mirrors; validators differ. During the probe one mirror supplied ETag/Last-Modified and another did not. A rotating CDN URL is not stable episode identity and is not sufficient evidence for safe ranged resume. Validate the same source version/strong validator; otherwise restart safely, without falsely promoting partial files to complete.
 
@@ -128,23 +114,23 @@ https://upload.wikimedia.org/wikipedia/commons/transcoded/b/b2/Beethoven_-_32_Va
 | `Range: bytes=0-4095` | HTTP 206; 4,096 bytes; `Content-Range: bytes 0-4095/17797506`. |
 | Immediate `Range: bytes=1048576-1052671` | **HTTP 429 Too Many Requests**. Probe stopped; no automatic alternate URL/client/proxy attempt. |
 
-Thus this is a **genuine compatible music candidate**, not yet proof of complete streaming, seek, download, or app playback. Respect rate limits/Retry-After, avoid repeated metadata/HEAD/range opens on one user action, and expose `RateLimited` honestly. A later deliberate native-player test is separate evidence. Keep “Open music · Wikimedia Commons” visibly distinct from YouTube; never silently replace a selected YouTube song with this recording.
+This was a genuine historical direct-media candidate, **not an authorized current app acquisition path** and not proof of app listening. Respect rate limits/Retry-After and expose `RateLimited` honestly. Commons remains visibly attributed discovery metadata; display its requested identity separately from the bound YouTube recording, and never transfer the Commons rights claim to that other recording.
 
-For an initial implementation, prefer a small explicitly vetted catalog/allowlist of recordings and preserve per-file creator, source, license URL, and the declaration inspected. Generic Commons search results are not automatically vetted music. The flattened `extmetadata` for this file says only “Public domain” and omits the crucial composition/performance distinction; it cannot be treated as a complete rights parser. Commons' reuse policy warns that users must verify each file's licensing: <https://commons.wikimedia.org/wiki/Commons:Reusing_content_outside_Wikimedia>. CC0 primary terms: <https://creativecommons.org/publicdomain/zero/1.0/>. Still show provenance/creator even when attribution is not a condition.
+For discovery, preserve per-file creator, source, license URL, and the declaration inspected. Generic Commons results are not a rights audit. The flattened `extmetadata` for this file says only “Public domain” and omits the crucial composition/performance distinction; it cannot be treated as a complete rights parser. Commons' reuse policy warns that users must verify each file's licensing: <https://commons.wikimedia.org/wiki/Commons:Reusing_content_outside_Wikimedia>. CC0 primary terms: <https://creativecommons.org/publicdomain/zero/1.0/>. Still show provenance/creator even when attribution is not a condition.
 
-An Internet Archive no-key search also returned HTTP 200 and 259 results for `creator:"Kevin MacLeod" AND mediatype:audio AND licenseurl:*`. However, top uploader-supplied results asserted divergent licenses, including public-domain/CC0 claims. That metadata alone is **not reliable evidence of the performer's rights grant**. Do not whitelist every `licenseurl` match or adopt those recordings without verifying authoritative provenance and both composition/recording rights. This finding favors the specifically reviewed Commons recording for the first music proof.
+An Internet Archive no-key search also returned HTTP 200 and 259 results for `creator:"Kevin MacLeod" AND mediatype:audio AND licenseurl:*`. However, top uploader-supplied results asserted divergent licenses, including public-domain/CC0 claims. That metadata alone is **not reliable evidence of the performer's rights grant**. Do not whitelist every `licenseurl` match or adopt those recordings without authoritative composition/recording provenance. This historical rights comparison does not authorize an alternate first-listening proof.
 
 ## First end-to-end smoke plan
 
 The gate is a **user-observable application path**, not just a collection of unit tests:
 
 1. Start a fresh app with a workspace-scoped data directory. Search the real directory; select the specific show by visible title/publisher; open its live RSS episodes.
-2. Select an eligible licensed MP3, retain feed/GUID identity and source attribution, resolve the real enclosure and platform-compatible source. Display an honest source error on failure.
+2. Retain full discovery metadata and feed/GUID identity. Submit the complete title through the production kmpYT gateway and persist its first raw result. Do not skip a nonplayable/unauthorized/unavailable first result; stop with a truthful classified outcome. Inspect and execute only that selected identity, within live-test authorization, and verify native compatibility. Never probe/play/download an RSS enclosure or Commons audio as fallback.
 3. Start the actual native/desktop player. Observe `Ready → Playing`, position advancing for at least 2 seconds, nonzero duration where known, and no placeholder/test-signal substitution. Check audible output on a host with an audio device; mute/sink decoding is explicitly weaker evidence.
 4. Pause/resume. Seek to a nontrivial position (e.g. 60 seconds) and observe position converging within a documented tolerance, then advancing. A successful range request alone is not a playback seek.
-5. Download that selected episode with visible real progress and cancellation. Write `.part`, validate the actual transfer/file, atomically rename, and persist completion plus stable identity. No partial resource may appear as playable offline completion.
+5. Download via the production persistent coordinator and **kmpYT transfer only**, reusing the explicit playback receipt for Play → Download. Exercise visible progress, pause/resume/cancel/retry and bounded parallelism. Validate actual bytes, file/hash and native decoder, atomically publish with durable finalization intent, and commit normalized Room records. No partial resource may appear as offline-ready.
 6. Save position, stop the app/player, and **terminate the process**. Disable network for the second run or use an explicit denying transport and independently inspect socket activity, including the native player's own sockets: denying Ktor alone does not stop AVPlayer/Media3/desktop networking. Assert the player receives the intended local artifact URI/path. Restart with the same persisted data. Open Library/Downloads, choose the completed item and prove local playback plus seek/position restoration. No transient stream URL may be required.
-7. Repeat negative cases: authorization required, missing file, cancellation mid-transfer, stale RSS length, no validator, changed ETag/resource, disallowed codec/transport, network failure, malformed feed. Expose a reason; do not silently substitute a different recording or delete unrelated state.
+7. Repeat negative cases: non-video/unavailable first result, authorization required, missing/corrupt file, cancellation at handoff and mid-transfer, offline toggles, changed selected resource/validator, disallowed codec/transport, network failure, malformed feed, and cleanup/reopen races. Publisher duration/length/rights are metadata, not proof about selected YouTube bytes. Expose a reason; do not silently substitute a recording or delete unrelated state.
 
 Supporting ffprobe/FFmpeg and an offline fresh helper process can establish format/bytes but must be reported separately from this app gate. Android/iOS background service/audio-session/lockscreen tests and each desktop OS remain platform-specific verification work.
 
@@ -152,21 +138,35 @@ Supporting ffprobe/FFmpeg and an offline fresh helper process can establish form
 
 - Domain: source identity, media kind, title/publisher, language, duration, rights/attribution, playable source with headers and explicit transport/codec capabilities, and typed unavailable reason.
 - Podcasts: bounded XML parsing with entities disabled, direct-RSS entry point, GUID-based identity/deduplication, namespace-aware duration/artwork/description handling, and escaped/sanitized rendered HTML.
-- Networking: bounded redirects/timeouts/body sizes; HTTPS by default; no global TLS/security weakening. User-provided feeds and enclosures must not become an unrestricted private-network/file proxy. Recheck each redirect and keep credentials out of cross-host requests/logs.
-- Storage: atomic completed download, genuine response-byte accounting, strong version checks for resume, local file existence/integrity reconciliation, and schema-backed queue/position/download state. RSS metadata is not a transfer checkpoint.
+- Networking: bounded redirects/timeouts/body sizes; HTTPS by default; no global TLS/security weakening. User-provided metadata/image URLs must not become an unrestricted private-network/file proxy; enclosures are not execution inputs. Recheck redirects and keep credentials out of requests/logs. Native/public-DNS preflight is **not atomic DNS pinning** and does not establish rebinding immunity.
+- Storage: normalized Room, atomic completed download, genuine response-byte accounting, strong scoped version checks for kmpYT resume, and local file/hash/native reconciliation. RSS metadata is not a transfer checkpoint. Owned image-only artwork is stored separately; no audio downloader is hidden inside it.
 - Identity versus generation: stable episode identity is canonical feed identity + GUID, with explicit aliases for migrated feeds. A resource generation is separate: the same GUID, CDN URL, length, or ETag on a different host does not prove identical audio. Test replaced enclosures, rotating mirrors, changed bytes, reused cross-host ETags, and stale feed metadata before enabling resume.
 - Offline: local resolver has priority for completed items; ordinary UI, persistence, and player start do not secretly require a directory lookup or source refresh.
 - Availability taxonomy: `NetworkUnavailable`, `SourceAccessRequired`, `SourceRemoved`, `RateLimited`, `UnsupportedCodecOrTransport`, `CorruptOrMissingLocalFile`. A “zero results” success must not mask an access/network error.
 
 ## Cross-review outcomes
 
-kmpYT reviewer confirmed the independent podcast path and challenged three enforceable gates: separate resource generation from episode GUID; turn safe-fetch prose into executable hostile-XML/redirect/DNS/private-origin tests; and deny/observe native-player networking, not only the shared HTTP client. Accepted above. DNS rebinding, IPv4/IPv6 loopback/private/link-local resolution, credential-bearing URLs, and each redirected target need explicit checks; a URL string-prefix allowlist is not sufficient.
+The initial kmpYT cross-review predated D005; its independent-podcast playback recommendation is superseded. Its enforceable challenges remain: separate resource generation from episode GUID; execute hostile-XML/redirect/DNS/private-origin tests; and deny/observe native-player networking, not only shared HTTP. A URL prefix allowlist is insufficient. Public-DNS preflight reduces unsafe-origin exposure but is not atomic DNS pinning.
 
 Integrator's kmpYT listening-proof challenges: (1) downloaded-format selection is not native codec selection; (2) a 401/403 must not automatically trigger endless signed-URL refresh or an identity bypass; (3) JVM/iOS successful transfer must not mark `OfflineReady` without testing the saved artifact through the real player. The upstream audit already flags each limitation; implementation tests must enforce them.
 
 Mobile cross-review (`mobile-audio.md`): (1) native session defaults must enter the same ordered coordinator, not create a second queue; late native callbacks and duplicate media IDs need generation/entry tests; (2) test offered codec/container plus real ready/advancing/seek on the target, not declared support, and do not pass SABR as a URL or rely on undocumented iOS headers; (3) completed Media3 cache handles, iOS packages, and raw MP3 files have different restoration/validation paths. True app termination plus native local-only playback is required. Reviewer agrees; Android hosts/devices and macOS/Xcode remain external test-environment dependencies.
 
 Desktop cross-review (`desktop-runtime.md`, in preparation): (1) ctypes/libmpv null-output decoding is useful native-engine evidence, not audible or Compose-app listening; the real package needs usable audio output and honest device errors; (2) seek success is observed position convergence followed by advancement, not an accepted command, and offline denial must include libmpv sockets; (3) prove actual bundled ABI/native dependencies and runtime licensing on each clean OS/architecture, not the presence of host-installed FFmpeg/mpv. The desktop experiment also found a truncated WebM accepted as ordinary EOF: successful native preparation cannot replace transfer completeness checks. The HPR source was passed to the desktop researcher for a separately labelled real native-engine attempt; no result is assumed here.
+
+## Implementation checkpoint: exact executed scope
+
+The first shared run's actual JUnit XML at 06:11 UTC independently shows **68/68 passing integration-owned tests**: Commons5, resolver-common21, resolver-Room9, public-URL4, SafeHttp6, podcast-source9, RSS-parser14. Room/file tests use actual SQLite, owned files and SHA, but fake native validation and authored **NON-AUDIO** bytes. Same-process close/reopen is not process-death or native playback evidence. The whole shared run was 91 tests/90 passed/one separately owned failure; this is not an all-green full suite claim.
+
+The first desktop compilation log (`.work/desktop-first-compile.log`) shows shared Room KSP, production Kotlin and JVM jar succeeding for its input snapshot, then the app compilation failing at two Compose receiver references and one desktop validator smart cast. The later shared runs compiled the newest source/artwork/resolver production code and its test code. They do not establish that the desktop fixes or AppContainer tests compile.
+
+The third shared run's actual XML at **07:16 UTC independently verifies 117/117 integration-owned tests passing, with zero errors/skips**: Commons5, resolver-common31, resolver-Room12, public-URL4, SafeHttp8, podcast-source9, RSS-parser14, artwork-common8 and artwork-Room26. Source hashes still match the frozen pre-run inventory. The **whole run is not green**: 247 JUnit records include six failures outside these suites, including a Room test-class initialization failure. Two gateway failures are watch-only fixture assertions: the authored watch response omitted uploader/thumbnail, so the real upstream inspector requested public oEmbed metadata for the **same canonical bound video**, not another search or selected recording. The adapter owner corrected exact stage/URL fixture checks without changing production binding; rerun is pending.
+
+**13 AppContainer integration tests are authored but still uncompiled/unrun.** They cover full-title provenance, Play → Download receipt capture across later plays, offline cancellation, slow-delete UI responsiveness and native file-release barriers, settings/artwork restoration and single teardown. App-level media/native success is explicitly synthetic; the first-card case runs the real kmpYT parser on authored HTML only. No case is a substitute for current central real-source listening, terminated-process native-egress denial, or physical audible crossfade.
+
+Independent read-only review found no confirmed blocker in the current SABR resource wrapper/authorization or DOWNLOAD materialized-output contract. Valid resolved HLS/DASH plans have nonempty segments and the central native processors output MP4; whole-resource DASH entries become progressive. DOWNLOAD preview retains acquisition transport while native compatibility is checked against the progressive materialized file. The source authorization callback does not itself observe Room offline state: post-handoff enforcement depends on controller/native resource closure and still needs actual app/native verification. Existing upstream XML separately shows **103/103 scoped JVM resource/manifest/transfer tests passing**, not the full upstream test corpus or a Veyra playback proof.
+
+The audit inventory and hashes are `.work/feasibility/implementation-verification-checkpoint.json`; copied owned XML is under `.work/feasibility/shared-third-owned-results/`, and the independent upstream observation is `.work/feasibility/upstream-jvm-resource-test-observation.json`. The artwork cache validates size/signature/header/dimensions/hash, not complete native image decoding. Public-DNS checks are preflight, not atomic DNS pinning. No new live requests or Gradle builds were started by this audit to produce the checkpoint.
 
 ## Primary references
 
@@ -175,6 +175,6 @@ Desktop cross-review (`desktop-runtime.md`, in preparation): (1) ctypes/libmpv n
 - Apple publisher RSS requirements: <https://podcasters.apple.com/support/823-podcast-requirements> (GUID, enclosure URL/length/type, public RSS, media HEAD/range).
 - HPR publisher licensing and specific episode links above.
 
-These findings establish a viable real podcast path and a real YouTube discovery path with an upstream playback restriction. They do **not** establish completed Veyra playback, authorized unrestricted YouTube downloading, a production distribution license for kmpYT, or successful builds/tests on all five platforms.
+These findings establish real podcast metadata discovery and YouTube discovery with an upstream playback restriction. They do **not** establish completed compliant Veyra listening, unrestricted YouTube acquisition, terminated-process native offline proof, physical-device crossfade, or successful builds/tests on all five platforms. MIT authorization/baseline review is separately settled; final release closure remains with the lead.
 
 Model disclosure: this workstream was requested as `gpt-6-astra` / `max`; no independent effective-runtime model/reasoning attestation is exposed to this subagent. No stronger verification is claimed.

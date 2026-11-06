@@ -111,6 +111,77 @@ The lead explicitly resolved the following before implementation. These supersed
 
 The timer visibility and source-restriction challenges above are additional implementation checks. No native application behavior has been verified by this report.
 
+## 9. Later owner scope revision and implemented presentation contract
+
+The lead relayed a subsequent explicit owner revision during implementation. It supersedes the
+earlier execution-source recommendation above; it is a product requirement, **not evidence that
+title matching is reliable**:
+
+- All playback/download execution respects the **complete selected title → first kmpYT
+  result**. External music/podcast sources supply discovery metadata only. No selection of a later
+  result to improve a match, no hidden direct-enclosure/Commons fallback, and no fabricated audio
+  when the first result is restricted or unusable.
+  Local references/import do not create an independent execution bypass; offline reopening still
+  uses the validated owned file and exact acquisition receipt rather than new network resolution.
+- Requested discovery identity, resolved audio identity, and file identity are distinct. The full
+  player receives its immutable receipt from `PlaybackState.executionBinding`; a Ready download
+  receives its receipt through `OfflineAsset.executionBindingId`. An arbitrary newest receipt is
+  never evidence about the current session or an older downloaded file. Different titles trigger
+  a textual-mismatch warning; equal titles still do not verify that recordings/episodes match.
+  Original listing licences do not establish the rights of a different resolved recording.
+- The normalized persistent implementation is now **Room**, not the earlier JSON proposal.
+  Presentational screens retain `AppSnapshot` only as the root-supplied read model. Actual album
+  entities/collections must retain source identity; UI does not invent albums from song titles.
+- Music crossfade is mandatory across target engines. Settings belong to the root; the player
+  presents typed PREPARING/READY/OVERLAPPING state. Only confirmed OVERLAPPING is labeled active
+  and shown with the engine/coordinator's fraction. Outgoing identity stays current until atomic
+  promotion; podcast controls never inherit music crossfade/shuffle/repeat.
+
+Owned presentation sources now cover Listen, Search, Library/playlists/downloads, nonplaying track
+details, real source collection details, mini/full players, two-context queue inspection, and receipt
+disclosure. Track details keep complete requested metadata and listing duration separate from the
+native current duration and validated file duration. Current, downloaded, and previous-search
+receipts are labeled independently; opening details does not dispatch playback. Public source and
+licence links dispatch root-validated intents and remain disabled under offline policy. Incoming
+crossfade receipts now use the supplied `incomingExecutionBinding` and an explicit incoming-audio
+label, never a guessed current recording.
+Whole-collection actions do not silently operate on just the first page: pagination must complete
+before a whole-list action is enabled, with an explicit reason and per-item actions still exposed.
+Queue actions identify occurrences, while `Clear upcoming` requires confirmation and a distinct
+coordinator command preserving the current occurrence/history.
+
+Nineteen pure-helper tests and twenty-five desktop Compose interaction tests have been **authored
+but not yet executed** at this checkpoint. The latter include requested/resolved identity and
+non-first-result diagnostics, confirmed-only crossfade status and incoming identity, occurrence-aware
+queue and playlist intents, scoped source errors, timer/speed/seek controls, collection pagination,
+track-detail controls/attribution/offline states, verifying-not-Ready downloads, and 320dp
+Arabic/175% text transport/keyboard checks with screenshot capture. This is implementation and
+test-source status, not a passing build, visual review, native fade, actual playback, or offline
+verification claim. An additional sixteen root-authorized pure navigation tests are authored but
+unexecuted: Back priority, complete route/collection metadata restoration, cold-launch overlay
+suppression, malformed/missing/type-mismatched references, bounded detail depth, and queue-state
+independence. Those pure routing tests do not exercise Room, UI rendering, or native audio.
+
+Nine further root-authorized **connected desktop fixture tests are authored but unexecuted** under
+`desktopTest/dev/veyra/app`. They mount the actual `VeyraApp`, `AppContainer`, controller and a
+task-owned Room database, with explicitly simulated engine/execution gateway and authored catalog.
+They cover inspection versus activation, duplicate occurrence reorder/clear/Undo, reference-only
+favorite/playlist edits, atomic collection-shuffle Undo, keyboard focus ownership, and dialog/queue/
+player Escape priority. The 320dp Arabic/175% text and 720×360dp short-landscape fixtures assert
+unclipped control bounds, selected navigation-label layout and LTR transport, including an injected
+runtime-error banner. Library title/section chips now scroll with content so they cannot permanently
+consume a short viewport; that layout change still awaits rendering. Requested viewport dimensions
+are asserted, not inferred from a requested modifier. Intended PNGs/sidecars under
+`composeApp/build/test-evidence/music/core-shell` are labeled **authored UI fixtures**, never live
+source, download, native decoding, audible-output or physical-device evidence. No screenshots from
+these tests have yet been generated or reviewed.
+Keyboard checks inject test events, not a physical OS keyboard: the pinned Compose 1.9.3 Skiko
+`performKeyInput` implementation omits modifier flags and the Space code point, so the affected
+Ctrl shortcuts/typed-space checks explicitly supply them through `performKeyPress`. This avoids
+mistaking a test-driver limitation for app behavior. Main-surface viewport assertions alone do not
+validate independently layered modal-dialog bounds; the design owner's true-scene-sized dialog
+tests cover that separate case.
+
 ## Primary references
 
 - [S1] Spotify — Search: <https://support.spotify.com/us/article/search/>

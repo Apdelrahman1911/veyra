@@ -1,0 +1,1563 @@
+{
+  "platform": "windows-x64",
+  "component": "chromium",
+  "version": "1737213",
+  "url": "https://storage.googleapis.com/chromium-browser-snapshots/Win_x64/1737213/chrome-win.zip",
+  "archiveSha256": "746fcbb8b65ed4d0e6a7f0dac07ad24f7cb5c835af57bc0296c547f92be1cf98",
+  "archiveBytes": 382475232,
+  "expandedBytes": 897579751,
+  "archiveRoot": "chrome-win",
+  "format": "zip",
+  "executable": "chrome.exe",
+  "selection": {},
+  "entries": [
+    {
+      "path": "159.0.8147.0.manifest",
+      "size": 224,
+      "sha256": "ea8c73fff461c7b98b71d25f1bae2c680920187e58327836ee90da261c5882f9",
+      "executable": false
+    },
+    {
+      "path": "D3DCompiler_47.dll",
+      "size": 4753864,
+      "sha256": "f5c95e919b4ffa1ac71049cd45b9f986d2965e6888395ca2806337985334fa56",
+      "executable": false
+    },
+    {
+      "path": "First Run",
+      "size": 8,
+      "sha256": "839adbaaca1c43dd4575c502ada96ebb4651f1a69b6fc5e42679beb47584181e",
+      "executable": false
+    },
+    {
+      "path": "IwaKeyDistribution/iwa-key-distribution.pb",
+      "size": 3917,
+      "sha256": "274f2cc20e5627c35d54cef0b5798f0a43bbc560fd52aa61a044a518c881a7d6",
+      "executable": false
+    },
+    {
+      "path": "IwaKeyDistribution/manifest.json",
+      "size": 115,
+      "sha256": "313d7ea9fb517aea7819f0f70ad56a26a7410cae164433ce80f9e88c5be4379c",
+      "executable": false
+    },
+    {
+      "path": "MEIPreload/manifest.json",
+      "size": 238,
+      "sha256": "44844cf3dde6e80087ae0e6bf0d9326d7ef7d23326d24ac83af0850be26923d2",
+      "executable": false
+    },
+    {
+      "path": "MEIPreload/preloaded_data.pb",
+      "size": 8254,
+      "sha256": "c6070a157b4e28d16fbccbd233e93846ddb070c85e1a1bc64469b7a5f1424fad",
+      "executable": false
+    },
+    {
+      "path": "chrome.dll",
+      "size": 353441280,
+      "sha256": "733b830b8831891d157b8038ca677bcb8b4b0a8bb990175b61181567a777d7f6",
+      "executable": false
+    },
+    {
+      "path": "chrome.exe",
+      "size": 3134976,
+      "sha256": "655c74930c0fdf7cedbf6406e3cfbaa0201c82b8d4a01569824def14326d5fd0",
+      "executable": true
+    },
+    {
+      "path": "chrome_100_percent.pak",
+      "size": 577258,
+      "sha256": "dcc2c34c115b6455fc9049f519e8a8b80da18ddf9639b24072404a4bf5303ad4",
+      "executable": false
+    },
+    {
+      "path": "chrome_200_percent.pak",
+      "size": 934788,
+      "sha256": "1fde4ac317bf76db8da6463064a58551a0825d4065b35ea944954c0d942d54de",
+      "executable": false
+    },
+    {
+      "path": "chrome_elf.dll",
+      "size": 1524736,
+      "sha256": "267221c2ff71eb2f750504635f285d5b2529a77bfec9aea59897bc6ba7902274",
+      "executable": false
+    },
+    {
+      "path": "chrome_proxy.exe",
+      "size": 1413632,
+      "sha256": "8cc663ee823c913e1da279a31547fa8329b6a811fa69dee63d0b5f2f5ab686ac",
+      "executable": true
+    },
+    {
+      "path": "chrome_pwa_launcher.exe",
+      "size": 1700864,
+      "sha256": "1fc337b64f70d6768b2cc7b44864c08463f11c1bc090bca893d141704fdf34e8",
+      "executable": true
+    },
+    {
+      "path": "chrome_wer.dll",
+      "size": 116736,
+      "sha256": "eb68736e2e197159903b169b5686edd8d67178b93bb7b35b42098a39d38d045f",
+      "executable": false
+    },
+    {
+      "path": "dxcompiler.dll",
+      "size": 25978880,
+      "sha256": "93e137943fc2b0d54df193e6067b7e2b666085150772525b2960c1b35824e4a3",
+      "executable": false
+    },
+    {
+      "path": "elevated_tracing_service.exe",
+      "size": 4408320,
+      "sha256": "c0d491eaaaf0fb20449b6370b1cd4115aca6cda68197d60194c410478999f7e4",
+      "executable": true
+    },
+    {
+      "path": "elevation_service.exe",
+      "size": 2710528,
+      "sha256": "53dff7b5da53a9c4a6306090d2363993f464990dfff4d2c2a7ac29b3a107e819",
+      "executable": true
+    },
+    {
+      "path": "eventlog_provider.dll",
+      "size": 6144,
+      "sha256": "76dc3b0df3bcc6a69ebecec2bd088238ceb5f119870ec1b48247303fa92ab8c1",
+      "executable": false
+    },
+    {
+      "path": "icudtl.dat",
+      "size": 10686384,
+      "sha256": "eccdb4c815b98d90dba72c85f156ca3ced5a2625923655f50d8702217951d15c",
+      "executable": false
+    },
+    {
+      "path": "interactive_ui_tests.exe",
+      "size": 389143040,
+      "sha256": "d5e464733275cfc55ba1074c74f58e6a1484bdbf7e8659f3ba1311763c2a2845",
+      "executable": true
+    },
+    {
+      "path": "libEGL.dll",
+      "size": 482816,
+      "sha256": "3d3a3fc32612ee9ba7cec521f72282024661774f13366df462b2e2049afae143",
+      "executable": false
+    },
+    {
+      "path": "libGLESv2.dll",
+      "size": 482816,
+      "sha256": "54b739ea6d31b492c285030b694f14f5fe4561e799562d6fad05adfe5b449b9d",
+      "executable": false
+    },
+    {
+      "path": "locales/af.pak",
+      "size": 660967,
+      "sha256": "c232d087025f8a967b29c379525c5cec0147cf41d19c1719d726a9ae40297f49",
+      "executable": false
+    },
+    {
+      "path": "locales/af_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/af_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/af_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/am.pak",
+      "size": 1063169,
+      "sha256": "4cd03ddf7afb844dba3b42ef1cd1af5102c285777a81c6b04a8f0b5ef3c435bc",
+      "executable": false
+    },
+    {
+      "path": "locales/am_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/am_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/am_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/ar-XB.pak",
+      "size": 1088178,
+      "sha256": "406f0bd34eb9a441866e353600925dce907dbdd2d8da578b6b056e276e9422e2",
+      "executable": false
+    },
+    {
+      "path": "locales/ar-XB_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/ar-XB_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/ar-XB_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/ar.pak",
+      "size": 1183657,
+      "sha256": "061a079d9abfe91acf2652d52262ecb8edd40bf9270931fa1ea3ec8cf4da0320",
+      "executable": false
+    },
+    {
+      "path": "locales/ar_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/ar_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/ar_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/bg.pak",
+      "size": 1216448,
+      "sha256": "313fefab00261b9f43ab3462bc93d65a82f6dc7fde09c967e4bafcdf5a355a45",
+      "executable": false
+    },
+    {
+      "path": "locales/bg_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/bg_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/bg_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/bn.pak",
+      "size": 1553332,
+      "sha256": "377094b89a3d6bede9687845fb2dabffd22bf76c9e235d14c275549c47459866",
+      "executable": false
+    },
+    {
+      "path": "locales/bn_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/bn_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/bn_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/ca.pak",
+      "size": 752144,
+      "sha256": "e417f29fa6610831e4bb6f6cd84b387aba0d699da3bd8b88942b443f3342e052",
+      "executable": false
+    },
+    {
+      "path": "locales/ca_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/ca_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/ca_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/cs.pak",
+      "size": 778218,
+      "sha256": "f531d05f336582f9097aaf9a3d58feb5665e6e8032d4a75bfce47210d0163238",
+      "executable": false
+    },
+    {
+      "path": "locales/cs_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/cs_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/cs_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/da.pak",
+      "size": 699757,
+      "sha256": "b807b583f068e354be8fd31ff6fd49e127a710932837f19f031d1748503688b5",
+      "executable": false
+    },
+    {
+      "path": "locales/da_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/da_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/da_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/de.pak",
+      "size": 756312,
+      "sha256": "5eb26916df69231bc04959c4c009fe3b0f1069056f7f5877d6ea599e1d9eed67",
+      "executable": false
+    },
+    {
+      "path": "locales/de_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/de_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/de_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/el.pak",
+      "size": 1333350,
+      "sha256": "327504a571bc13456f1c58ba76a63f35426e5db375b5d51313bec7666fa9f671",
+      "executable": false
+    },
+    {
+      "path": "locales/el_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/el_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/el_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/en-GB.pak",
+      "size": 604350,
+      "sha256": "4e5a04a0540d2fe287a39946fa2c7f1e051b86f4bee9607e09fdb2beadd89a27",
+      "executable": false
+    },
+    {
+      "path": "locales/en-GB_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/en-GB_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/en-GB_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/en-US.pak",
+      "size": 611924,
+      "sha256": "4927a8a2de374a0f9317bbe67488f086d79598544d24112a8aa6206a9ece8793",
+      "executable": false
+    },
+    {
+      "path": "locales/en-US_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/en-US_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/en-US_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/en-XA.pak",
+      "size": 1359033,
+      "sha256": "ef96cdd19d67aa98178d30f6ce997448e637aed4dd7699ecc3996d25cc2f94f8",
+      "executable": false
+    },
+    {
+      "path": "locales/en-XA_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/en-XA_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/en-XA_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/es-419.pak",
+      "size": 737379,
+      "sha256": "3f6c6200c869847754d76d15ffdd05d56d5f747ed984d46f8354157a6db7d718",
+      "executable": false
+    },
+    {
+      "path": "locales/es-419_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/es-419_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/es-419_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/es.pak",
+      "size": 732367,
+      "sha256": "759164bd19b323674ed4dfa263f9585254b79fddbd1a4dda41c4615503b415a4",
+      "executable": false
+    },
+    {
+      "path": "locales/es_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/es_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/es_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/et.pak",
+      "size": 672640,
+      "sha256": "cc4606f0dfa52f58375b21b8a14f83de11ac6874c9a4a5c7f6091d95b62359e1",
+      "executable": false
+    },
+    {
+      "path": "locales/et_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/et_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/et_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/fa.pak",
+      "size": 1101274,
+      "sha256": "6af00172b542c5bd6b684fcb568d2b85ce460f87b74a345865e24fb5a534e8ac",
+      "executable": false
+    },
+    {
+      "path": "locales/fa_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/fa_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/fa_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/fi.pak",
+      "size": 684010,
+      "sha256": "c8866a9666820a1491b41b388576f71e9534baff1919e127af8e64c3a97ee9c7",
+      "executable": false
+    },
+    {
+      "path": "locales/fi_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/fi_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/fi_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/fil.pak",
+      "size": 770698,
+      "sha256": "d1f76718dd21facb72d3a7b91179784941fb8d068f252660a16953554ba7f7a5",
+      "executable": false
+    },
+    {
+      "path": "locales/fil_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/fil_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/fil_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/fr.pak",
+      "size": 801668,
+      "sha256": "cdea6ad663fde54cf06bb1646732690d202b005665ee925face927fe807f9215",
+      "executable": false
+    },
+    {
+      "path": "locales/fr_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/fr_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/fr_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/gu.pak",
+      "size": 1540402,
+      "sha256": "d3d2df53fb04eb75aa51f4c1c7ce4f9687e8529dc4f60cd9464ec7d9c41c4091",
+      "executable": false
+    },
+    {
+      "path": "locales/gu_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/gu_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/gu_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/he.pak",
+      "size": 968735,
+      "sha256": "adbcaafc35a96588f1772a02a80c5e3183c35e1405b38d0fbd929b7e4ce78877",
+      "executable": false
+    },
+    {
+      "path": "locales/he_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/he_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/he_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/hi.pak",
+      "size": 1640389,
+      "sha256": "f3c7f97cd7dac587e0ce97d98259f0b80af1821ddacfc8727a07950511cffd1f",
+      "executable": false
+    },
+    {
+      "path": "locales/hi_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/hi_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/hi_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/hr.pak",
+      "size": 748173,
+      "sha256": "75deb66e5a9993aafe9e6d734d91b360f68fae2d7d5b1f3d975361d1acbb587c",
+      "executable": false
+    },
+    {
+      "path": "locales/hr_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/hr_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/hr_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/hu.pak",
+      "size": 795271,
+      "sha256": "e8e2a8437959cad7be009c76bee3e892a1f9958565b27380b4854eea1891f55b",
+      "executable": false
+    },
+    {
+      "path": "locales/hu_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/hu_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/hu_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/id.pak",
+      "size": 663092,
+      "sha256": "49ffa56b43c5fd08750091bba4f057e298308b3d8ec887ca6d72558de07c5a5c",
+      "executable": false
+    },
+    {
+      "path": "locales/id_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/id_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/id_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/it.pak",
+      "size": 727838,
+      "sha256": "a646c02fd3b6fbcc5bef03022c57cdc33f3062c94fcb233c6dc8cc9ceea1e872",
+      "executable": false
+    },
+    {
+      "path": "locales/it_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/it_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/it_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/ja.pak",
+      "size": 882140,
+      "sha256": "b4ff0240300840319f29ff90ba861b8aeda1157d6ec1e996c5bb8e2f65ffa3a3",
+      "executable": false
+    },
+    {
+      "path": "locales/ja_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/ja_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/ja_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/kn.pak",
+      "size": 1767941,
+      "sha256": "d2e6ef9003b42cf523afa6e2f4f7196988d3186fe9c621ab660f76ba875c328e",
+      "executable": false
+    },
+    {
+      "path": "locales/kn_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/kn_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/kn_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/ko.pak",
+      "size": 753055,
+      "sha256": "559d622c1403abc609a14808253ea851fc45a89b976b8946a5a00ce310e468aa",
+      "executable": false
+    },
+    {
+      "path": "locales/ko_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/ko_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/ko_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/lt.pak",
+      "size": 814895,
+      "sha256": "51323bd99b4131807ca1861b638a1cbd61f7f5b4990c4ef04ca7ae6604e4353d",
+      "executable": false
+    },
+    {
+      "path": "locales/lt_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/lt_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/lt_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/lv.pak",
+      "size": 810168,
+      "sha256": "1c8fc284f9b0adcb9dda048797a33ad68ed4f159e92311aa35f7eecf13526b05",
+      "executable": false
+    },
+    {
+      "path": "locales/lv_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/lv_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/lv_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/ml.pak",
+      "size": 1809095,
+      "sha256": "0c484114a4bbac98460ac61d958ac6f8f14e63ef1b3bf96c82d3e21e47496729",
+      "executable": false
+    },
+    {
+      "path": "locales/ml_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/ml_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/ml_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/mr.pak",
+      "size": 1505919,
+      "sha256": "7e07857c408e7e93af69e7af20fd124ca0cd472c05ca351e7477f3fb0b88c53a",
+      "executable": false
+    },
+    {
+      "path": "locales/mr_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/mr_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/mr_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/ms.pak",
+      "size": 697766,
+      "sha256": "0f868b4b5716c3ad7fce024163660167ce05efbf99b14be6c8ad1d21d14b38ac",
+      "executable": false
+    },
+    {
+      "path": "locales/ms_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/ms_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/ms_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/nb.pak",
+      "size": 664517,
+      "sha256": "20905a8141864357e018115e9cf6ce267bb33396da1283b570d25d99d137fb80",
+      "executable": false
+    },
+    {
+      "path": "locales/nb_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/nb_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/nb_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/nl.pak",
+      "size": 692240,
+      "sha256": "7a2ee0f5f216fe0b59338afc3c0a5e30edc80a3a839e33b15afc170d069b19d2",
+      "executable": false
+    },
+    {
+      "path": "locales/nl_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/nl_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/nl_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/pl.pak",
+      "size": 779146,
+      "sha256": "55b186b81b710580d624250c8a31d8a0b31ab24f3e72df813dbd85f3f13b9cb6",
+      "executable": false
+    },
+    {
+      "path": "locales/pl_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/pl_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/pl_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/pt-BR.pak",
+      "size": 727457,
+      "sha256": "682f3db5feb32becfb91bd6301ec44421dec191e4a1de1a13fe3e9369d750375",
+      "executable": false
+    },
+    {
+      "path": "locales/pt-BR_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/pt-BR_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/pt-BR_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/pt-PT.pak",
+      "size": 729366,
+      "sha256": "9ea0a89e496d12f013b4f4f7b02217ff80e74d0382d93f3e6077bdd69bf4591b",
+      "executable": false
+    },
+    {
+      "path": "locales/pt-PT_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/pt-PT_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/pt-PT_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/ro.pak",
+      "size": 756097,
+      "sha256": "c14b7db2aa96fa934f61952141a44322829cd4f7df64f548e9384ffeb17cdba0",
+      "executable": false
+    },
+    {
+      "path": "locales/ro_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/ro_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/ro_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/ru.pak",
+      "size": 1246912,
+      "sha256": "d9d8fad268a8a960b34b49662c61900238f4298ccfd9304c17fc6ed7ae2210ef",
+      "executable": false
+    },
+    {
+      "path": "locales/ru_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/ru_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/ru_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/sk.pak",
+      "size": 789791,
+      "sha256": "8e4560d454b09a09b13d25d9c8f806bbbc82f574fc454c2b0e4b2f8b8e2cfa48",
+      "executable": false
+    },
+    {
+      "path": "locales/sk_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/sk_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/sk_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/sl.pak",
+      "size": 755300,
+      "sha256": "30bab610ba4186b33ddb09214d618cbc52bb2870eced17f45c8f4e87fdc09f9a",
+      "executable": false
+    },
+    {
+      "path": "locales/sl_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/sl_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/sl_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/sr.pak",
+      "size": 1153505,
+      "sha256": "3f042576637a12b76238464008e913e9ebbabe30a511c592f6158b5f634b2a84",
+      "executable": false
+    },
+    {
+      "path": "locales/sr_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/sr_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/sr_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/sv.pak",
+      "size": 675418,
+      "sha256": "c074617600acceef937273f572e54f57629c7454994ba60c09dbb91c157bd687",
+      "executable": false
+    },
+    {
+      "path": "locales/sv_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/sv_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/sv_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/sw.pak",
+      "size": 713256,
+      "sha256": "c05ff7e9c37e2d63e14804e7ebb0fa4d4e2f08f9b602c9255a17e3bd6966ecc7",
+      "executable": false
+    },
+    {
+      "path": "locales/sw_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/sw_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/sw_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/ta.pak",
+      "size": 1800526,
+      "sha256": "39d33f186d0cc8f8c282c450a7eac1417738f3229706e33ab528148b0bee0294",
+      "executable": false
+    },
+    {
+      "path": "locales/ta_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/ta_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/ta_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/te.pak",
+      "size": 1670952,
+      "sha256": "de19aea04869579aa4f9151d0ef3d11bf0a5ce5edca3eac199c38bfb1acc317c",
+      "executable": false
+    },
+    {
+      "path": "locales/te_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/te_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/te_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/th.pak",
+      "size": 1401320,
+      "sha256": "e9a10ce63afdffa4a1c80eed68e6608566752ddc8e491806781015c8fb1a1cc7",
+      "executable": false
+    },
+    {
+      "path": "locales/th_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/th_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/th_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/tr.pak",
+      "size": 726955,
+      "sha256": "8a7a1d9763cbabaf23a5850b643943906f1932f4871ebb3dd5dd3b76f06322ed",
+      "executable": false
+    },
+    {
+      "path": "locales/tr_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/tr_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/tr_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/uk.pak",
+      "size": 1256270,
+      "sha256": "2894890c2f9e41bc7184126bfd68ab6c6e712310b0b9542fa5a0888f0baf8e01",
+      "executable": false
+    },
+    {
+      "path": "locales/uk_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/uk_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/uk_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/ur.pak",
+      "size": 1079480,
+      "sha256": "36bd945ecb4bc6957b1a2655dcdc5ba0c737cec91a523e5a01f62354ebd674c9",
+      "executable": false
+    },
+    {
+      "path": "locales/ur_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/ur_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/ur_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/vi.pak",
+      "size": 861285,
+      "sha256": "19150f9adc91c0c7acae253e71034336f4d183a95ce593448de57f0b4683e21e",
+      "executable": false
+    },
+    {
+      "path": "locales/vi_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/vi_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/vi_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/zh-CN.pak",
+      "size": 620409,
+      "sha256": "3d19a037ab67a02db3f16e46e755794e0b00a564fba901078ce3f6813f2d3b21",
+      "executable": false
+    },
+    {
+      "path": "locales/zh-CN_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/zh-CN_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/zh-CN_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/zh-TW.pak",
+      "size": 614064,
+      "sha256": "a9dcc9ff62aefa0388edd8ae0dd9e75a6aa2955e88cb0d2f211caebb290a40d5",
+      "executable": false
+    },
+    {
+      "path": "locales/zh-TW_FEMININE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/zh-TW_MASCULINE.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "locales/zh-TW_NEUTER.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "notification_helper.exe",
+      "size": 1556480,
+      "sha256": "0a2a469e908077091fd1e7a62a69be6bf820294cca001b95ae474dcd3bbbe7f6",
+      "executable": true
+    },
+    {
+      "path": "resources.pak",
+      "size": 25812169,
+      "sha256": "c4c45d2f2ebeeb26ad0b73aa6ef51feb7a0f14e5ba998e5af001d3348bcf2652",
+      "executable": false
+    },
+    {
+      "path": "setup.exe",
+      "size": 5986816,
+      "sha256": "8803dcdfefbc57cdb27aa9f1fb2a8344af69049621c2fdd618cbe2a87ce2fe83",
+      "executable": true
+    },
+    {
+      "path": "v8_context_snapshot.bin",
+      "size": 711712,
+      "sha256": "d6b851b8ff3ec60cfc4e6c36c0e8d2840d1f1fc1da14bcd7a3605608f7846e9a",
+      "executable": false
+    },
+    {
+      "path": "vk_swiftshader.dll",
+      "size": 6036992,
+      "sha256": "d6459fd0890e921927fc6bfecaf24ff3c1d9567fac1e7cd51d97706ddbbd88fa",
+      "executable": false
+    },
+    {
+      "path": "vk_swiftshader_icd.json",
+      "size": 106,
+      "sha256": "32d83ff113fef532a9f97e0d2831f8656628ab1c99e9060f0332b1532839afd9",
+      "executable": false
+    },
+    {
+      "path": "vulkan-1.dll",
+      "size": 962560,
+      "sha256": "6e20559c76589745098b330e0d774e58c05e4eae9928fcee86515d5328f4dd62",
+      "executable": false
+    }
+  ]
+}

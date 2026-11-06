@@ -1,0 +1,30 @@
+{
+  "platform": "macos-arm64",
+  "component": "node",
+  "version": "22.23.4",
+  "url": "https://nodejs.org/dist/v22.23.4/node-v22.23.4-darwin-arm64.tar.gz",
+  "archiveSha256": "c9e1dbc748b33ed2d14f42445191ecaf14c56259c7a9a26d0042c49ec2b66428",
+  "archiveBytes": 49996369,
+  "expandedBytes": 184553723,
+  "archiveRoot": "node-v22.23.4-darwin-arm64",
+  "format": "tar.gz",
+  "executable": "node",
+  "selection": {
+    "bin/node": "node",
+    "LICENSE": "LICENSE"
+  },
+  "entries": [
+    {
+      "path": "LICENSE",
+      "size": 145485,
+      "sha256": "c738ae413cf561f174e34f6961f8ca458aae2369a73640dda6234c629b98bcc4",
+      "executable": false
+    },
+    {
+      "path": "node",
+      "size": 113002944,
+      "sha256": "2cc28a1880d0774616959f2210ee739bffa6ac695c887e8988a496a21271f6c0",
+      "executable": true
+    }
+  ]
+}

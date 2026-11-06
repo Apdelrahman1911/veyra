@@ -1,8 +1,147 @@
 # kmpYT feasibility and integration audit
 
-**Audit date:** 2026-11-06 UTC. **Scope:** public repository, checked-in implementation/tests, read-only GitHub metadata, and cross-team public-page probe evidence. No kmpYT source edits, dependency installation, local library test execution, or native playback were performed for this audit. Code examples below are integration sketches, not execution evidence.
+**Updated:** 2026-11-06 UTC. This document retains the original baseline research below, but the
+**current implementation checkpoint supersedes its former progressive-only, no-code/no-tests,
+design-only-resume and unresolved-license statements**. Sections 1–10 are historical observations
+at `533562f`, not descriptions of the latest local patch stack or a release-verification claim.
 
-## Decision in brief
+## Current implementation checkpoint
+
+### Revisions and ownership
+
+- Authorized editable checkout: `.work/kmpYT`; Veyra consumes a separately pinned submodule.
+  Local upstream stack:
+  - `2aae01e997da74f9ea83ca36809ec05a3870b307`: complete search titles and leading ordered-result receipts.
+  - `84afce07b7f996a316847212e094a507711f9141`: explicit scoped desktop runtime locations.
+  - `acc8d1e3acd8e3633f5e5532e35e47218793eb49`: refreshed progressive prefix integrity and stable checkpoint locks.
+  - `316e7498f5ed0a38b5734117837906f1737e33b2`: owned bounded native static-SABR playback resources.
+- The final code stack above was tested locally. The lead merged it with the reviewed MIT/scoped-CI
+  stack at `c0a08090fe7dbd76e20216559b8184ad2cccde63`; that is the current local Veyra gitlink and
+  `gradle/kmpyt.commit`. Later privacy/integrity repairs are independent work, not yet in that pin.
+- **No push from this branch:** its inherited workflows do not satisfy the project write boundary.
+  Lead/CI ownership must stack the patches on the reviewed licensed/scoped-CI base before publication.
+- Owner-authorized MIT adoption and baseline contribution/dependency review are complete locally
+  at `e8754184b37b8c30fa89956908f09cda7f56732e` in `.work/kmpYT-license`; independent review found
+  no licensing blocker. This resolves the former permission/source-license gap, not remote
+  publication, final per-binary SBOM/source/notices or clean-checkout delivery. See
+  [licensing verification](../verification/licensing.md).
+
+### Central acquisition and exact first-result behavior
+
+D005 supersedes the old independent-source sketch: **all playable acquisition goes through
+kmpYT**, including externally discovered music and podcast episodes. RSS, directory and Commons
+adapters supply discovery metadata only. Complete, unchanged titles are submitted verbatim;
+oversized/invalid input fails rather than being shortened. `YouTubeBrowsePage.query` records the
+submitted query and `firstEntry` records ordinal zero before UI filtering. Unknown/private/
+malformed cards and collection shelves do not promote a later video or a collection child.
+
+Veyra's `YouTubeKmpMediaGateway` consumes that raw receipt, preserves a nonplayable first result
+as an explicit outcome, validates immutable execution bindings, and leaves requested-versus-
+resolved podcast/music provenance to `AppSourceResolver`. Browsing an album/playlist/channel
+is supported metadata navigation; it is not a claim of typed music-album or podcast-catalogue
+equivalence, nor permission to replace a collection result with one of its tracks.
+
+### Native SABR resources and broad download planning
+
+- Upstream normal native factories now install `YouTubePlaybackAdapter`; custom hosts can supply
+  one explicitly. `YouTubeClient.openPlayback(request, authorization)` wraps the **existing**
+  `YouTubeSabrStreamingSession`/transfer engine, not a competing media downloader.
+- A native decoder receives an exact `127.0.0.1` GET/HEAD/range endpoint with a random 256-bit
+  capability, never the signed SABR POST endpoint. Exact Host/path matching, no browser-origin
+  surface, single ranges, no-store headers, bounded sockets/headers/chunks/timeouts and a bounded
+  private disk cache protect the bridge. Cache directory names do not reveal URL capabilities.
+  Verified byte coverage—not sparse-file length—controls native reads.
+- Explicit caller authorization is rechecked on actual media requests. There is **no fabricated
+  authorization or integrity issuer**, no live rolling cache, no server-time-seek invention and no
+  fallback to another track/recording. Static seeks wait for the required source bytes.
+- Client ownership includes opening-resource bounds, acquired-result cancellation compensation,
+  malformed adapter metadata cleanup, resource-before-transport close ordering and sticky unknown
+  release failures. A failed close remains owned and cannot become successful on duplicate close.
+- JVM/Android use sockets and durable random-access files. The iOS adapter uses nonblocking BSD
+  sockets, per-descriptor mutexes, `SO_NOSIGPIPE`, private `O_NOFOLLOW` files and secure capabilities.
+  **Android/iOS adapter code is authored/static-reviewed, not yet compiled or executed for this patch.**
+- Veyra source changes select actual progressive or adapted SABR for PLAYBACK. DOWNLOAD calls
+  actual `expandFormats`/`plan` and supports offered progressive/SABR/HLS/DASH representations
+  compatible with the target's materialized audio. It creates **no playback resource** while
+  preparing a download. Its transport is the acquisition transport; MIME/codec describe the
+  materialized file. Native decoder capability checks apply to that progressive local output,
+  not whether a generic native HTTP player can execute SABR or a DASH manifest.
+- Segmented/remux output is not checked against the sum of input segment byte sizes. Final app
+  native-media validation, file SHA, atomic publication and Room Ready/recovery remain required.
+  Full Room-backed orchestration is owned by the app download workstream (D006/D008), not JSON
+  checkpoint files. These new Veyra source bridge changes still await the pinned shared test run.
+
+### Resume integrity and review findings
+
+Schema-2 JVM/Android **standalone progressive** refresh reuse binds selected media/format metadata,
+exact origin/port/raw path, order-sensitive raw content query, actual final-response scope, a strong
+quoted ETag and committed-prefix SHA-256. Only exact documented signing keys on Googlevideo or
+explicit authored loopback fixtures are elided. Non-signing duplicates/empty pairs/encoding/case
+are not normalized away; no Googlevideo-subdomain equivalence is assumed. Uncommitted tails are
+truncated, retained bytes are hashed, and even complete retained parts are response-revalidated.
+Legacy schema 1 retains exact-plan-only behavior; multi-resource/SABR bindings are not relaxed.
+
+Private tree validation rejects symlinks (including dangling links), special files and excess
+depth/entry count before writing/resetting/deleting state. Caller-private-directory assumptions
+remain explicit: portable `java.io` cannot eliminate every hostile same-user TOCTOU mutation.
+Independent review caught post-unlock completion cleanup and failed-resource-close forgetting;
+both were fixed and re-reviewed. Completed checkpoint data is now purged **under the held lock**,
+leaving the reusable lock inode/parent. Only a stronger external retired-generation lifetime fence
+may remove that path; Veyra's download owner confirmed that fence for app cleanup.
+
+**Still open, not silently declared complete:** iOS's existing resume scope implementation sorts/
+decodes queries, removes some signing keys on arbitrary origins, collapses Googlevideo hosts, and
+does not have the new committed-prefix receipt proof. It needs a separate repair and native tests.
+Cross-signature resumption for other transports is not covered by this standalone-progressive
+patch. Complete resumable-download scope remains required; safe restart is not full parity.
+
+A further baseline audit confirmed that **JVM/Android SABR checkpoints serialize transient protocol
+state**: the generation string contains the source endpoint/configuration, and the checkpoint can
+include redirected endpoints, cookies and contexts. The README's blanket “hashes/receipts, not
+signed URLs” statement was therefore too broad. Existing iOS SABR persistence hashes the generation
+and drops session state, but neither native SABR persistence implementation hashes retained bytes.
+Coverage geometry and file length alone do not certify unmodified local content. The lead approved
+a separate repair: privacy-safe generation/range receipts, verified local byte hashes and a fresh
+anonymous session under the **same exact** generation; no relaxed source binding or invented grants.
+iOS redirect isolation, actual response scope, cancellation and stable lock cleanup also remain
+under repair. These gaps are not covered by the earlier 103-test result.
+
+### Executed evidence and remaining release gates
+
+| Check | Actual result / evidence |
+|---|---|
+| Full-title/first-result/runtime focused JVM suite | **82 tests, 0 failures/errors/skips**; `.work/kmpyt-first-result-final-tests.log`, `.work/kmpyt-evidence/first-result-final/` |
+| Earlier resume safety suite | **57 tests, 0 failures/errors, 1 existing FFmpeg-gated skip**; `.work/kmpyt-resume-safety-tests.log` |
+| Final resource/resume/transfer/manifest JVM suite, explicit `/usr/bin/ffmpeg` | **103 tests, 0 failures/errors/skips**; `.work/kmpyt-native-playback-final-tests.log`, `.work/kmpyt-evidence/native-playback-final/` |
+| Included in those 103 (not additional totals) | 16 refreshed-resume, 9 client resource-lifecycle/bounds/cancellation, 7 HTTP protocol, 5 real loopback/native adapter tests |
+| Native authored fixture path | Actual SABR-shaped POST → private file → real local HEAD/GET/ranges, byte comparisons, resource cancellation/cleanup, FFmpeg AAC decode/seek to **null output** |
+| Android/iOS for the new adapter/resume work | Authored/static review only; no compile, emulator/simulator, Apple execution or physical audio inference |
+| Live approved YouTube source | Still classified `LOGIN_REQUIRED`/authorization refusal with zero formats. No compliant live playback/download/offline-restart proof |
+
+The first native run exposed a real HTTP header-length receiver-shadowing bug (93 tests, 3
+failures). The explicit response-length fix made that suite green; subsequent lifecycle/lock
+regressions produced the final 103-test result above. Tests are authored redistributable fixtures,
+not a replacement for denied central media. No source bearer URLs or audio captures are evidence
+artifacts. The recorded counts overlap and must not be added as disjoint coverage.
+
+The merged shared production/test sources compiled. The subsequent 247-record suite reported six
+failures, including two gateway fixtures that disallowed legitimate same-video oEmbed metadata
+requests; their exact-bound-video fixture correction is authored and awaits rerun. This is not a
+green shared suite or live-source evidence.
+
+Remaining essential gates include a green source-bridge/shared suite, Android/Apple execution,
+complete iOS/all-transport resume parity, app-native listening/download/restart with native egress
+denied, clean-machine Node/Chromium/FFmpeg packaging, reviewed public upstream publication/pin,
+and mandatory physical native MUSIC crossfade/audio verification. The task remains incomplete.
+
+## Historical baseline research (sections 1–10)
+
+**Initial audit scope:** public repository, checked-in implementation/tests, read-only GitHub
+metadata and cross-team public-page probes. At that initial baseline no local library tests or
+source edits had yet been performed. The sketches and limitations below preserve that history;
+the current checkpoint above and D005/D006/D008/D009 supersede contrary recommendations.
+
+## Initial decision in brief (historical)
 
 - **Suitable as a YouTube source adapter, not as Veyra's player, podcast provider, music catalogue, persistent library, or download scheduler.** Its actual public API covers discovery, inspection, source/transfer plans, captions, and platform file transfers.
 - **Do the real discovery → inspected audio source → native play/seek → download → process-restart/offline-play spike before promising YouTube playback.** Public discovery works from this environment; an approved video's watch response currently requires sign-in/bot verification and supplies no formats. A working browse page or green fixture suite does not establish a playable source.

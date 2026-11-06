@@ -1,0 +1,17 @@
+# Source/scripts must remain runnable from Windows checkouts too.
+*.kt text eol=lf
+*.kts text eol=lf
+*.sh text eol=lf
+*.py text eol=lf
+*.yml text eol=lf
+gradlew text eol=lf
+
+# Preserve original third-party bytes, including upstream CRLF/trailing spaces.
+gradlew.bat -text whitespace=cr-at-eol
+composeApp/src/commonMain/composeResources/files/licenses/ibm_plex_sans_arabic_ofl.txt -text whitespace=-blank-at-eol,-blank-at-eof,cr-at-eol
+# The legal bundle contains verbatim upstream notices, not whitespace-normalized copies.
+composeApp/src/commonMain/composeResources/files/legal/THIRD_PARTY_NOTICES.txt -text whitespace=-blank-at-eol,-blank-at-eof,cr-at-eol
+composeApp/src/commonMain/composeResources/files/legal/notices/*.txt -text whitespace=-blank-at-eol,-blank-at-eof,cr-at-eol
+*.ttf binary
+*.jar binary
+*.mp3 binary
