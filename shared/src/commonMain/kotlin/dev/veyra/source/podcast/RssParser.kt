@@ -9,7 +9,9 @@ import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 
 data class PodcastFeed(
+    /** episodeIds is current feed membership, not every historically retained episode. */
     val show: PodcastShow,
+    /** Includes retained older metadata for saved/downloaded/in-progress episodes. */
     val episodes: List<MediaItem>,
     val warnings: List<String> = emptyList(),
     /** Same GUID is identity, not proof of identical enclosure bytes. */
@@ -103,10 +105,11 @@ object RssParser {
         }.distinctBy { it.id }
         val old = previousEpisodes.associateBy { it.id }
         val changes = parsed.filter { item -> old[item.id]?.source?.enclosureUrl?.let { it != item.source.enclosureUrl } == true }.mapTo(mutableSetOf()) { it.id }
-        // A short latest-only RSS must not erase old saved/followed episodes on refresh.
+        // A short latest-only RSS must not erase old saved/followed episode metadata. Keep
+        // that history separate from current membership used by New/No longer in feed UI.
         val freshIds = parsed.mapTo(hashSetOf()) { it.id }
         val merged = parsed + previousEpisodes.filter { it.showId == showId && it.id !in freshIds }
-        return PodcastFeed(show.copy(episodeIds = merged.map { it.id }), merged, warnings.toList(), changes, copyright)
+        return PodcastFeed(show.copy(episodeIds = parsed.map { it.id }), merged, warnings.toList(), changes, copyright)
     }
 
     private fun explicit(value: String?): Boolean = value?.trim()?.lowercase() in setOf("yes", "true", "explicit", "1")

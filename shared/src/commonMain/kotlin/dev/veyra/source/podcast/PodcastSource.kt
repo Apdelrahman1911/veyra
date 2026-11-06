@@ -66,7 +66,8 @@ class PodcastSource(
         else -> sourceFailure(FailureCode.UNSUPPORTED_SOURCE, "unsupported_podcast_browse")
     }
 
-    /** Caller persists the returned metadata. Prior episodes survive short/truncated recent-only feeds. */
+    /** Caller persists the returned metadata. History survives recent-only feeds in episodes;
+     * show.episodeIds remains the latest actual feed membership, including on cached/304 paths. */
     suspend fun refreshFeed(
         feedUrl: String,
         previousShow: PodcastShow? = null,
@@ -80,12 +81,11 @@ class PodcastSource(
             // seen. Fresh cached metadata wins for duplicates, but it must not erase that history.
             val retained = (cached.episodes + previousEpisodes.filter { it.showId == cached.show.id }).distinctBy { it.id }
             cached.copy(episodes = retained, show = cached.show.copy(
-                episodeIds = retained.map { it.id },
                 feedAliases = cached.show.feedAliases + previousShow?.takeIf { it.id == cached.show.id }?.feedAliases.orEmpty(),
             ))
         } else previousShow?.let { show ->
             val retained = previousEpisodes.filter { it.showId == show.id }.distinctBy { it.id }
-            PodcastFeed(show.copy(episodeIds = (show.episodeIds + retained.map { it.id }).distinct()), retained, copyright = show.copyright)
+            PodcastFeed(show, retained, copyright = show.copyright)
         }
         if (!force && cached != null && nowMs() - (cached.show.lastRefreshEpochMs ?: 0) < FEED_TTL) {
             return@withLock remember(requireNotNull(previous))

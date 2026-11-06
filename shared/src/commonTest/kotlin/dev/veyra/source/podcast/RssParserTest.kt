@@ -52,9 +52,36 @@ class RssParserTest {
         assertEquals(first.show.id, refreshed.show.id)
         assertEquals(2, refreshed.episodes.size)
         assertEquals(first.episodes[0].id, refreshed.episodes[0].id)
+        assertEquals(listOf(first.episodes[0].id), refreshed.show.episodeIds)
         assertEquals(setOf(first.episodes[0].id), refreshed.changedEnclosureIds)
         assertTrue("https://example.com/feed" in refreshed.show.feedAliases)
         assertEquals(first.episodes[1], refreshed.episodes[1])
+    }
+
+    @Test fun emptyFreshFeedClearsOnlyMembershipWhileRetainingPreviousEpisodeMetadata() {
+        val first = RssParser.parse(feed(item("recent") + item("archived")), "https://example.com/feed", fetchedAtEpochMs = 1_000)
+        val empty = RssParser.parse(feed(""), first.show.feedUrl, first.show, first.episodes, fetchedAtEpochMs = 2_000)
+        assertTrue(empty.show.episodeIds.isEmpty())
+        assertEquals(first.episodes, empty.episodes)
+        assertEquals(2_000L, empty.show.lastRefreshEpochMs)
+        assertTrue(empty.changedEnclosureIds.isEmpty())
+    }
+
+    @Test fun currentMembershipUsesUniquePublisherOrderAndCanReintroduceRetainedEpisodes() {
+        val first = RssParser.parse(feed(item("recent") + item("archived")), "https://example.com/feed")
+        val second = RssParser.parse(feed(item("new") + item("recent") + item("new")), first.show.feedUrl, first.show, first.episodes)
+        val newId = podcastEpisodeId(first.show.id, "new")
+        val recentId = first.episodes[0].id
+        val archivedId = first.episodes[1].id
+        assertEquals(listOf(newId, recentId), second.show.episodeIds)
+        assertEquals(listOf(newId, recentId, archivedId), second.episodes.map { it.id })
+        assertEquals(first.episodes[1], second.episodes.last())
+
+        val reintroduced = RssParser.parse(feed(item("archived", title = "Complete reintroduced title")),
+            first.show.feedUrl, second.show, second.episodes)
+        assertEquals(listOf(archivedId), reintroduced.show.episodeIds)
+        assertEquals(setOf(newId, recentId, archivedId), reintroduced.episodes.map { it.id }.toSet())
+        assertEquals("Complete reintroduced title", reintroduced.episodes.first().title)
     }
 
     @Test fun guidIdentityIgnoresTitleAndDoesNotCollideAcrossShows() {

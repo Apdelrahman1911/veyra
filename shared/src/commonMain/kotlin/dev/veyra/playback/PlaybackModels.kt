@@ -53,8 +53,19 @@ data class PlaybackState(
 }
 
 sealed interface PlaybackCommand {
-    /** Explicit replacement and activation. Merely opening a collection must not dispatch this. */
-    data class Play(val context: QueueContext, val items: List<MediaItem>, val startIndex: Int = 0, val shuffle: Boolean? = null) : PlaybackCommand
+    /**
+     * Explicit replacement and activation. Merely opening a collection must not dispatch this.
+     * [startFromBeginning] is a podcast-only, selected-episode restart intent: checkpoint the
+     * outgoing occurrence, reset the selected episode, then prepare a new occurrence at zero.
+     * It does not claim a native seek completed or reset other collection members.
+     */
+    data class Play(
+        val context: QueueContext,
+        val items: List<MediaItem>,
+        val startIndex: Int = 0,
+        val shuffle: Boolean? = null,
+        val startFromBeginning: Boolean = false,
+    ) : PlaybackCommand
     data class PlayEntry(val context: QueueContext, val entryId: String) : PlaybackCommand
     data class SelectContext(val context: QueueContext) : PlaybackCommand
     data object PlayPause : PlaybackCommand

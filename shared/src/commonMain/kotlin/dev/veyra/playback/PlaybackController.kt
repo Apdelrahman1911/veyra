@@ -473,6 +473,7 @@ class PlaybackController(
     private suspend fun playCollection(command: PlaybackCommand.Play) {
         require(command.items.isNotEmpty() && command.startIndex in command.items.indices)
         require(command.items.all { contextFor(it) == command.context })
+        require(!command.startFromBeginning || command.context == QueueContext.PODCAST)
         var previous = store.state.value.queue(command.context)
         val entries = command.items.map { QueueEntry(newEntityId(), it.id) }
         val selected = entries[command.startIndex]
@@ -480,16 +481,25 @@ class PlaybackController(
             previous = old.queue(command.context) // Includes the outgoing native checkpoint for undo.
             val media = old.media + command.items.associate { it.id to it.withRetainedLocalArtwork(old.media[it.id]) }
             val item = media.getValue(selected.mediaId)
+            // The checkpoint above must happen BEFORE this durable user intent. A separate
+            // ResetProgress -> Play sequence can checkpoint the outgoing, still-unseeked
+            // position over the reset. Preserve its history and recording provenance, but
+            // never label the reset as a confirmed position from that outgoing generation.
+            val progress = if (command.startFromBeginning) old.progress + (item.id to MediaProgress(
+                durationMs = old.progress[item.id]?.durationMs,
+                updatedEpochMs = clock.epochMs(),
+                executionBindingId = old.progress[item.id]?.executionBindingId,
+            )) else old.progress
             var queue = previous.copy(
                 entries = entries,
                 currentEntryId = selected.id,
-                positionMs = resumePosition(item, old),
+                positionMs = if (command.startFromBeginning) 0 else resumePosition(item, old),
                 originalOrder = entries.map { it.id },
                 speed = speedFor(item, old, previous),
                 shuffle = command.shuffle ?: previous.shuffle,
             )
             if (queue.shuffle) queue = queue.copy(entries = shuffledAfterCurrent(queue))
-            old.copy(media = media, queues = old.queues + (command.context to queue), activeContext = command.context)
+            old.copy(media = media, progress = progress, queues = old.queues + (command.context to queue), activeContext = command.context)
         }
         undoQueues[command.context] = previous
         activate(snapshot, desiredPlaying = true, manual = true)
