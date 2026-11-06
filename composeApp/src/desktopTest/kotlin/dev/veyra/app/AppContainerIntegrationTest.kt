@@ -38,6 +38,7 @@ import io.ktor.utils.io.ByteReadChannel
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.sync.Mutex
@@ -47,6 +48,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.*
 
@@ -68,11 +70,14 @@ class AppContainerIntegrationTest {
         val progress: suspend (YouTubeTransferProgress) -> Unit,
     )
 
-    private class Resource : PlaybackResource {
+    private class Resource(private val onClose: suspend (Int) -> Unit = {}) : PlaybackResource {
         override val localEndpoint = EphemeralPlaybackEndpoint("http://127.0.0.1:34567/authored-owned-session/audio")
         val closeCalls = AtomicInteger()
         val closed = CompletableDeferred<Unit>()
-        override suspend fun close() { closeCalls.incrementAndGet(); closed.complete(Unit) }
+        override suspend fun close() {
+            onClose(closeCalls.incrementAndGet())
+            closed.complete(Unit)
+        }
     }
 
     /** Synthetic callbacks only: this engine never opens a URL/file or claims native decoding. */
@@ -149,7 +154,8 @@ class AppContainerIntegrationTest {
         override val store: LibraryStore = createPlatformLibraryStore(directory.resolve("library").toString())
         override val engine = NativeProbe()
         val validations = ConcurrentLinkedQueue<OfflineAsset>()
-        override val validator = AssetValidator { asset -> validations += asset; AssetValidation.Valid(12_345L) }
+        @Volatile var validateAsset: suspend (OfflineAsset) -> AssetValidation = { AssetValidation.Valid(12_345L) }
+        override val validator = AssetValidator { asset -> validations += asset; validateAsset(asset) }
         override val systemLanguage = LanguagePreference.ENGLISH
         val youtubeRequests = ConcurrentLinkedQueue<ResearchRequest>()
         val youtubeCloseCalls = AtomicInteger()
@@ -335,6 +341,133 @@ class AppContainerIntegrationTest {
         assertEquals(1, resource.closeCalls.get())
     }
 
+    @Test fun rejectedGatewayResourceIsDrainedAtFinalCloseButEarlierReleaseFailureStaysSanitizedAndSticky() = checkCase {
+        val fixture = newFixture()
+        val cleanupActive = ConcurrentLinkedQueue<Boolean>()
+        val resource = Resource { attempt ->
+            cleanupActive += currentCoroutineContext().isActive
+            if (attempt == 1) throw IllegalStateException("authored private https://media.example/close?sig=never-report-this")
+        }
+        fixture.gateway.onResolve = { binding, _, _ ->
+            currentCoroutineContext().job.cancel(CancellationException("authored_scope_return_cancellation"))
+            plan(binding).copy(uri = resource.localEndpoint.uri, resource = resource)
+        }
+        val cancellation = assertFailsWith<CancellationException> {
+            fixture.app.resolver.resolve(item(), fixture.platform.engine.capabilities)
+        }
+        assertFalse(cancellation.suppressedExceptions.any { it.toString().contains("never-report-this") })
+        assertEquals(1, resource.closeCalls.get())
+        assertFalse(resource.closed.isCompleted, "A failed close must not count as released ownership")
+        assertTrue(fixture.platform.engine.preparations.isEmpty(), "The native engine never accepted this handoff")
+
+        val first = assertFailsWith<VeyraException> { fixture.app.close() }
+        fixture.expectedCloseFailure = first.failure
+        assertEquals(AppFailure(FailureCode.UNEXPECTED), first.failure)
+        assertNull(first.cause)
+        assertFalse(first.toString().contains("never-report-this"))
+        resource.closed.await()
+        assertEquals(2, resource.closeCalls.get(), "The app must retain and retry the rejected resource before releasing dependencies")
+        assertEquals(listOf(true, true), cleanupActive.toList(), "Cancellation must not abort resource disposal")
+        assertEquals(first.failure, assertFailsWith<VeyraException> { fixture.app.close() }.failure)
+        assertEquals(2, resource.closeCalls.get(), "A successfully drained resource must not be closed again")
+        assertEquals(1, fixture.platform.runtimeCloseCalls.get())
+        assertEquals(1, fixture.platform.youtubeCloseCalls.get())
+        assertEquals(1, fixture.platform.engine.closeCalls.get())
+        assertEquals(1, fixture.http.closeCalls.get())
+        assertEquals(StoreStatus.Closed, fixture.store.status.value)
+        fixture.assertNoNetwork()
+    }
+
+    @Test fun persistentlyFailedRejectedResourceRemainsRetriableAfterFinalCloseWithoutRepeatingGlobalClosures() = checkCase {
+        val fixture = newFixture()
+        val allowRelease = AtomicBoolean()
+        val resource = Resource {
+            if (!allowRelease.get()) throw IllegalStateException("authored private resource handle cannot close")
+        }
+        fixture.gateway.onResolve = { binding, _, _ ->
+            currentCoroutineContext().job.cancel(CancellationException("authored_scope_return_cancellation"))
+            plan(binding).copy(uri = resource.localEndpoint.uri, resource = resource)
+        }
+        assertFailsWith<CancellationException> { fixture.app.resolver.resolve(item(), fixture.platform.engine.capabilities) }
+        assertEquals(1, resource.closeCalls.get())
+        val first = assertFailsWith<VeyraException> { fixture.app.close() }
+        fixture.expectedCloseFailure = first.failure
+        assertEquals(AppFailure(FailureCode.UNEXPECTED), first.failure)
+        assertEquals(2, resource.closeCalls.get())
+        assertFalse(resource.closed.isCompleted)
+        assertEquals(first.failure, assertFailsWith<VeyraException> { fixture.app.close() }.failure)
+        assertEquals(3, resource.closeCalls.get(), "Still-retained resource is retried, not forgotten")
+        assertFalse(resource.closed.isCompleted)
+
+        allowRelease.set(true)
+        val recoveredDrain = assertFailsWith<VeyraException> { fixture.app.close() }
+        assertEquals(first.failure, recoveredDrain.failure, "A later release cannot retroactively certify a clean shutdown")
+        assertNull(recoveredDrain.cause)
+        resource.closed.await()
+        assertEquals(4, resource.closeCalls.get())
+        assertEquals(first.failure, assertFailsWith<VeyraException> { fixture.app.close() }.failure)
+        assertEquals(4, resource.closeCalls.get())
+        assertEquals(1, fixture.platform.runtimeCloseCalls.get())
+        assertEquals(1, fixture.platform.youtubeCloseCalls.get())
+        assertEquals(1, fixture.platform.engine.closeCalls.get())
+        assertEquals(1, fixture.http.closeCalls.get())
+        assertEquals(StoreStatus.Closed, fixture.store.status.value)
+        fixture.assertNoNetwork()
+    }
+
+    @Test fun finalCloseCancelsExternalResolverAndAwaitsItsLateRejectedResourceBeforeClosingDependencies() = checkCase {
+        val fixture = newFixture()
+        val resolving = CompletableDeferred<Unit>()
+        val releasing = CompletableDeferred<Unit>()
+        val permitRelease = CompletableDeferred<Unit>()
+        val resource = Resource { attempt ->
+            if (attempt == 1) {
+                releasing.complete(Unit)
+                permitRelease.await()
+                throw IllegalStateException("authored late resource release failed once")
+            }
+        }
+        fixture.gateway.onResolve = { binding, _, _ ->
+            resolving.complete(Unit)
+            try { awaitCancellation() }
+            catch (_: CancellationException) {
+                plan(binding).copy(uri = resource.localEndpoint.uri, resource = resource)
+            }
+        }
+        supervisorScope {
+            // Deliberately external to the app's playback/download actor jobs. AppContainer's
+            // admitted-acquisition completion barrier must include the policy-return cleanup.
+            val resolution = async { fixture.app.resolver.resolve(item(), fixture.platform.engine.capabilities) }
+            resolving.await()
+            val closing = async { runCatching { fixture.app.close() } }
+            try {
+                releasing.await()
+                assertFalse(closing.isCompleted)
+                assertFalse(resource.closed.isCompleted)
+                assertEquals(0, fixture.platform.runtimeCloseCalls.get())
+                assertEquals(0, fixture.platform.youtubeCloseCalls.get())
+                assertEquals(0, fixture.http.closeCalls.get())
+                assertNotEquals(StoreStatus.Closed, fixture.store.status.value)
+                assertTrue(fixture.platform.engine.preparations.isEmpty())
+            } finally { permitRelease.complete(Unit) }
+            assertFailsWith<CancellationException> { resolution.await() }
+            val failure = assertIs<VeyraException>(closing.await().exceptionOrNull())
+            fixture.expectedCloseFailure = failure.failure
+            assertEquals(AppFailure(FailureCode.UNEXPECTED), failure.failure)
+            assertNull(failure.cause)
+        }
+        resource.closed.await()
+        assertEquals(2, resource.closeCalls.get())
+        assertEquals(fixture.expectedCloseFailure, assertFailsWith<VeyraException> { fixture.app.close() }.failure)
+        assertEquals(2, resource.closeCalls.get())
+        assertEquals(1, fixture.platform.runtimeCloseCalls.get())
+        assertEquals(1, fixture.platform.youtubeCloseCalls.get())
+        assertEquals(1, fixture.platform.engine.closeCalls.get())
+        assertEquals(1, fixture.http.closeCalls.get())
+        assertEquals(StoreStatus.Closed, fixture.store.status.value)
+        fixture.assertNoNetwork()
+    }
+
     @Test fun offlineToggleCancelsRunningGatewayCoroutineAndClosesLateResultBeforeNativeHandoff() = checkCase {
         val fixture = newFixture()
         val entered = CompletableDeferred<Unit>()
@@ -446,6 +579,42 @@ class AppContainerIntegrationTest {
         assertEquals(1, fixture.http.requests.size)
         assertTrue(fixture.gateway.queries.isEmpty())
         assertTrue(fixture.platform.engine.preparations.isEmpty())
+    }
+
+    @Test fun uiLibraryDoesNotAdvertiseRestartedRoomCompleteAsReadyBeforeThisProcessValidatesIt() = checkCase {
+        val fixture = newFixture()
+        val original = item()
+        fixture.gateway.onDownload = { transfer -> writeFakeTransfer(transfer) }
+        fixture.play(original)
+        fixture.app.onPodcastAction(PodcastAction.Download(original.id))
+        val persisted = fixture.store.state.first { state -> state.downloads.values.any { it.status == DownloadStatus.COMPLETE } }
+        val id = persisted.downloads.values.single().id
+        fixture.app.changeSettings { it.copy(offlineOnly = true) }
+        fixture.store.state.first { it.settings.offlineOnly }
+        fixture.app.close()
+
+        val reopened = newFixture(initialize = false)
+        val validating = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        reopened.platform.validateAsset = { validating.complete(Unit); release.await(); AssetValidation.Valid(12_345L) }
+        coroutineScope {
+            val observed = ConcurrentLinkedQueue<DownloadStatus>()
+            val observing = launch(start = CoroutineStart.UNDISPATCHED) {
+                reopened.app.library.collect { snapshot -> snapshot.downloads[id]?.let { observed += it.status } }
+            }
+            try {
+                reopened.app.initialize()
+                validating.await()
+                assertEquals(DownloadStatus.COMPLETE, reopened.store.state.value.downloads.getValue(id).status,
+                    "The historical Room receipt remains intact while session-only validation is pending")
+                reopened.app.library.first { it.downloads[id]?.status == DownloadStatus.VERIFYING }
+                assertFalse(DownloadStatus.COMPLETE in observed, "Core UI must never flash Ready from unchecked historical rows")
+                assertTrue(reopened.platform.engine.preparations.isEmpty())
+                release.complete(Unit)
+                reopened.app.library.first { it.downloads[id]?.status == DownloadStatus.COMPLETE }
+            } finally { release.complete(Unit); observing.cancelAndJoin() }
+        }
+        reopened.assertNoNetwork()
     }
 
     @Test fun queuedDownloadRetainsTheRecordingChosenAtIntentAfterAnotherFreshPlayOfSameItem() = checkCase {

@@ -72,6 +72,11 @@ class AppContainer(
         set(value) { closedState.value = value }
     // Guarded by lifecycleLock. A second close must not falsely certify released owners.
     private var closeFailure: AppFailure? = null
+    private val rejectedResourceLock = Mutex()
+    private val rejectedResources = mutableListOf<PlaybackResource>()
+    private var rejectedResourceFailure: AppFailure? = null
+    // Completion includes policy-return failure cleanup, not just the inner request coroutine.
+    private val activeAcquisitions = MutableStateFlow<List<CompletableDeferred<Unit>>>(emptyList())
     val store: LibraryStore = platform.store
     private val executionGateway = object : KmpMediaGateway {
         override suspend fun firstResult(completeTitle: String) = online { gateway.firstResult(completeTitle) }
@@ -79,20 +84,30 @@ class AppContainer(
             // coroutineScope's cancellable return can discard a successful result. Retain the
             // resource here until the policy scope hands it to the resolver, not only there.
             var acquired: ResolvedPlayable? = null
+            val completion = CompletableDeferred<Unit>()
+            activeAcquisitions.update { it + completion }
             try {
-                return online {
+                val result = online {
                     platform.prepareMediaRuntime()
                     gateway.resolve(binding, capabilities, purpose).also { acquired = it }
                 }
+                if (closed) throw VeyraException(AppFailure(FailureCode.INVALID_STATE))
+                return result
             } catch (failure: Throwable) {
                 withContext(NonCancellable) {
-                    try { acquired?.resource?.close() }
-                    catch (releaseFailure: Exception) {
-                        failure.addSuppressed(releaseFailure)
-                        report(releaseFailure)
+                    try { acquired?.resource?.let { releaseRejectedResource(it) } }
+                    catch (releaseFailure: Throwable) {
+                        // Preserve only typed diagnostics; failed ownership is retained below,
+                        // rather than forgotten after attaching an arbitrary native exception.
+                        val sanitized = failureOf(releaseFailure)
+                        failure.addSuppressed(VeyraException(sanitized))
+                        fail(sanitized)
                     }
                 }
                 throw failure
+            } finally {
+                completion.complete(Unit)
+                activeAcquisitions.update { old -> old.filterNot { it === completion } }
             }
         }
         override suspend fun download(binding: PlaybackBinding, destinationPath: String, capabilities: EngineCapabilities,
@@ -155,6 +170,30 @@ class AppContainer(
     private val collectionJobs = MutableStateFlow<Map<String, Job>>(emptyMap())
     private val searchGeneration = MutableStateFlow(0L)
     private val discoveryGeneration = MutableStateFlow(0L)
+
+    private suspend fun releaseRejectedResource(resource: PlaybackResource): Unit = rejectedResourceLock.withLock {
+        if (rejectedResources.none { it === resource }) rejectedResources += resource
+        try {
+            resource.close()
+            rejectedResources.removeAll { it === resource }
+        } catch (error: Throwable) {
+            if (rejectedResourceFailure == null) rejectedResourceFailure = failureOf(error)
+            throw error
+        }
+    }
+
+    /** Retry each retained owner, but a previously failed close never becomes a clean-close claim. */
+    private suspend fun drainRejectedResources(): Unit = rejectedResourceLock.withLock {
+        for (resource in rejectedResources.toList()) {
+            try {
+                resource.close()
+                rejectedResources.removeAll { it === resource }
+            } catch (error: Throwable) {
+                if (rejectedResourceFailure == null) rejectedResourceFailure = failureOf(error)
+            }
+        }
+        rejectedResourceFailure?.let { throw VeyraException(it) }
+    }
 
     suspend fun initialize() = lifecycleLock.withLock { initializeLocked() }
 
@@ -763,11 +802,13 @@ class AppContainer(
 
     /** An active offline-policy change cancels the actual request coroutine, not just its spinner. */
     private suspend fun <T> online(block: suspend () -> T): T = coroutineScope {
+        if (closed) throw VeyraException(AppFailure(FailureCode.INVALID_STATE))
         if (store.state.value.settings.offlineOnly) throw VeyraException(AppFailure(FailureCode.OFFLINE_POLICY))
         val owner = currentCoroutineContext()[Job]!!
         val observer = launch(start = CoroutineStart.UNDISPATCHED) {
-            store.state.map { it.settings.offlineOnly }.distinctUntilChanged().first { it }
-            owner.cancel(CancellationException("offline_policy"))
+            combine(store.state.map { it.settings.offlineOnly }, closedState) { offline, closing -> offline || closing }
+                .distinctUntilChanged().first { it }
+            owner.cancel(CancellationException("media_execution_policy"))
         }
         try {
             currentCoroutineContext().ensureActive()
@@ -801,15 +842,17 @@ class AppContainer(
     private fun inform(text: TextKey) { mutableNotice.value = AppNotice(text = text) }
     private fun fail(failure: AppFailure) { mutableNotice.value = AppNotice(failure = failure) }
     private fun report(error: Exception) = fail(failureOf(error))
-    private fun failureOf(error: Exception) = when (error) {
+    private fun failureOf(error: Throwable) = when (error) {
         is VeyraException -> error.failure
         is IllegalArgumentException -> AppFailure(FailureCode.INVALID_STATE)
         else -> AppFailure(FailureCode.UNEXPECTED)
     }
 
-    suspend fun close() = withContext(NonCancellable) {
+    suspend fun close(): Unit = withContext(NonCancellable) {
         lifecycleLock.withLock {
             if (closed) {
+                try { drainRejectedResources() }
+                catch (error: Throwable) { if (closeFailure == null) closeFailure = failureOf(error) }
                 closeFailure?.let { throw VeyraException(it) }
                 return@withLock
             }
@@ -820,11 +863,15 @@ class AppContainer(
             // completion barriers and close checkpointed state before Room is closed.
             var failure: AppFailure? = null
             suspend fun release(block: suspend () -> Unit) {
-                try { block() } catch (error: Exception) { if (failure == null) failure = failureOf(error) }
+                try { block() } catch (error: Throwable) { if (failure == null) failure = failureOf(error) }
             }
             release { effectsLifetime.cancelAndJoin() }
             release { downloads.close() }
             release { playback.close() }
+            // Also cover explicitly awaited resolver calls (such as verification clients) that
+            // were admitted before closing but aren't children of the playback/download actors.
+            release { activeAcquisitions.value.forEach { it.await() } }
+            release { drainRejectedResources() }
             release { artwork.close() }
             release { platform.closeMediaRuntime() }
             release { platform.youtube.close() }
