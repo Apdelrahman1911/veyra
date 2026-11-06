@@ -1,0 +1,25 @@
+# Project-scoped tool homes, probes, source-work checkouts and private listening data
+.work/
+.gradle/
+.kotlin/
+.konan/
+**/build/
+local.properties
+.DS_Store
+.idea/
+*.iml
+*.jks
+*.keystore
+*.p12
+*.mobileprovision
+.env
+.env.*
+!*.example
+*.log
+*.hprof
+xcuserdata/
+DerivedData/
+*.xcresult/
+# Never publish resolved source credentials or locally downloaded media
+*.cookies
+*.pem
