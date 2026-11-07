@@ -1,5 +1,6 @@
 package dev.veyra.source.execution
 
+import dev.veyra.downloads.DownloadMaterializationEvidence
 import dev.veyra.data.LibraryStore
 import dev.veyra.data.createPlatformLibraryStore
 import dev.veyra.data.getOrThrow
@@ -38,11 +39,12 @@ class AppSourceResolverRoomTest {
         var validations = 0
         var onValidation: suspend () -> Unit = {}
         var nativeResult: AssetValidation = AssetValidation.Valid(31_234L)
+        private val evidenceOwners = mutableMapOf<LibraryStore, DownloadMaterializationEvidence>()
         fun resolver() = AppSourceResolver(store, files, AssetValidator {
             validations++
             onValidation()
             nativeResult
-        }, gateway, ExecutionTestClock())
+        }, gateway, ExecutionTestClock(), evidenceOwners.getOrPut(store) { DownloadMaterializationEvidence(store.transactionOwner) })
 
         suspend fun seed() {
             files.initialize()

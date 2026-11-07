@@ -50,7 +50,7 @@ class DownloadRecoveryRoomTest {
         assertEquals(intent.finalPath, asset.uri)
         assertFalse(id in complete.downloadFinalizations)
         assertEquals(DownloadAttemptStatus.SUCCEEDED, complete.downloadAttempts.getValue(intent.attemptId!!).status)
-        val local = AppSourceResolver(reopened, files, validator, gatewayB, clock)
+        val local = AppSourceResolver(reopened, files, validator, gatewayB, clock, materializationEvidence(reopened))
             .resolve(complete.media.getValue(asset.mediaId), EngineCapabilities(), offlineOnly = true)
         assertTrue(local.isLocal)
         assertEquals(asset.uri, local.uri)
