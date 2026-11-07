@@ -12,8 +12,10 @@ execution and not a release claim. PR #4 remains draft; this branch is not merge
   (`t3/typed-room-download-recovery`), a fast-forward descendant of the integration parent.
 - This worktree was clean at `9b1b047...`; the supplied local branch was fast-forwarded only to
   `6759466...` after ancestor verification. No reset/rebase/force-push or other tree was changed.
-- Tested code commit: `0184e50185c158c6f1e99693dfad963cfb61112f`
-  (`Connect typed downloads to existing music and podcast surfaces`).
+- Tested code/test commit: `b7308cc912e21efeaddcd4e755bfe7313ea02120`
+  (`Cover queued and cancelled typed surface rows`); its production code is identical to
+  `0184e50185c158c6f1e99693dfad963cfb61112f` (`Connect typed downloads to existing music and
+  podcast surfaces`).
 - Local branch: `t3/typed-download-screen-compat`; pushed as the scoped stacked branch
   `t3/pr4-typed-download-screen-compatibility`; PR base `t3/typed-room-download-recovery`.
 - Accepted launch settings: OpenCode provider `opencode`, model
@@ -147,15 +149,15 @@ Evidence root (ignored, task-owned):
 `/root/.t3/worktrees/Veyra/t3-100c62d1/.work/verification/typed-download-screen-compatibility`.
 
 - `result.json` SHA-256:
-  `e2fc5171f8a68c852c7b80c4f186495c7e671b4a06f42364610914bb1b3d6871`
-- `inputs-before.json` (512 tracked regular files) SHA-256:
-  `242a962bcbf0dc88393f2b7d0b1ef8246db79ad2cebcbb354c1bb529d754ceb2`
+  `8b8279fd2037c92437f4452c0514e91a59fc0f5441fff8e7ffd0b3a6529b0c34`
+- `inputs-before.json` (513 tracked regular files) SHA-256:
+  `b94b173531ad7ce346da1f81ebe36dcda1717b4b172cd68a0ea614de948aff87`
 - Complete evidence manifest SHA-256:
-  `3e351f4dd0fbed9ce0dae890fbbf2e6dbdf3aba28c318c085567bfe5ee750a6f`
+  `faad77073c31cd04599b225b9e1be52d7d2931ce73f301a4434e399793e8cc43`
   (`manifest.sha256` covers 36 log/XML/result files; no source drift)
 - Tracked input drift: **none**. Working tree clean before/after. Host:
   `Linux-6.1.72-x86_64-with-glibc2.39`, 12 logical CPUs, OpenJDK 21.0.12.
-- UTC window: `2026-11-07T20:32:08Z` to `2026-11-07T20:36:41Z`.
+- UTC window: `2026-11-07T20:41:29Z` to `2026-11-07T20:44:02Z`.
 
 All commands ran from the worktree root, under the shared lock
 `/root/projects/Veyra/.work/verification/pr4-ports-wave-20261107/gradle.lock`, with the bounded
@@ -164,12 +166,12 @@ test initializer and the single Gradle JVM argument
 
 | Run | Command task(s) | Exit | Suites | Tests | Failures/errors/skips | Log SHA-256 |
 | --- | --- | --- | --- | --- | --- | --- |
-| run-001 | `:composeApp:compileKotlinDesktop` | 0 | 0 | 0 | 0/0/0 | `5426f3b6b214488f1a7bb263a1e3b50aa6da5ce3c5c3f8d62b227623b679fdc1` |
-| run-002 | `:composeApp:compileTestKotlinDesktop` | 0 | 0 | 0 | 0/0/0 | `31a29e47bb5b8590eadfad7ef3515171ef7e1e7c8780ba357952a9d28ac33e6d` |
-| run-003 | focused common tests (11 classes) | 0 | 11 | 92 | 0/0/0 | `e7dd5434559871bacf28cd738aca8c58673758c6791f4ed835ffee6ae0b47fb2` |
-| run-004 | focused existing music/podcast surfaces (13 methods) | 0 | 3 | 13 | 0/0/0 | `d2f8e13edd081ad20fe9094584919a553ede8711d30d90c4f6acd414bd3e1610` |
+| run-001 | `:composeApp:compileKotlinDesktop` | 0 | 0 | 0 | 0/0/0 | `b13c446a1d15499b0c53859fc0261a4a7eecfc13319e3c65a90ac758fda0be40` |
+| run-002 | `:composeApp:compileTestKotlinDesktop` | 0 | 0 | 0 | 0/0/0 | `5903410c484cf0331d716e0839c28d8fcbf7d59e73c2ce0492d3db1f5f514191` |
+| run-003 | focused common tests (11 classes) | 0 | 11 | 92 | 0/0/0 | `b8f07b0a4417a6a72061feac7d717795961369eda3a389f09142148aa1d2c016` |
+| run-004 | focused existing music/podcast surfaces (13 methods) | 0 | 3 | 13 | 0/0/0 | `cff3fabdaf3f8014f32a8914ddd8be2b450aad644b6342341d10b5de15eece30` |
 | run-005 | new typed surfaces + real AppContainer/Room integration (6 tests) | 0 | 2 | 6 | 0/0/0 | `74fecfa1a2c0930754b4a46220fa9c489cb4e410a7b5b80c15874aff66bb6755` |
-| run-006 | `:shared:compileDebugKotlinAndroid :composeApp:compileDebugKotlinAndroid` | 0 | 0 | 0 | 0/0/0 | `909f3d6fbba75cc5c0341cb44bdec15b38b41592b36080b1ad015123dfff5a27` |
+| run-006 | `:shared:compileDebugKotlinAndroid :composeApp:compileDebugKotlinAndroid` | 0 | 0 | 0 | 0/0/0 | `ec6e83eb4adeaee43bbe16a4adf60dc03e2b2cd2cbffb8cfbc1954886ca60a14` |
 
 `run-003` classes: `AppStringsTest`, `DownloadSurfaceTest`, `TypedPodcastDownloadStateTest`,
 `MusicPresentationTest`, `TrackDetailPresentationTest`, `PodcastDownloadActionTest`,
