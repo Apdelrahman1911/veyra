@@ -1,6 +1,7 @@
 package dev.veyra.downloads
 
 import dev.veyra.data.getOrThrow
+import dev.veyra.data.AcquisitionRepositoryState
 import dev.veyra.model.*
 import dev.veyra.playback.LocalMediaValidationReaderRelease
 import dev.veyra.playback.LocalMediaValidationReaderUnacknowledged
@@ -213,74 +214,85 @@ class DownloadCleanupRoomTest {
         assertEquals(revision, owner.store.acquisitionView().snapshot.revision)
     }
 
-    @Test fun maintenanceAllowanceFailureRetainsFinalizationFilesAndRoomClaimThroughIndependentDrain() = downloadCase {
-        val library = store()
-        val seeded = seedFinalization(library)
+    @Test fun maintenanceAllowanceFailureRetainsFinalizationFilesAndRoomClaimThroughIndependentDrain() = acquisitionDownloadRoomCase {
+        val owner = owner()
+        val seeded = prepareFinalizationSchema3(owner)
         val validating = CompletableDeferred<Unit>()
         val allowConsumption = AtomicBoolean()
         val allowanceCloses = AtomicInteger()
-        val gateway = DownloadTestGateway().apply { denyAcquisition() }
-        val validator = AssetValidator { validating.complete(Unit); awaitCancellation() }
-        val scheduler = coordinator(library, gateway, validator, closingGate {
+        owner.gate.beforeClose = {
             if (allowanceCloses.incrementAndGet() == 1 && !allowConsumption.get())
                 throw IOException("Authored unconsumed maintenance allowance")
-        })
+        }
+        owner.validation = { validating.complete(Unit); awaitCancellation() }
+        owner.denyFinalizationSchema3Acquisition()
+        val scheduler = owner.coordinator
         try {
             scheduler.start(DownloadActivation.DURABLE_WORK)
             validating.await()
-            val claimed = library.flush().getOrThrow().downloads.getValue(seeded.record.id)
-            assertEquals(restartFailure, assertFailsWith<VeyraException> { scheduler.drainForBackground() }.failure)
-            assertBlocked(scheduler)
-            val retained = library.flush().getOrThrow()
-            assertEquals(claimed.leaseOwner, retained.downloads[seeded.record.id]?.leaseOwner)
-            assertEquals(claimed.activeAttemptId, retained.downloads[seeded.record.id]?.activeAttemptId)
-            assertEquals(seeded.intent, retained.downloadFinalizations[seeded.record.id])
-            assertNull(files.tryLeasePaths(listOf(seeded.intent!!.stagingPath)))
+            val claimed = owner.store.acquisitionView().acquisition.physicalDownloads.getValue(seeded.record.id)
+            assertEquals(executorRestartRequired, assertFailsWith<VeyraException> { scheduler.drainForBackground() }.failure)
+            assertMaintenanceBlocked(scheduler)
+            val retained = owner.store.acquisitionView().acquisition
+            assertEquals(claimed.leaseOwner, retained.physicalDownloads[seeded.record.id]?.leaseOwner)
+            assertEquals(claimed.activeAttemptId, retained.physicalDownloads[seeded.record.id]?.activeAttemptId)
+            assertEquals(seeded.intent, retained.physicalFinalizations[seeded.record.id])
+            assertNull(files.tryLeasePaths(listOf(seeded.intent.stagingPath)))
             assertNull(files.tryLeasePaths(listOf(seeded.intent.finalPath)))
             assertNotNull(files.tryTransferSlot(1)).close() // Maintenance never owned a transfer slot.
-            assertEquals(restartFailure, assertFailsWith<VeyraException> { scheduler.close() }.failure)
+            assertEquals(executorRestartRequired, assertFailsWith<VeyraException> { scheduler.close() }.failure)
             assertFalse(scheduler.hasPendingCleanupOwners)
             assertTrue(scheduler.dependencyReleaseSafeAfterClose)
             assertEquals(2, allowanceCloses.get())
-            assertNull(library.flush().getOrThrow().downloads[seeded.record.id]?.leaseOwner)
-            assertEquals(seeded.intent, library.state.value.downloadFinalizations[seeded.record.id])
+            assertNull(owner.store.acquisitionView().acquisition.physicalDownloads[seeded.record.id]?.leaseOwner)
+            assertEquals(seeded.intent, owner.store.acquisitionView().acquisition.physicalFinalizations[seeded.record.id])
             assertNotNull(files.tryLeasePaths(listOf(seeded.intent.stagingPath, seeded.intent.finalPath))).close()
-            gateway.assertUnused()
-        } finally { releaseFaulted(scheduler) { allowConsumption.set(true) } }
+            owner.assertFinalizationSchema3SourceUnused()
+        } finally { allowConsumption.set(true) }
     }
 
-    @Test fun maintenanceFileCloseFailureKeepsRoomClaimWithoutRepeatingConsumedAllowance() = downloadCase {
-        val library = store()
-        val seeded = seedFinalization(library)
+    @Test fun maintenanceFileCloseFailureKeepsRoomClaimWithoutRepeatingConsumedAllowance() = acquisitionDownloadRoomCase {
+        val owner = owner()
+        val seeded = prepareFinalizationSchema3(owner)
         val validating = CompletableDeferred<Unit>()
         val allowanceCloses = AtomicInteger()
-        val leaseFaults = LeaseCloseFaults()
-        val faultingFiles = DownloadFiles(files.root.toString(), files.fileSystem, leaseFaults)
-        val gateway = DownloadTestGateway().apply { denyAcquisition() }
-        val scheduler = coordinator(library, gateway,
-            AssetValidator { validating.complete(Unit); awaitCancellation() },
-            closingGate { allowanceCloses.incrementAndGet() }, files = faultingFiles)
+        val closeAttempts = CopyOnWriteArrayList<String>()
+        val failedPath = AtomicReference<String>()
+        owner.gate.beforeClose = { allowanceCloses.incrementAndGet() }
+        owner.validation = { validating.complete(Unit); awaitCancellation() }
+        owner.denyFinalizationSchema3Acquisition()
+        leases.beforeClose = { name, _ ->
+            closeAttempts += name
+            if (name.startsWith("path-") && failedPath.compareAndSet(null, name))
+                throw IOException("Authored failure before real file-lease consumption")
+        }
+        val scheduler = owner.coordinator
         try {
             scheduler.start(DownloadActivation.DURABLE_WORK)
             validating.await()
-            val claimed = library.flush().getOrThrow().downloads.getValue(seeded.record.id)
-            leaseFaults.armed.set(true)
-            scheduler.pause(seeded.record.id)
-            assertBlocked(scheduler)
+            val claimed = owner.store.acquisitionView().acquisition.physicalDownloads.getValue(seeded.record.id)
+            assertEquals(AppFailure(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed"),
+                assertFailsWith<VeyraException> { scheduler.pause(seeded.record.id) }.failure)
+            assertMaintenanceBlocked(scheduler)
             assertEquals(1, allowanceCloses.get())
-            assertEquals(claimed.leaseOwner, library.flush().getOrThrow().downloads[seeded.record.id]?.leaseOwner)
-            assertEquals(seeded.intent, library.state.value.downloadFinalizations[seeded.record.id])
-            assertNull(tryAcquireDownloadFileLease(leaseFaults.failedPath.get()))
+            assertEquals(claimed.leaseOwner, owner.store.acquisitionView().acquisition.physicalDownloads[seeded.record.id]?.leaseOwner)
+            assertEquals(seeded.intent, owner.store.acquisitionView().acquisition.physicalFinalizations[seeded.record.id])
+            assertNull(files.tryLeasePaths(listOf(seeded.intent.stagingPath, seeded.intent.finalPath)))
             // The aggregate path lease may have closed independent sibling locks. Its failed
             // member remains REAL-OS-held, and Room release must not run before the aggregate ACK.
-            assertEquals(restartFailure, assertFailsWith<VeyraException> { scheduler.close() }.failure)
+            assertEquals(1, closeAttempts.count { it == failedPath.get() })
+            assertEquals(executorRestartRequired, assertFailsWith<VeyraException> { scheduler.close() }.failure)
             assertFalse(scheduler.hasPendingCleanupOwners)
             assertTrue(scheduler.dependencyReleaseSafeAfterClose)
             assertEquals(1, allowanceCloses.get())
-            assertNull(library.flush().getOrThrow().downloads[seeded.record.id]?.leaseOwner)
-            assertNotNull(files.tryLeasePaths(listOf(seeded.intent!!.stagingPath, seeded.intent.finalPath))).close()
-            gateway.assertUnused()
-        } finally { releaseFaulted(scheduler) { leaseFaults.armed.set(false) } }
+            assertEquals(2, closeAttempts.count { it == failedPath.get() })
+            assertNull(owner.store.acquisitionView().acquisition.physicalDownloads[seeded.record.id]?.leaseOwner)
+            assertNotNull(files.tryLeasePaths(listOf(seeded.intent.stagingPath, seeded.intent.finalPath))).close()
+            owner.assertFinalizationSchema3SourceUnused()
+        } finally {
+            owner.gate.beforeClose = { }
+            leases.beforeClose = { _, _ -> }
+        }
     }
 
     @Test fun generationCloseFailureRetainsTransferSlotAndRoomAttemptAfterNativeStagesConsumed() = executorSchema3Case {
@@ -581,49 +593,56 @@ class DownloadCleanupRoomTest {
     }
 
     @Test fun maintenanceClaimFailureBeforeAndAfterCommitKeepsFileAndRoomOwnershipUntilExplicitClose() {
-        for (afterCommit in listOf(false, true)) downloadCase {
-            val faults = persistence()
-            val library = store(faults)
-            val seeded = seedFinalization(library)
-            val proposed = AtomicReference<DownloadRecord>()
+        for (afterCommit in listOf(false, true)) acquisitionDownloadRoomCase {
+            val (store, port) = maintenancePortStore()
+            val owner = owner(store)
+            val seeded = prepareFinalizationSchema3(owner)
+            val proposed = AtomicReference<PhysicalDownloadJob>()
             val once = AtomicBoolean(true)
-            fun failClaim(snapshot: AppSnapshot) {
-                val record = snapshot.downloads[seeded.record.id] ?: return
-                if (record.leaseOwner?.startsWith("download-maintenance") == true && once.compareAndSet(true, false)) {
-                    proposed.set(record)
+            fun failClaim(state: AcquisitionRepositoryState) {
+                val job = state.physicalDownloads[seeded.record.id] ?: return
+                if (state.maintenanceLease(seeded.record.id) && once.compareAndSet(true, false)) {
+                    proposed.set(job)
                     throw IOException("Authored maintenance claim return failure")
                 }
             }
-            if (afterCommit) faults.afterCommit = { failClaim(it) }
-            else faults.afterTransform = { _, next -> failClaim(next) }
-            val leaseFaults = LeaseCloseFaults().apply { armed.set(true) }
-            val faultingFiles = DownloadFiles(files.root.toString(), files.fileSystem, leaseFaults)
-            val gateway = DownloadTestGateway().apply { denyAcquisition() }
-            val allowances = AtomicInteger()
-            val scheduler = coordinator(library, gateway, files = faultingFiles,
-                gate = closingGate { allowances.incrementAndGet() })
+            if (afterCommit) port.afterCommit = { failClaim(it) }
+            else port.beforeCommit = { _, next -> failClaim(next.state()) }
+            val closeAttempts = CopyOnWriteArrayList<String>()
+            val failedPath = AtomicReference<String>()
+            leases.beforeClose = { name, _ ->
+                closeAttempts += name
+                if (name.startsWith("path-") && failedPath.compareAndSet(null, name))
+                    throw IOException("Authored maintenance claim rollback path release failure")
+            }
+            val scheduler = owner.coordinator
             try {
                 scheduler.start(DownloadActivation.DURABLE_WORK)
-                withTimeout(5_000) { scheduler.lastFailure.first { it == restartFailure } }
-                assertBlocked(scheduler)
+                scheduler.awaitFailure(executorRestartRequired)
+                assertMaintenanceBlocked(scheduler)
                 val claim = assertNotNull(proposed.get())
-                val retained = library.flush().getOrThrow()
+                val retained = owner.store.acquisitionView().acquisition
                 assertEquals(if (afterCommit) claim.leaseOwner else seeded.record.leaseOwner,
-                    retained.downloads[seeded.record.id]?.leaseOwner)
-                assertEquals(seeded.intent, retained.downloadFinalizations[seeded.record.id])
-                assertNull(tryAcquireDownloadFileLease(leaseFaults.failedPath.get()))
-                assertEquals(1, leaseFaults.attempts.count { it == leaseFaults.failedPath.get() })
-                assertEquals(0, allowances.get())
-                assertEquals(0, validationCount.get())
-                assertEquals(restartFailure, assertFailsWith<VeyraException> { scheduler.close() }.failure)
+                    retained.physicalDownloads[seeded.record.id]?.leaseOwner)
+                assertEquals(seeded.intent, retained.physicalFinalizations[seeded.record.id])
+                assertNull(files.tryLeasePaths(listOf(seeded.intent.stagingPath, seeded.intent.finalPath)))
+                assertEquals(1, closeAttempts.count { it == failedPath.get() })
+                assertEquals(0, owner.gate.acquires.get())
+                assertEquals(0, owner.validations.size)
+                assertEquals(executorRestartRequired, assertFailsWith<VeyraException> { scheduler.close() }.failure)
                 assertFalse(scheduler.hasPendingCleanupOwners)
                 assertTrue(scheduler.dependencyReleaseSafeAfterClose)
-                assertEquals(2, leaseFaults.attempts.count { it == leaseFaults.failedPath.get() })
-                assertNull(library.flush().getOrThrow().downloads[seeded.record.id]?.leaseOwner)
-                assertEquals(seeded.intent, library.state.value.downloadFinalizations[seeded.record.id])
-                assertNotNull(files.tryLeasePaths(listOf(seeded.intent!!.stagingPath, seeded.intent.finalPath))).close()
-                gateway.assertUnused()
-            } finally { releaseFaulted(scheduler) { leaseFaults.armed.set(false) } }
+                assertEquals(2, closeAttempts.count { it == failedPath.get() })
+                assertNull(owner.store.acquisitionView().acquisition.physicalDownloads[seeded.record.id]?.leaseOwner)
+                assertEquals(seeded.intent, owner.store.acquisitionView().acquisition.physicalFinalizations[seeded.record.id])
+                assertNotNull(files.tryLeasePaths(listOf(seeded.intent.stagingPath, seeded.intent.finalPath))).close()
+                owner.assertFinalizationSchema3SourceUnused()
+            } finally {
+                port.clearFaults()
+                owner.gate.beforeClose = { }
+                leases.beforeClose = { _, _ -> }
+                store.close()
+            }
         }
     }
 
@@ -664,33 +683,41 @@ class DownloadCleanupRoomTest {
         }
     }
 
-    @Test fun partialMaintenancePathAcquisitionFailureRetainsRealFirstLeaseBeforeRoomClaim() = downloadCase {
-        val library = store()
-        val seeded = seedFinalization(library)
+    @Test fun partialMaintenancePathAcquisitionFailureRetainsRealFirstLeaseBeforeRoomClaim() = acquisitionDownloadRoomCase {
+        val owner = owner()
+        val seeded = prepareFinalizationSchema3(owner)
         val paths = AtomicInteger()
-        val leaseFaults = LeaseCloseFaults(refuse = {
-            Path.of(it).fileName.toString().startsWith("path-") && paths.incrementAndGet() == 2
-        }).apply { armed.set(true) }
-        val faultingFiles = DownloadFiles(files.root.toString(), files.fileSystem, leaseFaults)
-        val gateway = DownloadTestGateway().apply { denyAcquisition() }
-        val scheduler = coordinator(library, gateway, files = faultingFiles)
+        val closeAttempts = CopyOnWriteArrayList<String>()
+        val failedPath = AtomicReference<String>()
+        leases.refuse = { name -> name.startsWith("path-") && paths.incrementAndGet() == 2 }
+        leases.beforeClose = { name, _ ->
+            closeAttempts += name
+            if (name.startsWith("path-") && failedPath.compareAndSet(null, name))
+                throw IOException("Authored failure before real first-path consumption")
+        }
+        owner.denyFinalizationSchema3Acquisition()
+        val scheduler = owner.coordinator
         try {
             scheduler.start(DownloadActivation.DURABLE_WORK)
-            withTimeout(5_000) { scheduler.lastFailure.first { it == restartFailure } }
-            assertBlocked(scheduler)
-            assertEquals(seeded.record, library.flush().getOrThrow().downloads[seeded.record.id])
-            assertEquals(seeded.intent, library.state.value.downloadFinalizations[seeded.record.id])
+            scheduler.awaitFailure(executorRestartRequired)
+            assertMaintenanceBlocked(scheduler)
+            val unchanged = owner.store.acquisitionView().acquisition
+            assertEquals(seeded.record, unchanged.physicalDownloads[seeded.record.id])
+            assertEquals(seeded.intent, unchanged.physicalFinalizations[seeded.record.id])
             // Second-path contention is deliberately injected; the first path's lease is REAL.
-            assertNull(tryAcquireDownloadFileLease(leaseFaults.failedPath.get()))
-            assertEquals(1, leaseFaults.attempts.count { it == leaseFaults.failedPath.get() })
-            assertEquals(0, validationCount.get())
-            assertEquals(restartFailure, assertFailsWith<VeyraException> { scheduler.close() }.failure)
+            assertNull(files.tryLeasePaths(listOf(seeded.intent.stagingPath, seeded.intent.finalPath)))
+            assertEquals(1, closeAttempts.count { it == failedPath.get() })
+            assertEquals(0, owner.validations.size)
+            assertEquals(executorRestartRequired, assertFailsWith<VeyraException> { scheduler.close() }.failure)
             assertFalse(scheduler.hasPendingCleanupOwners)
             assertTrue(scheduler.dependencyReleaseSafeAfterClose)
-            assertEquals(2, leaseFaults.attempts.count { it == leaseFaults.failedPath.get() })
-            assertNotNull(files.tryLeasePaths(listOf(seeded.intent!!.stagingPath, seeded.intent.finalPath))).close()
-            gateway.assertUnused()
-        } finally { releaseFaulted(scheduler) { leaseFaults.armed.set(false) } }
+            assertEquals(2, closeAttempts.count { it == failedPath.get() })
+            assertNotNull(files.tryLeasePaths(listOf(seeded.intent.stagingPath, seeded.intent.finalPath))).close()
+            owner.assertFinalizationSchema3SourceUnused()
+        } finally {
+            leases.refuse = { false }
+            leases.beforeClose = { _, _ -> }
+        }
     }
 
     private suspend fun assertBlocked(scheduler: DownloadCoordinator) {
