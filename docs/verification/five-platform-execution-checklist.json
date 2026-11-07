@@ -1,0 +1,3080 @@
+{
+  "schemaVersion": 1,
+  "kind": "veyra-task-b-five-platform-execution-checklist",
+  "document": "docs/verification/five-platform-preparation.md",
+  "preparedAtUtc": "2026-11-07T05:36:45Z",
+  "preparedFrom": {
+    "repository": "https://github.com/Apdelrahman1911/veyra",
+    "sourceBranch": "feat/veyra-integration",
+    "preparedFromCommit": "ec97925883f7a26765b7e3409ba5a81e358082b9",
+    "remoteTipAtPreparation": "ec97925883f7a26765b7e3409ba5a81e358082b9",
+    "defaultMainAtPreparation": "304d4dcde725899d2f50c72497c624d8f416a54c",
+    "kmpytPin": "c0a08090fe7dbd76e20216559b8184ad2cccde63",
+    "currentRoomSchemaVersion": 2,
+    "finalTaskACommit": null,
+    "finalTaskASchemaVersion": null
+  },
+  "preparationExecution": {
+    "model": "opencode-go/deepseek-v4.1-flash",
+    "variantRequested": "max",
+    "attestation": "No independent runtime/back-end or variant attestation exposed by the harness; accepted launch configuration only.",
+    "subagentsCreated": 0,
+    "finalTaskACommitSupplied": false
+  },
+  "readyToExecute": false,
+  "dependencyGate": "Awaiting the lead-provided, reviewed, merged and validated Task A integration SHA with accepted schema-3/download-recovery evidence. First Room-foundations PR is not sufficient. ec97925 is not a final revision.",
+  "statusVocabulary": {
+    "inspected": "Source/configuration/documentation read; no execution claimed.",
+    "configured": "Entrypoint/runner/task is named but no execution is proven.",
+    "blocked": "A prerequisite, environment, credential, or decision is missing.",
+    "not-run": "Ready or not yet attempted; no result claimed.",
+    "executed-passed": "Actual command completed with exit 0 and captured evidence.",
+    "executed-failed": "Actual command completed nonzero or assertions failed; evidence preserved.",
+    "excluded": "Outside the authorized Task B scope; remains an explicit release hold."
+  },
+  "verificationLevels": {
+    "not-run": "Placeholder: no execution and no level established.",
+    "configured": "Placeholder: entrypoint/runner named; no execution.",
+    "inspected": "Source/config read only.",
+    "compiled": "Compile/link task completed; framework/app is not execution.",
+    "automated-logic-tested": "Named tests executed with exact counts/results.",
+    "native-executed": "Native decoder/engine/helper actually executed; silent/null output labeled.",
+    "packaged": "Platform distributable produced and hashed; not installed/launched.",
+    "runtime-smoke-tested": "Packaged app started and performed named assertions on stated host/guest.",
+    "installed": "OS installer transaction completed and app launched in a clean environment.",
+    "physical-device-tested": "Exact hardware/route/audio behavior observed; emulator/simulator/null sink excluded."
+  },
+  "evidenceRecordSchema": {
+    "runId": "unique run identifier",
+    "taskId": "checklist task id",
+    "commit": "exact Veyra commit",
+    "kmpytPin": "exact submodule commit",
+    "dirtyPaths": "array; empty for clean run",
+    "os": "actual OS",
+    "architecture": "actual architecture",
+    "runnerLabel": "configured runner label or local",
+    "runnerImage": "actual image/version if available",
+    "toolVersions": "object of exact tool versions",
+    "command": "argv array; no secrets",
+    "startedAtUtc": "ISO-8601 UTC",
+    "endedAtUtc": "ISO-8601 UTC",
+    "exitCode": "integer",
+    "testLevel": "one verification level plus detailed sublevel",
+    "tests": {
+      "suites": null,
+      "tests": null,
+      "failures": null,
+      "errors": null,
+      "skipped": null
+    },
+    "junitPaths": "array of exact scoped XML paths",
+    "logPath": "path",
+    "logSha256": "64 lowercase hex",
+    "artifactPath": "path",
+    "artifactBytes": "integer",
+    "artifactSha256": "64 lowercase hex",
+    "inventoryPaths": "array",
+    "generatedLegalHashes": "object",
+    "correspondingSourcePaths": "array",
+    "signingStatus": "exact",
+    "installability": "exact",
+    "launchLevel": "exact",
+    "reviewer": "name/id",
+    "reviewStatus": "pending/accepted/rejected",
+    "notes": "bounded notes; no secrets",
+    "platform": "actual platform id",
+    "platformVersion": "actual OS version"
+  },
+  "evidenceSchemaNote": "runs is intentionally empty. Populate only from actual executions; never invent timestamps, SHAs, counts, or paths.",
+  "platforms": [
+    {
+      "id": "all",
+      "label": "Cross-platform / lead",
+      "os": "multiple",
+      "architectures": [],
+      "runnerLabels": [],
+      "artifactContracts": [],
+      "note": "Cross-platform gates, legal, review and retention tasks; not a binary target."
+    },
+    {
+      "id": "android",
+      "label": "Android",
+      "os": "Android",
+      "architectures": [
+        "arm64-v8a",
+        "x86_64"
+      ],
+      "runnerLabels": [
+        "ubuntu-24.04"
+      ],
+      "artifactContracts": [
+        "composeApp/build/outputs/apk/debug/composeApp-debug.apk",
+        "composeApp/build/outputs/apk/release/",
+        "composeApp/build/outputs/bundle/release/"
+      ]
+    },
+    {
+      "id": "ios-simulator",
+      "label": "iOS Simulator",
+      "os": "iOS",
+      "architectures": [
+        "arm64",
+        "x86_64"
+      ],
+      "runnerLabels": [
+        "macos-15",
+        "macos-15-intel"
+      ],
+      "artifactContracts": [
+        ".work/xcode/DerivedData-simulator-<arch>/Build/Products/<Config>-iphonesimulator/Veyra.app"
+      ]
+    },
+    {
+      "id": "ios-device",
+      "label": "iOS Device",
+      "os": "iOS",
+      "architectures": [
+        "arm64"
+      ],
+      "runnerLabels": [
+        "macos-15"
+      ],
+      "artifactContracts": [
+        ".work/xcode/DerivedData-device-arm64/Build/Products/<Config>-iphoneos/Veyra.app"
+      ]
+    },
+    {
+      "id": "windows-x64",
+      "label": "Windows x64",
+      "os": "Windows",
+      "architectures": [
+        "x64"
+      ],
+      "runnerLabels": [
+        "windows-2022"
+      ],
+      "artifactContracts": [
+        "composeApp/build/compose/binaries/main/msi/",
+        "composeApp/build/compose/binaries/main/app/Veyra/"
+      ]
+    },
+    {
+      "id": "macos-arm64",
+      "label": "macOS arm64",
+      "os": "macOS",
+      "architectures": [
+        "arm64"
+      ],
+      "runnerLabels": [
+        "macos-15"
+      ],
+      "artifactContracts": [
+        "composeApp/build/compose/binaries/main/dmg/",
+        "composeApp/build/compose/binaries/main/app/Veyra.app"
+      ]
+    },
+    {
+      "id": "macos-x64",
+      "label": "macOS x64",
+      "os": "macOS",
+      "architectures": [
+        "x64"
+      ],
+      "runnerLabels": [
+        "macos-15-intel"
+      ],
+      "artifactContracts": [
+        "composeApp/build/compose/binaries/main/dmg/",
+        "composeApp/build/compose/binaries/main/app/Veyra.app"
+      ]
+    },
+    {
+      "id": "linux-x64",
+      "label": "Linux x64",
+      "os": "Linux",
+      "architectures": [
+        "x64"
+      ],
+      "runnerLabels": [
+        "ubuntu-24.04"
+      ],
+      "artifactContracts": [
+        "composeApp/build/compose/binaries/main/deb/",
+        "composeApp/build/compose/binaries/main/app/"
+      ]
+    }
+  ],
+  "summary": {
+    "totalTasks": 89,
+    "blocked": 21,
+    "notRun": 63,
+    "inspected": 1,
+    "executedPassed": 0,
+    "executedFailed": 0,
+    "excluded": 3,
+    "configured": 1
+  },
+  "ownerDecisions": [
+    "Apple signing team/cert/profile for installable iOS IPA/TestFlight/App Store build, or explicit simulator-only/unsigned limitation.",
+    "Android production signing key/alias/passwords for store-ready APK/AAB, or explicit debug-only/unsigned limitation.",
+    "Windows Authenticode and macOS Developer ID/notarization identities, or explicit unsigned/SmartScreen/Gatekeeper limitation.",
+    "Authorization to create a tag/public GitHub Release and a trusted contents:write release job, or an approved retrieval alternative.",
+    "Authorization for an external clean installation environment (Windows VM, macOS machine, Ubuntu/device), or acceptance of extraction/launch smoke only.",
+    "Node/Chromium helper notice/source strategy and libmpv/FFmpeg/JDK corresponding-source delivery.",
+    "Separate hardware/source work for physical-audio and live central-source release holds."
+  ],
+  "proposedChanges": [
+    {
+      "id": "G-01",
+      "priority": "P0",
+      "summary": "Regenerate/reconcile source-only generated legal resources at the final SHA",
+      "files": [
+        "composeApp/src/commonMain/composeResources/files/legal/NOTICE.md",
+        "composeApp/src/commonMain/composeResources/files/legal/THIRD_PARTY_NOTICES.txt",
+        "composeApp/src/commonMain/composeResources/files/legal/index.json"
+      ]
+    },
+    {
+      "id": "G-03",
+      "priority": "P0",
+      "summary": "Add a reviewed Android instrumented-test runner/guest execution path",
+      "files": [
+        "scripts/android-instrumented-tests.sh (proposed)",
+        ".github/workflows/verify.yml"
+      ]
+    },
+    {
+      "id": "G-04",
+      "priority": "P0",
+      "summary": "Add/confirm iOS native test execution and simulator launch evidence",
+      "files": [
+        "scripts/ios-simulator-smoke.sh (proposed)",
+        ".github/workflows/verify.yml",
+        "iosApp/Veyra.xcodeproj/xcshareddata/xcschemes/Veyra.xcscheme (only if adding a testable)"
+      ]
+    },
+    {
+      "id": "G-07",
+      "priority": "P0",
+      "summary": "Prove or block the Windows MSVC+MSYS2 make/WiX native toolchain preflight",
+      "files": [
+        ".github/workflows/verify.yml",
+        "docs/verification/five-platform-preparation.md"
+      ]
+    },
+    {
+      "id": "G-08",
+      "priority": "P0",
+      "summary": "Review a minimal scoped Windows AppData/Local helper-home fix",
+      "files": [
+        "scripts/env.sh",
+        "composeApp/src/desktopMain/kotlin/dev/veyra/desktop/runtime/DesktopMediaRuntime.kt"
+      ]
+    },
+    {
+      "id": "G-10",
+      "priority": "P0",
+      "summary": "Add authorized public Release retention/publication without Actions artifact storage",
+      "files": [
+        ".github/workflows/verify.yml"
+      ]
+    },
+    {
+      "id": "G-13",
+      "priority": "P1",
+      "summary": "Bind package-manifest output to exact source/run and reject stale packages",
+      "files": [
+        "scripts/package-manifest.py",
+        "scripts/tests/test_package_manifest.py (proposed)",
+        "scripts/ci.sh"
+      ]
+    },
+    {
+      "id": "G-14",
+      "priority": "P1",
+      "summary": "Bind verification-summary XML to the current run and keep iOS zero explicit",
+      "files": [
+        "scripts/verification-summary.py",
+        "scripts/tests/test_verification.py"
+      ]
+    },
+    {
+      "id": "G-15",
+      "priority": "P1",
+      "summary": "Bound shared test workers explicitly",
+      "files": [
+        "shared/build.gradle.kts"
+      ]
+    }
+  ],
+  "tasks": [
+    {
+      "id": "B-MATRIX-01",
+      "platform": "all",
+      "title": "Record configured runners, labels, tool prerequisites and entrypoints (no execution)",
+      "category": "precondition",
+      "inScope": true,
+      "status": "configured",
+      "verificationLevel": "inspected",
+      "dependsOn": [],
+      "existingEntrypoint": true,
+      "commands": [],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [],
+      "acceptance": [
+        "Matrix rows, runner labels, tool prerequisites, artifact contracts and blockers are source-verified and recorded."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "4",
+      "notes": "Documentation inspection only; no remote runner availability inferred."
+    },
+    {
+      "id": "B-GATE-01",
+      "platform": "all",
+      "title": "Accept the reviewed, merged and validated Task A integration SHA",
+      "category": "gate",
+      "inScope": true,
+      "status": "blocked",
+      "verificationLevel": "inspected",
+      "dependsOn": [],
+      "existingEntrypoint": true,
+      "commands": [],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [
+        "Lead has not yet supplied the final Task A SHA; first Room-foundations PR is not sufficient."
+      ],
+      "acceptance": [
+        "Exact SHA and accepted schema-3/download-recovery evidence are recorded."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "6.1",
+      "notes": ""
+    },
+    {
+      "id": "B-GATE-02",
+      "platform": "all",
+      "title": "Verify Git state, kmpYT pin, Room schema 3 and worktree cleanliness",
+      "category": "gate",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "inspected",
+      "dependsOn": [
+        "B-GATE-01"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "git status --porcelain=v1 -uall",
+        "git submodule status -- third_party/kmpYT",
+        "test \"$(tr -d '\\r\\n' < gradle/kmpyt.commit)\" = \"$(git -C third_party/kmpYT rev-parse HEAD)\"",
+        "sha256sum shared/schemas/dev.veyra.data.room.VeyraDatabase/*.json"
+      ],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [],
+      "acceptance": [
+        "HEAD equals the supplied SHA; pin gitlink/file/checkout agree; Room version 3 and exported 3.json hash recorded."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "6.1",
+      "notes": ""
+    },
+    {
+      "id": "B-GATE-03",
+      "platform": "all",
+      "title": "Reconcile source-only generated legal resources with the final source",
+      "category": "legal",
+      "inScope": true,
+      "status": "blocked",
+      "verificationLevel": "inspected",
+      "dependsOn": [
+        "B-GATE-01"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "scripts/dev.sh python3 -B scripts/package-notices.py --check"
+      ],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [
+        "Clean ec97925 fails --check: NOTICE.md, THIRD_PARTY_NOTICES.txt, index.json are stale."
+      ],
+      "acceptance": [
+        "--check exits 0 from a clean final checkout, or an explicitly authorized build-workspace regeneration is recorded."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "2.4 / 6.6",
+      "notes": ""
+    },
+    {
+      "id": "B-GATE-04",
+      "platform": "all",
+      "title": "Preflight host, toolchain and runner-image availability read-only",
+      "category": "precondition",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "inspected",
+      "dependsOn": [
+        "B-GATE-01"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "uname -s; uname -m; nproc",
+        "df -B1 .",
+        "awk '/MemTotal|MemAvailable|SwapTotal/{print}' /proc/meminfo",
+        "java -version",
+        "command -v cmake make cc bash dpkg-deb Xvfb xauth unshare gh strace"
+      ],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [],
+      "acceptance": [
+        "Every required tool is present or the task is blocked; no installation/global configuration."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "6.2",
+      "notes": ""
+    },
+    {
+      "id": "B-GATE-05",
+      "platform": "all",
+      "title": "Reserve the single heavy-build slot and record resource limits",
+      "category": "precondition",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "configured",
+      "dependsOn": [
+        "B-GATE-04"
+      ],
+      "existingEntrypoint": true,
+      "commands": [],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [],
+      "acceptance": [
+        "One local heavy build at a time; VEYRA_GRADLE_WORKERS=1; disk/memory re-inventoried; no unrelated workload touched."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "6.2 / 11",
+      "notes": ""
+    },
+    {
+      "id": "B-GATE-06",
+      "platform": "all",
+      "title": "Freeze inputs and create the run/evidence IDs",
+      "category": "gate",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "configured",
+      "dependsOn": [
+        "B-GATE-02",
+        "B-GATE-03",
+        "B-GATE-05"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "sha256sum <critical inputs>",
+        "mkdir -p .work/verification/task-b/<run-id>"
+      ],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [],
+      "acceptance": [
+        "inputs-before.json, command log, evidence directory and pre-existing package list created."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "5.3 / 6.3",
+      "notes": ""
+    },
+    {
+      "id": "B-GATE-07",
+      "platform": "all",
+      "title": "Run existing source-only tooling, notice and design regressions",
+      "category": "test",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-GATE-06"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "scripts/dev.sh python3 -B scripts/tests/test_tooling.py",
+        "scripts/dev.sh python3 -B scripts/tests/test_verification.py",
+        "scripts/dev.sh python3 -B scripts/tests/test_package_notices.py",
+        "scripts/dev.sh python3 -B scripts/tests/test_design_resources.py",
+        "scripts/dev.sh python3 -B scripts/verify-design-resources.py",
+        "scripts/dev.sh python3 -B scripts/package-notices.py --check",
+        "scripts/dev.sh python3 -B scripts/tests/test_android_preflight.py"
+      ],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [],
+      "acceptance": [
+        "Actual command exits and counts recorded; no historical counts substituted."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "6.3",
+      "notes": ""
+    },
+    {
+      "id": "B-GATE-08",
+      "platform": "all",
+      "title": "Keep exclusions and release holds visible",
+      "category": "gate",
+      "inScope": true,
+      "status": "inspected",
+      "verificationLevel": "inspected",
+      "dependsOn": [],
+      "existingEntrypoint": true,
+      "commands": [],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [],
+      "acceptance": [
+        "Source authentication/live playback, physical audio, catalogue/UI redesign and Room implementation remain excluded."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "1.2 / 9.1",
+      "notes": ""
+    },
+    {
+      "id": "B-GATE-09",
+      "platform": "all",
+      "title": "Re-freeze the final SHA after any reviewed tooling/legal PR",
+      "category": "gate",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "configured",
+      "dependsOn": [
+        "B-GATE-06"
+      ],
+      "existingEntrypoint": true,
+      "commands": [],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [],
+      "acceptance": [
+        "Any tooling/legal PR is merged and the final Task A SHA/pin/schema hashes are rechecked."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "6.1",
+      "notes": ""
+    },
+    {
+      "id": "B-REG-01",
+      "platform": "all",
+      "title": "Execute integrated shared JVM tests from the final SHA",
+      "category": "test",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-GATE-07"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "scripts/gradle.sh :shared:jvmTest"
+      ],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [],
+      "acceptance": [
+        "Nonzero executed tests, zero failures/errors; exact XML paths/counts/log hash recorded."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.1 / Appendix A",
+      "notes": ""
+    },
+    {
+      "id": "B-REG-02",
+      "platform": "linux-x64",
+      "title": "Execute desktop and shared tests on Linux with the guarded display",
+      "category": "test",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-GATE-07"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "scripts/with-display.sh scripts/gradle.sh :shared:jvmTest :composeApp:desktopTest",
+        "scripts/dev.sh python3 -B scripts/verification-summary.py --phase desktop --require-tests shared composeApp"
+      ],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [],
+      "acceptance": [
+        "Guarded Xvfb run exits 0; fresh XML/test counts; screenshots preserved."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.5",
+      "notes": ""
+    },
+    {
+      "id": "B-REG-03",
+      "platform": "android",
+      "title": "Execute Android JVM unit tests and debug build/lint",
+      "category": "test",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-GATE-07"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "scripts/ci.sh android"
+      ],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [],
+      "acceptance": [
+        "Debug APK assembled; JVM tests nonzero/no failures; lint result recorded, no instrumentation claim."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.1",
+      "notes": ""
+    },
+    {
+      "id": "B-REG-04",
+      "platform": "ios-simulator",
+      "title": "Compile iOS Kotlin test sources and debug framework on macOS",
+      "category": "test",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "compiled",
+      "dependsOn": [
+        "B-GATE-07"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "DEVELOPER_DIR=/Applications/Xcode_26.0.1.app/Contents/Developer scripts/ci.sh ios"
+      ],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [],
+      "acceptance": [
+        "Compile/link exits 0; test execution is a separate task; no simulator/device claim."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.2",
+      "notes": ""
+    },
+    {
+      "id": "B-REG-05",
+      "platform": "all",
+      "title": "Run authored native Python bundle/process/FFmpeg tests",
+      "category": "test",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-GATE-07"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "scripts/dev.sh python3 -B native/test_bundle.py",
+        "scripts/dev.sh python3 -B native/test_owned_process.py",
+        "scripts/dev.sh python3 -B native/ffmpeg/test_build.py"
+      ],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [],
+      "acceptance": [
+        "Actual counts/failures recorded; these do not compile or execute production native code."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "6.3",
+      "notes": ""
+    },
+    {
+      "id": "B-REG-06",
+      "platform": "all",
+      "title": "Re-run integrated regression against the final packaged SHA",
+      "category": "test",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-LIN-07",
+        "B-AND-06",
+        "B-WIN-08",
+        "B-MACARM-08",
+        "B-MACX64-08",
+        "B-IOS-07"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "scripts/with-display.sh scripts/gradle.sh :shared:jvmTest :composeApp:desktopTest",
+        "scripts/gradle.sh :shared:testDebugUnitTest :composeApp:testDebugUnitTest"
+      ],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [],
+      "acceptance": [
+        "Tests executed from the same SHA/pin as the final packages; nonzero executed tests; zero failures/errors; exact XML/log hashes."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "6.8",
+      "notes": "Any source fix creates a new SHA and invalidates affected inventories/notices/packages."
+    },
+    {
+      "id": "B-UX-01",
+      "platform": "all",
+      "title": "Run static bilingual/RTL design-resource and contrast checks",
+      "category": "test",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-GATE-07"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "scripts/dev.sh python3 -B scripts/tests/test_design_resources.py",
+        "scripts/dev.sh python3 -B scripts/verify-design-resources.py"
+      ],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [],
+      "acceptance": [
+        "Checks pass; no UI redesign to satisfy them."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.6",
+      "notes": ""
+    },
+    {
+      "id": "B-UX-02",
+      "platform": "linux-x64",
+      "title": "Review fresh desktop en/ar/light/dark screenshots and layout artifacts",
+      "category": "test",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-REG-02"
+      ],
+      "existingEntrypoint": true,
+      "commands": [],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [],
+      "acceptance": [
+        "Fresh screenshots from final SHA reviewed; clipping/RTL/keyboard results recorded; failures reported, not waived."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.6",
+      "notes": ""
+    },
+    {
+      "id": "B-UX-03",
+      "platform": "android",
+      "title": "Check en/ar/RTL launch on an owned emulator/device",
+      "category": "test",
+      "inScope": true,
+      "status": "blocked",
+      "verificationLevel": "configured",
+      "dependsOn": [
+        "B-AND-07"
+      ],
+      "existingEntrypoint": true,
+      "commands": [],
+      "candidateCommands": [
+        "adb shell am start -n dev.veyra.app/.MainActivity",
+        "adb exec-out screencap -p > <owned>.png"
+      ],
+      "artifacts": [],
+      "blockers": [
+        "No authorized Android guest/instrumentation path."
+      ],
+      "acceptance": [
+        "Actual en/ar screenshots/behavior on the stated guest; no redesign."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.6",
+      "notes": ""
+    },
+    {
+      "id": "B-UX-04",
+      "platform": "ios-simulator",
+      "title": "Check en/ar/RTL launch on an owned simulator",
+      "category": "test",
+      "inScope": true,
+      "status": "blocked",
+      "verificationLevel": "configured",
+      "dependsOn": [
+        "B-IOS-08"
+      ],
+      "existingEntrypoint": true,
+      "commands": [],
+      "candidateCommands": [
+        "xcrun simctl launch <udid> dev.veyra.app",
+        "xcrun simctl io <udid> screenshot <owned>.png"
+      ],
+      "artifacts": [],
+      "blockers": [
+        "No simulator smoke script/execution."
+      ],
+      "acceptance": [
+        "Actual en/ar screenshots/behavior on the stated simulator."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.6",
+      "notes": ""
+    },
+    {
+      "id": "B-LIN-01",
+      "platform": "linux-x64",
+      "title": "Preflight Linux desktop tools, SDK-free native compiler and fakeroot",
+      "category": "precondition",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "inspected",
+      "dependsOn": [
+        "B-GATE-04"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "command -v cmake make cc bash dpkg-deb fakeroot Xvfb xauth",
+        "java -version"
+      ],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [
+        "Local fakeroot absent; runner must be used or the task blocked."
+      ],
+      "acceptance": [
+        "All required tools present or exact blocker recorded."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.5",
+      "notes": ""
+    },
+    {
+      "id": "B-LIN-02",
+      "platform": "linux-x64",
+      "title": "Prepare Linux FFmpeg/native resources",
+      "category": "build",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-LIN-01",
+        "B-GATE-07"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "scripts/dev.sh python3 -B native/bundle.py --target linux-x64"
+      ],
+      "candidateCommands": [],
+      "artifacts": [
+        {
+          "pathContract": ".work/native-ffmpeg/output/linux-x64/",
+          "kind": "native-ffmpeg-output",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        },
+        {
+          "pathContract": ".work/desktop-native/resources/linux-x64/",
+          "kind": "staged-native-resources",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        }
+      ],
+      "blockers": [],
+      "acceptance": [
+        "FFmpeg verify-output passes; staged manifest hashes exact; no system/PATH fallback."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.5 / 8",
+      "notes": ""
+    },
+    {
+      "id": "B-LIN-03",
+      "platform": "linux-x64",
+      "title": "Execute Linux desktop tests and first package run",
+      "category": "build",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-LIN-02"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "scripts/ci.sh desktop",
+        "scripts/package.sh"
+      ],
+      "candidateCommands": [],
+      "artifacts": [
+        {
+          "pathContract": "composeApp/build/compose/binaries/main/deb/",
+          "kind": "linux-deb",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        },
+        {
+          "pathContract": "composeApp/build/compose/binaries/main/app/",
+          "kind": "desktop-app-image",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        }
+      ],
+      "blockers": [],
+      "acceptance": [
+        "Tests pass; first DEB/app image produced; pre-existing packages recorded."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.5",
+      "notes": ""
+    },
+    {
+      "id": "B-LIN-04",
+      "platform": "linux-x64",
+      "title": "Export desktop-linux-x64 production inventory",
+      "category": "legal",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-LIN-03"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "scripts/gradle.sh -I scripts/runtime-inventory.init.gradle :composeApp:exportProductionInventory -Pveyra.inventory.platform=desktop-linux-x64"
+      ],
+      "candidateCommands": [],
+      "artifacts": [
+        {
+          "pathContract": ".work/verification/runtime-inventory/desktop-linux-x64.json",
+          "kind": "runtime-inventory",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        }
+      ],
+      "blockers": [],
+      "acceptance": [
+        "Inventory exists, hashes exact artifacts/POMs/build inputs, no unresolved edges, claims false."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "6.5",
+      "notes": ""
+    },
+    {
+      "id": "B-LIN-05",
+      "platform": "linux-x64",
+      "title": "Generate and check Linux target notices",
+      "category": "legal",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-LIN-04"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "scripts/dev.sh python3 -B scripts/package-notices.py --inventory .work/verification/runtime-inventory/desktop-linux-x64.json --output composeApp/src/commonMain/composeResources/files/legal --require-notices-complete",
+        "scripts/dev.sh python3 -B scripts/package-notices.py --inventory .work/verification/runtime-inventory/desktop-linux-x64.json --check"
+      ],
+      "candidateCommands": [],
+      "artifacts": [
+        {
+          "pathContract": "composeApp/src/commonMain/composeResources/files/legal/",
+          "kind": "generated-legal-workspace",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        }
+      ],
+      "blockers": [
+        "Open notice gaps may require reviewed supplements; no binary readiness claim."
+      ],
+      "acceptance": [
+        "Generation and --check exit 0; generated hashes recorded; dirty files not committed."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "6.6",
+      "notes": ""
+    },
+    {
+      "id": "B-LIN-06",
+      "platform": "linux-x64",
+      "title": "Final Linux package rebuild with exact notices",
+      "category": "build",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-LIN-05"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "scripts/package.sh"
+      ],
+      "candidateCommands": [],
+      "artifacts": [
+        {
+          "pathContract": "composeApp/build/compose/binaries/main/deb/",
+          "kind": "linux-deb-final",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        },
+        {
+          "pathContract": "composeApp/build/compose/binaries/main/app/",
+          "kind": "desktop-app-image-final",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        }
+      ],
+      "blockers": [],
+      "acceptance": [
+        "New package bytes/hashes; package contains exact generated legal hashes; JDK/libmpv/FFmpeg included."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "6.7",
+      "notes": ""
+    },
+    {
+      "id": "B-LIN-07",
+      "platform": "linux-x64",
+      "title": "Inspect final Linux DEB/app-image contents and metadata",
+      "category": "package",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "packaged",
+      "dependsOn": [
+        "B-LIN-06"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "dpkg-deb -I <deb>",
+        "dpkg-deb -c <deb>",
+        "dpkg-deb -x <deb> <owned-dir>",
+        "readelf -h <binary>",
+        "readelf -d <binary>",
+        "sha256sum <deb>"
+      ],
+      "candidateCommands": [],
+      "artifacts": [
+        {
+          "pathContract": "composeApp/build/compose/binaries/main/deb/",
+          "kind": "linux-deb-final",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        }
+      ],
+      "blockers": [],
+      "acceptance": [
+        "Architecture/metadata/Depends/Maintainer/Section recorded; bundled JDK/libmpv/FFmpeg/legal entries present; no test JUnit/EPL."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.5",
+      "notes": ""
+    },
+    {
+      "id": "B-LIN-08",
+      "platform": "linux-x64",
+      "title": "Run packaged Linux self-test and optional UI smoke",
+      "category": "native",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "runtime-smoke-tested",
+      "dependsOn": [
+        "B-LIN-06"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "<app-image>/bin/Veyra --self-test composeApp/src/desktopTest/resources/dev/veyra/desktop/tone.mp3 --data-dir <owned> --silent-audio --verification-result <owned>/verification/results/self-test.json",
+        "scripts/with-display.sh <app-image>/bin/Veyra --ui-smoke --data-dir <owned> --verification-result <owned>/verification/results/ui-smoke.json"
+      ],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [
+        "No sound card; physical audio excluded."
+      ],
+      "acceptance": [
+        "Self-test success/ownersClosed true; actual audio output null/silent recorded; UI smoke separate."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.5",
+      "notes": ""
+    },
+    {
+      "id": "B-LIN-09",
+      "platform": "linux-x64",
+      "title": "Record Linux signing and installation limits",
+      "category": "distribution",
+      "inScope": true,
+      "status": "blocked",
+      "verificationLevel": "inspected",
+      "dependsOn": [
+        "B-LIN-07"
+      ],
+      "existingEntrypoint": true,
+      "commands": [],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [
+        "dpkg -i install requires external authorized environment; DEB unsigned."
+      ],
+      "acceptance": [
+        "Unsigned DEB and extraction-vs-install distinction recorded; no system installation on shared host."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.5 / 10",
+      "notes": ""
+    },
+    {
+      "id": "B-LIN-10",
+      "platform": "linux-x64",
+      "title": "Assemble Linux FFmpeg corresponding-source/legal asset set",
+      "category": "legal",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-LIN-06"
+      ],
+      "existingEntrypoint": true,
+      "commands": [],
+      "candidateCommands": [],
+      "artifacts": [
+        {
+          "pathContract": ".work/native-ffmpeg/output/linux-x64/corresponding-source/",
+          "kind": "ffmpeg-corresponding-source",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        },
+        {
+          "pathContract": ".work/native-ffmpeg/output/linux-x64/licenses/",
+          "kind": "ffmpeg-licenses",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        }
+      ],
+      "blockers": [],
+      "acceptance": [
+        "Source archive, recipe, config, licenses hashed and retained; separate from app package."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "8.3",
+      "notes": ""
+    },
+    {
+      "id": "B-AND-01",
+      "platform": "android",
+      "title": "Build debug APK, run JVM tests and lint",
+      "category": "build",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-GATE-07"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "scripts/ci.sh android"
+      ],
+      "candidateCommands": [],
+      "artifacts": [
+        {
+          "pathContract": "composeApp/build/outputs/apk/debug/",
+          "kind": "android-debug-apk",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        }
+      ],
+      "blockers": [],
+      "acceptance": [
+        "Debug APK assembled; JVM tests/lint results recorded; no instrumentation claim."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.1",
+      "notes": ""
+    },
+    {
+      "id": "B-AND-02",
+      "platform": "android",
+      "title": "Attempt release APK/AAB and record signing state",
+      "category": "build",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-AND-01"
+      ],
+      "existingEntrypoint": true,
+      "commands": [],
+      "candidateCommands": [
+        "scripts/gradle.sh :composeApp:assembleRelease",
+        "scripts/gradle.sh :composeApp:bundleRelease"
+      ],
+      "artifacts": [
+        {
+          "pathContract": "composeApp/build/outputs/apk/release/",
+          "kind": "android-release-apk",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        },
+        {
+          "pathContract": "composeApp/build/outputs/bundle/release/",
+          "kind": "android-app-bundle",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        }
+      ],
+      "blockers": [
+        "No release signing config/key."
+      ],
+      "acceptance": [
+        "Actual task outcome; unsigned artifacts labeled; no store-ready claim."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.1",
+      "notes": ""
+    },
+    {
+      "id": "B-AND-03",
+      "platform": "android",
+      "title": "Export android-debug/android-release production inventories",
+      "category": "legal",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-AND-01",
+        "B-AND-02"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "scripts/gradle.sh -I scripts/runtime-inventory.init.gradle :composeApp:exportProductionInventory -Pveyra.inventory.platform=android-debug",
+        "scripts/gradle.sh -I scripts/runtime-inventory.init.gradle :composeApp:exportProductionInventory -Pveyra.inventory.platform=android-release"
+      ],
+      "candidateCommands": [],
+      "artifacts": [
+        {
+          "pathContract": ".work/verification/runtime-inventory/android-debug.json",
+          "kind": "runtime-inventory",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        },
+        {
+          "pathContract": ".work/verification/runtime-inventory/android-release.json",
+          "kind": "runtime-inventory",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        }
+      ],
+      "blockers": [],
+      "acceptance": [
+        "Both inventories exist if both artifacts are claimed; exact components/artifacts; no test config."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "6.5",
+      "notes": ""
+    },
+    {
+      "id": "B-AND-04",
+      "platform": "android",
+      "title": "Generate and check Android target notices",
+      "category": "legal",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-AND-03"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "scripts/dev.sh python3 -B scripts/package-notices.py --inventory .work/verification/runtime-inventory/android-debug.json --inventory .work/verification/runtime-inventory/android-release.json --output composeApp/src/commonMain/composeResources/files/legal --require-notices-complete",
+        "scripts/dev.sh python3 -B scripts/package-notices.py --inventory .work/verification/runtime-inventory/android-debug.json --inventory .work/verification/runtime-inventory/android-release.json --check"
+      ],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [],
+      "acceptance": [
+        "Generation/--check exit 0 or open gaps recorded; generated hashes captured."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "6.6",
+      "notes": ""
+    },
+    {
+      "id": "B-AND-05",
+      "platform": "android",
+      "title": "Final Android APK/AAB rebuild with exact notices",
+      "category": "build",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-AND-04"
+      ],
+      "existingEntrypoint": false,
+      "commands": [
+        "scripts/gradle.sh :composeApp:assembleDebug",
+        "scripts/gradle.sh :composeApp:assembleRelease",
+        "scripts/gradle.sh :composeApp:bundleRelease"
+      ],
+      "candidateCommands": [],
+      "artifacts": [
+        {
+          "pathContract": "composeApp/build/outputs/apk/debug/",
+          "kind": "android-debug-apk-final",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        },
+        {
+          "pathContract": "composeApp/build/outputs/apk/release/",
+          "kind": "android-release-apk-final",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        },
+        {
+          "pathContract": "composeApp/build/outputs/bundle/release/",
+          "kind": "android-aab-final",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        }
+      ],
+      "blockers": [],
+      "acceptance": [
+        "New artifact bytes/hashes; legal files match generated set; exact task outcome recorded."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "6.7",
+      "notes": "assembleDebug exists; assembleRelease/bundleRelease are conventional AGP tasks requiring confirmation at the final SHA."
+    },
+    {
+      "id": "B-AND-06",
+      "platform": "android",
+      "title": "Inspect final APK/AAB signing, manifest and contents",
+      "category": "package",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "packaged",
+      "dependsOn": [
+        "B-AND-05"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "$ANDROID_HOME/build-tools/35.0.0/apksigner verify --verbose --print-certs <apk>",
+        "$ANDROID_HOME/build-tools/35.0.0/aapt2 dump badging <apk>",
+        "unzip -l <apk>",
+        "sha256sum <apk>"
+      ],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [],
+      "acceptance": [
+        "Signer cert/applicationId/version/min/target SDK/ABIs recorded; legal entries present; warnings classified."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.1",
+      "notes": ""
+    },
+    {
+      "id": "B-AND-07",
+      "platform": "android",
+      "title": "Execute the compiled instrumented test suite in a reviewed guest",
+      "category": "native",
+      "inScope": true,
+      "status": "blocked",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-AND-05"
+      ],
+      "existingEntrypoint": true,
+      "commands": [],
+      "candidateCommands": [
+        "adb install -t <app.apk>",
+        "adb install -t <test.apk>",
+        "adb shell am instrument -w -r dev.veyra.app.test/androidx.test.runner.AndroidJUnitRunner"
+      ],
+      "artifacts": [],
+      "blockers": [
+        "scripts/android-instrumentation.sh --run exits 78",
+        "No reviewed emulator runner",
+        "Local /dev/kvm absent"
+      ],
+      "acceptance": [
+        "Actual test XML/results for the methods; emulator/device identity; no physical audio claim."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.1",
+      "notes": ""
+    },
+    {
+      "id": "B-AND-08",
+      "platform": "android",
+      "title": "Record Android signing and installability",
+      "category": "distribution",
+      "inScope": true,
+      "status": "blocked",
+      "verificationLevel": "inspected",
+      "dependsOn": [
+        "B-AND-06"
+      ],
+      "existingEntrypoint": true,
+      "commands": [],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [
+        "No production keystore/Play credentials; no device install execution."
+      ],
+      "acceptance": [
+        "Debug-signed vs unsigned-release vs store-ready distinguished; owner decision recorded."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.1",
+      "notes": ""
+    },
+    {
+      "id": "B-IOS-01",
+      "platform": "ios-device",
+      "title": "Preflight macOS/Xcode 26.0.1 and native toolchain",
+      "category": "precondition",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "inspected",
+      "dependsOn": [
+        "B-GATE-04"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "test -d /Applications/Xcode_26.0.1.app/Contents/Developer",
+        "xcodebuild -version",
+        "xcrun --sdk iphonesimulator --show-sdk-version"
+      ],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [],
+      "acceptance": [
+        "Pinned Xcode and tools present; no implicit Xcode switch."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.2",
+      "notes": ""
+    },
+    {
+      "id": "B-IOS-02",
+      "platform": "ios-simulator",
+      "title": "Compile simulator/device host and Kotlin test sources",
+      "category": "build",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "compiled",
+      "dependsOn": [
+        "B-IOS-01",
+        "B-GATE-07"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "scripts/ci.sh ios",
+        "VEYRA_IOS_CONFIGURATION=Release scripts/build-ios.sh simulator",
+        "VEYRA_IOS_CONFIGURATION=Release scripts/build-ios.sh device"
+      ],
+      "candidateCommands": [],
+      "artifacts": [
+        {
+          "pathContract": ".work/xcode/DerivedData-simulator-<arch>/Build/Products/<Config>-iphonesimulator/Veyra.app",
+          "kind": "ios-simulator-app",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        },
+        {
+          "pathContract": ".work/xcode/DerivedData-device-arm64/Build/Products/<Config>-iphoneos/Veyra.app",
+          "kind": "ios-device-unsigned-app",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        },
+        {
+          "pathContract": ".work/verification/ios-simulator-<arch>.json",
+          "kind": "ios-receipt",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        },
+        {
+          "pathContract": ".work/verification/ios-device-arm64.json",
+          "kind": "ios-receipt",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        }
+      ],
+      "blockers": [],
+      "acceptance": [
+        "Full Swift host built; receipt says launched=false/installed=false/productionSigned=false; config recorded."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.2",
+      "notes": ""
+    },
+    {
+      "id": "B-IOS-03",
+      "platform": "ios-simulator",
+      "title": "Execute iOS Kotlin tests in a simulator",
+      "category": "test",
+      "inScope": true,
+      "status": "blocked",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-IOS-02"
+      ],
+      "existingEntrypoint": true,
+      "commands": [],
+      "candidateCommands": [
+        "scripts/gradle.sh :shared:iosSimulatorArm64Test :composeApp:iosSimulatorArm64Test"
+      ],
+      "artifacts": [],
+      "blockers": [
+        "Scheme Testables empty",
+        "KMP simulator test task existence/behavior unconfirmed",
+        "No reviewed simulator execution path"
+      ],
+      "acceptance": [
+        "Actual test counts/XML or explicit blocked result; no compile-only pass."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.2",
+      "notes": ""
+    },
+    {
+      "id": "B-IOS-04",
+      "platform": "ios-simulator",
+      "title": "Export iOS production inventories",
+      "category": "legal",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-IOS-02"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "scripts/gradle.sh -I scripts/runtime-inventory.init.gradle :composeApp:exportProductionInventory -Pveyra.inventory.platform=ios-arm64",
+        "scripts/gradle.sh -I scripts/runtime-inventory.init.gradle :composeApp:exportProductionInventory -Pveyra.inventory.platform=ios-simulator-arm64"
+      ],
+      "candidateCommands": [],
+      "artifacts": [
+        {
+          "pathContract": ".work/verification/runtime-inventory/ios-arm64.json",
+          "kind": "runtime-inventory",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        },
+        {
+          "pathContract": ".work/verification/runtime-inventory/ios-simulator-arm64.json",
+          "kind": "runtime-inventory",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        }
+      ],
+      "blockers": [],
+      "acceptance": [
+        "Inventories on macOS; exact KLIB link inputs; not a final linked binary SBOM."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "6.5",
+      "notes": ""
+    },
+    {
+      "id": "B-IOS-05",
+      "platform": "ios-simulator",
+      "title": "Generate and check iOS target notices",
+      "category": "legal",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-IOS-04"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "scripts/dev.sh python3 -B scripts/package-notices.py --inventory .work/verification/runtime-inventory/ios-arm64.json --inventory .work/verification/runtime-inventory/ios-simulator-arm64.json --output composeApp/src/commonMain/composeResources/files/legal --require-notices-complete",
+        "scripts/dev.sh python3 -B scripts/package-notices.py --inventory .work/verification/runtime-inventory/ios-arm64.json --inventory .work/verification/runtime-inventory/ios-simulator-arm64.json --check"
+      ],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [],
+      "acceptance": [
+        "Generation/--check exit 0 or gaps recorded; generated hashes captured."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "6.6",
+      "notes": ""
+    },
+    {
+      "id": "B-IOS-06",
+      "platform": "ios-simulator",
+      "title": "Final Release simulator/device host rebuild with exact notices",
+      "category": "build",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-IOS-05"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "VEYRA_IOS_CONFIGURATION=Release scripts/build-ios.sh simulator",
+        "VEYRA_IOS_CONFIGURATION=Release scripts/build-ios.sh device"
+      ],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [],
+      "acceptance": [
+        "New .app bytes/hashes; legal files packaged; receipts refreshed."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "6.7",
+      "notes": ""
+    },
+    {
+      "id": "B-IOS-07",
+      "platform": "ios-device",
+      "title": "Inspect final iOS app bundle metadata and contents",
+      "category": "package",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "packaged",
+      "dependsOn": [
+        "B-IOS-06"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "plutil -p <app>/Info.plist",
+        "lipo -archs <app>/<exe>",
+        "codesign -dv --verbose=4 <app> 2>&1 || true"
+      ],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [],
+      "acceptance": [
+        "Bundle id/version/deployment/localizations/background modes/ATS/arch/signing recorded; legal files present; no IPA claim."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.2",
+      "notes": ""
+    },
+    {
+      "id": "B-IOS-08",
+      "platform": "ios-simulator",
+      "title": "Install/launch the simulator app and capture owned evidence",
+      "category": "native",
+      "inScope": true,
+      "status": "blocked",
+      "verificationLevel": "runtime-smoke-tested",
+      "dependsOn": [
+        "B-IOS-06"
+      ],
+      "existingEntrypoint": true,
+      "commands": [],
+      "candidateCommands": [
+        "xcrun simctl boot <udid>",
+        "xcrun simctl install <udid> <app>",
+        "xcrun simctl launch <udid> dev.veyra.app",
+        "xcrun simctl io <udid> screenshot <owned>.png",
+        "xcrun simctl shutdown <udid>"
+      ],
+      "artifacts": [],
+      "blockers": [
+        "No reviewed simulator smoke script",
+        "CoreSimulator containment review pending"
+      ],
+      "acceptance": [
+        "Actual install/launch/screenshot; app-owned ready evidence or explicit failure; simulator-only label."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.2",
+      "notes": ""
+    },
+    {
+      "id": "B-IOS-09",
+      "platform": "ios-device",
+      "title": "Produce/verify an installable IPA with owner-provided Apple signing",
+      "category": "distribution",
+      "inScope": true,
+      "status": "blocked",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-IOS-06"
+      ],
+      "existingEntrypoint": true,
+      "commands": [],
+      "candidateCommands": [
+        "xcodebuild -exportArchive ..."
+      ],
+      "artifacts": [],
+      "blockers": [
+        "No Apple team/cert/profile/export options; no device"
+      ],
+      "acceptance": [
+        "Signed/exported IPA verified or explicit owner decision to keep simulator-only/unsigned; no invented credentials."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.2 / 9.1",
+      "notes": ""
+    },
+    {
+      "id": "B-IOS-10",
+      "platform": "ios-device",
+      "title": "Record iOS signing/installability classification",
+      "category": "distribution",
+      "inScope": true,
+      "status": "blocked",
+      "verificationLevel": "inspected",
+      "dependsOn": [
+        "B-IOS-07"
+      ],
+      "existingEntrypoint": true,
+      "commands": [],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [
+        "Unsigned device app is not an installable IPA."
+      ],
+      "acceptance": [
+        "Simulator-only/unsigned-device/installable-IPA statuses separated."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.2",
+      "notes": ""
+    },
+    {
+      "id": "B-WIN-01",
+      "platform": "windows-x64",
+      "title": "Preflight Windows MSVC, MSYS2 make/bash, CMake, WiX and JDK 21",
+      "category": "precondition",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "inspected",
+      "dependsOn": [
+        "B-GATE-04"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "cl",
+        "lib",
+        "dumpbin",
+        "cmake --version",
+        "bash --version",
+        "make --version",
+        "candle -?",
+        "java -version"
+      ],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [
+        "GNU make/MSVC activation/WiX presence unproven; LocalAppData risk recorded."
+      ],
+      "acceptance": [
+        "Every required tool present in the actual environment or task blocked; no choco/pacman install."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.3",
+      "notes": ""
+    },
+    {
+      "id": "B-WIN-02",
+      "platform": "windows-x64",
+      "title": "Run Windows JVM desktop tests",
+      "category": "test",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-WIN-01",
+        "B-GATE-07"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "scripts/ci.sh desktop"
+      ],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [],
+      "acceptance": [
+        "Nonzero executed tests; zero failures/errors; exact XML/log/hash."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.3",
+      "notes": ""
+    },
+    {
+      "id": "B-WIN-03",
+      "platform": "windows-x64",
+      "title": "Build Windows FFmpeg and SMTC session helper",
+      "category": "native",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-WIN-01"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "scripts/dev.sh python3 -B native/bundle.py --target windows-x64"
+      ],
+      "candidateCommands": [],
+      "artifacts": [
+        {
+          "pathContract": ".work/native-ffmpeg/output/windows-x64/",
+          "kind": "native-ffmpeg-output",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        },
+        {
+          "pathContract": ".work/native-session/windows-x64/output/veyra-session.dll",
+          "kind": "windows-session-helper",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        },
+        {
+          "pathContract": ".work/desktop-native/resources/windows-x64/",
+          "kind": "staged-native-resources",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        }
+      ],
+      "blockers": [],
+      "acceptance": [
+        "FFmpeg/helper build exit 0; PE x64 architecture; static CRT; staged manifest exact."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.3 / 8",
+      "notes": ""
+    },
+    {
+      "id": "B-WIN-04",
+      "platform": "windows-x64",
+      "title": "Build first Windows MSI/app image",
+      "category": "build",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-WIN-02",
+        "B-WIN-03"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "scripts/package.sh"
+      ],
+      "candidateCommands": [],
+      "artifacts": [
+        {
+          "pathContract": "composeApp/build/compose/binaries/main/msi/",
+          "kind": "windows-msi",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        },
+        {
+          "pathContract": "composeApp/build/compose/binaries/main/app/Veyra/",
+          "kind": "desktop-app-image",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        }
+      ],
+      "blockers": [],
+      "acceptance": [
+        "MSI/app image produced; pre-existing packages recorded; not final bytes."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.3",
+      "notes": ""
+    },
+    {
+      "id": "B-WIN-05",
+      "platform": "windows-x64",
+      "title": "Export desktop-windows-x64 production inventory",
+      "category": "legal",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-WIN-04"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "scripts/gradle.sh -I scripts/runtime-inventory.init.gradle :composeApp:exportProductionInventory -Pveyra.inventory.platform=desktop-windows-x64"
+      ],
+      "candidateCommands": [],
+      "artifacts": [
+        {
+          "pathContract": ".work/verification/runtime-inventory/desktop-windows-x64.json",
+          "kind": "runtime-inventory",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        }
+      ],
+      "blockers": [],
+      "acceptance": [
+        "Exact inventory with critical inputs; claims false."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "6.5",
+      "notes": ""
+    },
+    {
+      "id": "B-WIN-06",
+      "platform": "windows-x64",
+      "title": "Generate and check Windows target notices",
+      "category": "legal",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-WIN-05"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "scripts/dev.sh python3 -B scripts/package-notices.py --inventory .work/verification/runtime-inventory/desktop-windows-x64.json --output composeApp/src/commonMain/composeResources/files/legal --require-notices-complete",
+        "scripts/dev.sh python3 -B scripts/package-notices.py --inventory .work/verification/runtime-inventory/desktop-windows-x64.json --check"
+      ],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [],
+      "acceptance": [
+        "Generation/--check exit 0 or gaps recorded; hashes captured."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "6.6",
+      "notes": ""
+    },
+    {
+      "id": "B-WIN-07",
+      "platform": "windows-x64",
+      "title": "Final MSI/app image rebuild with exact notices",
+      "category": "build",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-WIN-06"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "scripts/package.sh"
+      ],
+      "candidateCommands": [],
+      "artifacts": [
+        {
+          "pathContract": "composeApp/build/compose/binaries/main/msi/",
+          "kind": "windows-msi-final",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        },
+        {
+          "pathContract": "composeApp/build/compose/binaries/main/app/Veyra/",
+          "kind": "desktop-app-image-final",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        }
+      ],
+      "blockers": [],
+      "acceptance": [
+        "New bytes/hashes; exact legal files; bundled JDK/libmpv/FFmpeg/session helper present."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "6.7",
+      "notes": ""
+    },
+    {
+      "id": "B-WIN-08",
+      "platform": "windows-x64",
+      "title": "Inspect final MSI/app image contents and Authenticode",
+      "category": "package",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "packaged",
+      "dependsOn": [
+        "B-WIN-07"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "Get-FileHash <msi> -Algorithm SHA256",
+        "Get-AuthenticodeSignature <msi>",
+        "7z l <msi>",
+        "dumpbin /headers <helper>"
+      ],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [],
+      "acceptance": [
+        "Architecture/imports/nested runtime/legal entries recorded; signing status exact; no install claim."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.3",
+      "notes": ""
+    },
+    {
+      "id": "B-WIN-09",
+      "platform": "windows-x64",
+      "title": "Run packaged Windows self-test/UI smoke",
+      "category": "native",
+      "inScope": true,
+      "status": "blocked",
+      "verificationLevel": "runtime-smoke-tested",
+      "dependsOn": [
+        "B-WIN-07"
+      ],
+      "existingEntrypoint": true,
+      "commands": [],
+      "candidateCommands": [
+        "<app-image>\\Veyra.exe --self-test <tone.mp3> --data-dir <owned> --silent-audio --verification-result <owned>\\verification\\results\\self-test.json"
+      ],
+      "artifacts": [],
+      "blockers": [
+        "Interactive desktop unproven",
+        "Scoped LOCALAPPDATA/Chromium risk",
+        "No physical audio"
+      ],
+      "acceptance": [
+        "Actual packaged launch/self-test result or explicit failure; no source/helper readiness inferred from old diagnostic."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.3",
+      "notes": ""
+    },
+    {
+      "id": "B-WIN-10",
+      "platform": "windows-x64",
+      "title": "Record Windows signing/installability and installer limits",
+      "category": "distribution",
+      "inScope": true,
+      "status": "blocked",
+      "verificationLevel": "inspected",
+      "dependsOn": [
+        "B-WIN-08"
+      ],
+      "existingEntrypoint": true,
+      "commands": [],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [
+        "Unsigned MSI; msiexec install requires external authorized environment"
+      ],
+      "acceptance": [
+        "Unsigned/extraction/install distinctions recorded; no shared-host installer run."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.3",
+      "notes": ""
+    },
+    {
+      "id": "B-WIN-11",
+      "platform": "windows-x64",
+      "title": "Reproduce and fix (only if approved) the scoped LOCALAPPDATA/Chromium risk",
+      "category": "native",
+      "inScope": true,
+      "status": "blocked",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-WIN-01"
+      ],
+      "existingEntrypoint": true,
+      "commands": [],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [
+        "Old diagnostic did not launch browser; fix not implemented or authorized"
+      ],
+      "acceptance": [
+        "Focused scoped test proves helper home behavior; no live-source claim."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.3 / G-08",
+      "notes": ""
+    },
+    {
+      "id": "B-MACARM-01",
+      "platform": "macos-arm64",
+      "title": "Preflight macOS arm64 Xcode/CLT, CMake and native tools",
+      "category": "precondition",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "inspected",
+      "dependsOn": [
+        "B-GATE-04"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "DEVELOPER_DIR=/Applications/Xcode_26.0.1.app/Contents/Developer xcodebuild -version",
+        "cmake --version",
+        "command -v clang make bash hdiutil codesign lipo otool plutil"
+      ],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [],
+      "acceptance": [
+        "Pinned Xcode/tools present; host is arm64."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.4",
+      "notes": ""
+    },
+    {
+      "id": "B-MACARM-02",
+      "platform": "macos-arm64",
+      "title": "Run macOS arm64 JVM desktop tests",
+      "category": "test",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-MACARM-01",
+        "B-GATE-07"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "scripts/ci.sh desktop"
+      ],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [],
+      "acceptance": [
+        "Nonzero tests; zero failures/errors; exact XML/log/hash."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.4",
+      "notes": ""
+    },
+    {
+      "id": "B-MACARM-03",
+      "platform": "macos-arm64",
+      "title": "Build macOS arm64 FFmpeg and MediaPlayer session helper",
+      "category": "native",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-MACARM-01"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "scripts/dev.sh python3 -B native/bundle.py --target macos-arm64"
+      ],
+      "candidateCommands": [],
+      "artifacts": [
+        {
+          "pathContract": ".work/native-ffmpeg/output/macos-arm64/",
+          "kind": "native-ffmpeg-output",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        },
+        {
+          "pathContract": ".work/native-session/macos-arm64/output/libveyra-session.dylib",
+          "kind": "macos-session-helper",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        },
+        {
+          "pathContract": ".work/desktop-native/resources/macos-arm64/",
+          "kind": "staged-native-resources",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        }
+      ],
+      "blockers": [],
+      "acceptance": [
+        "Mach-O arm64; deployment target 13.0; staged manifest exact; no PATH fallback."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.4 / 8",
+      "notes": ""
+    },
+    {
+      "id": "B-MACARM-04",
+      "platform": "macos-arm64",
+      "title": "Build first macOS arm64 DMG/app image",
+      "category": "build",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-MACARM-02",
+        "B-MACARM-03"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "scripts/package.sh"
+      ],
+      "candidateCommands": [],
+      "artifacts": [
+        {
+          "pathContract": "composeApp/build/compose/binaries/main/dmg/",
+          "kind": "macos-dmg",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        },
+        {
+          "pathContract": "composeApp/build/compose/binaries/main/app/Veyra.app",
+          "kind": "desktop-app-image",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        }
+      ],
+      "blockers": [],
+      "acceptance": [
+        "DMG/app produced; pre-existing packages recorded; not final bytes."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.4",
+      "notes": ""
+    },
+    {
+      "id": "B-MACARM-05",
+      "platform": "macos-arm64",
+      "title": "Export desktop-macos-arm64 production inventory",
+      "category": "legal",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-MACARM-04"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "scripts/gradle.sh -I scripts/runtime-inventory.init.gradle :composeApp:exportProductionInventory -Pveyra.inventory.platform=desktop-macos-arm64"
+      ],
+      "candidateCommands": [],
+      "artifacts": [
+        {
+          "pathContract": ".work/verification/runtime-inventory/desktop-macos-arm64.json",
+          "kind": "runtime-inventory",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        }
+      ],
+      "blockers": [],
+      "acceptance": [
+        "Exact inventory; host match; claims false."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "6.5",
+      "notes": ""
+    },
+    {
+      "id": "B-MACARM-06",
+      "platform": "macos-arm64",
+      "title": "Generate and check macOS arm64 target notices",
+      "category": "legal",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-MACARM-05"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "scripts/dev.sh python3 -B scripts/package-notices.py --inventory .work/verification/runtime-inventory/desktop-macos-arm64.json --output composeApp/src/commonMain/composeResources/files/legal --require-notices-complete",
+        "scripts/dev.sh python3 -B scripts/package-notices.py --inventory .work/verification/runtime-inventory/desktop-macos-arm64.json --check"
+      ],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [],
+      "acceptance": [
+        "Generation/--check exit 0 or gaps recorded."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "6.6",
+      "notes": ""
+    },
+    {
+      "id": "B-MACARM-07",
+      "platform": "macos-arm64",
+      "title": "Final macOS arm64 DMG/app rebuild with exact notices",
+      "category": "build",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-MACARM-06"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "scripts/package.sh"
+      ],
+      "candidateCommands": [],
+      "artifacts": [
+        {
+          "pathContract": "composeApp/build/compose/binaries/main/dmg/",
+          "kind": "macos-dmg-final",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        },
+        {
+          "pathContract": "composeApp/build/compose/binaries/main/app/Veyra.app",
+          "kind": "desktop-app-image-final",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        }
+      ],
+      "blockers": [],
+      "acceptance": [
+        "New bytes/hashes; exact legal files; bundled JDK/libmpv/FFmpeg/helper present."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "6.7",
+      "notes": ""
+    },
+    {
+      "id": "B-MACARM-08",
+      "platform": "macos-arm64",
+      "title": "Inspect and smoke-test the packaged macOS arm64 app",
+      "category": "package",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "packaged",
+      "dependsOn": [
+        "B-MACARM-07"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "hdiutil attach -readonly -nobrowse <dmg>",
+        "lipo -archs <app>/Contents/MacOS/Veyra",
+        "otool -L <app>/Contents/MacOS/Veyra",
+        "codesign -dv --verbose=4 <app> 2>&1 || true",
+        "plutil -p <app>/Contents/Info.plist",
+        "<app>/Contents/MacOS/Veyra --self-test <tone.mp3> --data-dir <owned> --silent-audio --verification-result <owned>/verification/results/self-test.json"
+      ],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [],
+      "acceptance": [
+        "DMG/app inspection; signed/unsigned exact; self-test null-sink success or explicit failure; no physical claim."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.4",
+      "notes": ""
+    },
+    {
+      "id": "B-MACARM-09",
+      "platform": "macos-arm64",
+      "title": "Record macOS arm64 signing/notarization and installability",
+      "category": "distribution",
+      "inScope": true,
+      "status": "blocked",
+      "verificationLevel": "inspected",
+      "dependsOn": [
+        "B-MACARM-07"
+      ],
+      "existingEntrypoint": true,
+      "commands": [],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [
+        "No Developer ID/notarization credentials; unsigned Gatekeeper limitation"
+      ],
+      "acceptance": [
+        "Unsigned/notarized/installable distinctions recorded; owner decision if distribution required."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.4",
+      "notes": ""
+    },
+    {
+      "id": "B-MACX64-01",
+      "platform": "macos-x64",
+      "title": "Preflight macOS x64 runner/Xcode and tools",
+      "category": "precondition",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "inspected",
+      "dependsOn": [
+        "B-GATE-04"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "uname -m",
+        "DEVELOPER_DIR=/Applications/Xcode_26.0.1.app/Contents/Developer xcodebuild -version",
+        "cmake --version"
+      ],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [
+        "macos-15-intel availability/tool presence unproven"
+      ],
+      "acceptance": [
+        "Actual x64 host; pinned Xcode/tools present or blocked."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.4",
+      "notes": ""
+    },
+    {
+      "id": "B-MACX64-02",
+      "platform": "macos-x64",
+      "title": "Run macOS x64 JVM desktop tests",
+      "category": "test",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-MACX64-01",
+        "B-GATE-07"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "scripts/ci.sh desktop"
+      ],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [],
+      "acceptance": [
+        "Nonzero tests; zero failures/errors; exact XML/log/hash."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.4",
+      "notes": ""
+    },
+    {
+      "id": "B-MACX64-03",
+      "platform": "macos-x64",
+      "title": "Build macOS x64 FFmpeg and session helper",
+      "category": "native",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-MACX64-01"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "scripts/dev.sh python3 -B native/bundle.py --target macos-x64"
+      ],
+      "candidateCommands": [],
+      "artifacts": [
+        {
+          "pathContract": ".work/native-ffmpeg/output/macos-x64/",
+          "kind": "native-ffmpeg-output",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        },
+        {
+          "pathContract": ".work/native-session/macos-x64/output/libveyra-session.dylib",
+          "kind": "macos-session-helper",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        },
+        {
+          "pathContract": ".work/desktop-native/resources/macos-x64/",
+          "kind": "staged-native-resources",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        }
+      ],
+      "blockers": [],
+      "acceptance": [
+        "Mach-O x86_64; deployment target 13.0; staged manifest exact."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.4 / 8",
+      "notes": ""
+    },
+    {
+      "id": "B-MACX64-04",
+      "platform": "macos-x64",
+      "title": "Build first macOS x64 DMG/app image",
+      "category": "build",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-MACX64-02",
+        "B-MACX64-03"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "scripts/package.sh"
+      ],
+      "candidateCommands": [],
+      "artifacts": [
+        {
+          "pathContract": "composeApp/build/compose/binaries/main/dmg/",
+          "kind": "macos-dmg",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        },
+        {
+          "pathContract": "composeApp/build/compose/binaries/main/app/Veyra.app",
+          "kind": "desktop-app-image",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        }
+      ],
+      "blockers": [],
+      "acceptance": [
+        "DMG/app produced; pre-existing packages recorded; not final bytes."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.4",
+      "notes": ""
+    },
+    {
+      "id": "B-MACX64-05",
+      "platform": "macos-x64",
+      "title": "Export desktop-macos-x64 production inventory",
+      "category": "legal",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-MACX64-04"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "scripts/gradle.sh -I scripts/runtime-inventory.init.gradle :composeApp:exportProductionInventory -Pveyra.inventory.platform=desktop-macos-x64"
+      ],
+      "candidateCommands": [],
+      "artifacts": [
+        {
+          "pathContract": ".work/verification/runtime-inventory/desktop-macos-x64.json",
+          "kind": "runtime-inventory",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        }
+      ],
+      "blockers": [],
+      "acceptance": [
+        "Exact inventory; host match; claims false."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "6.5",
+      "notes": ""
+    },
+    {
+      "id": "B-MACX64-06",
+      "platform": "macos-x64",
+      "title": "Generate and check macOS x64 target notices",
+      "category": "legal",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-MACX64-05"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "scripts/dev.sh python3 -B scripts/package-notices.py --inventory .work/verification/runtime-inventory/desktop-macos-x64.json --output composeApp/src/commonMain/composeResources/files/legal --require-notices-complete",
+        "scripts/dev.sh python3 -B scripts/package-notices.py --inventory .work/verification/runtime-inventory/desktop-macos-x64.json --check"
+      ],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [],
+      "acceptance": [
+        "Generation/--check exit 0 or gaps recorded."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "6.6",
+      "notes": ""
+    },
+    {
+      "id": "B-MACX64-07",
+      "platform": "macos-x64",
+      "title": "Final macOS x64 DMG/app rebuild with exact notices",
+      "category": "build",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-MACX64-06"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "scripts/package.sh"
+      ],
+      "candidateCommands": [],
+      "artifacts": [
+        {
+          "pathContract": "composeApp/build/compose/binaries/main/dmg/",
+          "kind": "macos-dmg-final",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        },
+        {
+          "pathContract": "composeApp/build/compose/binaries/main/app/Veyra.app",
+          "kind": "desktop-app-image-final",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        }
+      ],
+      "blockers": [],
+      "acceptance": [
+        "New bytes/hashes; exact legal files; bundled JDK/libmpv/FFmpeg/helper present."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "6.7",
+      "notes": ""
+    },
+    {
+      "id": "B-MACX64-08",
+      "platform": "macos-x64",
+      "title": "Inspect and smoke-test the packaged macOS x64 app",
+      "category": "package",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "packaged",
+      "dependsOn": [
+        "B-MACX64-07"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "hdiutil attach -readonly -nobrowse <dmg>",
+        "lipo -archs <app>/Contents/MacOS/Veyra",
+        "otool -L <app>/Contents/MacOS/Veyra",
+        "codesign -dv --verbose=4 <app> 2>&1 || true",
+        "plutil -p <app>/Contents/Info.plist",
+        "<app>/Contents/MacOS/Veyra --self-test <tone.mp3> --data-dir <owned> --silent-audio --verification-result <owned>/verification/results/self-test.json"
+      ],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [],
+      "acceptance": [
+        "DMG/app inspection; signed/unsigned exact; self-test null-sink success or explicit failure; no physical claim."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.4",
+      "notes": ""
+    },
+    {
+      "id": "B-MACX64-09",
+      "platform": "macos-x64",
+      "title": "Record macOS x64 signing/notarization and installability",
+      "category": "distribution",
+      "inScope": true,
+      "status": "blocked",
+      "verificationLevel": "inspected",
+      "dependsOn": [
+        "B-MACX64-07"
+      ],
+      "existingEntrypoint": true,
+      "commands": [],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [
+        "No Developer ID/notarization credentials; unsigned Gatekeeper limitation"
+      ],
+      "acceptance": [
+        "Unsigned/notarized/installable distinctions recorded; owner decision if distribution required."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "7.4",
+      "notes": ""
+    },
+    {
+      "id": "B-LEGAL-01",
+      "platform": "all",
+      "title": "Resolve Node/Chromium helper notice/source strategy",
+      "category": "legal",
+      "inScope": true,
+      "status": "blocked",
+      "verificationLevel": "inspected",
+      "dependsOn": [
+        "B-GATE-06"
+      ],
+      "existingEntrypoint": true,
+      "commands": [
+        "scripts/dev.sh python3 -B scripts/package-notices.py --helper-inventory <reviewed-helper-inventory.json> --inventory <target-runtime-inventory.json> --output .work/<owned> --require-notices-complete"
+      ],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [
+        "No complete Chromium third-party terms/source mapping; 401-byte sample credits only."
+      ],
+      "acceptance": [
+        "Reviewed helper inventory/source/terms accepted, or explicit documented non-redistribution/on-demand limitation; no fake receipt."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "8.5 / 9 G-11",
+      "notes": ""
+    },
+    {
+      "id": "B-LEGAL-02",
+      "platform": "all",
+      "title": "Assemble corresponding-source and license asset set for all distributed binaries",
+      "category": "legal",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-LIN-10",
+        "B-WIN-07",
+        "B-MACARM-07",
+        "B-MACX64-07"
+      ],
+      "existingEntrypoint": true,
+      "commands": [],
+      "candidateCommands": [],
+      "artifacts": [
+        {
+          "pathContract": "corresponding-source/",
+          "kind": "source-asset-set",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        }
+      ],
+      "blockers": [
+        "libmpv/JDK/helper corresponding-source closure incomplete."
+      ],
+      "acceptance": [
+        "FFmpeg source/build/config, libmpv/MediaMP source pins, JDK/helper notices/sources reviewed; asset hashes recorded."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "8.3 / 8.5",
+      "notes": ""
+    },
+    {
+      "id": "B-LEGAL-03",
+      "platform": "all",
+      "title": "Final legal/redistribution review of exact package set",
+      "category": "legal",
+      "inScope": true,
+      "status": "blocked",
+      "verificationLevel": "inspected",
+      "dependsOn": [
+        "B-LEGAL-01",
+        "B-LEGAL-02"
+      ],
+      "existingEntrypoint": true,
+      "commands": [],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [
+        "No binaryRedistributionReady certification; open helper/native/JDK source gates."
+      ],
+      "acceptance": [
+        "Independent review accepts exact packages/sources/notices or records remaining redistribution blockers."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "8.5",
+      "notes": ""
+    },
+    {
+      "id": "B-DIST-01",
+      "platform": "all",
+      "title": "Decide and implement a zero-purchase artifact retention/publication path",
+      "category": "distribution",
+      "inScope": true,
+      "status": "blocked",
+      "verificationLevel": "inspected",
+      "dependsOn": [
+        "B-LEGAL-03",
+        "B-LIN-07",
+        "B-AND-06",
+        "B-WIN-08",
+        "B-MACARM-08",
+        "B-MACX64-08",
+        "B-IOS-07"
+      ],
+      "existingEntrypoint": true,
+      "commands": [],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [
+        "Workflow has no upload/cache; publication/tag/contents:write not authorized."
+      ],
+      "acceptance": [
+        "Owner-authorized public Release assets or alternative; no paid storage."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "10",
+      "notes": ""
+    },
+    {
+      "id": "B-DIST-02",
+      "platform": "all",
+      "title": "Publish authorized final assets and SHA-256 manifest",
+      "category": "distribution",
+      "inScope": true,
+      "status": "blocked",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-DIST-01"
+      ],
+      "existingEntrypoint": true,
+      "commands": [],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [
+        "Publication not authorized."
+      ],
+      "acceptance": [
+        "Assets uploaded to authorized public Release with exact hashes; no secrets/media."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "10",
+      "notes": ""
+    },
+    {
+      "id": "B-DIST-03",
+      "platform": "all",
+      "title": "Retrieve and independently verify published assets",
+      "category": "distribution",
+      "inScope": true,
+      "status": "blocked",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-DIST-02"
+      ],
+      "existingEntrypoint": true,
+      "commands": [],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [],
+      "acceptance": [
+        "Independent download, hash match, package inspection, notices/source present."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "10",
+      "notes": ""
+    },
+    {
+      "id": "B-REV-01",
+      "platform": "all",
+      "title": "Independent lead review of complete evidence/diff/source references",
+      "category": "review",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "inspected",
+      "dependsOn": [
+        "B-LIN-07",
+        "B-AND-06",
+        "B-WIN-08",
+        "B-MACARM-08",
+        "B-MACX64-08",
+        "B-IOS-07"
+      ],
+      "existingEntrypoint": true,
+      "commands": [],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [],
+      "acceptance": [
+        "Lead accepts or returns exact defects; no agent self-acceptance."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "6.9",
+      "notes": ""
+    },
+    {
+      "id": "B-REV-02",
+      "platform": "all",
+      "title": "Publish the final verification matrix and remaining holds",
+      "category": "review",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "inspected",
+      "dependsOn": [
+        "B-REV-01"
+      ],
+      "existingEntrypoint": true,
+      "commands": [],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [],
+      "acceptance": [
+        "Build/package/native/install/signing/physical levels separated; unverified criteria remain visible."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "6.9",
+      "notes": ""
+    },
+    {
+      "id": "B-REV-03",
+      "platform": "all",
+      "title": "Seal artifact/log/XML hash manifest and preserve evidence",
+      "category": "review",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "inspected",
+      "dependsOn": [
+        "B-REV-01"
+      ],
+      "existingEntrypoint": true,
+      "commands": [],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [],
+      "acceptance": [
+        "Manifest hashes all evidence; task-owned outputs preserved; no secrets/media."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "5.3 / 11",
+      "notes": ""
+    },
+    {
+      "id": "B-PHYS-01",
+      "platform": "all",
+      "title": "Physical audible crossfade/podcast non-overlap verification",
+      "category": "hold",
+      "inScope": false,
+      "status": "excluded",
+      "verificationLevel": "not-run",
+      "dependsOn": [],
+      "existingEntrypoint": true,
+      "commands": [],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [
+        "No physical hardware/audio evidence; explicit release hold."
+      ],
+      "acceptance": [
+        "Remains unmet until actual hardware evidence on each supported platform."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "1.2 / 9.1",
+      "notes": ""
+    },
+    {
+      "id": "B-SRC-01",
+      "platform": "all",
+      "title": "Live central-source authentication/playback/offline restart proof",
+      "category": "hold",
+      "inScope": false,
+      "status": "excluded",
+      "verificationLevel": "not-run",
+      "dependsOn": [],
+      "existingEntrypoint": true,
+      "commands": [],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [
+        "Excluded from Task B preparation; existing real-source hold remains."
+      ],
+      "acceptance": [
+        "Separate source work/authorization; not satisfied by fixtures or packaging."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "1.2",
+      "notes": ""
+    },
+    {
+      "id": "B-ROOM-01",
+      "platform": "all",
+      "title": "Room schema-3/download-recovery implementation and regression",
+      "category": "hold",
+      "inScope": false,
+      "status": "excluded",
+      "verificationLevel": "not-run",
+      "dependsOn": [],
+      "existingEntrypoint": true,
+      "commands": [],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [
+        "Owned by isolated Room engineer; Task A acceptance is the prerequisite."
+      ],
+      "acceptance": [
+        "Lead accepts Task A SHA/migration/regression evidence before Task B."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "1.2",
+      "notes": ""
+    }
+  ],
+  "runs": []
+}
