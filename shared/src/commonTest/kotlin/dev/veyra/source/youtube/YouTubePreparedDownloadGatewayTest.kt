@@ -13,9 +13,10 @@ import dev.veyra.source.execution.AcquisitionTransferProgress
 import dev.veyra.source.execution.LegacyTransferResult
 import dev.veyra.source.execution.PreparedLegacyDownload
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.*
-import java.util.concurrent.atomic.AtomicInteger
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 import kotlin.test.*
@@ -146,13 +147,13 @@ class YouTubePreparedDownloadGatewayTest {
 
     @Test fun simultaneousTransferConsumesOneCapabilityAndTheOtherFailsWithoutExtraWork() = runBlocking {
         val requests = mutableListOf<ResearchRequest>()
-        val transferStarts = AtomicInteger()
+        val transferStarts = MutableStateFlow(0)
         val transfers = mutableListOf<String>()
         val entered = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()
         val client = YouTubeClient(transport(requests, format("first")),
             downloader = YouTubeDownloader { plan, destination, _ ->
-                transferStarts.incrementAndGet()
+                transferStarts.update { it + 1 }
                 transfers += plan.primary.url.orEmpty()
                 entered.complete(Unit)
                 release.await()
@@ -177,7 +178,7 @@ class YouTubePreparedDownloadGatewayTest {
             assertIs<VeyraException>(refused)
             assertEquals(AppFailure(FailureCode.INVALID_STATE, "YOUTUBE_PREPARED_DOWNLOAD_CONSUMED"),
                 refused.failure)
-            assertEquals(1, transferStarts.get(), "Exactly one transfer may consume the capability")
+            assertEquals(1, transferStarts.value, "Exactly one transfer may consume the capability")
             assertEquals(1, transfers.size)
             assertEquals(1, requests.size, "No extra inspection/source work for the losing caller")
         } finally { source.close() }
@@ -300,11 +301,11 @@ class YouTubePreparedDownloadGatewayTest {
         var now = Clock.System.now().toEpochMilliseconds()
         val usable = now / 1_000 + 3_600
         val requests = mutableListOf<ResearchRequest>()
-        val transferAttempts = AtomicInteger()
+        val transferAttempts = MutableStateFlow(0)
         val source = YouTubeMediaSource(YouTubeClient(transport(requests,
             format("a", bitrate = 128_000, expire = usable),
             format("b", bitrate = 192_000, expire = usable)), downloader = YouTubeDownloader { _, _, _ ->
-            transferAttempts.incrementAndGet()
+            transferAttempts.update { it + 1 }
             throw IllegalStateException("The media link is no longer available. Inspect the video again and retry.")
         }), nowEpochMs = { now })
         val gateway = YouTubeKmpMediaGateway(source)
@@ -317,12 +318,12 @@ class YouTubePreparedDownloadGatewayTest {
             assertEquals(FailureCode.RECOVERY_REQUIRED, failure.failure.code)
             assertEquals("YOUTUBE_SELECTED_TRACK_CHANGED", failure.failure.detail,
                 "The renewed URL is usable; refusal is the exact same-key representation mismatch")
-            assertEquals(1, transferAttempts.get())
+            assertEquals(1, transferAttempts.value)
             assertEquals(2, requests.size, "One total renewal lookup, never a second search")
             now = usable * 1_000 + 60_000
             assertFailsWith<VeyraException> { gateway.download(prepared, "authored-stage.m4a") { } }
             assertEquals(2, requests.size)
-            assertEquals(1, transferAttempts.get(), "The consumed capability never transfers again")
+            assertEquals(1, transferAttempts.value, "The consumed capability never transfers again")
         } finally { source.close() }
     }
 }
