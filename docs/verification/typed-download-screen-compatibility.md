@@ -16,6 +16,9 @@ execution and not a release claim. PR #4 remains draft; this branch is not merge
   (`Cover queued and cancelled typed surface rows`); its production code is identical to
   `0184e50185c158c6f1e99693dfad963cfb61112f` (`Connect typed downloads to existing music and
   podcast surfaces`).
+- Evidence was captured at that commit. Subsequent commits are documentation-only; rehashing all
+  tracked files shows only this document differs from the tested input set, so production/test
+  hashes remain exactly equal.
 - Local branch: `t3/typed-download-screen-compat`; pushed as the scoped stacked branch
   `t3/pr4-typed-download-screen-compatibility`; PR base `t3/typed-room-download-recovery`.
 - Accepted launch settings: OpenCode provider `opencode`, model
