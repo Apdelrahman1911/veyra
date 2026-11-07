@@ -417,6 +417,39 @@ class AcquisitionCoordinatorTest {
         assertEquals(1, rig.gateway.acquisitions.size)
     }
 
+    @Test fun blockedPageWithAValidFirstReceiptStaysUnplayableAcrossRestoreAndCannotBind() = runTest {
+        val rig = Rig()
+        val occurrence = rig.admit()
+        val raw = FirstResultObservation(occurrence.requestId!!, rig.repository.state.value.requests.getValue(
+            occurrence.requestId!!).request.completeTitle,
+            SourceEntry(AcquisitionEntryKind.VIDEO, "ABCDEFGHIJK", "Actual first video title",
+                "https://www.youtube.com/watch?v=ABCDEFGHIJK"), "https://www.youtube.com/watch?v=ABCDEFGHIJK")
+        rig.gateway.acquireResult = { SourceAcquisitionResult.Unplayable(it.id, raw,
+            AcquisitionProblem(AcquisitionProblemCode.FIRST_RESULT_UNAVAILABLE)) }
+        val accepted = assertIs<AcquisitionResolution.Accepted>(rig.resolveCurrent())
+        val failure = assertIs<AcquisitionOutcome.Unplayable>(accepted.record.outcome)
+        assertEquals(AcquisitionFailureStage.SELECTION, failure.stage)
+        assertEquals(raw, rig.repository.state.value.receipts.getValue(assertNotNull(failure.receiptId))
+            .let { (it as FirstResultReceipt.Observed).observation })
+        assertTrue(rig.repository.state.value.bindings.isEmpty())
+        assertEquals(OccurrenceSelectionState.UNPLAYABLE,
+            rig.repository.state.value.occurrences.getValue(occurrence.id).selectionState)
+        // Room-only restore returns the same immutable outcome; no binding/occurrence is invented.
+        val restored = rig.coordinator.restore()
+        assertEquals(accepted.record, restored.requests.getValue(accepted.record.request.id))
+        assertEquals(failure, restored.requests.getValue(accepted.record.request.id).outcome)
+        assertEquals(AcquisitionFailureStage.SELECTION, restored.requests.getValue(accepted.record.request.id)
+            .outcome.let { assertIs<AcquisitionOutcome.Unplayable>(it).stage })
+        assertTrue(restored.bindings.isEmpty())
+        assertFailsWith<VeyraException> {
+            rig.coordinator.boundOccurrence(occurrence.id, ExecutionBindingId("authored-missing-binding"))
+        }
+        // A repeated resolve is not a second source query and cannot promote the blocked page.
+        assertIs<AcquisitionResolution.Accepted>(rig.coordinator.resolve(accepted.record.request.id))
+        assertEquals(1, rig.gateway.acquisitions.size)
+        assertTrue(rig.repository.state.value.bindings.isEmpty())
+    }
+
     @Test fun aDefensivelyRejectedSavedMemberWithoutAFirstReceiptIsAnAdmissionFailure() = runTest {
         val rig = Rig()
         rig.admit(rig.captures.member(authoredSnapshot(), 0))
