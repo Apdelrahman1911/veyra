@@ -359,7 +359,7 @@ class DownloadMaintenanceRoomTest {
         assertEquals(intent.finalPath, assertNotNull(recovered.asset).uri)
         assertEquals(0, owner.gateway.transfers.size, "Local recovery never issues a source transfer")
         assertEquals(1, owner.selector.requests.size)
-        assertEquals(1, owner.gate.closes.get())
+        awaitCondition { owner.gate.closes.get() >= 1 }
         val oldExpiration: suspend () -> Unit = owner.gate.expirations[0]
         val (id, selection) = enqueue(owner, item("after-recovery"), "AFTERRECOV1")
         holding.entered.await()
@@ -375,7 +375,8 @@ class DownloadMaintenanceRoomTest {
         holding.release()
         complete(owner, id)
         assertEquals(1, owner.gateway.transfers.size)
-        assertEquals(2, owner.gate.expirations.size)
+        assertEquals(2, owner.gate.closes.get())
+        assertEquals(2, owner.gate.expirations.size, "The queued recovery callback cannot start a second selection")
         assertEquals(2, owner.selector.requests.size, "The queued recovery callback cannot start a second selection")
         assertTrue(owner.selector.requests.contains(selection.record.request))
         owner.legacy.assertUnused()
