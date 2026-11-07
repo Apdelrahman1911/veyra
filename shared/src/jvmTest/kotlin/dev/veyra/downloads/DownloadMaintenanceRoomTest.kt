@@ -369,7 +369,9 @@ class DownloadMaintenanceRoomTest {
             val pending = join(owner, id)
             fail("fresh transfer did not start: status=${pending.job.status} lease=${pending.job.leaseOwner} " +
                 "failure=${pending.job.failure} plan=${a.schedulingPlan()} last=${a.lastFailure.value} " +
-                "pendingWork=${a.hasPendingWork.value} scheduled=${a.schedulingPlan().nextNetworkEpochMs}")
+                "pendingWork=${a.hasPendingWork.value} scheduled=${a.schedulingPlan().nextNetworkEpochMs} " +
+                "events=${owner.events.toList()} validations=${owner.validations.size} " +
+                "producer=${pending.job.producer}")
         }
         val before = owner.store.acquisitionView().acquisition.physicalDownloads.getValue(id)
         oldExpiration()
