@@ -385,8 +385,7 @@
     "executedPassed": 0,
     "executedFailed": 0,
     "excluded": 3,
-    "configured": 1,
-    "remoteEphemeralTasks": 40
+    "configured": 1
   },
   "ownerDecisions": [
     "Apple signing team/cert/profile for installable iOS IPA/TestFlight/App Store build, or explicit simulator-only/unsigned limitation.",
