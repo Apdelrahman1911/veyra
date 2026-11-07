@@ -7,11 +7,7 @@ import dev.veyra.data.PhysicalDownloadCommit
 import dev.veyra.playback.AssetValidation
 import dev.veyra.playback.AssetValidator
 import dev.veyra.playback.Clock
-import dev.veyra.playback.PlaybackResource
-import dev.veyra.playback.ResolvedPlayable
 import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.first
 import okio.FileSystem
 import okio.ForwardingFileSystem
@@ -39,11 +35,17 @@ class DownloadSchedulingRoomTest {
             // one historical completion, one durable network retry and one real failed
             // local finalization recheck with its documented 5 s deadline.
             val setup = owner()
-            val (historicalId, _) = complete(setup, "authored-historical")
-            val (waitingId, _) = runtimeRetry(setup, retryAfterMs = 86_400_000, label = "authored-waiting")
+            val (historicalId, _) = complete(setup, "authored-historical", video = "HISTORIC001")
+            val (waitingId, _) = runtimeRetry(setup, retryAfterMs = 86_400_000, label = "authored-waiting",
+                video = "WAITING0001")
+            // One scheduling host at a time: the cold finalization/recheck owner must not race
+            // the already-started setup worker for the same canonical jobs.
+            setup.coordinator.close()
             val completing = owner(setup.store)
             val finishing = prepareFinalizationSchema3(completing)
-            completing.validation = { throw IOException("authored local recheck failure") }
+            completing.validation = {
+                throw VeyraException(AppFailure(FailureCode.STORAGE_IO, "authored_local_recheck_failure"))
+            }
             completing.coordinator.start(DownloadActivation.DURABLE_WORK)
             val recheck = awaitState(completing.store) { state ->
                 state.physicalDownloads[finishing.record.id]?.let { job ->
@@ -67,11 +69,20 @@ class DownloadSchedulingRoomTest {
                 assertEquals(networkDeadline, plan.nextNetworkEpochMs)
                 assertFalse(plan.hasDueWork)
                 assertIs<DownloadIdleDecision.Deferred>(cold.coordinator.idleDecision())
-                assertEquals(DownloadStatus.VERIFYING, cold.coordinator.physicalStates.value[historicalId]?.status)
+                // Historical publication is a durable receipt, never a current-process check.
+                withTimeout(5_000) {
+                    cold.coordinator.physicalStates.first { it[historicalId]?.status == DownloadStatus.VERIFYING }
+                }
                 assertEquals(DownloadStatus.COMPLETE, cold.store.acquisitionView().acquisition.physicalDownloads.getValue(historicalId).status)
                 assertEquals(1, completing.validations.size)
                 assertEquals(1, completing.gate.acquires.get())
                 assertEquals(0, fileCalls.get())
+                assertEquals(0, cold.validations.size)
+                assertEquals(0, cold.gate.acquires.get())
+                assertEquals(0, cold.coverageChecks.get())
+                assertEquals(0, cold.selector.requests.size)
+                assertTrue(cold.gateway.preparations.isEmpty())
+                assertTrue(cold.gateway.transfers.isEmpty())
                 cold.legacy.assertUnused()
                 completing.legacy.assertUnused()
             } finally { armed.set(false) }
@@ -80,11 +91,12 @@ class DownloadSchedulingRoomTest {
 
     @Test fun durableActivationDoesNotScanHistoricalAssetsAndUserUpgradeIsMonotonic() {
         val armed = AtomicBoolean()
-        val fileReadsAndLists = AtomicInteger()
+        val historicalSourceReads = AtomicInteger()
         val observedFiles = object : ForwardingFileSystem(FileSystem.SYSTEM) {
             override fun onPathParameter(path: okio.Path, functionName: String, parameterName: String): okio.Path {
-                if (armed.get() && (functionName == "source" || functionName.startsWith("list")))
-                    fileReadsAndLists.incrementAndGet()
+                // The existing reconciler may list the metadata-only retired-staging directory;
+                // that is not a historical asset integrity scan. Reading historical bytes is.
+                if (armed.get() && functionName == "source") historicalSourceReads.incrementAndGet()
                 return path
             }
         }
@@ -93,6 +105,7 @@ class DownloadSchedulingRoomTest {
             val (id, _) = complete(setup, "authored-durable-history")
             val historical = setup.store.acquisitionView().acquisition.physicalDownloads.getValue(id)
             assertEquals(DownloadStatus.COMPLETE, historical.status)
+            setup.coordinator.close()
             val validating = barrier()
             val cold = owner(setup.store)
             cold.validation = { validating.stop(); AssetValidation.Valid(31_234) }
@@ -102,9 +115,10 @@ class DownloadSchedulingRoomTest {
                 // DURABLE activation must not authorize a historical integrity scan.
                 assertIs<DownloadIdleDecision.Deferred>(cold.coordinator.idleDecision())
                 delay(160) // Bounded observation; the eventual user check below proves the worker is active.
-                assertEquals(0, fileReadsAndLists.get())
+                assertEquals(0, historicalSourceReads.get())
                 assertEquals(0, cold.validations.size)
                 assertEquals(0, cold.gate.acquires.get())
+                assertEquals(0, cold.coverageChecks.get())
                 assertEquals(DownloadStatus.VERIFYING, cold.coordinator.physicalStates.value[id]?.status)
                 cold.coordinator.start(DownloadActivation.USER_SESSION)
                 validating.entered.await()
@@ -119,7 +133,7 @@ class DownloadSchedulingRoomTest {
                 // USER_SESSION also admits the moved-from staging-directory sweep. Its separate
                 // legitimate allowance is not a second validation of this historical asset.
                 assertTrue(cold.gate.acquires.get() >= 1)
-                assertTrue(fileReadsAndLists.get() > 0)
+                assertTrue(historicalSourceReads.get() > 0)
                 cold.legacy.assertUnused()
             } finally { armed.set(false) }
         }
@@ -477,17 +491,27 @@ class DownloadSchedulingRoomTest {
     }
 
     @Test fun cancellingIndependentBackgroundDrainCannotSkipJoiningPendingNativeAcquisition() = executorSchema3Case {
-        val owner = owner()
-        val transferring = CompletableDeferred<Unit>()
-        val nativeClosing = barrier()
-        owner.gateway.transfer = { call ->
-            call.write(); transferring.complete(Unit)
-            try { awaitCancellation() }
-            finally { withContext(NonCancellable) { nativeClosing.stop() } }
+        val acquiring = CompletableDeferred<Unit>()
+        val nativeAnswer = CompletableDeferred<Unit>()
+        val nativeClosed = CompletableDeferred<Unit>()
+        val nativeAcquires = AtomicInteger()
+        // A REAL pending execution-gate acquisition (before prepare/transfer). The host answer is
+        // released only after the cancelled drain caller is proven still owing the join.
+        val gate = object : DownloadExecutionGate {
+            override suspend fun acquire(onExpiration: suspend () -> Unit): DownloadExecutionLease {
+                nativeAcquires.incrementAndGet()
+                acquiring.complete(Unit)
+                nativeAnswer.await()
+                return DownloadExecutionLease {
+                    withContext(NonCancellable) { nativeClosed.complete(Unit) }
+                }
+            }
         }
+        val owner = owner(executionGate = gate)
         val (id, _) = enqueue(owner)
+        val selectionsBefore = owner.selector.requests.size
         owner.coordinator.start(DownloadActivation.DURABLE_WORK)
-        transferring.await()
+        acquiring.await()
         coroutineScope {
             val callerFinished = AtomicBoolean()
             val draining = launch(start = CoroutineStart.UNDISPATCHED) {
@@ -495,21 +519,30 @@ class DownloadSchedulingRoomTest {
                 finally { callerFinished.set(true) }
             }
             try {
-                nativeClosing.entered.await()
+                // Accept the drain and cancel ONLY its caller. The caller's cancellation must not
+                // discard the accepted join while the native acquisition is still pending.
                 draining.cancel()
                 assertNull(withTimeoutOrNull(100) { draining.join(); true }, "Cancelled caller still owes the accepted join")
                 assertFalse(callerFinished.get())
                 assertEquals(DownloadIdleDecision.OwnedWork, owner.coordinator.idleDecision())
-                nativeClosing.release()
+                // Release the real pending native acquisition; its allowance close is observed
+                // before the drain may acknowledge its joined owner.
+                nativeAnswer.complete(Unit)
+                nativeClosed.await()
                 draining.join()
                 assertTrue(draining.isCancelled)
                 assertTrue(callerFinished.get())
-            } finally { nativeClosing.release() }
+            } finally { nativeAnswer.complete(Unit) }
         }
         val drained = join(owner, id)
         assertEquals(DownloadStatus.NEEDS_FOREGROUND, drained.job.status)
         assertNull(drained.job.leaseOwner)
         assertIs<DownloadIdleDecision.Deferred>(owner.coordinator.idleDecision())
+        assertEquals(1, nativeAcquires.get())
+        assertTrue(nativeClosed.isCompleted)
+        assertTrue(owner.gateway.prepareCalls.isEmpty())
+        assertTrue(owner.gateway.transfers.isEmpty())
+        assertEquals(selectionsBefore, owner.selector.requests.size, "Drain must not re-query the source")
         owner.legacy.assertUnused()
     }
 
@@ -545,23 +578,32 @@ class DownloadSchedulingRoomTest {
                         assertFalse(resourceClosed.get())
                         assertFalse(allowanceClosed.get())
                         resourceClosing.release()
-                        assertEquals(unknown::class, assertNotNull(draining.await().exceptionOrNull())::class)
+                        val drainResult = draining.await()
+                        owner.coordinator.lastFailure.value?.let { owner.expectedCloseFailure = it }
+                        assertEquals(unknown::class, assertNotNull(drainResult.exceptionOrNull())::class)
                     } finally { resourceClosing.release() }
                 }
                 assertTrue(resourceClosed.get())
                 assertTrue(allowanceClosed.get())
+                assertTrue(finishAttempted.get(), "The real post-COMMIT checkpoint fault must have run before the no-ACK result")
                 assertNull(join(owner, id).job.leaseOwner)
                 assertNotNull(probeFiles.tryTransferSlot(1)).close()
-                val restriction = AppFailure(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_failed_restart_required")
-                assertEquals(restriction, owner.coordinator.lastFailure.value)
-                assertEquals(restriction, owner.coordinator.schedulingPlan().blockedReason)
+                val actualRestriction = assertNotNull(owner.coordinator.lastFailure.value)
+                assertEquals(FailureCode.BACKGROUND_RESTRICTED, actualRestriction.code)
+                // The stale plan is blocked by the typed host's sanitized background restriction;
+                // the retry commands below must all reject with the SAME first sticky failure.
+                assertEquals(FailureCode.BACKGROUND_RESTRICTED,
+                    assertNotNull(owner.coordinator.schedulingPlan().blockedReason).code)
                 for (retry in listOf<suspend () -> Unit>(
                     { owner.coordinator.resumePending() }, { owner.coordinator.drainForBackground(); Unit }, { owner.coordinator.idleDecision(); Unit },
                 )) {
-                    assertEquals(restriction, assertFailsWith<VeyraException> { retry() }.failure)
+                    assertEquals(actualRestriction, assertFailsWith<VeyraException> { retry() }.failure)
                 }
                 assertEquals(1, owner.gateway.transfers.size)
-                assertEquals(restriction, owner.coordinator.lastFailure.value, "Rejected retries retain the first visible typed failure")
+                assertEquals(actualRestriction, owner.coordinator.lastFailure.value, "Rejected retries retain the first visible typed failure")
+                // The sticky typed drain failure above is expected; teardown must still prove
+                // every real owner closed positively rather than hiding that receipt.
+                owner.expectedCloseFailure = actualRestriction
             }
         }
     }
@@ -619,6 +661,9 @@ class DownloadSchedulingRoomTest {
 
     @Test fun unrelatedPlaybackProgressAndPresentationChangesDoNotStarveIdleRetirement() = acquisitionDownloadRoomCase {
         val host = owner()
+        host.store.upsertCatalog(listOf(MediaItem("authored-progress", "Authored unrelated progress — تقدم غير مرتبط",
+            MediaKind.MUSIC, SourceRef(SourceProvider.COMMONS, "original-authored-progress",
+                canonicalUrl = "https://commons.wikimedia.org/wiki/File:authored-progress")))).getOrThrow()
         val (id, _) = runtimeRetry(host, retryAfterMs = 86_400_000)
         val scheduler = host.coordinator
         scheduler.initializeScheduling()
@@ -626,7 +671,8 @@ class DownloadSchedulingRoomTest {
         val priorRevision = host.store.acquisitionView().snapshot.revision
         repeat(3) { index ->
             // Typed scheduling deliberately zeroes progress/bytes from its canonical inputs.
-            // A separate real Room connection still publishes unrelated presentation rows.
+            // A separate real Room connection still publishes unrelated playback progress
+            // and download presentation rows; legal snapshot edits still handle theme/nav.
             mutateUnrelatedDownloadPresentation(host, id, index)
             host.store.update { snapshot -> snapshot.copy(
                 settings = snapshot.settings.copy(textScale = 1.5f, theme = ThemeMode.DARK),
@@ -651,6 +697,9 @@ class DownloadSchedulingRoomTest {
                     it.bindText(4, id)
                     it.step()
                 }
+                connection.execSQL("INSERT OR REPLACE INTO media_progress(mediaId, positionMs, durationMs, played, " +
+                    "updatedEpochMs, sessionId, generation, sequence, executionBindingId) VALUES('authored-progress', " +
+                    "${index * 1_000L}, NULL, 0, ${owner.fixture.clock.epochMs() + index}, 'authored-session', $index, $index, NULL)")
                 connection.execSQL("UPDATE store_meta SET revision = revision + 1 WHERE id = 0")
                 connection.execSQL("COMMIT")
             } catch (error: Throwable) {
@@ -662,25 +711,23 @@ class DownloadSchedulingRoomTest {
 
     @Test fun anotherRoomConnectionCanInvalidateTicketEvenWhenItsInvalidationHintIsUnavailable() = acquisitionDownloadRoomCase {
         val writer = owner()
-        val (id, _) = runtimeRetry(writer, retryAfterMs = 86_400_000, label = "authored-cross-connection")
-        val originalDeadline = assertNotNull(join(writer, id).job.nextRetryEpochMs)
+        val (firstId, _) = runtimeRetry(writer, retryAfterMs = 86_400_000, label = "authored-cross-connection",
+            video = "CROSSREC001")
+        val originalDeadline = assertNotNull(join(writer, firstId).job.nextRetryEpochMs)
         val reader = owner(store(suppressInvalidationHints = true))
         val scheduler = reader.coordinator
         scheduler.initializeScheduling()
         val candidate = assertIs<DownloadIdleDecision.Deferred>(scheduler.idleDecision())
         // Another real Room connection publishes a genuinely earlier retry through one actual
-        // failing typed transfer; no row is fabricated.
-        writer.gateway.transfer = { prepared, path, _ ->
-            Files.write(Path.of(path), authoredBytes)
-            throw VeyraException(AppFailure(FailureCode.RATE_LIMITED, "authored_cross_connection_retry", retryAfterMs = 2_000))
-        }
-        writer.coordinator.resume(id)
+        // failing typed transfer on a second canonical subject; no row is fabricated.
+        val (earlierId, _) = runtimeRetry(writer, retryAfterMs = 2_000, label = "authored-cross-connection-sooner",
+            video = "CROSSREC002")
         val earlier = awaitState(writer.store) { state ->
-            state.physicalDownloads[id]?.let { it.status == DownloadStatus.WAITING_NETWORK && it.leaseOwner == null &&
+            state.physicalDownloads[earlierId]?.let { it.status == DownloadStatus.WAITING_NETWORK && it.leaseOwner == null &&
                 it.nextRetryEpochMs == writer.fixture.clock.epochMs() + 2_000 } == true
         }
-        val earlierDeadline = assertNotNull(earlier.physicalDownloads.getValue(id).nextRetryEpochMs)
-        assertEquals(originalDeadline, reader.store.acquisitionViews.value.acquisition.physicalDownloads[id]?.nextRetryEpochMs,
+        val earlierDeadline = assertNotNull(earlier.physicalDownloads.getValue(earlierId).nextRetryEpochMs)
+        assertEquals(originalDeadline, reader.store.acquisitionViews.value.acquisition.physicalDownloads[firstId]?.nextRetryEpochMs,
             "The reader is deliberately stale; only an authoritative Room read can notice this write")
         assertFalse(scheduler.confirmIdle(candidate.ticket) { error("A stale wake plan cannot retire") })
         val fresh = scheduler.schedulingPlan()
@@ -688,38 +735,43 @@ class DownloadSchedulingRoomTest {
         assertNotEquals(candidate.plan.key, fresh.key)
     }
 
-    @Test fun enqueueResumeCancelAndPolicyChangesDuringWakeAckInvalidateOldTicket() = acquisitionDownloadRoomCase {
-        val setup = owner()
-        val waiting = (0 until 3).map { index ->
-            runtimeRetry(setup, retryAfterMs = 86_400_000, label = "authored-wake-mutation-$index").first
-        }
-        setup.coordinator.close()
-        val host = owner(setup.store)
-        val scheduler = host.coordinator
-        scheduler.initializeScheduling()
-        suspend fun checkMutation(mutate: suspend () -> Unit) {
+    @Test fun enqueueResumeCancelAndPolicyChangesDuringWakeAckInvalidateOldTicket() {
+        // Each mutation gets its own real fixture so a refused wake ACK cannot be papered over by
+        // resetting the canonical rows to a shared manufactured state between attempts.
+        for (mutation in listOf("enqueue", "resume", "cancel", "policy", "pause")) acquisitionDownloadRoomCase {
+            val setup = owner()
+            val waiting = (0 until 3).map { index ->
+                runtimeRetry(setup, retryAfterMs = 86_400_000, label = "authored-wake-mutation-$mutation-$index",
+                    video = ("WAKE" + mutation.uppercase() + index).take(10).padEnd(11, 'Z')).first
+            }
+            setup.coordinator.close()
+            val host = owner(setup.store)
+            val scheduler = host.coordinator
+            scheduler.initializeScheduling()
             val candidate = assertIs<DownloadIdleDecision.Deferred>(scheduler.idleDecision())
             val publishing = barrier()
             val calls = AtomicInteger()
             coroutineScope {
                 val retired = async { publishing.stop(); scheduler.confirmIdle(candidate.ticket) { calls.incrementAndGet(); true } }
                 publishing.entered.await()
-                mutate()
+                when (mutation) {
+                    "enqueue" -> enqueue(host, acceptNeutral(host, "authored-wake-enqueue", "WAKEENQ0001"))
+                    "resume" -> host.coordinator.resume(waiting[0])
+                    "cancel" -> host.coordinator.cancel(waiting[1])
+                    "policy" -> host.store.update { it.copy(settings = it.settings.copy(offlineOnly = true)) }.getOrThrow()
+                    "pause" -> host.coordinator.pauseForBackground()
+                    else -> error("Unknown authored wake mutation")
+                }
                 publishing.release()
-                assertFalse(retired.await())
+                assertFalse(retired.await(), "$mutation during wake ACK must invalidate the old ticket")
             }
             assertEquals(0, calls.get())
         }
-        val newItem = acceptNeutral(host, "authored-wake-enqueue")
-        checkMutation { enqueue(host, newItem) }
-        checkMutation { host.coordinator.resume(waiting[0]) }
-        checkMutation { host.coordinator.cancel(waiting[1]) }
-        checkMutation { host.store.update { it.copy(settings = it.settings.copy(offlineOnly = true)) }.getOrThrow() }
-        checkMutation { host.coordinator.pauseForBackground() }
     }
 
     @Test fun connectedDueWorkAndHostEpochChangesInvalidateDeferredTickets() = acquisitionDownloadRoomCase {
         val host = owner()
+        host.network.value = DownloadNetworkState.DISCONNECTED
         queued(host) // Accepted durable intent, but the host is never started.
         val scheduler = host.coordinator
         scheduler.initializeScheduling()
@@ -765,7 +817,8 @@ class DownloadSchedulingRoomTest {
             override fun monotonicMs(): Long = baseClock.monotonicMs()
         }
         val setup = owner()
-        runtimeRetry(setup, retryAfterMs = 2_000, label = "authored-crossing-plan")
+        val (id, _) = runtimeRetry(setup, retryAfterMs = 2_000, label = "authored-crossing-plan")
+        assertEquals(deadline, join(setup, id).job.nextRetryEpochMs)
         setup.coordinator.close()
         val host = owner(setup.store, schedulerClock = crossingClock)
         val scheduler = host.coordinator
@@ -805,10 +858,10 @@ class DownloadSchedulingRoomTest {
         val owner = owner()
         parallelism(owner, 1)
         val (id, _) = enqueue(owner)
+        val selectionsBefore = owner.selector.requests.size
         files.initialize()
         val held = assertNotNull(probeFiles.tryTransferSlot(1))
         releaseOnClose += { held.close() }
-        val calls = AtomicInteger()
         val scheduler = owner.coordinator
         scheduler.start(DownloadActivation.DURABLE_WORK)
         val delays = listOf(5_000L, 10_000L, 20_000L, 40_000L, 60_000L, 60_000L)
@@ -821,6 +874,7 @@ class DownloadSchedulingRoomTest {
             assertEquals(0, join(owner, id).job.attemptCount)
             assertTrue(owner.gateway.prepareCalls.isEmpty())
             assertTrue(owner.gateway.transfers.isEmpty())
+            assertEquals(selectionsBefore, owner.selector.requests.size)
             if (index != delays.lastIndex) advance(delay)
         }
         assertNull(probeFiles.tryTransferSlot(1), "Failed contenders must not release the existing slot owner")
@@ -830,6 +884,7 @@ class DownloadSchedulingRoomTest {
         delay(120)
         assertTrue(owner.gateway.prepareCalls.isEmpty())
         assertTrue(owner.gateway.transfers.isEmpty())
+        assertEquals(selectionsBefore, owner.selector.requests.size)
         advance(1)
         complete(owner, id)
         assertEquals(1, owner.gate.acquires.get())
@@ -865,6 +920,8 @@ class DownloadSchedulingRoomTest {
     @Test fun rolledBackAcquisitionClaimReleasesFilesAndDefersInsteadOfKeepingAnEmptyOwnerAlive() = executorSchema3Case {
         val owner = owner()
         val (id, _) = enqueue(owner)
+        val selectionsBefore = owner.selector.requests.size
+        val beforeClaim = join(owner, id)
         val blocked = AtomicBoolean(true)
         val fault = faults(owner.store)
         fault.beforeCommit = { before, next ->
@@ -876,8 +933,10 @@ class DownloadSchedulingRoomTest {
         scheduler.start(DownloadActivation.DURABLE_WORK)
         scheduler.awaitPlan { it.nextLocalEpochMs == clock.epochMs() + 5_000 && !it.hasDueWork }
         val unchanged = owner.store.acquisitionView().acquisition
+        assertEquals(beforeClaim.job, unchanged.physicalDownloads.getValue(id))
         assertEquals(DownloadStatus.QUEUED, unchanged.physicalDownloads.getValue(id).status)
         assertTrue(unchanged.physicalAttempts.values.none { it.downloadId == id })
+        assertEquals(selectionsBefore, owner.selector.requests.size)
         assertNotNull(probeFiles.tryTransferSlot(1)).close()
         assertEquals(0, owner.gate.acquires.get())
         assertTrue(owner.gateway.prepareCalls.isEmpty())
@@ -892,6 +951,7 @@ class DownloadSchedulingRoomTest {
     @Test fun failedExpiredLeaseRecoveryIsDeferredWithoutForgingAcknowledgementOrStartingSource() = executorSchema3Case {
         val owner = owner()
         val (id, _) = enqueue(owner)
+        val selectionsBefore = owner.selector.requests.size
         val foreign = foreignClaim(owner, id, leaseDurationMs = 1_000)
         foreign.releasePhysicalAsAuthoredCrash()
         advance(1_100)
@@ -912,6 +972,7 @@ class DownloadSchedulingRoomTest {
         assertEquals(0, owner.gate.acquires.get())
         assertTrue(owner.gateway.prepareCalls.isEmpty())
         assertTrue(owner.gateway.transfers.isEmpty())
+        assertEquals(selectionsBefore, owner.selector.requests.size)
         assertIs<DownloadIdleDecision.Deferred>(scheduler.idleDecision())
         blocked.set(false)
         advance(5_000)
@@ -958,8 +1019,10 @@ class DownloadSchedulingRoomTest {
     @Test fun failedCleanupBackoffPersistenceStillDefersLocallyAndRetainsAllDurableReferences() {
         val target = AtomicReference<String?>()
         val blocked = AtomicBoolean(true)
+        val deleteCalls = AtomicInteger()
         val filesWithFailure = object : ForwardingFileSystem(FileSystem.SYSTEM) {
             override fun onPathParameter(path: okio.Path, functionName: String, parameterName: String): okio.Path {
+                if (functionName == "delete" && path.toString() == target.get()) deleteCalls.incrementAndGet()
                 if (blocked.get() && functionName == "delete" && path.toString() == target.get())
                     throw IOException("Authored cleanup deletion failure")
                 return path
@@ -969,15 +1032,20 @@ class DownloadSchedulingRoomTest {
             val owner = owner()
             val (id, _) = complete(owner, "authored-cleanup-backoff")
             val asset = assertNotNull(join(owner, id).asset)
+            val preparationsAfterComplete = owner.gateway.preparations.size
+            val transfersAfterComplete = owner.gateway.transfers.size
             target.set(asset.uri)
             // Accepted removable intent through the same canonical commands as remove(), but
             // BEFORE any cleanup owner runs, so the first actual deletion is scheduler-driven.
             val before = join(owner, id)
             val claim = before.claims.single { it.owner is DownloadClaimOwner.Standalone }
             val updated = assertIs<PhysicalDownloadCommit.Committed<PhysicalDownloadJoin>>(
-                owner.repository.updateStandaloneDownloadIntent(UpdateStandaloneDownloadIntent(id, before.job.producer,
-                    before.job.ownershipGeneration, claim.id, claim.generation, claim.ownerIntentRevision,
-                    DownloadBatchIntent.CANCELLED, retain = false, clock.epochMs(), allowRetryFailure = false))).value
+                owner.repository.updateStandaloneDownloadIntent(UpdateStandaloneDownloadIntent(
+                    downloadId = id, expectedProducer = before.job.producer,
+                    expectedOwnershipGeneration = before.job.ownershipGeneration, claimId = claim.id,
+                    expectedClaimGeneration = claim.generation, expectedOwnerIntentRevision = claim.ownerIntentRevision,
+                    intent = DownloadBatchIntent.CANCELLED, retainCompletedAsset = false,
+                    nowEpochMs = clock.epochMs(), allowRetryFailure = false))).value
             assertIs<PhysicalDownloadCommit.Committed<PhysicalDownloadJoin>>(
                 owner.repository.reconcilePhysicalDownloadIntent(ReconcilePhysicalDownloadIntent(id, updated.job.producer,
                     updated.job.ownershipGeneration, updated.claims, clock.epochMs())))
@@ -988,8 +1056,11 @@ class DownloadSchedulingRoomTest {
             }
             val scheduler = owner.coordinator
             scheduler.start(DownloadActivation.DURABLE_WORK)
-            scheduler.awaitPlan { it.nextLocalEpochMs != null && !it.hasDueWork }
-            assertIs<DownloadIdleDecision.Deferred>(scheduler.idleDecision())
+            scheduler.awaitPlan { it.nextLocalEpochMs == clock.epochMs() + 5_000 && !it.hasDueWork }
+            // A failed error-persistence transform leaves the REAL cleanup owner retained, so the
+            // typed host first owes that owner rather than reporting legacy-style idle:
+            // the bounded local recheck still defers all source/gate work.
+            assertIs<DownloadIdleDecision.OwnedWork>(scheduler.idleDecision())
             val retained = join(owner, id)
             assertTrue(retained.job.cleanupPending)
             assertTrue(retained.job.removeWhenClean)
@@ -997,19 +1068,35 @@ class DownloadSchedulingRoomTest {
             assertTrue(Files.exists(Path.of(asset.uri)))
             blocked.set(false)
             clock.advance(5_000)
-            awaitJob(owner, id) { !it.job.cleanupPending && it.asset == null }
+            // The typed host retains a failed cleanup owner. Explicit close consumes that exact
+            // owner (recording its unconfirmed durable receipt) instead of inventing a success;
+            // the durable cleanup reservation, asset and tombstone remain.
+            assertEquals(1, deleteCalls.get())
+            scheduler.close()
+            assertTrue(scheduler.dependencyReleaseSafeAfterClose)
+            val retainedAfterClose = join(owner, id)
+            assertTrue(retainedAfterClose.job.cleanupPending)
+            assertEquals(asset, retainedAfterClose.asset)
+            assertTrue(Files.exists(Path.of(asset.uri)))
+            // A genuinely separate host retries the retained canonical cleanup after its exact
+            // persisted/claim backoff. Only that actual deletion may clear the reservation.
+            val cold = owner(owner.store)
+            val retryAt = assertNotNull(retainedAfterClose.job.nextRetryEpochMs)
+            advance((retryAt - clock.epochMs()).coerceAtLeast(1))
+            cold.coordinator.start(DownloadActivation.DURABLE_WORK)
+            awaitJob(cold, id) { !it.job.cleanupPending && it.asset == null }
             assertFalse(Files.exists(Path.of(asset.uri)))
-            assertTrue(owner.gateway.preparations.isEmpty())
-            assertTrue(owner.gateway.transfers.isEmpty())
+            assertEquals(preparationsAfterComplete, owner.gateway.preparations.size,
+                "Cleanup retry must not prepare or re-source the removed asset")
+            assertEquals(transfersAfterComplete, owner.gateway.transfers.size,
+                "Cleanup retry must not transfer the removed asset")
+            assertTrue(cold.gateway.preparations.isEmpty())
+            assertTrue(cold.gateway.transfers.isEmpty())
+            assertTrue(owner.selector.requests.isEmpty())
+            assertTrue(cold.selector.requests.isEmpty())
             owner.legacy.assertUnused()
+            cold.legacy.assertUnused()
         }
-    }
-}
-
-private fun countingGate(calls: AtomicInteger) = object : DownloadExecutionGate {
-    override suspend fun acquire(onExpiration: suspend () -> Unit): DownloadExecutionLease {
-        calls.incrementAndGet()
-        return DownloadExecutionLease { }
     }
 }
 

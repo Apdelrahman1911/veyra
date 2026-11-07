@@ -56,10 +56,33 @@ internal class DownloadAcquisitionRoomFixture(fileSystem: FileSystem = FileSyste
         assertNotNull(owner.repository.physicalDownload(id))
 
     suspend fun awaitJob(owner: DownloadAcquisitionRoomOwner, id: String,
-        predicate: (PhysicalDownloadJoin) -> Boolean): PhysicalDownloadJoin = withTimeout(15_000) {
+        predicate: (PhysicalDownloadJoin) -> Boolean): PhysicalDownloadJoin {
         var value = join(owner, id)
-        while (!predicate(value)) { delay(10); value = join(owner, id) }
-        value
+        try {
+            withTimeout(15_000) { while (!predicate(value)) { delay(10); value = join(owner, id) } }
+        } catch (timeout: TimeoutCancellationException) {
+            throw AssertionError("Authored job $id did not settle; status=${value.job.status} " +
+                "lease=${value.job.leaseOwner} attempt=${value.activeAttempt?.id} " +
+                "failure=${value.job.failure} retry=${value.job.nextRetryEpochMs} " +
+                "cleanup=${value.job.cleanupPending} asset=${value.asset?.id}", timeout)
+        }
+        return value
+    }
+
+    suspend fun awaitState(store: LibraryStore, predicate: (AcquisitionRepositoryState) -> Boolean): AcquisitionRepositoryState {
+        var state = store.acquisitionView().acquisition
+        try {
+            withTimeout(15_000) {
+                while (!predicate(state)) { delay(10); state = store.acquisitionView().acquisition }
+            }
+        } catch (timeout: TimeoutCancellationException) {
+            val actual = store.acquisitionView().acquisition
+            throw AssertionError("Authored state did not become true; downloads=${
+                actual.physicalDownloads.values.joinToString { "${it.id}:${it.status}:lease=${it.leaseOwner}:attempt=${it.activeAttemptId}:failure=${it.failure}:retry=${it.nextRetryEpochMs}" }
+            }; attempts=${actual.physicalAttempts.values.size}", timeout)
+        }
+        assertTrue(predicate(state))
+        return state
     }
 
     /** Accepted immutable intent that has not started a native/source execution yet. */
@@ -74,15 +97,6 @@ internal class DownloadAcquisitionRoomFixture(fileSystem: FileSystem = FileSyste
             while (!predicate()) delay(10)
             assertTrue(predicate(), message)
         }
-    }
-
-    suspend fun awaitState(store: LibraryStore, predicate: (AcquisitionRepositoryState) -> Boolean): AcquisitionRepositoryState {
-        var state = store.acquisitionView().acquisition
-        withTimeout(15_000) {
-            while (!predicate(state)) { delay(10); state = store.acquisitionView().acquisition }
-        }
-        assertTrue(predicate(state))
-        return state
     }
 
     suspend fun idle(owner: DownloadAcquisitionRoomOwner): DownloadIdleDecision.Deferred {
@@ -119,8 +133,16 @@ internal class DownloadAcquisitionRoomFixture(fileSystem: FileSystem = FileSyste
         return accept(owner, request, authoredSingle(request, video))
     }
 
-    suspend fun enqueue(owner: DownloadAcquisitionRoomOwner, accepted: AcquisitionRecord): String =
-        owner.coordinator.enqueueAccepted(accepted.request.id, assertIs<AcquisitionOutcome.Single>(accepted.outcome).bindingId) { }
+    suspend fun enqueue(owner: DownloadAcquisitionRoomOwner, accepted: AcquisitionRecord): String {
+        val requestId = accepted.request.id
+        val bindingId = assertIs<AcquisitionOutcome.Single>(accepted.outcome).bindingId
+        return owner.coordinator.enqueueAccepted(requestId, bindingId) {
+            // Live canonical admission token: the accepted request must still be COMMITTED in the
+            // published same-owner state at the instant the command accepts durable intent.
+            check(owner.store.acquisitionViews.value.acquisition.requests[requestId]?.state ==
+                AcquisitionJobState.COMMITTED) { "Authored admission token is no longer current" }
+        }
+    }
 
     suspend fun complete(owner: DownloadAcquisitionRoomOwner, label: String = newEntityId("authored-parent"),
         video: String = "LMNOPQRSTUV"): Pair<String, AcquisitionRecord> {
