@@ -138,7 +138,7 @@ Earlier failures are preserved, not relabelled:
 | Run | Exit | Result | Log SHA-256 |
 |---|---:|---|---|
 | `run-001-compile` | 1 | offline plugin-resolution configuration failure; 0 tests | `0fd0b74c8607f9f0fb38fa316918e1a7bb8a2bbd125bfd96a4b291d2c9871629` |
-| `run-004-focused` | 1 | 51 tests / 1 failure: raw-SQL closed-row read | `af3f118082ff8c11e83c542e7e5a418d540478764f039c3f5563785761728cac` |
+| `run-004-focused` | 1 | 51 tests / 1 failure: raw-SQL `getText` after `step()` advanced past the row | `af3f118082ff8c11e83c542e7e5a418d540478764f039c3f5563785761728cac` |
 | `run-005-focused` | 1 | 51 tests / 1 failure: wrong `downloads.subjectId` unique error | `6c60e9a59b51db5b3c7a440cb3b855d7cdf5a74220b982f76c6b63467914838e` |
 | `run-006-focused` | 0 | 51 tests / 0 failures (intermediate) | `eb9004488b91409f706258ab5feacf4ea2f4b98059d75c8f18ed02dd36397eb7` |
 | `run-007-focused` | 0 | 51 tests / 0 failures after the typed saved-relation correction | `3f32eb06177b040de6ea2c5018a2b0a0626fbe371301d0168365fc934809691a` |
@@ -147,8 +147,11 @@ Earlier failures are preserved, not relabelled:
 The `run-009`/`run-010`/`run-011` manifest-capture attempts aborted before Gradle and are
 retained as `*-manifest-failure`; `run-012-final` is the exact committed-source verification.
 `compileKotlinJvm` was `UP-TO-DATE` in that run because main sources were unchanged from the
-successfully executed main compilation in `run-002`; `compileTestKotlinJvm` executed against the
-final test sources. The tested production and test hashes are unchanged by the later docs-only
+successfully executed main compilation in `run-002` (exit 0, log SHA-256
+`81aaded796c3127752d3b1bbd1c78b1bf63b1c7db0a5bfaf6712027ff491fbfb`);
+`compileTestKotlinJvm` executed in `run-012-final` against the final test sources. The earlier
+intermediate test compile after the first fixes is `run-003-compile` (exit 0, log SHA-256
+`8a7047c2827880f7151d6e53c1a5276be70c0ebd54274fb7d625a2e0daf54759`). The tested production and test hashes are unchanged by the later docs-only
 report commit.
 
 ## Limitations and remaining scope
