@@ -133,12 +133,23 @@ fresh XML was redirected with `-Dveyra.lead.evidence=`. All paths are project-lo
 - Schema export SHA-256 remains
   `aab30e43a35a431a25a7ecbb7ebccefd849811f688957054304b02d3caf6d367`.
 
-Earlier failures are preserved, not relabelled: `run-001-compile` (offline plugin resolution
-configuration failure), `run-004-focused` and `run-005-focused` (one `RoomLibraryStoreTest`
-failure each, first a raw-SQL closed-row read and then the wrong `downloads.subjectId` unique
-error), plus the `run-009`/`run-010`/`run-011` manifest-capture failures that aborted before
-Gradle. Passing intermediate runs `run-006`, `run-007` and `run-008` are retained too, but
-`run-012-final` is the exact committed-source verification.
+Earlier failures are preserved, not relabelled:
+
+| Run | Exit | Result | Log SHA-256 |
+|---|---:|---|---|
+| `run-001-compile` | 1 | offline plugin-resolution configuration failure; 0 tests | `0fd0b74c8607f9f0fb38fa316918e1a7bb8a2bbd125bfd96a4b291d2c9871629` |
+| `run-004-focused` | 1 | 51 tests / 1 failure: raw-SQL closed-row read | `af3f118082ff8c11e83c542e7e5a418d540478764f039c3f5563785761728cac` |
+| `run-005-focused` | 1 | 51 tests / 1 failure: wrong `downloads.subjectId` unique error | `6c60e9a59b51db5b3c7a440cb3b855d7cdf5a74220b982f76c6b63467914838e` |
+| `run-006-focused` | 0 | 51 tests / 0 failures (intermediate) | `eb9004488b91409f706258ab5feacf4ea2f4b98059d75c8f18ed02dd36397eb7` |
+| `run-007-focused` | 0 | 51 tests / 0 failures after the typed saved-relation correction | `3f32eb06177b040de6ea2c5018a2b0a0626fbe371301d0168365fc934809691a` |
+| `run-008-data` | 0 | 198 tests / 22 suites / 0 failures (intermediate data controls) | `bdb39d8ab72a52169611cdaedd400ff432c57ba73e2a3d09554a92bac96572fc` |
+
+The `run-009`/`run-010`/`run-011` manifest-capture attempts aborted before Gradle and are
+retained as `*-manifest-failure`; `run-012-final` is the exact committed-source verification.
+`compileKotlinJvm` was `UP-TO-DATE` in that run because main sources were unchanged from the
+successfully executed main compilation in `run-002`; `compileTestKotlinJvm` executed against the
+final test sources. The tested production and test hashes are unchanged by the later docs-only
+report commit.
 
 ## Limitations and remaining scope
 
