@@ -45,7 +45,9 @@ internal class DownloadMaintenancePortPersistence(private val room: RoomLibraryP
             beforeTransform(before)
             val mutation = try { transform(before) }
             catch (failure: Throwable) { transformFailure = failure; throw failure }
-            mutation.also { beforeCommit(before, it.graph) }
+            try { beforeCommit(before, mutation.graph) }
+            catch (failure: Throwable) { transformFailure = failure; throw failure }
+            mutation
         }
         afterCommit(committed.graph.state())
         return committed

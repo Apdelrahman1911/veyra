@@ -370,10 +370,7 @@ class DownloadMaintenanceRoomTest {
             }
         }
         port.beforeCommit = { _, next ->
-            val fresh = next.state().physicalDownloads.filterKeys { it != seeded.record.id }
-            if (fresh.isNotEmpty()) owner.events += "fresh-tx:" + fresh.values.joinToString {
-                "${it.status}/${it.representationId}/${it.stagingPath != null}/${it.activeAttemptId != null}"
-            }
+            owner.events += "commit-r${next.revision}"
         }
         val accepted = acceptNeutral(owner, "after-recovery", "AFTERRECOV1")
         val id = enqueue(owner, accepted)
