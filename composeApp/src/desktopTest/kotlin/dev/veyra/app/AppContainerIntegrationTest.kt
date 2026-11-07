@@ -157,7 +157,7 @@ class AppContainerIntegrationTest {
                 isLocal = source.isLocal,
                 representationId = source.representationId,
                 item = selection.catalogMedia,
-                executionBinding = selection.binding?.let { typed -> store.state.value.playbackBindings[typed.id.value] },
+                executionBinding = observationBinding(selection),
                 resource = source.resource,
             )
             val preparation = Preparation(observed, startPositionMs, generation)
@@ -165,6 +165,23 @@ class AppContainerIntegrationTest {
             prepared.send(preparation)
             callbacks.send(EngineEvent.Ready(generation, source.durationMs, seekable = true))
         }
+        private fun observationBinding(selection: PlaybackSelection): PlaybackBinding? {
+            val binding = selection.binding ?: return null
+            val receipt = selection.receipt as? FirstResultReceipt.Observed ?: return null
+            return PlaybackBinding(
+                binding.id.value,
+                selection.catalogMedia?.id ?: binding.subjectId.value,
+                selection.request?.completeTitle ?: receipt.observation.queryTitle,
+                FirstResultKind.VIDEO,
+                receipt.observation.entry.id ?: binding.recordingId?.value.orEmpty(),
+                receipt.observation.entry.title ?: "",
+                receipt.observation.canonicalUrl,
+                selection.executionContext?.recording?.canonicalId ?: receipt.observation.entry.id,
+                resolvedEpochMs = receipt.observedEpochMs,
+                selectionOrdinal = 0,
+            )
+        }
+
         override suspend fun awaitRetiredReaders(expectedGeneration: Long): NativeReaderDrainResult =
             NativeReaderDrainResult.Drained(expectedGeneration)
         override suspend fun play(generation: Long) = lock.withLock {
@@ -1838,6 +1855,7 @@ class AppContainerIntegrationTest {
         fixture.gateway.onFirst = { title ->
             KmpFirstResult(title, FirstResultKind.VIDEO, FIRST, firstTitle, "https://www.youtube.com/watch?v=$FIRST")
         }
+        fixture.gateway.onDownload = { transfer -> writeFakeTransfer(transfer) }
         fixture.app.onMusicAction(MusicUiAction.Download(track))
         val view = try {
             withTimeout(15_000) {
@@ -1847,7 +1865,7 @@ class AppContainerIntegrationTest {
             }
         } catch (timeout: TimeoutCancellationException) {
             fail("download timeout notice=${fixture.app.notice.value} init=${fixture.app.initialization.value} " +
-                "physical=${fixture.store.acquisitionViews.value.acquisition.physicalDownloads} " +
+                "physical=${fixture.store.acquisitionViews.value.acquisition.physicalDownloads.values.map { it.status to it.failure }} " +
                 "requests=${fixture.store.acquisitionViews.value.acquisition.requests} queries=${fixture.gateway.queries}")
         }
         val state = view.acquisition
