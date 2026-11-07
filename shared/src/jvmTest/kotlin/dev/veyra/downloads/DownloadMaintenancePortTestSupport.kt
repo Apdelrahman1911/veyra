@@ -34,12 +34,14 @@ import kotlin.test.assertTrue
 internal class DownloadMaintenancePortPersistence(private val room: RoomLibraryPersistence) :
     LibraryPersistence by room, AcquisitionPersistence by room {
     @Volatile var beforeCommit: (AcquisitionGraph, AcquisitionGraph) -> Unit = { _, _ -> }
+    @Volatile var beforeTransform: (AcquisitionGraph) -> Unit = { }
     @Volatile var afterCommit: suspend (AcquisitionRepositoryState) -> Unit = { }
 
     override suspend fun <T> transactAcquisition(
         transform: (AcquisitionGraph) -> AcquisitionMutation<T>,
     ): AcquisitionTransactionResult<T> {
         val committed = room.transactAcquisition { before ->
+            beforeTransform(before)
             transform(before).also { beforeCommit(before, it.graph) }
         }
         afterCommit(committed.graph.state())
@@ -48,6 +50,7 @@ internal class DownloadMaintenancePortPersistence(private val room: RoomLibraryP
 
     fun clearFaults() {
         beforeCommit = { _, _ -> }
+        beforeTransform = { }
         afterCommit = { }
     }
 }

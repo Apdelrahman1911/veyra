@@ -346,7 +346,8 @@ class DownloadMaintenanceRoomTest {
     }
 
     @Test fun completedMaintenanceCloseAndQueuedCallbackCannotSuspendAFreshTransfer() = acquisitionDownloadRoomCase {
-        val owner = owner()
+        val (store, port) = maintenancePortStore()
+        val owner = owner(store)
         val seeded = prepareFinalizationSchema3(owner)
         owner.validation = { AssetValidation.Valid(31_234) }
         owner.denyFinalizationSchema3Acquisition()
@@ -362,7 +363,13 @@ class DownloadMaintenanceRoomTest {
         awaitState(owner.store) { it.physicalDownloads[seeded.record.id]?.status == DownloadStatus.COMPLETE && owner.gate.closes.get() >= 1 }
         owner.assertFinalizationSchema3Recovered(seeded)
         val oldExpiration: suspend () -> Unit = owner.gate.expirations[0]
-        faults(owner.store).beforeCommit = { _, next ->
+        port.beforeTransform = { before ->
+            val fresh = before.state().physicalDownloads.filterKeys { it != seeded.record.id }
+            if (fresh.isNotEmpty()) owner.events += "tx-begin:" + fresh.values.joinToString {
+                "${it.status}/${it.representationId}/${it.stagingPath != null}"
+            }
+        }
+        port.beforeCommit = { _, next ->
             val fresh = next.state().physicalDownloads.filterKeys { it != seeded.record.id }
             if (fresh.isNotEmpty()) owner.events += "fresh-tx:" + fresh.values.joinToString {
                 "${it.status}/${it.representationId}/${it.stagingPath != null}/${it.activeAttemptId != null}"
