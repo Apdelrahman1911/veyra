@@ -121,7 +121,15 @@ class DownloadMaintenanceRoomTest {
         withTimeout(3_000) { a.coordinator.hasPendingWork.first { !it } }
         denied.set(false)
         a.coordinator.resumePending()
-        withTimeout(3_000) { a.coordinator.physicalStates.first { it[id]?.status == DownloadStatus.COMPLETE } }
+        val presentedComplete = withTimeoutOrNull(3_000) {
+            a.coordinator.physicalStates.first { it[id]?.status == DownloadStatus.COMPLETE }
+        }
+        if (presentedComplete == null) {
+            val resumed = join(a, id)
+            fail("foreground resume did not restore the durable complete check: status=${resumed.job.status} " +
+                "lease=${resumed.job.leaseOwner} failure=${resumed.job.failure} closes=${a.gate.closes.get()} " +
+                "validations=${a.validations.size}")
+        }
         val verified = awaitState(a.store) { state ->
             state.physicalDownloads[id]?.leaseOwner == null && a.gate.closes.get() == 1
         }
@@ -264,7 +272,15 @@ class DownloadMaintenanceRoomTest {
         assertEquals(asset, held.asset)
         assertEquals(FailureCode.BACKGROUND_RESTRICTED, held.job.failure?.code)
         advance(5_000)
-        val removed = awaitJob(a, id) { !it.job.cleanupPending && it.asset == null }
+        val retried = withTimeoutOrNull(5_000) { awaitJob(a, id) { !it.job.cleanupPending && it.asset == null } }
+        if (retried == null) {
+            val retained = join(a, id)
+            fail("expired cleanup did not retry after foreground resume: status=${retained.job.status} " +
+                "lease=${retained.job.leaseOwner} maintenance=${retained.job.maintenanceKind} " +
+                "cleanupPending=${retained.job.cleanupPending} failure=${retained.job.failure} " +
+                "releases=${releases.get()} closes=${a.gate.closes.get()}")
+        }
+        val removed = retried
         assertEquals(DownloadStatus.CANCELLED, removed.job.status)
         assertEquals(2, releases.get())
         assertEquals(2, a.gate.closes.get())
@@ -348,7 +364,13 @@ class DownloadMaintenanceRoomTest {
         val oldExpiration: suspend () -> Unit = owner.gate.expirations[0]
         val accepted = acceptNeutral(owner, "after-recovery", "AFTERRECOV1")
         val id = enqueue(owner, accepted)
-        holding.entered.await()
+        val enteredFresh = withTimeoutOrNull(10_000) { holding.entered.await(); true }
+        if (enteredFresh == null) {
+            val pending = join(owner, id)
+            fail("fresh transfer did not start: status=${pending.job.status} lease=${pending.job.leaseOwner} " +
+                "failure=${pending.job.failure} plan=${a.schedulingPlan()} last=${a.lastFailure.value} " +
+                "pendingWork=${a.hasPendingWork.value} scheduled=${a.schedulingPlan().nextNetworkEpochMs}")
+        }
         val before = owner.store.acquisitionView().acquisition.physicalDownloads.getValue(id)
         oldExpiration()
         delay(160)
@@ -458,7 +480,8 @@ class DownloadMaintenanceRoomTest {
             assertEquals(intent, released.finalization)
             assertNull(released.asset)
             assertFalse(released.job.cleanupPending)
-            assertEquals(0, owner.gate.acquires.get(), "Cancellation must release the exact lease before a new gate")
+            assertEquals(0, owner.gate.acquires.get(), "Cancellation must release the exact lease before a new gate " +
+                "(closes=${owner.gate.closes.get()})")
             assertEquals(0, owner.validations.size)
             assertNotNull(probeFiles.tryLeasePaths(listOf(intent.stagingPath, intent.finalPath))).close()
             assertNotNull(probeFiles.tryTransferSlot(1)).close()
