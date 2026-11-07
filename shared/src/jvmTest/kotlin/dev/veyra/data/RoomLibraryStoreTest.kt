@@ -13,10 +13,11 @@ import kotlin.test.*
 class RoomLibraryStoreTest {
     @Test fun allNormalizedRelationsAndTwoOccurrenceQueuesSurviveColdReopen() = runBlocking {
         val directory = roomWorkDirectory("roundtrip")
+        seedSchema2(directory, completeLibrary())
         val store = createPlatformLibraryStore(directory.toString())
         val committed = try {
-            val snapshot = store.update { completeLibrary() }.getOrThrow()
-            assertEquals(1L, snapshot.revision)
+            val snapshot = store.initialize().getOrThrow()
+            assertEquals(0L, snapshot.revision)
             withSql(directory.resolve("veyra.db")) { db ->
                 assertTrue(db.longValue("SELECT count(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'room_%'") >= 30)
                 assertEquals(3L, db.longValue("SELECT count(*) FROM queue_entries WHERE contextId='MUSIC'"))
@@ -43,8 +44,9 @@ class RoomLibraryStoreTest {
         val directory = roomWorkDirectory("reorder")
         val store = createPlatformLibraryStore(directory.toString())
         try {
-            store.update { completeLibrary() }.getOrThrow()
-            val result = store.update { old ->
+            seedSchema2(directory, completeLibrary())
+            store.initialize().getOrThrow()
+            val result = writerUpdate(store) { old ->
                 val queue = old.queue(QueueContext.MUSIC)
                 old.copy(
                     queues = old.queues + (QueueContext.MUSIC to queue.copy(entries = queue.entries.reversed(), originalOrder = queue.originalOrder.reversed())),
@@ -53,7 +55,7 @@ class RoomLibraryStoreTest {
                     media = old.media.mapValues { (_, item) -> item.copy(artistIds = item.artistIds.reversed()) },
                     shows = old.shows.mapValues { (_, s) -> s.copy(episodeIds = s.episodeIds.reversed()) },
                 )
-            }.getOrThrow()
+            }
             assertEquals("music-occurrence-2", result.queue(QueueContext.MUSIC).currentEntryId)
             assertEquals(2, result.queue(QueueContext.MUSIC).entries.count { it.mediaId == "music-1" })
             assertEquals(result, store.flush().getOrThrow())
@@ -69,16 +71,19 @@ class RoomLibraryStoreTest {
         val directory = roomWorkDirectory("rollback")
         val store = createPlatformLibraryStore(directory.toString())
         try {
-            val before = store.update { completeLibrary() }.getOrThrow()
+            seedSchema2(directory, completeLibrary())
+            val before = store.initialize().getOrThrow()
             withSql(directory.resolve("veyra.db")) { db ->
                 db.execSQL("CREATE TRIGGER fail_favorite BEFORE INSERT ON favorites WHEN NEW.mediaId='music-2' BEGIN SELECT RAISE(ABORT, 'authored failure'); END")
             }
-            val failure = store.update { old ->
-                val queue = old.queue(QueueContext.MUSIC)
-                old.copy(favoriteIds = old.favoriteIds + "music-2", settings = old.settings.copy(theme = ThemeMode.LIGHT),
-                    queues = old.queues + (QueueContext.MUSIC to queue.copy(entries = queue.entries.reversed())))
+            assertFailsWith<Exception> {
+                writerUpdate(store) { old ->
+                    val queue = old.queue(QueueContext.MUSIC)
+                    old.copy(favoriteIds = old.favoriteIds + "music-2", settings = old.settings.copy(theme = ThemeMode.LIGHT),
+                        queues = old.queues + (QueueContext.MUSIC to queue.copy(entries = queue.entries.reversed())))
+                }
             }
-            assertIs<StoreResult.Failure>(failure)
+            assertEquals(FailureCode.STORAGE_IO, store.lastFailure.value?.code)
             assertEquals(before, store.state.value)
             assertEquals(before, store.flush().getOrThrow())
             withSql(directory.resolve("veyra.db")) { db ->
@@ -90,27 +95,26 @@ class RoomLibraryStoreTest {
     }
 
     @Test fun independentRoomWritersReadLatestRevisionAndNeverLoseOtherFields() = runBlocking {
-        val path = roomWorkDirectory("writers").resolve("library.db")
+        val directory = roomWorkDirectory("writers")
+        seedSchema2(directory, completeLibrary())
+        val path = directory.resolve("veyra.db")
         val first = LibraryStore(testDatabase(path))
         val second = LibraryStore(testDatabase(path))
         try {
-            val item = music()
-            first.upsertCatalog(listOf(item)).getOrThrow()
+            val item = first.initialize().getOrThrow().media.getValue("music-1")
             second.initialize().getOrThrow()
             coroutineScope {
                 listOf(
-                    async(Dispatchers.Default) { repeat(12) { first.update { old -> old.copy(navigation = old.navigation + ("favorite-$it" to "committed"), favoriteIds = setOf(item.id)) }.getOrThrow() } },
-                    async(Dispatchers.Default) { repeat(12) { second.update { old -> old.copy(navigation = old.navigation + ("progress-$it" to "committed"), progress = old.progress + (item.id to MediaProgress(positionMs = it.toLong()))) }.getOrThrow() } },
+                    async(Dispatchers.Default) { repeat(12) { first.editCatalogLibrary { old -> old.copy(favoriteIds = setOf(item.id)) } } },
+                    async(Dispatchers.Default) { repeat(12) { second.update { old -> old.copy(navigation = old.navigation + ("progress-$it" to "committed")) }.getOrThrow() } },
                     async(Dispatchers.Default) { repeat(12) { first.update { old -> old.copy(navigation = old.navigation + ("setting-$it" to "committed"), settings = old.settings.copy(crossfadeDurationMs = 3000L + it)) }.getOrThrow() } },
-                    async(Dispatchers.Default) { repeat(12) { second.update { old -> old.copy(navigation = old.navigation + ("download-$it" to "committed"), downloads = mapOf("download" to DownloadRecord("download", item.id, bytesDownloaded = it.toLong()))) }.getOrThrow() } },
+                    async(Dispatchers.Default) { repeat(12) { second.update { old -> old.copy(navigation = old.navigation + ("download-$it" to "committed")) }.getOrThrow() } },
                 ).awaitAll()
             }
             val result = first.flush().getOrThrow()
-            assertEquals(48, result.navigation.size)
+            assertEquals(38, result.navigation.size)
             assertEquals(setOf(item.id), result.favoriteIds)
-            assertEquals(11L, result.progress.getValue(item.id).positionMs)
             assertEquals(3011L, result.settings.crossfadeDurationMs)
-            assertEquals(11L, result.downloads.getValue("download").bytesDownloaded)
             assertEquals(result, second.flush().getOrThrow())
         } finally { first.close(); second.close() }
     }
@@ -198,10 +202,12 @@ class RoomLibraryStoreTest {
     }
 
     @Test fun cachedArtworkIsIndependentOfCatalogRefreshAndFavoriteFollowPlaylistChanges() = runBlocking {
-        val store = createPlatformLibraryStore(roomWorkDirectory("artwork").toString())
+        val directory = roomWorkDirectory("artwork")
+        val initial = completeLibrary()
+        seedSchema2(directory, initial)
+        val store = createPlatformLibraryStore(directory.toString())
         try {
-            val initial = completeLibrary()
-            store.update { initial }.getOrThrow()
+            store.initialize().getOrThrow()
             val track = initial.media.getValue("music-1").copy(localArtworkPath = null)
             val episode = initial.media.getValue("episode-1").copy(localArtworkPath = null)
             val show = initial.shows.getValue("show-1").copy(localArtworkPath = null)

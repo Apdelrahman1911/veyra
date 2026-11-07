@@ -8,13 +8,13 @@ import dev.veyra.model.AppFailure
 import dev.veyra.model.FailureCode
 import dev.veyra.model.StreamTransport
 import dev.veyra.model.VeyraException
-import dev.veyra.playback.AudioEngine
 import dev.veyra.playback.EngineCapabilities
 import dev.veyra.playback.EngineEvent
 import dev.veyra.playback.EnginePhase
 import dev.veyra.playback.InterruptionKind
-import dev.veyra.playback.ResolvedPlayable
+import dev.veyra.playback.NativeReaderDrainResult
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.Channel
@@ -27,6 +27,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.util.Locale
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.abs
 import kotlin.math.roundToLong
 
@@ -36,7 +37,7 @@ internal class MpvAudioDeck private constructor(
     private val runtime: PreparedDesktopRuntime,
     private val silentTestOutput: Boolean,
     private val validationMode: Boolean = false,
-) : AudioEngine {
+) : DesktopAudioDeck {
     override val capabilities = EngineCapabilities(
         transports = setOf(StreamTransport.PROGRESSIVE),
         mimeTypes = setOf("audio/mpeg", "audio/mp3", "audio/mp4", "audio/x-m4a", "audio/webm", "video/webm", "audio/ogg", "application/ogg", "audio/flac", "audio/x-flac", "audio/aac"),
@@ -57,7 +58,8 @@ internal class MpvAudioDeck private constructor(
     private val terminated = CompletableDeferred<Unit>()
     @Volatile private var wakeHandle: Pointer? = null
     private lateinit var handle: Pointer
-    private var generationBarrier = Long.MIN_VALUE
+    private val readerEpoch = DesktopNativeReaderEpoch()
+    private val generationBarrier: Long get() = readerEpoch.generation
     private var active: Session? = null
     private var nativePlayingEntry: Long? = null
     private val sessions = linkedMapOf<Long, Session>()
@@ -65,7 +67,7 @@ internal class MpvAudioDeck private constructor(
     private var selectedOutput = "auto"
     private val owner = Thread(::eventLoop, "Veyra-libmpv-owner").apply { isDaemon = true; start() }
 
-    private class Session(val generation: Long, val source: ResolvedPlayable) {
+    private class Session(val generation: Long, val source: DesktopNativeInput) {
         var entryId: Long? = null
         var ready = false
         var desiredPlaying = false
@@ -81,11 +83,10 @@ internal class MpvAudioDeck private constructor(
         var openingDeadline = System.nanoTime() + 35_000_000_000L
     }
     private data class Seek(val positionMs: Long, val sequence: Long, var began: Boolean = false, var deadline: Long = System.nanoTime() + 15_000_000_000L)
-    private data class Operation(val action: () -> Unit, val completion: CompletableDeferred<Unit>)
+    private data class Operation(val action: () -> Unit, val completion: CompletableDeferred<Unit>, val scoped: Boolean = false)
 
-    override suspend fun prepare(source: ResolvedPlayable, startPositionMs: Long, generation: Long) = submit {
-        if (generation < generationBarrier) return@submit
-        generationBarrier = generation
+    override suspend fun prepare(source: DesktopNativeInput, startPositionMs: Long, generation: Long) = submit {
+        if (!readerEpoch.adoptSource(generation)) return@submit
         val input = sourceInput(source)
         require(source.transport == StreamTransport.PROGRESSIVE) { "Native decoder requires a progressive media resource" }
         val session = Session(generation, source)
@@ -149,31 +150,31 @@ internal class MpvAudioDeck private constructor(
 
     override suspend fun stop(generation: Long) = submit {
         if (generation < generationBarrier) return@submit
-        generationBarrier = generation
-        active = null
         checkNative(native.command(handle, "stop"))
+        readerEpoch.stopped(generation)
+        active = null
         publish(EngineEvent.StateChanged(generation, EnginePhase.IDLE, false))
     }
 
     /** Desktop application gain, deliberately separate from the device's system volume. */
-    suspend fun setGain(gain: Float) = submit {
+    override suspend fun setGain(gain: Float) = submit {
         require(gain.isFinite() && gain in 0f..1f)
         set("volume", (gain * 100f).toString())
     }
 
-    suspend fun selectOutput(deviceId: String) = submit {
+    override suspend fun selectOutput(deviceId: String) = submit {
         require(deviceId.isNotBlank() && deviceId.length <= 1024 && '\u0000' !in deviceId)
         set("audio-device", deviceId)
         selectedOutput = deviceId
     }
 
-    suspend fun diagnostics(): Map<String, String?> {
+    override suspend fun diagnostics(): Map<String, String?> {
         var result = emptyMap<String, String?>()
         submit { result = listOf("mpv-version", "ffmpeg-version", "tls-verify", "audio-pitch-correction", "current-ao", "audio-device", "audio-device-list", "volume", "pause").associateWith(::get) }
         return result // Contains no media URI, request header or native diagnostic log.
     }
 
-    suspend fun snapshot(): MpvDeckSnapshot {
+    override suspend fun snapshot(): MpvDeckSnapshot {
         var result = MpvDeckSnapshot()
         submit {
             val session = active
@@ -190,6 +191,35 @@ internal class MpvAudioDeck private constructor(
             }
         }
         return result
+    }
+
+    override suspend fun awaitRetiredReaders(expectedGeneration: Long): NativeReaderDrainResult {
+        try {
+            initialized.await()
+            var result: NativeReaderDrainResult = NativeReaderDrainResult.Superseded
+            val completion = CompletableDeferred<Unit>()
+            val accepted = synchronized(gate) {
+                if (!accepting) false else {
+                    operations.add(Operation({ result = readerEpoch.result(expectedGeneration) }, completion, scoped = true))
+                    wakeHandle?.let(native::mpv_wakeup)
+                    true
+                }
+            }
+            if (accepted) {
+                completion.await()
+                return result
+            }
+            // A closed handle can acknowledge only after actual native destruction, not after
+            // stop command acceptance or after the request to stop its owner loop.
+            terminated.await()
+            return readerEpoch.result(expectedGeneration)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Throwable) {
+            return NativeReaderDrainResult.Unacknowledged(
+                AppFailure(FailureCode.RECOVERY_REQUIRED, "native_reader_release_unacknowledged"),
+            )
+        }
     }
 
     override suspend fun close() {
@@ -245,7 +275,7 @@ internal class MpvAudioDeck private constructor(
                     try { operation.action(); operation.completion.complete(Unit) }
                     catch (error: Throwable) {
                         operation.completion.completeExceptionally(safeException(error))
-                        active?.let { fail(it, failure(error)) }
+                        if (!operation.scoped) active?.let { fail(it, failure(error)) }
                     }
                 }
                 if (!running) break
@@ -274,6 +304,7 @@ internal class MpvAudioDeck private constructor(
                 // failed. Raw native diagnostics can contain ephemeral source URLs.
                 shutdownFailure = VeyraException(AppFailure(FailureCode.RECOVERY_REQUIRED, "native_audio_cleanup"))
             }
+            readerEpoch.destroyed(acknowledged = shutdownFailure == null)
             while (true) {
                 val operation = operations.poll() ?: break
                 operation.completion.completeExceptionally(IllegalStateException("Audio engine is closed"))
@@ -392,17 +423,40 @@ internal class MpvAudioDeck private constructor(
     private fun safeException(error: Throwable): VeyraException = VeyraException(failure(error))
 
     companion object {
+        // A failed creation can own a native handle even though no source was loaded. Keep
+        // that exact inert owner, never merely its exception text or a replacement decoder.
+        private val failedConstructionOwners = ConcurrentHashMap.newKeySet<MpvAudioDeck>()
+
         suspend fun create(config: DesktopRuntimeConfig): MpvAudioDeck = createInternal(config, false)
 
-        internal suspend fun createInternal(config: DesktopRuntimeConfig, validation: Boolean): MpvAudioDeck {
+        /** An external validation owner accepts cleanup BEFORE initialization or dispatch-return failure. */
+        internal suspend fun createInternal(
+            config: DesktopRuntimeConfig,
+            validation: Boolean,
+            onOwned: ((MpvAudioDeck) -> Unit)? = null,
+        ): MpvAudioDeck {
             var deck: MpvAudioDeck? = null
+            var transferred = false
             try {
                 return withContext(Dispatchers.IO) {
                     val runtime = DesktopNativeRuntime.prepare(config)
-                    MpvAudioDeck(MpvNative.load(runtime), runtime, config.silentTestOutput, validation).also { deck = it; it.initialized.await() }
+                    MpvAudioDeck(MpvNative.load(runtime), runtime, config.silentTestOutput, validation).also {
+                        deck = it
+                        onOwned?.invoke(it)
+                        transferred = onOwned != null
+                        it.initialized.await()
+                    }
                 }
             } catch (error: Throwable) {
-                withContext(kotlinx.coroutines.NonCancellable) { deck?.close() }
+                if (!transferred) withContext(kotlinx.coroutines.NonCancellable) {
+                    deck?.let {
+                        failedConstructionOwners.add(it)
+                        it.close()
+                        failedConstructionOwners.remove(it)
+                    }
+                }
+                // With external ownership only its finally closes. Never retry an ambiguous
+                // destroy here, and never hide that exact native owner behind factory failure.
                 throw error
             }
         }
@@ -413,7 +467,7 @@ internal class MpvAudioDeck private constructor(
                 else Path.of(uri).toAbsolutePath().normalize()
         }
 
-        internal fun sourceInput(source: ResolvedPlayable): String {
+        internal fun sourceInput(source: DesktopNativeInput): String {
             require(source.uri.isNotBlank() && '\u0000' !in source.uri)
             if (source.isLocal) {
                 val path = localPath(source.uri)

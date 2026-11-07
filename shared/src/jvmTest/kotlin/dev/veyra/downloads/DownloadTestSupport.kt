@@ -134,6 +134,9 @@ internal data class SeededDownload(val item: MediaItem, val binding: PlaybackBin
     val attempt: DownloadAttempt? = null, val intent: DownloadFinalization? = null)
 
 internal class DownloadFixture(fileSystem: FileSystem = FileSystem.SYSTEM) {
+    private val evidenceOwners = mutableMapOf<LibraryStore, DownloadMaterializationEvidence>()
+    fun materializationEvidence(store: LibraryStore): DownloadMaterializationEvidence =
+        evidenceOwners.getOrPut(store) { DownloadMaterializationEvidence(store.transactionOwner) }
     val directory = downloadTestDirectory()
     val databasePath = directory.resolve("library.db")
     val files = DownloadFiles(directory.resolve("media").toString(), fileSystem)
@@ -161,7 +164,7 @@ internal class DownloadFixture(fileSystem: FileSystem = FileSystem.SYSTEM) {
         capabilities: EngineCapabilities = EngineCapabilities(), heartbeatMs: Long = 80,
         network: StateFlow<DownloadNetworkState> = alwaysConnectedDownloadNetwork,
         schedulerClock: Clock = clock): DownloadCoordinator =
-        DownloadCoordinator(store, files, AppSourceResolver(store, files, validator, gateway, schedulerClock), gateway,
+        DownloadCoordinator(store, files, AppSourceResolver(store, files, validator, gateway, schedulerClock, materializationEvidence(store)), gateway,
             validator, capabilities, parent, gate, schedulerClock, pollingMs = 40, leaseDurationMs = 1_000,
             heartbeatMs = heartbeatMs, beforePhysicalDelete = beforeDelete, networkState = network).also { coordinators += it }
 

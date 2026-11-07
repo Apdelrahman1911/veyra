@@ -50,7 +50,8 @@ class RoomFileFaultTest {
         val persistence = RoomLibraryPersistence({ path -> testDatabase(Path.of(path)) }, files)
         val store = LibraryStore(persistence)
         try {
-            store.update { completeLibrary() }.getOrThrow()
+            seedSchema2(directory, completeLibrary())
+            store.initialize().getOrThrow()
             store.backup().getOrThrow()
             val original = Files.readAllBytes(directory.resolve("veyra.backup.db"))
             faults.failBackupMove = true
@@ -104,7 +105,8 @@ class RoomFileFaultTest {
     }
 
     private suspend fun seed(directory: Path): AppSnapshot {
+        seedSchema2(directory, completeLibrary())
         val store = createPlatformLibraryStore(directory.toString())
-        return try { store.update { completeLibrary() }.getOrThrow() } finally { store.close() }
+        return try { store.initialize().getOrThrow() } finally { store.close() }
     }
 }

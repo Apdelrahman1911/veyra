@@ -327,10 +327,15 @@ private fun CrossfadeStatus(crossfade: CrossfadeState) {
     }
     Column(Modifier.fillMaxWidth().testTag("player-crossfade"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(strings.text(label), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-        // IncomingItem is discovery metadata, not a claim that title-search resolved a matching recording.
-        Text(strings.format(TextKey.RequestedTitleValue, crossfade.incomingItem.title), style = MaterialTheme.typography.bodySmall)
-        crossfade.incomingExecutionBinding?.takeIf { it.mediaId == crossfade.incomingItem.id }?.let { binding ->
-            PlaybackProvenanceCard(crossfade.incomingItem, binding, compact = true, context = PlaybackProvenanceContext.INCOMING)
+        // Incoming identity is discovery/selection metadata, not a claim that title-search
+        // resolved a matching recording. A neutral typed recording has no catalogue MediaItem.
+        val incoming = crossfade.incomingItem
+        val incomingTitle = incoming?.title ?: crossfade.incomingSelection?.primaryDisplay?.title
+        incomingTitle?.let { Text(strings.format(TextKey.RequestedTitleValue, it), style = MaterialTheme.typography.bodySmall) }
+        if (incoming != null) {
+            crossfade.incomingExecutionBinding?.takeIf { it.mediaId == incoming.id }?.let { binding ->
+                PlaybackProvenanceCard(incoming, binding, compact = true, context = PlaybackProvenanceContext.INCOMING)
+            }
         }
         if (crossfade.phase == CrossfadePhase.OVERLAPPING) MediaDirection {
             val progress = crossfade.fraction.takeIf { it.isFinite() }?.coerceIn(0f, 1f) ?: 0f

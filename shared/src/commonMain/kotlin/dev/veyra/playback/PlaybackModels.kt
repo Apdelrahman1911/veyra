@@ -1,5 +1,7 @@
 package dev.veyra.playback
 
+import dev.veyra.acquisition.PreparedAcquisitionAdmission
+import dev.veyra.data.QueueAdmissionOperation
 import dev.veyra.model.*
 import kotlin.time.ExperimentalTime
 import kotlin.time.TimeSource
@@ -11,11 +13,15 @@ enum class CrossfadePhase { PREPARING, READY, OVERLAPPING }
 
 data class CrossfadeState(
     val phase: CrossfadePhase,
-    val incomingItem: MediaItem,
+    /** Catalogue compatibility only. Neutral recordings deliberately have no MediaItem. */
+    val incomingItem: MediaItem?,
     val incomingEntryId: String,
     val durationMs: Long? = null,
     val fraction: Float = 0f,
     val incomingExecutionBinding: PlaybackBinding? = null,
+    val incomingSelection: PlaybackSelection? = null,
+    /** Exact silent-deck admission token, never an identity synthesized from a mediaId. */
+    val incomingGeneration: Long? = null,
 )
 
 data class SleepTimerState(
@@ -47,12 +53,39 @@ data class PlaybackState(
     val crossfade: CrossfadeState? = null,
     val executionBinding: PlaybackBinding? = null,
     val undoableQueueContexts: Set<QueueContext> = emptySet(),
+    /** Canonical schema3 selections/order. Legacy queue/media projection is not their authority. */
+    val currentSelection: PlaybackSelection? = null,
+    val executionQueues: Map<QueueContext, ExecutionQueue> = emptyMap(),
+    val queueSelections: Map<ExecutionOccurrenceId, PlaybackSelection> = emptyMap(),
 ) {
     val queue: QueueSnapshot get() = queues[activeContext] ?: QueueSnapshot()
     val isBuffering: Boolean get() = phase in setOf(PlaybackPhase.RESOLVING, PlaybackPhase.PREPARING, PlaybackPhase.BUFFERING)
+    val hasCurrent: Boolean get() = currentSelection != null || currentItem != null
+    val controlsMode: PlaybackControlsMode? get() = currentSelection?.controlsMode ?: currentItem?.let {
+        if (it.kind == MediaKind.EPISODE) PlaybackControlsMode.PODCAST else PlaybackControlsMode.MUSIC
+    }
 }
 
 sealed interface PlaybackCommand {
+    /** Same-owner durable admission/checkpoint/optional activation, before any source call. */
+    data class AdmitAcquisition(
+        val prepared: PreparedAcquisitionAdmission,
+        val context: QueueContext,
+        val expectedQueueRevision: Long,
+        val operation: QueueAdmissionOperation,
+        val activate: Boolean = false,
+        val startOccurrenceId: ExecutionOccurrenceId? = null,
+        val startFromBeginning: Boolean = false,
+    ) : PlaybackCommand
+
+    data class PlayOccurrence(
+        val context: QueueContext,
+        val expectedQueueRevision: Long,
+        val occurrenceId: ExecutionOccurrenceId,
+        val expectedBindingId: ExecutionBindingId? = null,
+        val startFromBeginning: Boolean = false,
+    ) : PlaybackCommand
+
     /**
      * Explicit replacement and activation. Merely opening a collection must not dispatch this.
      * [startFromBeginning] is a podcast-only, selected-episode restart intent: checkpoint the
@@ -75,19 +108,24 @@ sealed interface PlaybackCommand {
     data object Previous : PlaybackCommand
     data class Seek(val positionMs: Long, val expectedEntryId: String? = null, val expectedGeneration: Long? = null) : PlaybackCommand
     data class SkipBy(val offsetMs: Long, val expectedEntryId: String? = null, val expectedGeneration: Long? = null) : PlaybackCommand
+    /** Capture identity at the native callback; read configured seconds only inside the actor. */
+    data class SkipConfigured(val forward: Boolean, val expectedEntryId: String, val expectedGeneration: Long) : PlaybackCommand
     data object SkipBack : PlaybackCommand
     data object SkipForward : PlaybackCommand
     data class Enqueue(val context: QueueContext, val items: List<MediaItem>, val position: EnqueuePosition = EnqueuePosition.END) : PlaybackCommand
-    data class Remove(val context: QueueContext, val entryId: String) : PlaybackCommand
-    data class Move(val context: QueueContext, val entryId: String, val toIndex: Int) : PlaybackCommand
-    data class Clear(val context: QueueContext) : PlaybackCommand
-    data class ClearUpcoming(val context: QueueContext) : PlaybackCommand
-    data class UndoQueueEdit(val context: QueueContext) : PlaybackCommand
-    data class SetShuffle(val enabled: Boolean, val context: QueueContext = QueueContext.MUSIC) : PlaybackCommand
-    data class SetRepeat(val mode: RepeatMode, val context: QueueContext = QueueContext.MUSIC) : PlaybackCommand
+    /** In schema3 [entryId] is an exact ExecutionOccurrenceId.value, never a catalogue ID. */
+    data class Remove(val context: QueueContext, val entryId: String, val expectedQueueRevision: Long? = null) : PlaybackCommand
+    data class Move(val context: QueueContext, val entryId: String, val toIndex: Int, val expectedQueueRevision: Long? = null) : PlaybackCommand
+    data class Clear(val context: QueueContext, val expectedQueueRevision: Long? = null) : PlaybackCommand
+    data class ClearUpcoming(val context: QueueContext, val expectedQueueRevision: Long? = null) : PlaybackCommand
+    data class UndoQueueEdit(val context: QueueContext, val expectedQueueRevision: Long? = null) : PlaybackCommand
+    data class SetShuffle(val enabled: Boolean, val context: QueueContext = QueueContext.MUSIC, val expectedQueueRevision: Long? = null) : PlaybackCommand
+    data class SetRepeat(val mode: RepeatMode, val context: QueueContext = QueueContext.MUSIC, val expectedQueueRevision: Long? = null) : PlaybackCommand
     data class SetRate(val speed: Float, val forThisShow: Boolean = false) : PlaybackCommand
     data class SleepDuration(val durationMs: Long) : PlaybackCommand
     data object SleepAtEndOfEpisode : PlaybackCommand
+    /** Long-form timer bound to the displayed exact occurrence/load, not whichever later plays. */
+    data class SleepAtRecordingEnd(val expectedEntryId: String, val expectedGeneration: Long) : PlaybackCommand
     data object CancelSleepTimer : PlaybackCommand
     data class MarkPlayed(val mediaId: String, val played: Boolean) : PlaybackCommand
     data class ResetProgress(val mediaId: String) : PlaybackCommand

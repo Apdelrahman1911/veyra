@@ -52,8 +52,9 @@ class RoomMigrationTest {
     @Test fun migrationPreservesEveryNormalizedTableAndAppliesSafeDefaults() = runBlocking {
         val directory = roomWorkDirectory("migration")
         val sourceDirectory = directory.resolve("current")
+        seedSchema2(sourceDirectory, completeLibrary())
         val source = createPlatformLibraryStore(sourceDirectory.toString())
-        val committed = try { source.update { completeLibrary() }.getOrThrow() } finally { source.close() }
+        val committed = try { source.initialize().getOrThrow() } finally { source.close() }
         val targetDirectory = directory.resolve("baseline")
         Files.createDirectories(targetDirectory)
         val path = targetDirectory.resolve("veyra.db")

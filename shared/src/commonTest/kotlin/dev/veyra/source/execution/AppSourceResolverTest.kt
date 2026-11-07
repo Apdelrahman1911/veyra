@@ -1,5 +1,6 @@
 package dev.veyra.source.execution
 
+import dev.veyra.downloads.DownloadMaterializationEvidence
 import dev.veyra.data.LibraryStore
 import dev.veyra.data.getOrThrow
 import dev.veyra.downloads.DownloadFiles
@@ -35,6 +36,7 @@ class AppSourceResolverTest {
         val store = LibraryStore(persistence, StandardTestDispatcher(scope.testScheduler))
         val gateway = ExecutionTestGateway()
         val clock = ExecutionTestClock()
+        val materializationEvidence = DownloadMaterializationEvidence(store.transactionOwner)
         var nativeValidations = 0
         private val noFileIo = object : ForwardingFileSystem(FileSystem.SYSTEM) {
             override fun onPathParameter(path: Path, functionName: String, parameterName: String): Path =
@@ -45,7 +47,7 @@ class AppSourceResolverTest {
         val resolver = AppSourceResolver(store, DownloadFiles("/__veyra_unused_unit_path__", noFileIo), AssetValidator {
             nativeValidations++
             AssetValidation.Valid(1_000L)
-        }, gateway, clock)
+        }, gateway, clock, materializationEvidence)
     }
 
     private suspend fun TestScope.withFixture(block: suspend Fixture.() -> Unit) {
