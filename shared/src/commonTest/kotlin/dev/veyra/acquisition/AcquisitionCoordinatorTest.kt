@@ -6,7 +6,11 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.test.runTest
 import kotlin.test.*
 
-/** Coordinator/fake-port tests, not durable Room or successful native/source execution proof. */
+/**
+ * Coordinator/fake-port tests, not durable Room or successful native/source execution proof.
+ * The real-Room cold-reopen counterpart for the blocked first-video outcome is
+ * `dev.veyra.data.RoomAcquisitionRestoreTest` in jvmTest.
+ */
 class AcquisitionCoordinatorTest {
     private class Rig {
         val repository = AcquisitionTestRepository()
@@ -434,7 +438,12 @@ class AcquisitionCoordinatorTest {
         assertTrue(rig.repository.state.value.bindings.isEmpty())
         assertEquals(OccurrenceSelectionState.UNPLAYABLE,
             rig.repository.state.value.occurrences.getValue(occurrence.id).selectionState)
-        // Room-only restore returns the same immutable outcome; no binding/occurrence is invented.
+        // This Rig uses AcquisitionTestRepository, so this is a FAKE-PORT restore assertion only:
+        // restore() calls repository.initialize() and invents no binding/occurrence. The same
+        // claim after an actual Room close/reopen is executed by
+        // dev.veyra.data.RoomAcquisitionRestoreTest. The structural gateway.restore(request,
+        // observation) is not called and cannot re-create a page failure absent from its inputs;
+        // the committed Unplayable outcome itself is the durable admission guard.
         val restored = rig.coordinator.restore()
         assertEquals(accepted.record, restored.requests.getValue(accepted.record.request.id))
         assertEquals(failure, restored.requests.getValue(accepted.record.request.id).outcome)
