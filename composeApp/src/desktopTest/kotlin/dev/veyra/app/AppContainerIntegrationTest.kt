@@ -236,6 +236,7 @@ class AppContainerIntegrationTest {
         val validations = ConcurrentLinkedQueue<OfflineAsset>()
         @Volatile var validateAsset: suspend (OfflineAsset) -> AssetValidation = { AssetValidation.Valid(12_345L) }
         override val validator = AssetValidator { asset -> validations += asset; validateAsset(asset) }
+        override val localValidator = LocalMediaValidator { AssetValidation.Valid(12_345L) }
         override val systemLanguage = LanguagePreference.ENGLISH
         val youtubeRequests = ConcurrentLinkedQueue<ResearchRequest>()
         val youtubeCloseCalls = AtomicInteger()
@@ -279,6 +280,7 @@ class AppContainerIntegrationTest {
         val queries = ConcurrentLinkedQueue<String>()
         val resolutions = ConcurrentLinkedQueue<Resolution>()
         val transfers = ConcurrentLinkedQueue<Transfer>()
+        val typedTransfers = ConcurrentLinkedQueue<Pair<String, String>>()
         var onFirst: suspend (String) -> KmpFirstResult? = { title ->
             KmpFirstResult(title, FirstResultKind.VIDEO, FIRST, "Selected recording, not publisher metadata",
                 "https://www.youtube.com/watch?v=$FIRST")
@@ -301,6 +303,7 @@ class AppContainerIntegrationTest {
         }
 
         override suspend fun acquire(request: AcquisitionRequest): SourceAcquisitionResult {
+            queries += request.completeTitle
             val first = onFirst(request.completeTitle) ?: return SourceAcquisitionResult.Unplayable(request.id, null,
                 AcquisitionProblem(AcquisitionProblemCode.NO_FIRST_RESULT))
             val entry = SourceEntry(
@@ -358,29 +361,53 @@ class AppContainerIntegrationTest {
 
         override suspend fun preparePlayback(context: AcquisitionExecutionContext, capabilities: EngineCapabilities,
             requiredRepresentationId: String?, inspection: AcquisitionInspection?): AcquisitionPlaybackSource {
-            return AcquisitionPlaybackSource(context, "https://fixture.example.test/non-audio",
-                StreamTransport.PROGRESSIVE, "audio/mp4", "aac", requiredRepresentationId ?: "authored-aac",
-                durationMs = 100_000, seekableHint = true)
+            val binding = fixtureBinding(context)
+            val plan = onResolve(binding, capabilities, ResolvePurpose.PLAYBACK)
+            resolutions += Resolution(binding, ResolvePurpose.PLAYBACK, store.state.value.playbackBindings[binding.id])
+            return AcquisitionPlaybackSource(context, plan.uri, plan.transport, plan.mimeType, plan.codecs,
+                requiredRepresentationId ?: plan.representationId ?: "authored-aac", plan.headers,
+                plan.expiresAtEpochMs, plan.durationMs, plan.seekableHint, plan.isLocal,
+                materializationAssetId = null, resource = plan.resource)
         }
 
         override suspend fun prepareDownload(context: AcquisitionExecutionContext, capabilities: EngineCapabilities,
             requiredRepresentationId: String?, inspection: AcquisitionInspection?): PreparedAcquisitionDownload {
-            val representation = AcquisitionRepresentation(requiredRepresentationId ?: "authored-aac", "audio/mp4", "aac", "m4a")
-            return object : PreparedAcquisitionDownload {
-                override val context = context
-                override val requiredRepresentationId = representation.representationId
-                override val representation = representation
-            }
+            val binding = fixtureBinding(context)
+            val plan = onResolve(binding, capabilities, ResolvePurpose.DOWNLOAD)
+            resolutions += Resolution(binding, ResolvePurpose.DOWNLOAD, store.state.value.playbackBindings[binding.id])
+            val representation = AcquisitionRepresentation(requiredRepresentationId ?: plan.representationId ?: "authored-aac",
+                plan.mimeType ?: "audio/mpeg", plan.codecs ?: "mp3", "mp3")
+            return Prepared(context, requiredRepresentationId, representation, binding)
         }
+
+        private class Prepared(
+            override val context: AcquisitionExecutionContext,
+            override val requiredRepresentationId: String?,
+            override val representation: AcquisitionRepresentation,
+            val binding: PlaybackBinding,
+        ) : PreparedAcquisitionDownload
 
         override suspend fun download(prepared: PreparedAcquisitionDownload, destinationPath: String,
             onProgress: suspend (AcquisitionTransferProgress) -> Unit): AcquisitionTransferResult {
-            val bytes = "Veyra authored integration fixture. NOT AUDIO.".encodeToByteArray()
-            Files.createDirectories(Path.of(destinationPath).parent)
-            Files.write(Path.of(destinationPath), bytes)
-            onProgress(AcquisitionTransferProgress(bytes.size.toLong(), bytes.size.toLong()))
-            return AcquisitionTransferResult(prepared.context, bytes.size.toLong(), prepared.representation)
+            val owned = prepared as? Prepared ?: throw VeyraException(AppFailure(FailureCode.INVALID_STATE))
+            val call = Transfer(owned.binding, destinationPath, owned.representation.representationId,
+                store.state.value.playbackBindings[owned.binding.id]) { progress ->
+                onProgress(AcquisitionTransferProgress(progress.bytesDownloaded, progress.totalBytes, progress.speedBytesPerSecond))
+            }
+            val result = onDownload(call)
+            transfers += call
+            typedTransfers += destinationPath to owned.representation.representationId
+            return AcquisitionTransferResult(prepared.context, result.bytesWritten,
+                AcquisitionRepresentation(result.representationId, result.mimeType, result.codecs, result.extension))
         }
+
+        private fun fixtureBinding(context: AcquisitionExecutionContext): PlaybackBinding = PlaybackBinding(
+            context.binding.id.value, context.subject.id.value, context.request.completeTitle,
+            FirstResultKind.VIDEO, context.recording.canonicalId,
+            context.receipt.observation.entry.title ?: "Authored first recording",
+            context.recording.canonicalUrl, context.recording.canonicalId,
+            resolvedEpochMs = context.receipt.observedEpochMs, selectionOrdinal = 0,
+        )
     }
 
     private class Fixture(val directory: Path, productionGateway: Boolean, clock: Clock) {
@@ -1757,6 +1784,96 @@ class AppContainerIntegrationTest {
             fixture.assertDownloadCleanupDependenciesClosedOnce()
             fixture.assertNoNetwork()
         } finally { permitConsumption.complete(Unit) }
+    }
+
+    @Test fun catalogueRootActionsUseCommittedSavedFramesAndUndoSurvivesUnrelatedScalarCommit() = checkCase {
+        val fixture = newFixture()
+        val track = item(SourceProvider.COMMONS, id = "catalog-action")
+        fixture.store.upsertCatalog(listOf(track)).getOrThrow()
+        fixture.app.onMusicAction(MusicUiAction.ToggleFavorite(track))
+        withTimeout(5_000) { fixture.store.state.first { track.id in it.favoriteIds } }
+        withTimeout(5_000) { fixture.app.library.first { track.id in it.favoriteIds } }
+
+        // Every playlist mutation uses the same committed metadata/saved owner; duplicate
+        // occurrence identity is preserved and is never reconstructed from a projected slice.
+        fixture.app.onMusicAction(MusicUiAction.CreatePlaylist("Authored playlist — قائمة", track))
+        val created = withTimeout(5_000) { fixture.store.state.first { snapshot -> snapshot.playlists.any { it.entries.any { entry -> entry.mediaId == track.id } } } }
+        val playlist = created.playlists.single { it.entries.any { entry -> entry.mediaId == track.id } }
+        fixture.app.onMusicAction(MusicUiAction.AddToPlaylist(playlist.id, track, allowDuplicate = true))
+        val duplicated = withTimeout(5_000) { fixture.store.state.first { snapshot ->
+            snapshot.playlists.single { it.id == playlist.id }.entries.count { it.mediaId == track.id } == 2
+        } }
+        val entries = duplicated.playlists.single { it.id == playlist.id }.entries
+        assertEquals(2, entries.size)
+        fixture.app.onMusicAction(MusicUiAction.RenamePlaylist(playlist.id, "Renamed playlist — قائمة"))
+        fixture.app.onMusicAction(MusicUiAction.MovePlaylistEntry(playlist.id, entries.first().id, 1))
+        withTimeout(5_000) { fixture.store.state.first { snapshot ->
+            snapshot.playlists.single { it.id == playlist.id }.entries.last().id == entries.first().id
+        } }
+        fixture.app.onMusicAction(MusicUiAction.RemovePlaylistEntry(playlist.id, entries.last().id))
+        withTimeout(5_000) { fixture.store.state.first { snapshot ->
+            snapshot.playlists.single { it.id == playlist.id }.entries.size == 1
+        } }
+
+        // An unrelated same-owner scalar transaction advances the database but must not invalidate
+        // the opaque saved-frame receipt.
+        fixture.store.update { it.copy(settings = it.settings.copy(theme = ThemeMode.LIGHT)) }.getOrThrow()
+        assertTrue(fixture.app.musicOptions.value.canUndoLibrary)
+        fixture.app.onMusicAction(MusicUiAction.UndoLibrary)
+        withTimeout(5_000) { fixture.store.state.first { snapshot ->
+            snapshot.playlists.single { it.id == playlist.id }.entries.size == 2
+        } }
+
+        fixture.app.onMusicAction(MusicUiAction.DeletePlaylist(playlist.id))
+        withTimeout(5_000) { fixture.store.state.first { snapshot -> snapshot.playlists.none { it.id == playlist.id } } }
+        assertFalse(fixture.store.state.value.playlists.any { it.id == playlist.id })
+        assertEquals(1, fixture.store.state.value.favoriteIds.count { it == track.id })
+    }
+
+    @Test fun freshMusicDownloadCapturesCompleteTitleSelectsRawFirstAndPersistsBeforeOwnedExecution() = checkCase {
+        val fixture = newFixture()
+        val track = item(SourceProvider.COMMONS, id = "fresh-download")
+        fixture.store.upsertCatalog(listOf(track)).getOrThrow()
+        val firstTitle = "Actual raw ordinal-zero recording"
+        fixture.gateway.onFirst = { title ->
+            KmpFirstResult(title, FirstResultKind.VIDEO, FIRST, firstTitle, "https://www.youtube.com/watch?v=$FIRST")
+        }
+        fixture.app.onMusicAction(MusicUiAction.Download(track))
+        val view = try {
+            withTimeout(15_000) {
+                fixture.store.acquisitionViews.first { view ->
+                    view.acquisition.physicalDownloads.values.any { it.status == DownloadStatus.COMPLETE && it.assetId != null }
+                }
+            }
+        } catch (timeout: TimeoutCancellationException) {
+            fail("download timeout notice=${fixture.app.notice.value} init=${fixture.app.initialization.value} " +
+                "physical=${fixture.store.acquisitionViews.value.acquisition.physicalDownloads} " +
+                "requests=${fixture.store.acquisitionViews.value.acquisition.requests} queries=${fixture.gateway.queries}")
+        }
+        val state = view.acquisition
+        val physical = state.physicalDownloads.values.single { it.status == DownloadStatus.COMPLETE }
+        val accepted = state.requests.values.single { it.state == AcquisitionJobState.COMMITTED }
+        val single = assertIs<AcquisitionOutcome.Single>(accepted.outcome)
+        assertEquals(track.title, accepted.request.completeTitle)
+        assertEquals((accepted.request.metadata as MediaCapture).media.id, track.id)
+        assertEquals(0, accepted.request.completeTitle.indexOf("Complete requested title"))
+        assertEquals(single.bindingId, physical.producer.bindingId)
+        assertEquals(single.receiptId, accepted.request.let { state.receipts[single.receiptId]?.id })
+        assertEquals(listOf(track.title), fixture.gateway.queries.toList(), "Exactly one unchanged complete-title first-result query")
+        assertEquals(1, fixture.gateway.typedTransfers.size, "The same accepted recording executes through the existing kmpYT plan/transfer")
+        val asset = state.materializations.getValue(assertNotNull(physical.assetId))
+        assertTrue(state.assetUses.any { it.requestedBindingId == single.bindingId && it.materializationAssetId == asset.id })
+        assertTrue(Files.exists(Path.of(asset.uri)))
+        assertTrue(fixture.platform.youtubeRequests.isEmpty(), "No source-side search substituted the complete-title handoff")
+        fixture.app.onMusicAction(MusicUiAction.RemoveDownload(physical.id))
+        withTimeout(10_000) {
+            fixture.store.acquisitionViews.first {
+                val removed = it.acquisition.physicalDownloads[physical.id]
+                removed == null || (removed.cleanupPending == false && removed.assetId == null && removed.stagingPath == null)
+            }
+        }
+        assertFalse(Files.exists(Path.of(asset.uri)))
+        assertFalse(view.snapshot.settings.offlineOnly)
     }
 
     private companion object {

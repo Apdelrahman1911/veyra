@@ -130,7 +130,7 @@ class YouTubeKmpMediaGateway(private val source: YouTubeMediaSource) :
         requiredRepresentationId: String?): PreparedLegacyDownload = guardedDownload {
         val videoId = selectedVideo(binding)
         val input = YouTubeAudioExecution.Input(videoId, inspect = { source.inspectSelected(videoId) })
-        PreparedLegacy(this, binding, source.audioExecution.prepareDownload(input, capabilities, requiredRepresentationId))
+        PreparedLegacy(this, binding, requiredRepresentationId, source.audioExecution.prepareDownload(input, capabilities, requiredRepresentationId))
     }
 
     override suspend fun download(prepared: PreparedLegacyDownload, destinationPath: String,
@@ -153,9 +153,9 @@ class YouTubeKmpMediaGateway(private val source: YouTubeMediaSource) :
     private class PreparedLegacy(
         val owner: YouTubeKmpMediaGateway,
         override val binding: PlaybackBinding,
+        override val requiredRepresentationId: String?,
         val delegate: YouTubeAudioExecution.PreparedDownload,
     ) : PreparedLegacyDownload {
-        override val requiredRepresentationId: String? get() = delegate.representation.key
         override val representation = delegate.representation.let {
             AcquisitionRepresentation(it.key, it.mimeType, it.codecs, it.extension)
         }

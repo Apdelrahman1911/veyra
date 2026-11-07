@@ -40,7 +40,36 @@ internal class DownloadPhysicalCommands(
      * Compatibility route for ALREADY selected genuine catalogue media only. New selections
      * must use root acquisition routing then enqueueAccepted; no fallback query is made here.
      */
-    suspend fun enqueueKnownCatalog(item: MediaItem, reuseBindingId: String?): String = host.commands.withLock {
+    suspend fun enqueueKnownCatalog(item: MediaItem, reuseBindingId: String?): String {
+        // A fresh catalogue MEDIA tap has no prior accepted receipt. Capture and select through
+        // the SAME coordinator/gateway before taking the command lock, then reuse the existing
+        // enqueueAccepted persistence/claim path. An already-known prior/binding still uses the
+        // exact original selection and never searches today's title again.
+        if (reuseBindingId == null) {
+            val priorView = host.acquisitionView()
+            val prior = priorView.acquisition.physicalDownloads.values.singleOrNull { it.producer.subjectId.value == item.id }
+            if (prior?.producer?.bindingId == null) {
+                requireAdmission()
+                val current = priorView.snapshot.media[item.id]
+                    ?: fail(FailureCode.RECOVERY_REQUIRED, "download_acquisition_selection_required")
+                if (current.kind != item.kind || current.source.provider != item.source.provider ||
+                    current.source.canonicalId != item.source.canonicalId)
+                    fail(FailureCode.INVALID_STATE, "download_catalog_identity_changed")
+                val metadata = MediaCapture(current, current.artistIds.map { CapturedArtistCredit(it, null) })
+                val captured = dependencies.acquisition.capture(metadata,
+                    expectedCatalogRevision = priorView.snapshot.revision)
+                val resolved = dependencies.acquisition.resolve(captured.request.id)
+                val accepted = resolved as? dev.veyra.acquisition.AcquisitionResolution.Accepted
+                    ?: fail(FailureCode.RECOVERY_REQUIRED, "download_acquisition_selection_incomplete")
+                val single = accepted.record.outcome as? AcquisitionOutcome.Single
+                    ?: fail(FailureCode.UNSUPPORTED_SOURCE, "download_first_result_not_executable")
+                if ((accepted.record.request.metadata as? MediaCapture)?.media?.id != current.id)
+                    fail(FailureCode.INVALID_STATE, "download_catalog_capture_required")
+                requireAdmission()
+                return enqueueAccepted(accepted.record.request.id, single.bindingId) { }
+            }
+        }
+        return host.commands.withLock {
         requireAdmission()
         val view = host.acquisitionView()
         val currentItem = view.snapshot.media[item.id]
@@ -67,6 +96,7 @@ internal class DownloadPhysicalCommands(
             admitAcceptedLocked(accepted.request.id, requested)
         } else {
             admitSchema2Locked(item.id, requested)
+        }
         }
     }
 
@@ -129,8 +159,12 @@ internal class DownloadPhysicalCommands(
                 requireAdmission()
                 requireIntentCurrent()
                 val current = repository.physicalDownload(id) ?: fail(FailureCode.NOT_FOUND, "download_job_missing")
+                // A consumed cleanup maintenance legitimately advances ownershipGeneration
+                // (its claim fence). The exact producer/claim set and the later adopt CAS still
+                // reject a concurrent transfer owner; only a regression to an older generation
+                // is impossible here.
                 if (current.job.producer != pending.join.job.producer ||
-                    current.job.ownershipGeneration != settled.physicalOwnershipGeneration ||
+                    current.job.ownershipGeneration < settled.physicalOwnershipGeneration ||
                     current.claims.size != pending.join.claims.size || current.claims.toSet() != pending.join.claims.toSet())
                     fail(FailureCode.INVALID_STATE, "download_adoption_owner_changed")
                 runtime.requireClearedSchema2(current)

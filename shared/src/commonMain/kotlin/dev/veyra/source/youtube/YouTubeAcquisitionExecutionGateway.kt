@@ -45,7 +45,7 @@ class YouTubeAcquisitionExecutionGateway internal constructor(
         inspection: AcquisitionInspection?,
     ): PreparedAcquisitionDownload = guarded(download = true) {
         val input = checkedInput(context, inspection)
-        Prepared(this, context, source.audioExecution.prepareDownload(input, capabilities, requiredRepresentationId))
+        Prepared(this, context, requiredRepresentationId, source.audioExecution.prepareDownload(input, capabilities, requiredRepresentationId))
     }
 
     override suspend fun download(
@@ -110,9 +110,9 @@ class YouTubeAcquisitionExecutionGateway internal constructor(
     private class Prepared(
         val owner: YouTubeAcquisitionExecutionGateway,
         override val context: AcquisitionExecutionContext,
+        override val requiredRepresentationId: String?,
         val delegate: YouTubeAudioExecution.PreparedDownload,
     ) : PreparedAcquisitionDownload {
-        override val requiredRepresentationId: String? get() = delegate.representation.key
         override val representation = delegate.representation.let {
             AcquisitionRepresentation(it.key, it.mimeType, it.codecs, it.extension)
         }

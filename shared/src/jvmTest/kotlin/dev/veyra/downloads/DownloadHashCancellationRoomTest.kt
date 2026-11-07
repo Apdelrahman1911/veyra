@@ -25,51 +25,52 @@ import kotlin.test.*
 class DownloadHashCancellationRoomTest {
     @Test fun pauseDuringARealHashReadKeepsItsLeaseUntilSourceCloseAndResumesTheSameReceiptAndPath() {
         val blocking = BlockingHashReadFileSystem()
-        downloadCase(blocking) {
+        executorSchema3Case(blocking) {
             releaseOnClose += { blocking.releaseBoundary() }
-            val first = store()
-            val observer = store()
-            val gateway = DownloadTestGateway().apply {
-                transfer = { call -> call.complete().also { blocking.target = call.path } }
-            }
-            val gate = HashReadCancellationGate()
-            val a = coordinator(first, gateway, gate = gate)
-            val id = a.enqueue(item())
-            a.start(); blocking.boundaryEntered.await()
-            val part = gateway.transfers.single().path
-            val bound = observer.flush().getOrThrow().downloads.getValue(id)
-            assertEquals(DownloadStatus.VERIFYING, bound.status)
-            assertNotNull(bound.executionBindingId)
-            assertEquals(authoredRepresentation, bound.representationId)
+            val owner = owner()
+            val observer = owner(store())
+            owner.gateway.transfer = { call -> call.complete().also { blocking.target = call.path } }
+            val (id, selected) = enqueue(owner)
+            owner.coordinator.start(DownloadActivation.DURABLE_WORK)
+            blocking.boundaryEntered.await()
+            val transfer = owner.gateway.transfers.single()
+            val part = transfer.path
+            val bound = join(observer, id)
+            assertEquals(DownloadStatus.VERIFYING, bound.job.status)
+            assertEquals(selected.context, bound.producerContext)
+            assertEquals(authoredRepresentation, bound.job.representationId)
             coroutineScope {
-                val pausing = async(start = CoroutineStart.UNDISPATCHED) { a.pause(id) }
-                val paused = eventually(observer) { it.downloads[id]?.status == DownloadStatus.PAUSED }
-                gate.awaitCancellationRequested()
-                assertEquals(bound.executionBindingId, paused.downloads[id]?.executionBindingId)
-                assertEquals(bound.representationId, paused.downloads[id]?.representationId)
-                assertEquals(part, paused.downloads[id]?.stagingPath)
-                assertFalse(pausing.isCompleted, "Pause must await the blocked Source.read and its actual close")
+                val pausing = async(start = CoroutineStart.UNDISPATCHED) { owner.coordinator.pause(id) }
+                val paused = awaitJob(observer, id) { it.job.status == DownloadStatus.PAUSED }
+                // Gate.acquire runs NonCancellable in schema3; observe the ACTUAL transfer Job.
+                awaitCondition { transfer.operation.isCancelled }
+                assertFalse(transfer.operation.isCompleted)
+                assertEquals(bound.job.producer, paused.job.producer)
+                assertEquals(bound.job.representationId, paused.job.representationId)
+                assertEquals(part, paused.job.stagingPath)
+                assertFalse(pausing.isCompleted, "Pause must join actual Source.read and Source.close")
                 assertFalse(blocking.sourceClosed.isCompleted)
-                assertEquals(0, validationCount.get(), "Cancellation during hash cannot reach the decoder")
-                assertNull(files.tryLeasePaths(listOf(part)), "The cancelled but unreturned source still owns this generation")
+                assertTrue(owner.validations.isEmpty())
+                assertNull(probeFiles.tryLeasePaths(listOf(part)))
+                assertNull(probeFiles.tryTransferSlot(1))
                 assertContentEquals(authoredBytes, Files.readAllBytes(Path.of(part)))
                 blocking.releaseBoundary()
-                withTimeout(3_000) { pausing.await() }
+                withTimeout(5_000) { pausing.await() }
             }
             assertTrue(blocking.sourceClosed.isCompleted)
             assertEquals(1, blocking.blockedSourceCloses.get())
-            val released = observer.flush().getOrThrow().downloads.getValue(id)
-            assertEquals(DownloadStatus.PAUSED, released.status)
-            assertNull(released.leaseOwner)
-            assertNull(released.activeAttemptId)
-            assertEquals(bound.executionBindingId, released.executionBindingId)
-            val lease = assertNotNull(files.tryLeasePaths(listOf(part))); lease.close()
-            a.resume(id)
-            eventually(first) { it.downloads[id]?.status == DownloadStatus.COMPLETE }
-            assertEquals(listOf(part, part), gateway.transfers.map { it.path })
-            assertEquals(1, gateway.queries.size)
-            assertEquals(1, gateway.transfers.map { it.binding }.distinct().size)
-            assertEquals(1, validationCount.get())
+            val released = join(observer, id)
+            assertEquals(DownloadStatus.PAUSED, released.job.status)
+            assertNull(released.job.leaseOwner)
+            assertNull(released.activeAttempt)
+            assertEquals(bound.job.producer, released.job.producer)
+            assertNotNull(probeFiles.tryLeasePaths(listOf(part))).close()
+            owner.coordinator.resume(id)
+            complete(owner, id)
+            assertEquals(listOf(part, part), owner.gateway.transfers.map { it.path })
+            assertEquals(1, owner.selector.requests.size)
+            assertEquals(listOf(selected.context), owner.gateway.transfers.map { it.context }.distinct())
+            assertEquals(1, owner.validations.size)
         }
     }
 

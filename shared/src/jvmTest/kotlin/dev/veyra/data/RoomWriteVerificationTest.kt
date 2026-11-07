@@ -10,10 +10,11 @@ import kotlin.test.*
 class RoomWriteVerificationTest {
     @Test fun ignoredSqlInsertRollsBackRevisionAndWholeGraphWithoutPublishingPartialRefresh() = runBlocking<Unit> {
         val directory = roomWorkDirectory("ignored-write")
+        seedSchema2(directory, completeLibrary())
         val store = createPlatformLibraryStore(directory.toString())
         var observer: Job? = null
         try {
-            val before = store.update { completeLibrary() }.getOrThrow()
+            val before = store.initialize().getOrThrow()
             val observed = mutableListOf<AppSnapshot>()
             observer = launch(start = CoroutineStart.UNDISPATCHED) { store.state.collect { observed += it } }
             withSql(directory.resolve("veyra.db")) { db ->
@@ -26,8 +27,8 @@ class RoomWriteVerificationTest {
                 settings = before.settings.copy(theme = ThemeMode.LIGHT),
                 queues = before.queues + (QueueContext.MUSIC to before.queue(QueueContext.MUSIC).let { it.copy(entries = it.entries.reversed()) }),
             )
-            val failure = assertIs<StoreResult.Failure>(store.update { refreshed })
-            assertEquals(FailureCode.STORAGE_IO, failure.failure.code)
+            assertFailsWith<Exception> { writerUpdate(store) { refreshed } }
+            assertEquals(FailureCode.STORAGE_IO, store.lastFailure.value?.code)
             assertEquals(before, store.state.value)
             assertEquals(before, store.flush().getOrThrow())
             yield()
@@ -38,7 +39,7 @@ class RoomWriteVerificationTest {
                 db.execSQL("DROP TRIGGER ignore_favorite")
             }
             // A later genuine refresh succeeds once, without losing progress/artwork/downloads.
-            val committed = store.update { refreshed }.getOrThrow()
+            val committed = writerUpdate(store) { refreshed }
             assertEquals(refreshed.copy(revision = before.revision + 1), committed)
             assertEquals(before.downloads, committed.downloads)
             assertEquals(before.progress, committed.progress)
@@ -52,15 +53,16 @@ class RoomWriteVerificationTest {
 
     @Test fun feedRenameBeforeNewIdentityInsertPreservesChildrenRegardlessOfMapOrderAndRestart() = runBlocking<Unit> {
         val directory = roomWorkDirectory("feed-reuse")
+        seedSchema2(directory, completeLibrary())
         val store = createPlatformLibraryStore(directory.toString())
         val committed = try {
-            val before = store.update { completeLibrary() }.getOrThrow()
+            val before = store.initialize().getOrThrow()
             val original = before.shows.getValue("show-1")
             val renamed = original.copy(feedUrl = "https://publisher.example.com/renamed-feed",
                 feedAliases = original.feedAliases + original.feedUrl)
             val newcomer = PodcastShow("new-show", "New complete show title", original.feedUrl)
             val expected = before.copy(shows = linkedMapOf(newcomer.id to newcomer, renamed.id to renamed))
-            val after = store.update { expected }.getOrThrow()
+            val after = writerUpdate(store) { expected }
             assertEquals(expected.copy(revision = before.revision + 1), after)
             // New identity is deliberately first. Its UNIQUE conflict must not become a no-op
             // before the existing row moves, and no REPLACE may delete the old show's children.
@@ -86,17 +88,21 @@ class RoomWriteVerificationTest {
 
     @Test fun cyclicUniqueFeedSwapFailsWithoutDroppingEpisodesOrAcknowledgingAnyChange() = runBlocking<Unit> {
         val directory = roomWorkDirectory("feed-swap")
-        val store = createPlatformLibraryStore(directory.toString())
+        var store = createPlatformLibraryStore(directory.toString())
         val before = try {
             val fixture = completeLibrary()
             val another = PodcastShow("second-show", "Second complete show", "https://publisher.example.com/second-feed")
-            val before = store.update { fixture.copy(shows = fixture.shows + (another.id to another)) }.getOrThrow()
+            seedSchema2(directory, fixture.copy(shows = fixture.shows + (another.id to another)))
+            store = createPlatformLibraryStore(directory.toString())
+            val before = store.initialize().getOrThrow()
             val first = before.shows.getValue("show-1")
-            val failure = store.update { old -> old.copy(
-                shows = linkedMapOf(first.id to first.copy(feedUrl = another.feedUrl), another.id to another.copy(feedUrl = first.feedUrl)),
-                media = old.media + ("music-1" to old.media.getValue("music-1").copy(title = "Must not be published")),
-                favoriteIds = old.favoriteIds + "music-2",
-            ) }
+            val failure = assertIs<StoreResult.Failure>(runCatching {
+                writerUpdate(store) { old -> old.copy(
+                    shows = linkedMapOf(first.id to first.copy(feedUrl = another.feedUrl), another.id to another.copy(feedUrl = first.feedUrl)),
+                    media = old.media + ("music-1" to old.media.getValue("music-1").copy(title = "Must not be published")),
+                    favoriteIds = old.favoriteIds + "music-2",
+                ) }
+            }.exceptionOrNull()?.let { StoreResult.Failure(failureOfForTest(it)) } ?: StoreResult.Success(before))
             assertIs<StoreResult.Failure>(failure)
             assertEquals(before, store.state.value)
             assertEquals(before, store.flush().getOrThrow())
@@ -123,7 +129,8 @@ class RoomWriteVerificationTest {
         val directory = roomWorkDirectory(if (duplicateId) "asset-id" else "asset-uri")
         val store = createPlatformLibraryStore(directory.toString())
         val before = try {
-            val before = store.update { completeLibrary() }.getOrThrow()
+            seedSchema2(directory, completeLibrary())
+            val before = store.initialize().getOrThrow()
             val existingAsset = assertNotNull(before.downloads.getValue("download-1").asset)
             val episodeDownload = before.downloads.getValue("download-2")
             val collidingAsset = existingAsset.copy(
@@ -136,8 +143,14 @@ class RoomWriteVerificationTest {
                 (episodeDownload.id to episodeDownload.copy(asset = collidingAsset)), favoriteIds = before.favoriteIds + "music-2")
             val invalid = assertFailsWith<IllegalArgumentException> { validateLibrarySnapshot(proposed) }
             assertEquals(if (duplicateId) "Offline asset identities must be unique" else "Offline asset files must have one owner", invalid.message)
-            val failure = assertIs<StoreResult.Failure>(store.update { proposed })
-            assertEquals(FailureCode.INVALID_STATE, failure.failure.code)
+            assertFailsWith<Exception> {
+                writerRowsUpdate(store) { rows -> rows.copy(assets = rows.assets.map { asset ->
+                    if (asset.id == existingAsset.id) asset.copy(id = collidingAsset.id, mediaId = collidingAsset.mediaId,
+                        uri = collidingAsset.uri, executionBindingId = collidingAsset.executionBindingId,
+                    ) else asset
+                }) }
+            }
+            assertEquals(FailureCode.INVALID_STATE, store.lastFailure.value?.code)
             assertEquals(before, store.state.value)
             assertEquals(before, store.flush().getOrThrow())
             withSql(directory.resolve("veyra.db")) { db ->

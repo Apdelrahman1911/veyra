@@ -12,12 +12,13 @@ class RoomDifferentialWriteTest {
         val directory = roomWorkDirectory("history-payload-delta")
         val store = createPlatformLibraryStore(directory.toString())
         val committed = try {
-            val before = store.update { historyFixture(1_000) }.getOrThrow()
+            seedSchema2(directory, historyFixture(1_000))
+            val before = store.initialize().getOrThrow()
             audit(directory.resolve("veyra.db"), "playback_history", "NEW.id")
             val expected = before.copy(history = before.history.mapIndexed { index, row ->
                 if (index == 0) row.copy(lastPositionMs = row.lastPositionMs + 1) else row
             })
-            val actual = store.update { expected }.getOrThrow()
+            val actual = writerUpdate(store) { expected }
             assertEquals(expected.copy(revision = before.revision + 1), actual)
             assertEquals(actual, store.flush().getOrThrow())
             counts(directory, updates = 1, staged = 0, inserts = 0)
@@ -35,13 +36,12 @@ class RoomDifferentialWriteTest {
         val directory = roomWorkDirectory("playlist-payload-delta")
         val store = createPlatformLibraryStore(directory.toString())
         try {
-            val before = store.update {
-                completeLibrary().let { it.copy(playlists = it.playlists + Playlist("playlist-2", "Untouched")) }
-            }.getOrThrow()
+            seedSchema2(directory, completeLibrary().let { it.copy(playlists = it.playlists + Playlist("playlist-2", "Untouched")) })
+            val before = store.initialize().getOrThrow()
             audit(directory.resolve("veyra.db"), "playlists", "NEW.id")
-            val actual = store.update { old -> old.copy(playlists = old.playlists.mapIndexed { index, row ->
+            val actual = store.editCatalogLibrary { old -> old.copy(playlists = old.playlists.mapIndexed { index, row ->
                 if (index == 0) row.copy(name = "Changed complete title") else row
-            }) }.getOrThrow()
+            }) }.snapshot
             assertEquals(before.playlists[1], actual.playlists[1])
             counts(directory, updates = 1, staged = 0, inserts = 0)
             assertEquals(actual, store.flush().getOrThrow())
@@ -52,10 +52,11 @@ class RoomDifferentialWriteTest {
         val directory = roomWorkDirectory("history-order-delta")
         val store = createPlatformLibraryStore(directory.toString())
         try {
-            val before = store.update { historyFixture(5) }.getOrThrow()
+            seedSchema2(directory, historyFixture(5))
+            val before = store.initialize().getOrThrow()
             audit(directory.resolve("veyra.db"), "playback_history", "NEW.id")
             val order = listOf(before.history[1], before.history[0]) + before.history.drop(2)
-            val actual = store.update { it.copy(history = order) }.getOrThrow()
+            val actual = writerUpdate(store) { it.copy(history = order) }
             assertEquals(order, actual.history)
             counts(directory, updates = 4, staged = 2, inserts = 0)
             withSql(directory.resolve("veyra.db")) { db ->
@@ -69,12 +70,16 @@ class RoomDifferentialWriteTest {
         val directory = roomWorkDirectory("queue-order-delta")
         val store = createPlatformLibraryStore(directory.toString())
         try {
-            val before = store.update { completeLibrary() }.getOrThrow()
+            seedSchema2(directory, completeLibrary())
+            val before = store.initialize().getOrThrow()
             audit(directory.resolve("veyra.db"), "queue_entries", "NEW.contextId || ':' || NEW.id")
-            val actual = store.update { old ->
-                val queue = old.queue(QueueContext.MUSIC)
-                old.copy(queues = old.queues + (QueueContext.MUSIC to queue.copy(entries = queue.entries.reversed())))
-            }.getOrThrow()
+            val queueBefore = store.acquisition.state.value.queues.getValue(QueueContext.MUSIC)
+            val order = queueBefore.displayedOrder.reversed()
+            store.acquisition.applyPlayback(dev.veyra.data.AcquisitionPlaybackCommand.EditQueue(
+                dev.veyra.data.ExecutionQueueExpectation(QueueContext.MUSIC, queueBefore.editRevision, queueBefore.currentOccurrenceId),
+                order, queueBefore.originalOrder, queueBefore.currentOccurrenceId, queueBefore.positionMs, queueBefore.speed,
+                queueBefore.shuffle, queueBefore.repeat, outgoing = null))
+            val actual = store.flush().getOrThrow()
             assertEquals(before.queue(QueueContext.PODCAST), actual.queue(QueueContext.PODCAST))
             assertEquals(before.queue(QueueContext.MUSIC).originalOrder, actual.queue(QueueContext.MUSIC).originalOrder)
             assertEquals(before.queue(QueueContext.MUSIC).currentEntryId, actual.queue(QueueContext.MUSIC).currentEntryId)
@@ -91,11 +96,12 @@ class RoomDifferentialWriteTest {
         val directory = roomWorkDirectory("history-mixed-delta")
         val store = createPlatformLibraryStore(directory.toString())
         try {
-            val before = store.update { historyFixture(5) }.getOrThrow()
+            seedSchema2(directory, historyFixture(5))
+            val before = store.initialize().getOrThrow()
             audit(directory.resolve("veyra.db"), "playback_history", "NEW.id")
             val added = before.history[1].copy(id = "history-new", startedEpochMs = 10_000)
             val order = listOf(before.history[4], added, before.history[0], before.history[2])
-            val actual = store.update { it.copy(history = order) }.getOrThrow()
+            val actual = writerUpdate(store) { it.copy(history = order) }
             assertEquals(order, actual.history)
             counts(directory, updates = 6, staged = 3, inserts = 1)
             assertEquals(actual, store.flush().getOrThrow())
@@ -106,7 +112,8 @@ class RoomDifferentialWriteTest {
         val directory = roomWorkDirectory("artist-order-delta")
         val store = createPlatformLibraryStore(directory.toString())
         try {
-            store.update { completeLibrary() }.getOrThrow()
+            seedSchema2(directory, completeLibrary())
+            store.initialize().getOrThrow()
             audit(directory.resolve("veyra.db"), "track_artists", "NEW.trackId || ':' || NEW.artistId")
             val actual = store.update { old ->
                 val track = old.media.getValue("music-1")
@@ -124,15 +131,18 @@ class RoomDifferentialWriteTest {
         val directory = roomWorkDirectory("ignored-history-delta")
         val store = createPlatformLibraryStore(directory.toString())
         try {
-            val before = store.update { historyFixture(3) }.getOrThrow()
+            seedSchema2(directory, historyFixture(3))
+            val before = store.initialize().getOrThrow()
             withSql(directory.resolve("veyra.db")) { db ->
                 db.execSQL("CREATE TRIGGER ignore_history BEFORE UPDATE ON playback_history WHEN NEW.id='history-delta-0' BEGIN SELECT RAISE(IGNORE); END")
             }
-            val result = store.update { old -> old.copy(
-                history = old.history.mapIndexed { index, row -> if (index == 0) row.copy(lastPositionMs = 12) else row },
-                settings = old.settings.copy(theme = ThemeMode.LIGHT),
-            ) }
-            assertIs<StoreResult.Failure>(result)
+            assertFailsWith<Exception> {
+                writerUpdate(store) { old -> old.copy(
+                    history = old.history.mapIndexed { index, row -> if (index == 0) row.copy(lastPositionMs = 12) else row },
+                    settings = old.settings.copy(theme = ThemeMode.LIGHT),
+                ) }
+            }
+            assertEquals(FailureCode.STORAGE_IO, store.lastFailure.value?.code)
             assertEquals(before, store.state.value)
             assertEquals(before, store.flush().getOrThrow())
         } finally { store.close() }
@@ -142,11 +152,12 @@ class RoomDifferentialWriteTest {
         val directory = roomWorkDirectory("aborted-order-delta")
         val store = createPlatformLibraryStore(directory.toString())
         try {
-            val before = store.update { historyFixture(5) }.getOrThrow()
+            seedSchema2(directory, historyFixture(5))
+            val before = store.initialize().getOrThrow()
             withSql(directory.resolve("veyra.db")) { db ->
                 db.execSQL("CREATE TRIGGER abort_history BEFORE UPDATE ON playback_history WHEN OLD.position < 0 AND NEW.position >= 0 AND NEW.id='history-delta-0' BEGIN SELECT RAISE(ABORT, 'authored order rejection'); END")
             }
-            assertIs<StoreResult.Failure>(store.update { it.copy(history = it.history.reversed()) })
+            assertFailsWith<Exception> { writerUpdate(store) { it.copy(history = it.history.reversed()) } }
             assertEquals(before, store.state.value)
             assertEquals(before, store.flush().getOrThrow())
             withSql(directory.resolve("veyra.db")) { db ->
@@ -160,9 +171,10 @@ class RoomDifferentialWriteTest {
         val directory = roomWorkDirectory("chunked-order-delta")
         val store = createPlatformLibraryStore(directory.toString())
         try {
-            val before = store.update { historyFixture(513) }.getOrThrow()
+            seedSchema2(directory, historyFixture(513))
+            val before = store.initialize().getOrThrow()
             audit(directory.resolve("veyra.db"), "playback_history", "NEW.id")
-            val actual = store.update { it.copy(history = it.history.reversed()) }.getOrThrow()
+            val actual = writerUpdate(store) { it.copy(history = it.history.reversed()) }
             assertEquals(before.history.reversed(), actual.history)
             // Odd midpoint retains its order; all other rows are staged then updated once.
             counts(directory, updates = 1_024, staged = 512, inserts = 0)

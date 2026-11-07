@@ -15,6 +15,7 @@ import dev.veyra.playback.SystemClock
 import dev.veyra.source.ResolvePurpose
 import dev.veyra.source.execution.AppSourceResolver
 import dev.veyra.source.execution.KmpMediaGateway
+import okio.Path.Companion.toPath
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
@@ -387,10 +388,19 @@ class DownloadCoordinator(
                 }
             }
             policyObserver = scope.launch {
-                val policy = if (physicalRuntime == null) store.state.map { it.settings.offlineOnly }
-                    else store.acquisitionViews.map { it.snapshot.settings.offlineOnly }
-                policy.distinctUntilChanged().collect { offline ->
-                    try { if (offline) pauseForPolicy() else signalWork() }
+                val policy = if (physicalRuntime == null) store.state.map { it.settings.offlineOnly to 4 }
+                    else store.acquisitionViews.map { it.snapshot.settings.offlineOnly to
+                        it.snapshot.settings.downloadParallelism.coerceIn(1, 4) }
+                policy.distinctUntilChanged().collect { (offline, parallelism) ->
+                    try {
+                        if (offline) pauseForPolicy()
+                        else {
+                            // The canonical lower limit is enforced on active typed slots, not
+                            // only on the next claim. Cancellation uses the existing unwind path.
+                            physicalRuntime?.revokeExcessSlots(parallelism)
+                            signalWork()
+                        }
+                    }
                     catch (cancelled: CancellationException) { throw cancelled }
                     catch (error: Exception) { publishFailure(classify(error)) }
                 }
@@ -1374,7 +1384,18 @@ class DownloadCoordinator(
 
     private suspend fun maybeSweepRetiredStaging() {
         val stamp = clock.monotonicMs()
-        if (lifecycle.value.checksActivated && !lifecycle.value.closed && !lifecycle.value.suspended &&
+        // Orphan staging deletion is not a user-visible asset validation. It yields while any
+        // canonical download/finalization is pending so cleanup cannot consume another owner's
+        // gate/local retry slot. Scheduling-only bootstrap never starts this scheduler.
+        val pending = physicalRuntime?.let { physical ->
+            val state = store.acquisitionViews.value.acquisition
+            state.physicalFinalizations.isNotEmpty() || state.physicalDownloads.values.any {
+                it.cleanupPending || it.maintenanceKind != null || it.activeAttemptId != null ||
+                    it.status in setOf(DownloadStatus.QUEUED, DownloadStatus.RUNNING, DownloadStatus.VERIFYING,
+                        DownloadStatus.WAITING_NETWORK, DownloadStatus.NEEDS_FOREGROUND)
+            }
+        } ?: false
+        if (!pending && !lifecycle.value.closed && !lifecycle.value.suspended &&
             (lastSweepMs == null || stamp - lastSweepMs!! >= 5_000)) {
             sweepRetiredStaging()
             lastSweepMs = stamp
@@ -1716,6 +1737,9 @@ class DownloadCoordinator(
     private suspend fun sweepRetiredStaging() {
         for (path in files.generatedStagingParts()) {
             currentCoroutineContext().ensureActive()
+            // generatedStagingParts is a metadata-only shape hint and may name a canonical
+            // transfer.part that never existed. Never acquire an execution allowance for that.
+            if (files.fileSystem.metadataOrNull(path.toPath()) == null) continue
             val life = lifecycle.value
             if (life.closed || life.suspended) return
             // Metadata-only preflight and a nonblocking native claim avoid starting an OS worker

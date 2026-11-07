@@ -12,21 +12,31 @@ import kotlin.test.*
 
 /** D01–D08/D12/D13: real SQLite arbitration and filesystem fencing; fake acquisition, NOT AUDIO. */
 class DownloadOwnershipRoomTest {
-    @Test fun foreignFutureLeaseSurvivesStartBackgroundRestrictionAndClose() = downloadCase {
-        val first = store()
-        val second = store()
-        val seeded = seedPending(first, status = DownloadStatus.RUNNING, bound = true, bytes = authoredBytes,
-            leaseOwner = "foreign-writer", leaseUntil = clock.epochMs() + 20_000)
-        val gateway = DownloadTestGateway().apply { denyAcquisition() }
-        val coordinator = coordinator(second, gateway)
-        coordinator.start()
-        coordinator.pauseForBackground()
-        coordinator.close()
-        val durable = first.flush().getOrThrow()
-        assertEquals(seeded.record, durable.downloads[seeded.record.id])
-        assertEquals(seeded.attempt, durable.downloadAttempts[seeded.attempt!!.id])
-        assertContentEquals(authoredBytes, Files.readAllBytes(Path.of(seeded.record.stagingPath!!)))
-        gateway.assertUnused()
+    @Test fun foreignFutureLeaseSurvivesStartBackgroundRestrictionAndClose() = executorSchema3Case {
+        // EX20: foreign ownership is from ANOTHER actual typed executor, not a manufactured row.
+        val a = owner(heartbeatMs = 30_000, leaseDurationMs = 60_000)
+        val b = owner(store())
+        val entered = CompletableDeferred<Unit>()
+        a.gateway.transfer = { call -> call.write(); entered.complete(Unit); awaitCancellation() }
+        val (id, selected) = enqueue(a)
+        a.coordinator.start(DownloadActivation.DURABLE_WORK)
+        entered.await()
+        val foreign = join(a, id)
+        assertNotNull(foreign.job.leaseOwner)
+        assertNotNull(foreign.activeAttempt)
+        assertEquals(selected.context, foreign.producerContext)
+        b.coordinator.start(DownloadActivation.DURABLE_WORK)
+        b.coordinator.pauseForBackground()
+        b.coordinator.close()
+        assertTrue(b.coordinator.dependencyReleaseSafeAfterClose)
+        assertEquals(foreign, join(a, id))
+        assertContentEquals(authoredBytes, Files.readAllBytes(Path.of(assertNotNull(foreign.job.stagingPath))))
+        assertTrue(b.selector.requests.isEmpty())
+        assertTrue(b.gateway.prepareCalls.isEmpty())
+        assertTrue(b.gateway.transfers.isEmpty())
+        assertEquals(0, b.gate.acquires.get())
+        assertNull(probeFiles.tryLeasePaths(listOf(assertNotNull(foreign.job.stagingPath))))
+        b.legacy.assertUnused()
     }
 
     @Test fun twoReplayersHaveOneDurableClaimAndOnePublisher() = downloadCase {
@@ -128,96 +138,129 @@ class DownloadOwnershipRoomTest {
         }
     }
 
-    @Test fun silentTransferHeartbeatRevokesParentAndCleanupWaitsForUnwind() = downloadCase {
-        val first = store()
-        val second = store()
+    @Test fun silentTransferHeartbeatRevokesParentAndCleanupWaitsForUnwind() = executorSchema3Case {
+        // EX21: foreign stop accepts irreversible intent but cannot ACK the other live writer.
+        val a = owner()
+        val b = owner(store())
         val entered = CompletableDeferred<Unit>()
         val unwinding = barrier()
-        val gateway = DownloadTestGateway().apply {
-            transfer = { call ->
-                call.write()
-                entered.complete(Unit)
-                try { awaitCancellation() }
-                finally { withContext(NonCancellable) { unwinding.stop() } }
-            }
+        a.gateway.transfer = { call ->
+            call.write(); entered.complete(Unit)
+            try { awaitCancellation() }
+            finally { withContext(NonCancellable) { unwinding.stop() } }
         }
-        val a = coordinator(first, gateway)
-        val b = coordinator(second, DownloadTestGateway().apply { denyAcquisition() })
-        val id = a.enqueue(item())
-        a.start(); entered.await(); b.start()
-        val stage = gateway.transfers.single().path
-        b.cancel(id)
-        b.resume(id)
+        val (id, selected) = enqueue(a)
+        a.coordinator.start(DownloadActivation.DURABLE_WORK)
+        entered.await()
+        b.coordinator.start(DownloadActivation.DURABLE_WORK)
+        val original = join(a, id)
+        val stage = a.gateway.transfers.single().path
+        assertEquals(AppFailure(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed"),
+            assertFailsWith<VeyraException> { b.coordinator.cancel(id) }.failure)
+        assertEquals(FailureCode.INVALID_STATE, assertFailsWith<VeyraException> { b.coordinator.resume(id) }.failure.code)
         unwinding.entered.await()
-        assertTrue(second.flush().getOrThrow().downloads.getValue(id).cleanupPending)
+        val cancelling = join(b, id)
+        assertTrue(cancelling.job.cleanupPending)
+        assertEquals(DownloadBatchIntent.CANCELLED, cancelling.claims.single().intent)
+        assertEquals(selected.context, cancelling.producerContext)
         assertContentEquals(authoredBytes, Files.readAllBytes(Path.of(stage)))
-        assertEquals(1, gateway.transfers.size)
+        assertNull(probeFiles.tryLeasePaths(listOf(stage)))
+        assertEquals(1, a.gateway.transfers.size)
+        assertTrue(b.gateway.transfers.isEmpty())
         unwinding.release()
-        val durable = eventually(second) { it.downloads[id]?.let { d -> d.status == DownloadStatus.CANCELLED && !d.cleanupPending && d.leaseOwner == null } == true }
-        assertNull(durable.downloads[id]?.activeAttemptId)
+        awaitCondition { a.gateway.transfers.single().operation.isCompleted }
+        advance(5_100) // Actual local cleanup contention backoff, not an extra user retry.
+        val durable = awaitJob(b, id) {
+            it.job.status == DownloadStatus.CANCELLED && !it.job.cleanupPending && it.job.leaseOwner == null
+        }
+        assertNull(durable.activeAttempt)
         assertFalse(Files.exists(Path.of(stage)))
-        assertEquals(1, gateway.transfers.size)
-        assertEquals(DownloadAttemptStatus.CANCELLED, durable.downloadAttempts.values.single().status)
+        assertEquals(original.activeAttempt?.id, durable.attempts.single().id)
+        assertNotNull(durable.attempts.single().finishedEpochMs)
+        assertEquals(DownloadAttemptStatus.PAUSED, durable.attempts.single().status,
+            "Schema3 retains the real cancelled coroutine's PAUSED finish; cleanup cannot rewrite history")
+        assertEquals(1, a.gateway.transfers.size + b.gateway.transfers.size)
+        assertEquals(1, a.selector.requests.size)
+        assertTrue(b.selector.requests.isEmpty())
+        assertNull(durable.asset)
     }
 
-    @Test fun expiredZombieCannotWriteNewGenerationOrDemoteWinningCompletion() = downloadCase {
-        val first = store()
-        val second = store()
-        first.update { it.copy(settings = it.settings.copy(downloadParallelism = 2)) }.getOrThrow()
+    @Test fun expiredZombieCannotWriteNewGenerationOrDemoteWinningCompletion() = executorSchema3Case {
+        // EX22: logical expiry permits a fresh, separately OS-locked generation, not old-path reuse.
+        val a = owner()
+        val b = owner(store())
+        a.expectedCloseFailure = AppFailure(FailureCode.INVALID_STATE, "download_checkpoint_stale")
+        parallelism(a, 2)
         val zombie = barrier()
         val oldReturned = CompletableDeferred<Unit>()
-        val aGateway = DownloadTestGateway().apply {
-            transfer = { call ->
-                call.write("old partial".encodeToByteArray())
-                withContext(NonCancellable) {
-                    zombie.stop(); call.write("late old writer".encodeToByteArray()); oldReturned.complete(Unit)
-                }
-                call.result()
+        a.gateway.transfer = { call ->
+            call.write("old authored partial".encodeToByteArray())
+            withContext(NonCancellable) {
+                zombie.stop(); call.write("late authored old writer".encodeToByteArray()); oldReturned.complete(Unit)
             }
+            call.result()
         }
-        val bGateway = DownloadTestGateway()
-        val a = coordinator(first, aGateway)
-        val b = coordinator(second, bGateway)
-        val id = a.enqueue(item())
-        a.start(); zombie.entered.await(); b.start()
-        val oldPath = aGateway.transfers.single().path
-        clock.advance(1_100)
-        val completed = eventually(second) { it.downloads[id]?.status == DownloadStatus.COMPLETE }
-        val asset = completed.downloads.getValue(id).asset!!
-        val newPath = bGateway.transfers.single().path
+        val (id, selected) = enqueue(a)
+        a.coordinator.start(DownloadActivation.DURABLE_WORK)
+        zombie.entered.await()
+        val old = join(a, id)
+        val oldPath = a.gateway.transfers.single().path
+        b.coordinator.start(DownloadActivation.DURABLE_WORK)
+        advance(1_100)
+        val winner = complete(b, id)
+        val asset = assertNotNull(winner.asset)
+        val newPath = b.gateway.transfers.single().path
         assertNotEquals(oldPath, newPath)
-        assertContentEquals(authoredBytes, Files.readAllBytes(Path.of(asset.uri)))
-        assertEquals(aGateway.transfers.single().binding, bGateway.transfers.single().binding)
-        assertTrue(bGateway.queries.isEmpty(), "Takeover retains the exact first-result receipt")
+        assertTrue(asset.ownershipGeneration > old.job.ownershipGeneration)
+        assertEquals(selected.context, b.gateway.transfers.single().context)
+        assertEquals(a.gateway.transfers.single().context, b.gateway.transfers.single().context)
+        assertTrue(b.selector.requests.isEmpty())
+        assertNull(probeFiles.tryLeasePaths(listOf(oldPath)))
+        val retiredAttempt = winner.attempts.single { it.id == old.activeAttempt?.id }
+        assertEquals(DownloadAttemptStatus.PAUSED, retiredAttempt.status)
+        assertNotNull(retiredAttempt.finishedEpochMs)
         zombie.release(); oldReturned.await()
-        eventually(second) { it.downloadAttempts.values.any { attempt -> attempt.stagingPath == oldPath && attempt.finishedEpochMs != null } }
-        assertEquals(asset, second.flush().getOrThrow().downloads[id]?.asset)
-        assertEquals(DownloadStatus.COMPLETE, second.state.value.downloads[id]?.status)
+        awaitCondition { a.gateway.transfers.single().operation.isCompleted }
+        val afterLate = join(b, id)
+        assertEquals(asset, afterLate.asset)
+        assertEquals(DownloadStatus.COMPLETE, afterLate.job.status)
+        assertEquals(retiredAttempt, afterLate.attempts.single { it.id == retiredAttempt.id })
         assertContentEquals(authoredBytes, Files.readAllBytes(Path.of(asset.uri)))
-        clock.advance(5_100)
-        eventually(second) { it.downloadAttempts.values.none { attempt -> attempt.stagingPath == oldPath } }
-        assertFalse(Files.exists(Path.of(oldPath)))
-        assertEquals(2, second.state.value.downloadAttempts.size)
-        assertEquals(1, second.state.value.downloadAttempts.values.count { it.status == DownloadAttemptStatus.SUCCEEDED })
+        advance(5_100)
+        awaitCondition { !Files.exists(Path.of(oldPath)) }
+        val durable = join(b, id)
+        assertEquals(2, durable.attempts.size, "History stays immutable even after obsolete physical bytes are deleted")
+        assertEquals(1, durable.attempts.count { it.status == DownloadAttemptStatus.SUCCEEDED })
+        assertEquals(retiredAttempt, durable.attempts.single { it.id == retiredAttempt.id })
     }
 
-    @Test fun expiryDoesNotExceedOnePhysicalTransferWhileZombieHoldsGlobalSlot() = downloadCase {
-        val first = store(); val second = store()
-        first.update { it.copy(settings = it.settings.copy(downloadParallelism = 1)) }.getOrThrow()
+    @Test fun expiryDoesNotExceedOnePhysicalTransferWhileZombieHoldsGlobalSlot() = executorSchema3Case {
+        // EX23: database expiry cannot unlock a real OS slot; the new claim waits for its deadline.
+        val a = owner()
+        val b = owner(store())
+        a.expectedCloseFailure = AppFailure(FailureCode.INVALID_STATE, "download_checkpoint_stale")
+        parallelism(a, 1)
         val zombie = barrier()
-        val gatewayA = DownloadTestGateway().apply { transfer = { call -> withContext(NonCancellable) { zombie.stop() }; call.complete() } }
-        val gatewayB = DownloadTestGateway()
-        val a = coordinator(first, gatewayA); val b = coordinator(second, gatewayB)
-        val id = a.enqueue(item())
-        a.start(); zombie.entered.await(); b.start()
-        clock.advance(1_100)
-        eventually(second) { it.downloads[id]?.leaseOwner == null }
+        a.gateway.transfer = { call -> withContext(NonCancellable) { zombie.stop() }; call.complete() }
+        val (id, _) = enqueue(a)
+        a.coordinator.start(DownloadActivation.DURABLE_WORK)
+        zombie.entered.await()
+        b.coordinator.start(DownloadActivation.DURABLE_WORK)
+        advance(1_100)
+        awaitJob(b, id) { it.job.leaseOwner == null }
         delay(160)
-        assertTrue(gatewayB.transfers.isEmpty())
+        assertTrue(b.gateway.transfers.isEmpty())
+        assertNull(probeFiles.tryTransferSlot(1))
+        assertFalse(a.gateway.transfers.single().operation.isCompleted)
         zombie.release()
-        eventually(second) { it.downloads[id]?.status == DownloadStatus.COMPLETE }
-        assertEquals(1, first.flush().getOrThrow().downloads.size)
-        assertEquals(2, gatewayA.transfers.size + gatewayB.transfers.size)
+        awaitCondition { a.gateway.transfers.single().operation.isCompleted }
+        advance(5_100)
+        val completed = complete(b, id, evidenceOwners = listOf(a, b))
+        assertEquals(DownloadStatus.COMPLETE, completed.job.status)
+        assertEquals(1, b.store.acquisitionView().acquisition.physicalDownloads.size)
+        assertEquals(2, a.gateway.transfers.size + b.gateway.transfers.size)
+        assertEquals(1, a.selector.requests.size)
+        assertTrue(b.selector.requests.isEmpty())
     }
 
     @Test fun staleEnqueueResumeAndPauseCannotDemoteOtherConnectionsCompletedAsset() = downloadCase {
@@ -252,33 +295,80 @@ class DownloadOwnershipRoomTest {
         gateway.assertUnused()
     }
 
-    @Test fun unboundRetainedBytesNeverAcquireAFreshReceiptInTheirOldDirectory() = downloadCase {
-        val first = store()
-        val seeded = seedPending(first, bytes = "unbound bytes".encodeToByteArray())
-        val gateway = DownloadTestGateway()
-        val a = coordinator(first, gateway)
-        a.start()
-        val done = eventually(first) { it.downloads[seeded.record.id]?.status == DownloadStatus.COMPLETE }
-        assertNotEquals(seeded.record.stagingPath, gateway.transfers.single().path)
-        assertEquals(listOf(seeded.item.title), gateway.queries.toList())
-        assertContentEquals(authoredBytes, Files.readAllBytes(Path.of(done.downloads.getValue(seeded.record.id).asset!!.uri)))
+    @Test fun unboundRetainedBytesNeverAcquireAFreshReceiptInTheirOldDirectory() = executorSchema3Case {
+        // EX24: genuine exported2→3 migration, UNKNOWN until an explicit current-title selection.
+        val legacy = unknownSchema2()
+        val a = owner()
+        val before = a.store.acquisitionView()
+        val old = before.acquisition.physicalDownloads.getValue(legacy.jobId)
+        val oldProducer = assertIs<PhysicalDownloadProducer.Schema2>(old.producer)
+        assertNull(oldProducer.bindingId)
+        assertNull(oldProducer.recordingId)
+        val historicalClaim = before.acquisition.claims.values.single()
+        assertNull(historicalClaim.requestedBindingId)
+        assertEquals(legacy.path, old.stagingPath)
+        assertTrue(before.acquisition.requests.isEmpty())
+        assertTrue(before.acquisition.receipts.isEmpty())
+        assertTrue(before.acquisition.bindings.isEmpty())
+        a.coordinator.start(DownloadActivation.DURABLE_WORK)
+        idle(a)
+        assertTrue(a.selector.requests.isEmpty(), "Cold UNKNOWN history must never reselect today's title")
+        assertTrue(a.gateway.prepareCalls.isEmpty())
+        assertTrue(a.gateway.transfers.isEmpty())
+        assertContentEquals(EXECUTOR_UNKNOWN_BYTES, Files.readAllBytes(Path.of(legacy.path)))
+        val selected = select(a, before.snapshot.media.getValue(legacy.mediaId))
+        val adoptionChecks = AtomicInteger()
+        a.beforeAdoption = { producer ->
+            assertEquals(oldProducer, producer)
+            assertFalse(Files.exists(Path.of(legacy.path)))
+            assertNotNull(probeFiles.tryLeasePaths(listOf(legacy.path))).close()
+            adoptionChecks.incrementAndGet() // No player exists in this source/Room fixture.
+        }
+        assertEquals(legacy.jobId, a.coordinator.adoptSchema2(legacy.jobId, selected.record.request.id, selected.context.binding.id) {
+            check(selected.current.get()) { "Authored original adoption intent revoked" }
+            selected.admissionChecks.incrementAndGet()
+        })
+        val done = complete(a, legacy.jobId, originUse = false)
+        assertEquals(1, adoptionChecks.get())
+        assertTrue(selected.admissionChecks.get() > 0)
+        assertNotEquals(legacy.path, a.gateway.transfers.single().path)
+        assertNotEquals(Path.of(legacy.path).parent, Path.of(a.gateway.transfers.single().path).parent)
+        assertFalse(Files.exists(Path.of(legacy.path)))
+        assertEquals(listOf(selected.record.request), a.selector.requests)
+        assertEquals(selected.context, done.producerContext)
+        assertEquals(before.acquisition.physicalAttempts, emptyMap())
+        val after = a.store.acquisitionView().acquisition
+        assertEquals(historicalClaim.owner, after.claims.getValue(historicalClaim.id).owner)
+        assertNull(after.claims.getValue(historicalClaim.id).requestedBindingId)
+        assertTrue(after.assetUses.isEmpty(), "A null historical claim must not invent a requested new producer use")
+        assertEquals(selected.context.binding.id, done.asset?.producer?.bindingId)
+        a.legacy.assertUnused()
     }
 
-    @Test fun explicitPlayReceiptPreventsASecondSearchAndDifferentRecordingReplacement() = downloadCase {
-        val first = store()
+    @Test fun explicitPlayReceiptPreventsASecondSearchAndDifferentRecordingReplacement() = executorSchema3Case {
+        // EX25: selections are genuine accepted requests; download uses the already accepted Play R1.
+        val a = owner()
         val item = item()
-        val played = binding(item, "played-binding")
-        val other = binding(item, "other-binding", "BBBBBBBBBBB")
-        first.update { it.copy(media = mapOf(item.id to item), playbackBindings = mapOf(played.id to played, other.id to other)) }.getOrThrow()
-        val gateway = DownloadTestGateway()
-        val a = coordinator(first, gateway)
-        val id = a.enqueue(item, played.id)
-        a.start()
-        val complete = eventually(first) { it.downloads[id]?.status == DownloadStatus.COMPLETE }
-        assertEquals(played.id, complete.downloads[id]?.asset?.executionBindingId)
-        assertTrue(gateway.queries.isEmpty())
-        assertEquals(played, gateway.transfers.single().binding)
-        assertEquals(FailureCode.INVALID_STATE, assertFailsWith<VeyraException> { a.enqueue(item, other.id) }.failure.code)
-        assertEquals(complete.downloads[id], first.flush().getOrThrow().downloads[id])
+        val played = select(a, item)
+        val other = select(a, item, "BBBBBBBBBBB")
+        val queries = a.selector.requests.toList()
+        val id = a.coordinator.enqueue(item, played.context.binding.id.value)
+        a.coordinator.start(DownloadActivation.DURABLE_WORK)
+        val completed = complete(a, id)
+        assertEquals(played.context.binding.id, completed.asset?.producer?.bindingId)
+        assertEquals(queries, a.selector.requests, "Download cannot search a selected title again")
+        assertEquals(played.context, a.gateway.transfers.single().context)
+        val beforeConflict = a.store.acquisitionView().acquisition
+        assertEquals(FailureCode.INVALID_STATE, assertFailsWith<VeyraException> {
+            a.coordinator.enqueue(item, other.context.binding.id.value)
+        }.failure.code)
+        assertEquals(completed, join(a, id))
+        val afterConflict = a.store.acquisitionView().acquisition
+        assertEquals(beforeConflict.physicalDownloads, afterConflict.physicalDownloads)
+        assertEquals(beforeConflict.claims, afterConflict.claims)
+        assertEquals(beforeConflict.materializations, afterConflict.materializations)
+        assertEquals(beforeConflict.assetUses, afterConflict.assetUses)
+        assertEquals(queries, a.selector.requests)
     }
+
 }

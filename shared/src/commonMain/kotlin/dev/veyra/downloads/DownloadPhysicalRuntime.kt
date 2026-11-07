@@ -190,6 +190,21 @@ internal class DownloadPhysicalRuntime(
         runs.update { current -> if (current[run.fence.downloadId] === run) current - run.fence.downloadId else current }
     }
 
+    /**
+     * A lowered canonical global limit revokes only the actual surplus transfer slots through
+     * their normal cancellation/unwind. It never releases a lease, path or slot early and never
+     * touches local maintenance; the next admission sees the same persisted limit.
+     */
+    internal fun revokeExcessSlots(parallelism: Int) {
+        val limit = parallelism.coerceIn(1, 4)
+        runs.value.values.forEach { run ->
+            if (run.kind == null && (run.slot?.index ?: 0) >= limit) {
+                host.active[run.fence.downloadId]?.cancel(
+                    CancellationException("Download transfer slot retired by parallelism policy"))
+            }
+        }
+    }
+
     /** No early lease release or pretend checkpoint. Actual finalizers use canonical commands. */
     internal fun requestHostSuspension(target: DownloadStatus) {
         runs.value.values.forEach { run ->
@@ -658,7 +673,13 @@ internal class DownloadPhysicalRuntime(
                 ensureRun(admitted, network = false)
                 checkpoint(admitted)
                 action(admitted).also { admitted.actionFinished.value = true }
-            } catch (error: CancellationException) { throw error }
+            } catch (error: CancellationException) {
+                // An allowance/host suspension is an actual restriction, not a silent stop.
+                // Preserve a truthful diagnostic through the FINAL atomic maintenance command.
+                if (failure.value == null && run?.hostFinishStatus?.value == DownloadStatus.NEEDS_FOREGROUND)
+                    failure.value = AppFailure(FailureCode.BACKGROUND_RESTRICTED, "download_executor_needs_foreground")
+                throw error
+            }
             catch (error: Exception) {
                 failure.update { it ?: classify(error) }
                 if (failure.value?.code == FailureCode.BACKGROUND_RESTRICTED) run?.let { expire(it) }
@@ -715,7 +736,8 @@ internal class DownloadPhysicalRuntime(
             settle { repository.finishPhysicalDownloadMaintenance(FinishPhysicalDownloadMaintenance(run.fence,
                 kind, current.claims, run.cleanupCompleted, physicalFailure, clock.epochMs(),
                 status = when {
-                    run.hostFinishStatus.value == DownloadStatus.NEEDS_FOREGROUND -> DownloadStatus.NEEDS_FOREGROUND
+                    run.hostFinishStatus.value == DownloadStatus.NEEDS_FOREGROUND &&
+                        host.state().generation == run.hostGeneration -> DownloadStatus.NEEDS_FOREGROUND
                     host.state().suspended && !host.state().closed ||
                         failure?.code == FailureCode.BACKGROUND_RESTRICTED -> DownloadStatus.NEEDS_FOREGROUND
                     // Rejection of this exact R2/claim does not corrupt the shared R1 file.
@@ -1269,8 +1291,11 @@ internal class DownloadPhysicalRuntime(
         val state = host.state()
         val before = run.current.job
         val retry = !cancelled && failure?.code in RETRYABLE && before.automaticRetryCount < 5
+        // A foreground resume advances the host generation. A LATE finish from the previous
+        // generation must not relabel the newly admitted/resumed host as suspended again.
+        val activeSuspension = run.hostFinishStatus.value?.takeIf { state.generation == run.hostGeneration }
         val target = when {
-            run.hostFinishStatus.value != null -> requireNotNull(run.hostFinishStatus.value)
+            activeSuspension != null -> activeSuspension
             state.suspended && !state.closed || failure?.code == FailureCode.BACKGROUND_RESTRICTED -> DownloadStatus.NEEDS_FOREGROUND
             state.offlineOnly || failure?.code == FailureCode.OFFLINE_POLICY || retry -> DownloadStatus.WAITING_NETWORK
             run.current.finalization != null && failure == null -> DownloadStatus.VERIFYING
