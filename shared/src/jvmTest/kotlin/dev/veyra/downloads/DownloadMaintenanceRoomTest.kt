@@ -386,7 +386,7 @@ class DownloadMaintenanceRoomTest {
                 "events=${owner.events.toList()} validations=${owner.validations.size} " +
                 "producer=${pending.job.producer} staging=${pending.job.stagingPath} " +
                 "attempts=${pending.attempts.map { it.id + ':' + it.status + ':' + it.stagingPath }} " +
-                "context=${pending.producerContext}")
+                "context=${pending.producerContext} txFailure=${port.transformFailure?.let { it::class.java.name + ':' + it.message + ':' + it.stackTrace.take(6).joinToString("|") }}")
         }
         val before = owner.store.acquisitionView().acquisition.physicalDownloads.getValue(id)
         oldExpiration()
