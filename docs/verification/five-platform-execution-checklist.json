@@ -4385,9 +4385,7 @@
         "B-REG-03",
         "B-LIN-08",
         "B-IOS-08",
-        "B-IOS-08X",
-        "B-IOS-03",
-        "B-IOS-03X"
+        "B-IOS-08X"
       ],
       "runbookSections": [
         "6.3A",
