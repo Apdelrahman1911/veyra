@@ -232,8 +232,8 @@ class AppContainerIntegrationTest {
         suspend fun completeSeek(request: Triple<Long, Long, Long>) {
             callbacks.send(EngineEvent.SeekCompleted(request.first, request.second, request.third))
         }
-        suspend fun position(positionMs: Long) = lock.withLock {
-            callbacks.send(EngineEvent.Position(generation, positionMs, 12_345L))
+        suspend fun position(positionMs: Long, durationMs: Long = 12_345L) = lock.withLock {
+            callbacks.send(EngineEvent.Position(generation, positionMs, durationMs))
         }
         override suspend fun setRate(speed: Float, generation: Long) = lock.withLock {
             calls += "setRate"
@@ -1301,9 +1301,10 @@ class AppContainerIntegrationTest {
         assertEquals(0L, canonical.queues.getValue(QueueContext.PODCAST).positionMs)
         assertEquals(1, fixture.platform.engine.seekRequests.size, "Start Over must not seek the outgoing generation then lose that seek")
         // A typed checkpoint is a native observation, not a requested position. Supply the
-        // restarted generation's first real sample at zero, then flush it durably.
-        fixture.platform.engine.position(0L)
-        fixture.app.playback.state.first { it.positionMs == 0L && it.pendingSeekMs == null }
+        // restarted generation's first real sample at zero; the distinct duration is an
+        // observable barrier proving the sample was processed before the durable flush.
+        fixture.platform.engine.position(0L, durationMs = 12_346L)
+        fixture.app.playback.state.first { it.positionMs == 0L && it.durationMs == 12_346L }
         fixture.app.playback.dispatch(PlaybackCommand.FlushProgress).getOrThrow()
         assertEquals(0L, fixture.store.state.value.progress[original.id]?.positionMs)
         val retainedJob = fixture.job(jobId)
