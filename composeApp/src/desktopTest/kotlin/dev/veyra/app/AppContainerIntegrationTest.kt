@@ -6,9 +6,29 @@ import dev.kmpyt.YouTubeClient
 import dev.kmpyt.extraction.ResearchRequest
 import dev.kmpyt.extraction.ResearchResponse
 import dev.kmpyt.extraction.ResearchTransport
+import dev.veyra.acquisition.AcquisitionCaptureFactory
+import dev.veyra.acquisition.AcquisitionCoordinator
+import dev.veyra.acquisition.AcquisitionResolution
+import dev.veyra.data.AcquisitionPlaybackCommand
+import dev.veyra.data.AdmitStandalonePhysicalDownload
+import dev.veyra.data.AttachAcquisitionOccurrence
+import dev.veyra.data.BeginPhysicalDownloadValidation
+import dev.veyra.data.ClaimPhysicalDownloadAttempt
+import dev.veyra.data.ExecutionQueueExpectation
+import dev.veyra.data.FinishPhysicalDownloadAttempt
+import dev.veyra.data.HeartbeatPhysicalDownload
 import dev.veyra.data.LibraryStore
+import dev.veyra.data.OccurrenceAttachmentExpectation
+import dev.veyra.data.PhysicalDownloadCommit
+import dev.veyra.data.PreparePhysicalDownloadFinalization
+import dev.veyra.data.PublishPhysicalDownloadFinalization
+import dev.veyra.data.QueueAcquisitionAdmission
+import dev.veyra.data.QueueAdmissionOperation
+import dev.veyra.data.SelectPhysicalDownloadRepresentation
 import dev.veyra.data.StoreStatus
+import dev.veyra.data.UpdateStandaloneDownloadIntent
 import dev.veyra.data.createPlatformLibraryStore
+import dev.veyra.data.executionContext
 import dev.veyra.data.getOrThrow
 import dev.veyra.downloads.DownloadExecutionGate
 import dev.veyra.downloads.DownloadExecutionLease
@@ -63,6 +83,7 @@ import okio.ByteString.Companion.decodeHex
 import java.nio.file.Files
 import java.nio.file.Path
 import java.security.MessageDigest
+import java.util.Comparator
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -81,13 +102,20 @@ import kotlin.test.*
 class AppContainerIntegrationTest {
     private data class Preparation(val source: ResolvedPlayable, val positionMs: Long, val generation: Long)
     private data class Resolution(val binding: PlaybackBinding, val purpose: ResolvePurpose, val persisted: PlaybackBinding?)
-    private data class Transfer(
+    /**
+     * One actual gateway transfer invocation. [completed] distinguishes a returned transfer from a
+     * held/cancelled/failed invocation; the invocation itself must never disappear from counts.
+     */
+    private class Transfer(
         val binding: PlaybackBinding,
         val destination: String,
         val representationId: String?,
         val persisted: PlaybackBinding?,
         val progress: suspend (YouTubeTransferProgress) -> Unit,
-    )
+    ) {
+        @Volatile var completed = false
+        @Volatile var failure: Throwable? = null
+    }
 
     private class TestClock(private val initialEpochMs: Long = 1_000_000L) : Clock {
         private val now = AtomicLong(initialEpochMs)
@@ -204,8 +232,8 @@ class AppContainerIntegrationTest {
         suspend fun completeSeek(request: Triple<Long, Long, Long>) {
             callbacks.send(EngineEvent.SeekCompleted(request.first, request.second, request.third))
         }
-        suspend fun position(positionMs: Long) = lock.withLock {
-            callbacks.send(EngineEvent.Position(generation, positionMs, 12_345L))
+        suspend fun position(positionMs: Long, durationMs: Long = 12_345L) = lock.withLock {
+            callbacks.send(EngineEvent.Position(generation, positionMs, durationMs))
         }
         override suspend fun setRate(speed: Float, generation: Long) = lock.withLock {
             calls += "setRate"
@@ -252,9 +280,15 @@ class AppContainerIntegrationTest {
         override val engine: NativeProbe = NativeProbe(store)
         val validations = ConcurrentLinkedQueue<OfflineAsset>()
         val localValidations = AtomicInteger()
+        val localValidationInputs = ConcurrentLinkedQueue<LocalMediaValidationInput>()
         @Volatile var validateAsset: suspend (OfflineAsset) -> AssetValidation = { AssetValidation.Valid(12_345L) }
         override val validator = AssetValidator { asset -> validations += asset; validateAsset(asset) }
-        override val localValidator = LocalMediaValidator { localValidations.incrementAndGet(); AssetValidation.Valid(12_345L) }
+        @Volatile var validateLocal: suspend (LocalMediaValidationInput) -> AssetValidation = { AssetValidation.Valid(12_345L) }
+        override val localValidator = LocalMediaValidator { input ->
+            localValidations.incrementAndGet()
+            localValidationInputs += input
+            validateLocal(input)
+        }
         override val systemLanguage = LanguagePreference.ENGLISH
         val youtubeRequests = ConcurrentLinkedQueue<ResearchRequest>()
         val youtubeCloseCalls = AtomicInteger()
@@ -298,12 +332,21 @@ class AppContainerIntegrationTest {
         val queries = ConcurrentLinkedQueue<String>()
         val resolutions = ConcurrentLinkedQueue<Resolution>()
         val transfers = ConcurrentLinkedQueue<Transfer>()
+        /** Actual typed transfer invocations (recorded at entry, before the fake source runs). */
         val typedTransfers = ConcurrentLinkedQueue<Pair<String, String>>()
+        /** Typed transfer invocations that returned a successful result. */
+        val typedCompletions = ConcurrentLinkedQueue<Pair<String, String>>()
         var onFirst: suspend (String) -> KmpFirstResult? = { title ->
             KmpFirstResult(title, FirstResultKind.VIDEO, FIRST, "Selected recording, not publisher metadata",
                 "https://www.youtube.com/watch?v=$FIRST")
         }
         var onResolve: suspend (PlaybackBinding, EngineCapabilities, ResolvePurpose) -> ResolvedPlayable = { binding, _, _ -> plan(binding) }
+        /**
+         * Typed DOWNLOAD preparation reports representation metadata only. It is deliberately
+         * a separate hook: the current prepared-download contract creates NO PlaybackResource
+         * owner, so an authored resolve plan may never smuggle one in and have it dropped.
+         */
+        var onPrepareDownload: suspend (PlaybackBinding, EngineCapabilities) -> ResolvedPlayable = { binding, _ -> plan(binding) }
         var onDownload: suspend (Transfer) -> YouTubeTransferResult = { error("This case did not authorize a fake transfer") }
         override suspend fun firstResult(completeTitle: String): KmpFirstResult? {
             queries += completeTitle
@@ -317,7 +360,9 @@ class AppContainerIntegrationTest {
             representationId: String?, onProgress: suspend (YouTubeTransferProgress) -> Unit): YouTubeTransferResult {
             val transfer = Transfer(binding, destinationPath, representationId, store.state.value.playbackBindings[binding.id], onProgress)
             transfers += transfer
-            return onDownload(transfer)
+            val result = try { onDownload(transfer) } catch (failure: Throwable) { transfer.failure = failure; throw failure }
+            transfer.completed = true
+            return result
         }
 
         @Volatile var beforeAcquire: suspend (AcquisitionRequest) -> Unit = { }
@@ -407,30 +452,61 @@ class AppContainerIntegrationTest {
         override suspend fun prepareDownload(context: AcquisitionExecutionContext, capabilities: EngineCapabilities,
             requiredRepresentationId: String?, inspection: AcquisitionInspection?): PreparedAcquisitionDownload {
             val binding = fixtureBinding(context)
-            val plan = onResolve(binding, capabilities, ResolvePurpose.DOWNLOAD)
+            val plan = onPrepareDownload(binding, capabilities)
+            check(plan.resource == null) {
+                "Typed download preparation has no PlaybackResource owner; the authored fake must not drop one"
+            }
             resolutions += Resolution(binding, ResolvePurpose.DOWNLOAD, persistedReceipt(context, binding))
-            val representation = AcquisitionRepresentation(requiredRepresentationId ?: plan.representationId ?: "authored-aac",
+            val authored = plan.representationId
+            // A required representation is a real capability fence, not a relabel of the authored
+            // plan. If the fake plan does not provide it, preparation fails before any transfer.
+            if (requiredRepresentationId != null && authored != null && authored != requiredRepresentationId) {
+                throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "authored_download_representation_unavailable"))
+            }
+            val representation = AcquisitionRepresentation(requiredRepresentationId ?: authored ?: "authored-aac",
                 plan.mimeType ?: "audio/mpeg", plan.codecs ?: "mp3", "mp3")
-            return Prepared(context, requiredRepresentationId, representation, binding)
+            return Prepared(this, context, requiredRepresentationId, representation, binding)
         }
 
         private class Prepared(
+            private val issuer: GatewayProbe,
             override val context: AcquisitionExecutionContext,
             override val requiredRepresentationId: String?,
             override val representation: AcquisitionRepresentation,
             val binding: PlaybackBinding,
-        ) : PreparedAcquisitionDownload
+        ) : PreparedAcquisitionDownload {
+            private val consumed = AtomicBoolean()
+            /** Foreign/reused/mismatched capabilities fail before the source callback or any I/O. */
+            fun consume(gateway: GatewayProbe) {
+                if (issuer !== gateway) {
+                    throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "prepared_download_foreign_issuer"))
+                }
+                if (!consumed.compareAndSet(false, true)) {
+                    throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "prepared_download_reused"))
+                }
+                if (requiredRepresentationId != null && representation.representationId != requiredRepresentationId) {
+                    throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "prepared_download_representation_mismatch"))
+                }
+                if (context.binding.id.value != binding.id) {
+                    throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "prepared_download_context_mismatch"))
+                }
+            }
+        }
 
         override suspend fun download(prepared: PreparedAcquisitionDownload, destinationPath: String,
             onProgress: suspend (AcquisitionTransferProgress) -> Unit): AcquisitionTransferResult {
             val owned = prepared as? Prepared ?: throw VeyraException(AppFailure(FailureCode.INVALID_STATE))
+            owned.consume(this)
             val call = Transfer(owned.binding, destinationPath, owned.representation.representationId,
                 persistedReceipt(owned.context, owned.binding)) { progress ->
                 onProgress(AcquisitionTransferProgress(progress.bytesDownloaded, progress.totalBytes, progress.speedBytesPerSecond))
             }
-            val result = onDownload(call)
+            // The invocation boundary is counted before the fake source can block, cancel or fail.
             transfers += call
             typedTransfers += destinationPath to owned.representation.representationId
+            val result = try { onDownload(call) } catch (failure: Throwable) { call.failure = failure; throw failure }
+            call.completed = true
+            typedCompletions += destinationPath to owned.representation.representationId
             return AcquisitionTransferResult(prepared.context, result.bytesWritten,
                 AcquisitionRepresentation(result.representationId, result.mimeType, result.codecs, result.extension))
         }
@@ -455,6 +531,7 @@ class AppContainerIntegrationTest {
             if (productionGateway) YouTubeKmpMediaGateway(platform.youtube) else gateway, clock)
         // Capture the actual composition-root job, not the fixture's unrelated parent lifetime.
         val appLifetime: Job = lifetime.children.single()
+        val clockRef: Clock = clock
         val store get() = platform.store
         var expectedCloseFailure: AppFailure? = null
         suspend fun close() {
@@ -478,7 +555,9 @@ class AppContainerIntegrationTest {
             assertEquals(0, platform.runtimePrepareCalls.get())
             assertTrue(gateway.queries.isEmpty())
             assertTrue(gateway.resolutions.isEmpty())
-            assertTrue(gateway.transfers.isEmpty())
+            assertTrue(gateway.transfers.isEmpty(), "No transfer may be invoked before a legal allowance")
+            assertTrue(gateway.typedTransfers.isEmpty(), "No typed transfer may start before a legal allowance")
+            assertTrue(gateway.typedCompletions.isEmpty())
             assertNoNetwork()
         }
         fun assertSchedulingOnly() {
@@ -551,6 +630,182 @@ class AppContainerIntegrationTest {
             assertEquals(1, platform.youtubeCloseCalls.get())
             assertEquals(1, http.closeCalls.get())
             assertEquals(StoreStatus.Closed, store.status.value)
+        }
+
+        /** Detached historical fixture row prepared by actual production commands. */
+        class Seeded(
+            val media: MediaItem,
+            val request: AcquisitionRequest,
+            val bindingId: ExecutionBindingId,
+            val context: AcquisitionExecutionContext,
+        )
+
+        private fun accept(value: PhysicalDownloadCommit<*>): Unit = when (value) {
+            is PhysicalDownloadCommit.Committed -> Unit
+            PhysicalDownloadCommit.Stale -> fail("Authored canonical command was rejected as stale")
+        }
+
+        /**
+         * Authored source selection over the REAL canonical owner. The first-result answer,
+         * transfer bytes and validator result are explicit fakes; capture/claim/commit/admission/
+         * attempt/finalization/publication are the production Room commands with no snapshot seed.
+         */
+        suspend fun seedSelection(item: MediaItem, video: String = FIRST): Seeded {
+            store.upsertCatalog(listOf(item)).getOrThrow()
+            val catalog = store.acquisitionView().snapshot
+            val current = catalog.media.getValue(item.id)
+            val authored = GatewayProbe(store)
+            authored.onFirst = { title -> KmpFirstResult(title, FirstResultKind.VIDEO, video,
+                "Authored historical first recording", "https://www.youtube.com/watch?v=$video") }
+            val coordinator = AcquisitionCoordinator(store.acquisition, authored,
+                AcquisitionCaptureFactory(clockRef), clockRef, offline = { false })
+            val captured = coordinator.capture(MediaCapture(current), catalog.revision)
+            val accepted = assertIs<AcquisitionResolution.Accepted>(coordinator.resolve(captured.request.id))
+            val single = assertIs<AcquisitionOutcome.Single>(accepted.record.outcome)
+            val acquisition = store.acquisitionView().acquisition
+            return Seeded(current, accepted.record.request, single.bindingId,
+                acquisition.executionContext(single.bindingId))
+        }
+
+        /** Real queue admission + exact occurrence attachment; never a saved queue snapshot. */
+        suspend fun seedQueue(seed: Seeded, mode: PlaybackControlsMode = PlaybackControlsMode.MUSIC,
+            positionMs: Long = 0L, activate: Boolean = false): ExecutionOccurrence {
+            val context = QueueContext.valueOf(mode.name)
+            val queue = store.acquisitionView().acquisition.queues.getValue(context)
+            val occurrence = ExecutionOccurrence(ExecutionOccurrenceId(newEntityId("occurrence")),
+                AcquisitionOrigin.TYPED, seed.request.id, null, null, null, null, mode,
+                OccurrenceSelectionState.PENDING, clockRef.epochMs())
+            store.acquisition.admitQueue(QueueAcquisitionAdmission(context, queue.editRevision, null,
+                QueueAdmissionOperation.APPEND, listOf(seed.request), null, listOf(occurrence), null))
+            val pending = store.acquisitionView().acquisition.queues.getValue(context)
+            assertTrue(store.acquisition.attachOccurrence(AttachAcquisitionOccurrence(
+                OccurrenceAttachmentExpectation(occurrence.id, seed.request.id, context, pending.editRevision))))
+            if (activate) {
+                val current = store.acquisitionView().acquisition.queues.getValue(context)
+                val bound = store.acquisitionView().acquisition.occurrences.getValue(occurrence.id)
+                store.acquisition.applyPlayback(AcquisitionPlaybackCommand.Activate(
+                    ExecutionQueueExpectation(context, current.editRevision, current.currentOccurrenceId),
+                    occurrence.id, bound.bindingId, store.state.value.activeContext, 0L, current.speed,
+                    false, clockRef.epochMs(), null))
+            }
+            val attached = store.acquisitionView().acquisition.queues.getValue(context)
+            if (positionMs > 0L) {
+                store.acquisition.applyPlayback(AcquisitionPlaybackCommand.EditQueue(
+                    ExecutionQueueExpectation(context, attached.editRevision, attached.currentOccurrenceId),
+                    attached.displayedOrder, attached.originalOrder, attached.currentOccurrenceId,
+                    positionMs, attached.speed, attached.shuffle, attached.repeat, null))
+            }
+            return store.acquisitionView().acquisition.occurrences.getValue(occurrence.id)
+        }
+
+        suspend fun seedJob(seed: Seeded, now: Long, proposedId: String = newEntityId("download")): String {
+            val admission = when (val result = store.acquisition.admitStandalonePhysicalDownload(
+                AdmitStandalonePhysicalDownload(seed.request.id, seed.bindingId, proposedId,
+                    DownloadClaimId(newEntityId("download-claim")), now))) {
+                is PhysicalDownloadCommit.Committed -> result.value
+                PhysicalDownloadCommit.Stale -> fail("Authored standalone admission was stale")
+            }
+            assertEquals(seed.context, admission.requestedContext)
+            return admission.physical.job.id
+        }
+
+        suspend fun setIntent(id: String, intent: DownloadBatchIntent, retainCompletedAsset: Boolean, now: Long) {
+            val join = assertNotNull(store.acquisition.physicalDownload(id))
+            val claim = assertNotNull(join.claims.singleOrNull { it.owner is DownloadClaimOwner.Standalone })
+            accept(store.acquisition.updateStandaloneDownloadIntent(UpdateStandaloneDownloadIntent(
+                id, join.job.producer, join.job.ownershipGeneration, claim.id, claim.generation,
+                claim.ownerIntentRevision, intent, retainCompletedAsset, now)))
+        }
+
+        private suspend fun claimAuthoredAttempt(seed: Seeded, id: String, now: Long): PhysicalDownloadFence {
+            val join = assertNotNull(store.acquisition.physicalDownload(id))
+            val attemptId = newEntityId("download-attempt")
+            val staging = app.files.part(seed.media.id, attemptId).toString()
+            val claimed = when (val result = store.acquisition.claimPhysicalDownloadAttempt(
+                ClaimPhysicalDownloadAttempt(id, join.job.producer, join.job.ownershipGeneration,
+                    attemptId, "authored-app-fixture", now, 60_000L, staging))) {
+                is PhysicalDownloadCommit.Committed -> result.value
+                PhysicalDownloadCommit.Stale -> fail("Authored attempt admission was stale")
+            }
+            Files.createDirectories(Path.of(staging).parent)
+            Files.write(Path.of(staging), NON_AUDIO)
+            return claimed.fence
+        }
+
+        /**
+         * Historical attempt/lease state through the canonical finish command. Some fields are
+         * authored because this is a retained-history seed, not a current transfer.
+         */
+        suspend fun seedAttemptJob(seed: Seeded, now: Long, proposedId: String,
+            status: DownloadStatus = DownloadStatus.QUEUED,
+            attemptStatus: DownloadAttemptStatus = DownloadAttemptStatus.PAUSED,
+            failure: AppFailure? = null, nextRetryEpochMs: Long? = null, automaticRetryCount: Int = 0,
+            intent: DownloadBatchIntent = DownloadBatchIntent.ACTIVE,
+            retainCompletedAsset: Boolean = true): String {
+            val id = seedJob(seed, now, proposedId)
+            val fence = claimAuthoredAttempt(seed, id, now)
+            accept(store.acquisition.finishPhysicalDownloadAttempt(FinishPhysicalDownloadAttempt(
+                fence, status, attemptStatus, failure, nextRetryEpochMs, automaticRetryCount, now)))
+            if (intent != DownloadBatchIntent.ACTIVE || !retainCompletedAsset) {
+                setIntent(id, intent, retainCompletedAsset, now)
+            }
+            return id
+        }
+
+        /** Canonical publication of authored NON-AUDIO history; not a current-process validation. */
+        suspend fun seedCompleteJob(seed: Seeded, now: Long,
+            proposedId: String = newEntityId("download")): String {
+            val id = seedJob(seed, now, proposedId)
+            val fence = claimAuthoredAttempt(seed, id, now)
+            val claimed = assertNotNull(store.acquisition.physicalDownload(id))
+            val attemptId = requireNotNull(fence.attemptId)
+            val staging = requireNotNull(claimed.job.stagingPath)
+            val finalPath = app.files.finalPath(seed.media.id, 1, "audio/mpeg", attemptId).toString()
+            accept(store.acquisition.selectPhysicalDownloadRepresentation(SelectPhysicalDownloadRepresentation(
+                fence, REPRESENTATION, 1, null, null, now)))
+            val bytes = NON_AUDIO
+            accept(store.acquisition.heartbeatPhysicalDownload(HeartbeatPhysicalDownload(fence, now, 60_000L,
+                bytes.size.toLong(), bytes.size.toLong())))
+            accept(store.acquisition.beginPhysicalDownloadValidation(BeginPhysicalDownloadValidation(fence, now)))
+            val digest = sha256Hex(bytes)
+            val intent = PhysicalDownloadFinalization(id, fence.producer, staging, finalPath, digest,
+                bytes.size.toLong(), attemptId, 12_345L, "audio/mpeg", "mp3", REPRESENTATION, 1,
+                fence.ownershipGeneration, MaterializationAssetId(newEntityId("materialization")))
+            accept(store.acquisition.preparePhysicalDownloadFinalization(
+                PreparePhysicalDownloadFinalization(fence, intent, now)))
+            Files.createDirectories(Path.of(finalPath).parent)
+            Files.write(Path.of(finalPath), bytes)
+            val asset = MaterializationAsset(requireNotNull(intent.assetId), fence.producer, finalPath,
+                bytes.size.toLong(), mimeType = "audio/mpeg", codecs = "mp3", sha256 = digest,
+                representationId = REPRESENTATION, validatorGeneration = 1, completedEpochMs = now,
+                measuredDurationMs = 12_345L, materializerDownloadId = id, materializerAttemptId = attemptId,
+                ownershipGeneration = fence.ownershipGeneration)
+            accept(store.acquisition.publishPhysicalDownloadFinalization(
+                PublishPhysicalDownloadFinalization(fence, intent, asset, now)))
+            return id
+        }
+
+        suspend fun job(id: String): PhysicalDownloadJob =
+            assertNotNull(store.acquisitionView().acquisition.physicalDownloads[id])
+
+        suspend fun claim(id: String): DownloadClaim = assertNotNull(
+            store.acquisitionView().acquisition.claims.values.singleOrNull { it.physicalJobId == id })
+
+        suspend fun asset(id: String): MaterializationAsset? =
+            job(id).assetId?.let { store.acquisitionView().acquisition.materializations[it] }
+
+        /** Wait for the current-process validation projection, not a persisted Ready flag. */
+        suspend fun awaitChecked(jobId: String, asset: MaterializationAsset) = withTimeout(15_000L) {
+            app.downloads.acquisitionPresentation.first {
+                it.successfulChecks[jobId]?.asset == asset
+            }
+        }
+
+        fun deleteDirectory(path: Path) {
+            if (!Files.exists(path)) return
+            Files.walk(path).use { stream ->
+                stream.sorted(Comparator.reverseOrder()).forEach { Files.deleteIfExists(it) }
+            }
         }
     }
 
@@ -633,13 +888,30 @@ class AppContainerIntegrationTest {
             """<script>var ytInitialData={"contents":[{"channelRenderer":{"channelId":"$channel","title":{"simpleText":"First channel"}}},{"videoRenderer":{"videoId":"$FIRST","title":{"simpleText":"Later video must not play"}}}]};</script>""") }
         fixture.app.onMusicAction(MusicUiAction.Play(original))
         val state = fixture.app.playback.state.first { it.failure != null }
-        assertEquals(FailureCode.UNSUPPORTED_SOURCE, state.failure?.code)
-        val binding = fixture.store.state.value.playbackBindings.values.single()
-        assertEquals(original.title, binding.queryTitle)
-        assertEquals(FirstResultKind.CHANNEL, binding.firstResultKind)
-        assertEquals(channel, binding.firstResultId)
-        assertNull(binding.selectedVideoId)
-        assertEquals(0, binding.selectionOrdinal)
+        // The typed selection stage durably commits an UNPLAYABLE occurrence; the controller's
+        // truthful admission code is RECOVERY_REQUIRED, not the removed ambient resolver's
+        // UNSUPPORTED_SOURCE. The raw ordinal-zero receipt is the durable evidence either way.
+        assertEquals(FailureCode.RECOVERY_REQUIRED, state.failure?.code)
+        assertEquals("acquisition_selection_unplayable", state.failure?.detail)
+        val view = fixture.store.acquisitionView()
+        val accepted = view.acquisition.requests.values.single { it.state == AcquisitionJobState.COMMITTED }
+        assertEquals(original.title, accepted.request.completeTitle)
+        assertEquals(original.title, (accepted.request.metadata as MediaCapture).media.title)
+        val outcome = assertIs<AcquisitionOutcome.Unplayable>(accepted.outcome)
+        assertEquals(AcquisitionProblemCode.FIRST_RESULT_UNSUPPORTED, outcome.problem.code)
+        val receipt = assertIs<FirstResultReceipt.Observed>(
+            view.acquisition.receipts.getValue(assertNotNull(outcome.receiptId)))
+        assertEquals(original.title, receipt.observation.queryTitle)
+        assertEquals(AcquisitionEntryKind.CHANNEL, receipt.observation.entry.kind)
+        assertEquals(channel, receipt.observation.entry.id)
+        assertEquals("First channel", receipt.observation.entry.title)
+        assertEquals(0, receipt.observation.entry.ordinal)
+        assertNull(receipt.observation.entry.issue)
+        assertEquals("https://www.youtube.com/channel/$channel", receipt.observation.canonicalUrl)
+        assertTrue(view.acquisition.bindings.isEmpty(), "A non-playable first card cannot mint an execution binding")
+        assertTrue(view.acquisition.recordings.isEmpty(), "The later video must not become a recording")
+        assertTrue(view.acquisition.occurrences.values.all { it.selectionState == OccurrenceSelectionState.UNPLAYABLE })
+        assertTrue(view.snapshot.playbackBindings.isEmpty(), "No legacy compatibility binding may be invented")
         assertEquals(original.title, Url(fixture.platform.youtubeRequests.single().url).parameters["search_query"])
         assertTrue(fixture.platform.engine.preparations.isEmpty())
         assertEquals(0, fixture.platform.runtimePrepareCalls.get(), "A first non-playable receipt cannot start extraction")
@@ -648,38 +920,53 @@ class AppContainerIntegrationTest {
 
     @Test fun cancellationAtOnlineScopeReturnDisposesUnhandedGatewayResourceExactlyOnce() = checkCase {
         val fixture = newFixture()
+        val item = item()
         val resource = Resource()
-        fixture.gateway.onResolve = { binding, _, _ ->
-            // Deterministic prompt-cancellation boundary: the gateway returns a value but the
-            // enclosing online coroutineScope cannot hand that value to AppSourceResolver.
+        val preparationEntered = CompletableDeferred<Unit>()
+        fixture.gateway.onResolve = { binding, _, purpose ->
+            assertEquals(ResolvePurpose.PLAYBACK, purpose)
+            // Deterministic prompt-cancellation boundary: the typed gateway returns a native
+            // source but the enclosing policy/online scope cannot hand it to the resolver.
+            preparationEntered.complete(Unit)
             currentCoroutineContext().job.cancel(CancellationException("authored_scope_return_cancellation"))
             plan(binding).copy(uri = resource.localEndpoint.uri, resource = resource)
         }
-        assertFailsWith<CancellationException> { fixture.app.resolver.resolve(item(), fixture.platform.engine.capabilities) }
+        fixture.app.onMusicAction(MusicUiAction.Play(item))
+        preparationEntered.await()
         resource.closed.await()
         assertEquals(1, resource.closeCalls.get())
-        assertTrue(fixture.platform.engine.preparations.isEmpty())
-        assertEquals(1, fixture.gateway.resolutions.size)
-        assertEquals(1, fixture.store.state.value.playbackBindings.size)
+        assertTrue(fixture.platform.engine.preparations.isEmpty(), "The native engine never accepted this handoff")
+        val view = fixture.store.acquisitionView()
+        val accepted = view.acquisition.requests.values.single { it.state == AcquisitionJobState.COMMITTED }
+        val single = assertIs<AcquisitionOutcome.Single>(accepted.outcome)
+        assertEquals(item.title, accepted.request.completeTitle)
+        assertEquals(1, view.acquisition.bindings.size, "Exactly the accepted execution binding is committed")
+        assertEquals(1, fixture.gateway.resolutions.count { it.purpose == ResolvePurpose.PLAYBACK })
+        assertEquals(single.bindingId.value, fixture.gateway.resolutions.single { it.purpose == ResolvePurpose.PLAYBACK }.binding.id)
+        assertTrue(view.snapshot.playbackBindings.isEmpty(), "Typed execution does not fabricate a legacy binding row")
         fixture.app.close()
-        assertEquals(1, resource.closeCalls.get())
+        assertEquals(1, resource.closeCalls.get(), "A successfully rejected resource must not be closed twice")
+        fixture.assertNoNetwork()
     }
 
     @Test fun rejectedGatewayResourceIsDrainedAtFinalCloseButEarlierReleaseFailureStaysSanitizedAndSticky() = checkCase {
         val fixture = newFixture()
         val cleanupActive = ConcurrentLinkedQueue<Boolean>()
+        val firstReleaseAttempted = CompletableDeferred<Unit>()
         val resource = Resource { attempt ->
             cleanupActive += currentCoroutineContext().isActive
-            if (attempt == 1) throw IllegalStateException("authored private https://media.example/close?sig=never-report-this")
+            if (attempt == 1) {
+                firstReleaseAttempted.complete(Unit)
+                throw IllegalStateException("authored private https://media.example/close?sig=never-report-this")
+            }
         }
-        fixture.gateway.onResolve = { binding, _, _ ->
+        fixture.gateway.onResolve = { binding, _, purpose ->
+            assertEquals(ResolvePurpose.PLAYBACK, purpose)
             currentCoroutineContext().job.cancel(CancellationException("authored_scope_return_cancellation"))
             plan(binding).copy(uri = resource.localEndpoint.uri, resource = resource)
         }
-        val cancellation = assertFailsWith<CancellationException> {
-            fixture.app.resolver.resolve(item(), fixture.platform.engine.capabilities)
-        }
-        assertFalse(cancellation.suppressedExceptions.any { it.toString().contains("never-report-this") })
+        fixture.app.onMusicAction(MusicUiAction.Play(item()))
+        firstReleaseAttempted.await()
         assertEquals(1, resource.closeCalls.get())
         assertFalse(resource.closed.isCompleted, "A failed close must not count as released ownership")
         assertTrue(fixture.platform.engine.preparations.isEmpty(), "The native engine never accepted this handoff")
@@ -705,14 +992,20 @@ class AppContainerIntegrationTest {
     @Test fun persistentlyFailedRejectedResourceRemainsRetriableAfterFinalCloseWithoutRepeatingGlobalClosures() = checkCase {
         val fixture = newFixture()
         val allowRelease = AtomicBoolean()
+        val firstReleaseAttempted = CompletableDeferred<Unit>()
         val resource = Resource {
-            if (!allowRelease.get()) throw IllegalStateException("authored private resource handle cannot close")
+            if (!allowRelease.get()) {
+                firstReleaseAttempted.complete(Unit)
+                throw IllegalStateException("authored private resource handle cannot close")
+            }
         }
-        fixture.gateway.onResolve = { binding, _, _ ->
+        fixture.gateway.onResolve = { binding, _, purpose ->
+            assertEquals(ResolvePurpose.PLAYBACK, purpose)
             currentCoroutineContext().job.cancel(CancellationException("authored_scope_return_cancellation"))
             plan(binding).copy(uri = resource.localEndpoint.uri, resource = resource)
         }
-        assertFailsWith<CancellationException> { fixture.app.resolver.resolve(item(), fixture.platform.engine.capabilities) }
+        fixture.app.onMusicAction(MusicUiAction.Play(item()))
+        firstReleaseAttempted.await()
         assertEquals(1, resource.closeCalls.get())
         val first = assertFailsWith<VeyraException> { fixture.app.close() }
         fixture.expectedCloseFailure = first.failure
@@ -739,9 +1032,16 @@ class AppContainerIntegrationTest {
         fixture.assertNoNetwork()
     }
 
-    @Test fun finalCloseCancelsExternalResolverAndAwaitsItsLateRejectedResourceBeforeClosingDependencies() = checkCase {
+    /**
+     * App-owned typed resolver lifetime. The former external caller used the legacy
+     * `AppContainer.resolver`, which cannot acquire a schema-3 binding (legacy snapshot binding
+     * writes are intentionally rejected), so that entrypoint is no longer the app execution path.
+     * The controller-owned resolve below is the current legal external/UI route.
+     */
+    @Test fun finalCloseCancelsAppOwnedTypedResolveAndAwaitsItsLateRejectedResourceBeforeClosingDependencies() = checkCase {
         val fixture = newFixture()
         val resolving = CompletableDeferred<Unit>()
+        val resolveCancelled = CompletableDeferred<Unit>()
         val releasing = CompletableDeferred<Unit>()
         val permitRelease = CompletableDeferred<Unit>()
         val resource = Resource { attempt ->
@@ -751,21 +1051,24 @@ class AppContainerIntegrationTest {
                 throw IllegalStateException("authored late resource release failed once")
             }
         }
-        fixture.gateway.onResolve = { binding, _, _ ->
+        fixture.gateway.onResolve = { binding, _, purpose ->
+            assertEquals(ResolvePurpose.PLAYBACK, purpose)
             resolving.complete(Unit)
             try { awaitCancellation() }
             catch (_: CancellationException) {
+                resolveCancelled.complete(Unit)
                 plan(binding).copy(uri = resource.localEndpoint.uri, resource = resource)
             }
         }
-        supervisorScope {
-            // Deliberately external to the app's playback/download actor jobs. AppContainer's
-            // admitted-acquisition completion barrier must include the policy-return cleanup.
-            val resolution = async { fixture.app.resolver.resolve(item(), fixture.platform.engine.capabilities) }
-            resolving.await()
+        // The controller's resolver job is app-owned, but the policy operation registers the
+        // SAME admitted-acquisition completion that shutdown awaits before dependent release.
+        fixture.app.onMusicAction(MusicUiAction.Play(item()))
+        resolving.await()
+        coroutineScope {
             val closing = async { runCatching { fixture.app.close() } }
             try {
                 releasing.await()
+                assertTrue(resolveCancelled.isCompleted, "Final close must cancel the app-owned resolver")
                 assertFalse(closing.isCompleted)
                 assertFalse(resource.closed.isCompleted)
                 assertEquals(0, fixture.platform.runtimeCloseCalls.get())
@@ -774,7 +1077,6 @@ class AppContainerIntegrationTest {
                 assertNotEquals(StoreStatus.Closed, fixture.store.status.value)
                 assertTrue(fixture.platform.engine.preparations.isEmpty())
             } finally { permitRelease.complete(Unit) }
-            assertFailsWith<CancellationException> { resolution.await() }
             val failure = assertIs<VeyraException>(closing.await().exceptionOrNull())
             fixture.expectedCloseFailure = failure.failure
             assertEquals(AppFailure(FailureCode.UNEXPECTED), failure.failure)
@@ -797,27 +1099,30 @@ class AppContainerIntegrationTest {
         val entered = CompletableDeferred<Unit>()
         val cancelled = CompletableDeferred<Unit>()
         val resource = Resource()
-        fixture.gateway.onResolve = { binding, _, _ ->
+        fixture.gateway.onResolve = { binding, _, purpose ->
+            assertEquals(ResolvePurpose.PLAYBACK, purpose)
             entered.complete(Unit)
             try { awaitCancellation() }
             catch (_: CancellationException) {
                 cancelled.complete(Unit)
                 // A transport can finish a native resource concurrently with cancellation.
-                // Returning it must not leak it across AppContainer's online scope barrier.
+                // Returning it must not leak it across the policy/online scope barrier.
                 plan(binding).copy(uri = resource.localEndpoint.uri, resource = resource)
             }
         }
-        supervisorScope {
-            val resolution = async { fixture.app.resolver.resolve(item(), fixture.platform.engine.capabilities) }
-            entered.await()
-            fixture.app.changeSettings { it.copy(offlineOnly = true) }
-            fixture.store.state.first { it.settings.offlineOnly }
-            cancelled.await()
-            assertFailsWith<CancellationException> { resolution.await() }
-        }
+        fixture.app.onMusicAction(MusicUiAction.Play(item()))
+        entered.await()
+        fixture.app.changeSettings { it.copy(offlineOnly = true) }
+        fixture.store.state.first { it.settings.offlineOnly }
+        cancelled.await()
         resource.closed.await()
         assertEquals(1, resource.closeCalls.get())
+        fixture.app.playback.state.first { it.failure?.code == FailureCode.OFFLINE_POLICY }
         assertTrue(fixture.platform.engine.preparations.isEmpty())
+        val view = fixture.store.acquisitionView()
+        assertEquals(1, view.acquisition.requests.values.count { it.state == AcquisitionJobState.COMMITTED })
+        assertEquals(1, view.acquisition.bindings.size)
+        assertEquals(1, fixture.gateway.resolutions.count { it.purpose == ResolvePurpose.PLAYBACK })
         assertEquals(1, fixture.gateway.queries.size)
         fixture.assertNoNetwork()
     }
@@ -864,6 +1169,8 @@ class AppContainerIntegrationTest {
         assertEquals(original.id, (job.producer as PhysicalDownloadProducer.Typed).subjectId.value)
         assertEquals(binding, fixture.gateway.transfers.single().binding)
         assertEquals(binding, fixture.gateway.transfers.single().persisted)
+        assertTrue(fixture.gateway.transfers.single().completed, "The already-transferred source must have returned")
+        assertEquals(1, fixture.gateway.typedCompletions.size)
         assertEquals(listOf(original.title), fixture.gateway.queries.toList(), "Download must not fresh-search after Play")
         assertEquals(listOf(ResolvePurpose.PLAYBACK, ResolvePurpose.DOWNLOAD), fixture.gateway.resolutions.map { it.purpose })
         assertContentEquals(NON_AUDIO, Files.readAllBytes(Path.of(asset.uri)))
@@ -938,21 +1245,30 @@ class AppContainerIntegrationTest {
     }
 
     @Test fun podcastStartOverIsAtomicWithDelayedSeekAndRetainsTheOfflineRecording() = checkCase {
-        val fixture = newFixture()
+        val fixture = newFixture(initialize = false)
         val original = item(title = "Complete restart episode — إعادة الحلقة من بدايتها")
-        fixture.gateway.onDownload = ::writeFakeTransfer
-        val first = fixture.play(original)
-        val binding = assertNotNull(first.source.executionBinding)
-        fixture.app.onPodcastAction(PodcastAction.Download(original.id))
-        val downloaded = fixture.store.state.first { snapshot -> snapshot.downloads.values.any { it.status == DownloadStatus.COMPLETE } }
-            .downloads.values.single()
-        fixture.app.changeSettings { it.copy(offlineOnly = true) }
-        fixture.store.state.first { it.settings.offlineOnly }
-        val offline = fixture.play(original)
+        val selection = fixture.seedSelection(original)
+        fixture.seedQueue(selection, PlaybackControlsMode.PODCAST, activate = true)
+        val jobId = fixture.seedCompleteJob(selection, fixture.clockRef.epochMs(), "podcast-restart-recording")
+        val recording = assertNotNull(fixture.asset(jobId))
+        fixture.app.initialize()
+        fixture.awaitChecked(jobId, recording)
+        assertEquals(PlaybackPhase.PAUSED, fixture.app.playback.state.value.phase)
+        val offline = fixture.resumeRestored(original)
         assertTrue(offline.source.isLocal)
+        assertEquals(recording.uri, offline.source.uri)
+        assertEquals(selection.bindingId.value, offline.source.executionBinding?.id)
         fixture.platform.engine.position(4_500)
         fixture.app.playback.state.first { it.positionMs == 4_500L }
         fixture.app.playback.dispatch(PlaybackCommand.FlushProgress).getOrThrow()
+
+        // A genuinely offline restart must not depend on a fresh source lookup. The verified owned
+        // materialization stays playable while the policy forbids network resolution.
+        fixture.app.changeSettings { it.copy(offlineOnly = true) }
+        fixture.store.state.first { it.settings.offlineOnly }
+        assertTrue(fixture.app.playback.state.value.isPlaying, "The owned local recording remains usable offline")
+        val currentOccurrence = assertNotNull(fixture.app.playback.state.value.currentSelection?.occurrenceId)
+        assertEquals(selection.bindingId, fixture.app.playback.state.value.currentSelection?.bindingId)
 
         fixture.platform.engine.completeSeeks = false
         fixture.app.playback.dispatch(PlaybackCommand.Seek(6_000)).getOrThrow()
@@ -967,22 +1283,59 @@ class AppContainerIntegrationTest {
         // Exercise the real UI-action adapter, controller, transactions and local resolver.
         // Native samples and authored NON-AUDIO validation remain deliberate fakes.
         fixture.app.onPodcastAction(PodcastAction.StartOver(original.id))
-        val restarted = fixture.platform.engine.prepared.receive()
+        val restarted = try {
+            withTimeout(15_000) { fixture.platform.engine.prepared.receive() }
+        } catch (timeout: TimeoutCancellationException) {
+            fail("Start Over did not reuse the exact offline recording: phase=${fixture.app.playback.state.value.phase} " +
+                "failure=${fixture.app.playback.state.value.failure} " +
+                "selection=${fixture.app.playback.state.value.currentSelection?.occurrence?.selectionState} " +
+                "binding=${fixture.app.playback.state.value.currentSelection?.bindingId} " +
+                "queries=${fixture.gateway.queries} media=${fixture.store.acquisitionView().acquisition.requests.size}")
+        }
         fixture.app.playback.state.first { it.generation == restarted.generation && it.isPlaying }
         assertTrue(restarted.generation > offline.generation)
         assertEquals(0L, restarted.positionMs)
         assertTrue(restarted.source.isLocal)
-        assertEquals(binding, restarted.source.executionBinding)
+        assertEquals(recording.uri, restarted.source.uri)
+        assertEquals(selection.bindingId.value, restarted.source.executionBinding?.id)
+        assertEquals(currentOccurrence, fixture.app.playback.state.value.currentSelection?.occurrenceId,
+            "Start Over must reactivate the exact current occurrence, not admit another one")
+        assertEquals(selection.bindingId, fixture.app.playback.state.value.currentSelection?.bindingId)
+        val canonical = fixture.store.acquisitionView().acquisition
+        assertEquals(1, canonical.requests.size, "Offline restart must reuse the accepted request")
+        assertEquals(1, canonical.bindings.size, "Offline restart must reuse the exact binding")
+        assertEquals(0L, canonical.queues.getValue(QueueContext.PODCAST).positionMs)
         assertEquals(1, fixture.platform.engine.seekRequests.size, "Start Over must not seek the outgoing generation then lose that seek")
+        // A typed checkpoint is a native observation, not a requested position. Supply the
+        // restarted generation's first real sample at zero; the distinct duration is an
+        // observable barrier proving the sample was processed before the durable flush.
+        fixture.platform.engine.position(0L, durationMs = 12_346L)
+        fixture.app.playback.state.first { it.positionMs == 0L && it.durationMs == 12_346L }
         fixture.app.playback.dispatch(PlaybackCommand.FlushProgress).getOrThrow()
-        assertEquals(0L, fixture.store.state.value.progress[original.id]?.positionMs)
-        val retained = fixture.store.state.value.downloads.getValue(downloaded.id)
-        assertEquals(DownloadStatus.COMPLETE, retained.status)
-        assertEquals(downloaded.mediaId, retained.mediaId)
-        assertEquals(downloaded.executionBindingId, retained.executionBindingId)
-        assertEquals(downloaded.asset, retained.asset)
-        assertContentEquals(NON_AUDIO, Files.readAllBytes(Path.of(assertNotNull(retained.asset).uri)))
+        // Typed progress is the occurrence checkpoint/catalogue progress/queue position, not the
+        // legacy snapshot.progress compatibility map. Read the canonical playback view on the
+        // same owner.
+        assertEquals(0L, fixture.store.acquisitionView().acquisition.queues.getValue(QueueContext.PODCAST).positionMs)
+        val zeroView = fixture.store.acquisition.playbackView()
+        val zeroCheckpoint = assertNotNull(zeroView.checkpoints[currentOccurrence])
+        assertEquals(selection.bindingId, zeroCheckpoint.bindingId)
+        assertEquals(restarted.generation, zeroCheckpoint.generation)
+        assertEquals(0L, zeroCheckpoint.positionMs)
+        assertEquals(12_346L, zeroCheckpoint.measuredDurationMs)
+        val zeroProgress = assertNotNull(zeroView.catalogProgress[original.id])
+        assertEquals(0L, zeroProgress.positionMs)
+        assertEquals(restarted.generation, zeroProgress.generation)
+        assertEquals(selection.bindingId.value, zeroProgress.executionBindingId)
+        val retainedJob = fixture.job(jobId)
+        val retained = assertNotNull(fixture.asset(jobId))
+        assertEquals(DownloadStatus.COMPLETE, retainedJob.status)
+        assertEquals(recording, retained)
+        assertEquals(selection.bindingId, retainedJob.producer.bindingId)
+        assertContentEquals(NON_AUDIO, Files.readAllBytes(Path.of(retained.uri)))
         assertEquals(queries, fixture.gateway.queries.toList(), "Offline restart must not perform a new search")
+        assertTrue(fixture.gateway.resolutions.isEmpty(), "Local restart must not resolve a remote plan")
+        assertTrue(fixture.gateway.transfers.isEmpty(), "Local restart must not transfer or inspect a source")
+        assertTrue(fixture.gateway.typedTransfers.isEmpty())
 
         fixture.platform.engine.completeSeek(pending)
         // Both samples traverse the same fake event channel. Position itself may be
@@ -991,13 +1344,104 @@ class AppContainerIntegrationTest {
         fixture.platform.engine.position(1_000)
         fixture.app.playback.state.first { it.positionMs == 1_000L && it.pendingSeekMs == null }
         fixture.app.playback.dispatch(PlaybackCommand.FlushProgress).getOrThrow()
-        assertEquals(1_000L, fixture.store.state.value.progress[original.id]?.positionMs)
+        assertEquals(1_000L, fixture.app.playback.state.value.positionMs)
+        assertEquals(1_000L, fixture.store.acquisitionView().acquisition.queues.getValue(QueueContext.PODCAST).positionMs)
+        val thousandView = fixture.store.acquisition.playbackView()
+        val thousandCheckpoint = assertNotNull(thousandView.checkpoints[currentOccurrence])
+        assertEquals(1_000L, thousandCheckpoint.positionMs)
+        assertEquals(restarted.generation, thousandCheckpoint.generation)
+        assertEquals(selection.bindingId, thousandCheckpoint.bindingId)
+        val thousandProgress = assertNotNull(thousandView.catalogProgress[original.id])
+        assertEquals(1_000L, thousandProgress.positionMs)
+        assertEquals(restarted.generation, thousandProgress.generation)
+        assertEquals(selection.bindingId.value, thousandProgress.executionBindingId)
         fixture.app.close()
-        val reopened = newFixture()
-        assertEquals(1_000L, reopened.store.state.value.progress[original.id]?.positionMs)
+        val reopened = newFixture(clock = fixture.clockRef)
+        assertEquals(1_000L, reopened.store.acquisitionView().acquisition.queues.getValue(QueueContext.PODCAST).positionMs)
+        assertEquals(1_000L, reopened.app.playback.state.value.positionMs)
+        val reopenedView = reopened.store.acquisition.playbackView()
+        assertEquals(1_000L, assertNotNull(reopenedView.checkpoints[currentOccurrence]).positionMs)
+        val reopenedProgress = assertNotNull(reopenedView.catalogProgress[original.id])
+        assertEquals(1_000L, reopenedProgress.positionMs)
+        assertEquals(selection.bindingId.value, reopenedProgress.executionBindingId)
         assertEquals(PlaybackPhase.PAUSED, reopened.app.playback.state.value.phase)
         assertTrue(reopened.platform.engine.preparations.isEmpty())
         reopened.assertNoNetwork()
+        fixture.assertNoNetwork()
+    }
+
+    /**
+     * Control for the narrow Start Over repair: a different (non-current) episode must keep the
+     * established fresh Play admission semantics and may not be silently attached to the current
+     * episode's request/binding.
+     */
+    @Test fun podcastStartOverForANonCurrentEpisodeKeepsFreshAdmissionSemantics() = checkCase {
+        val fixture = newFixture()
+        val current = item(id = "start-over-current-episode", title = "Current episode — الحلقة الحالية")
+        val first = fixture.play(current)
+        val firstBinding = assertNotNull(first.source.executionBinding?.id)
+        val other = item(id = "start-over-other-episode", title = "Other episode — حلقة أخرى")
+        fixture.store.upsertCatalog(listOf(other)).getOrThrow()
+        fixture.app.onPodcastAction(PodcastAction.StartOver(other.id))
+        val restarted = try {
+            withTimeout(15_000) { fixture.platform.engine.prepared.receive() }
+        } catch (timeout: TimeoutCancellationException) {
+            fail("Non-current Start Over did not fresh-admit: phase=${fixture.app.playback.state.value.phase} " +
+                "failure=${fixture.app.playback.state.value.failure} queries=${fixture.gateway.queries}")
+        }
+        fixture.app.playback.state.first { it.currentItem?.id == other.id && it.isPlaying }
+        val otherBinding = assertNotNull(restarted.source.executionBinding?.id)
+        assertNotEquals(firstBinding, otherBinding)
+        assertEquals(other, restarted.source.item)
+        assertEquals(listOf(current.title, other.title), fixture.gateway.queries.toList(),
+            "A non-current Start Over keeps the established fresh-admission semantics")
+        val canonical = fixture.store.acquisitionView().acquisition
+        assertEquals(2, canonical.requests.values.count { it.state == AcquisitionJobState.COMMITTED })
+        assertEquals(2, canonical.bindings.size)
+        assertEquals(other.id, fixture.app.playback.state.value.currentSelection?.catalogMedia?.id)
+        fixture.assertNoNetwork()
+    }
+
+    /**
+     * Stale/competing queue control for the Start Over chain. The playback-state selection is
+     * advisory; the authoritative current occurrence can move outside the controller. Start Over
+     * must neither reactivate the competing occurrence nor reuse the stale one. It falls back to
+     * the established fresh admission for the requested episode, and a binding/queue CAS failure
+     * after dispatch is never converted into a silent fallback.
+     */
+    @Test fun podcastStartOverWithACompetingQueueActivationDoesNotRestartTheWrongOccurrence() = checkCase {
+        val fixture = newFixture(initialize = false)
+        val original = item(id = "stale-start-original", title = "Original restart episode — الحلقة الأصلية")
+        val competing = item(id = "stale-start-competing", title = "Competing episode — حلقة منافسة")
+        val originalSelection = fixture.seedSelection(original)
+        fixture.seedQueue(originalSelection, PlaybackControlsMode.PODCAST, activate = true)
+        fixture.app.initialize()
+        assertEquals(PlaybackPhase.PAUSED, fixture.app.playback.state.value.phase)
+
+        // A competing canonical activation outside the playback owner. Both the advisory
+        // playback state and the authoritative queue can now disagree about the current
+        // occurrence; Start Over(original) must not prefer either stale binding.
+        val competingSelection = fixture.seedSelection(competing)
+        val competingOccurrence = fixture.seedQueue(competingSelection, PlaybackControlsMode.PODCAST, activate = true)
+        fixture.app.onPodcastAction(PodcastAction.StartOver(original.id))
+        val restarted = withTimeout(15_000) { fixture.platform.engine.prepared.receive() }
+        fixture.app.playback.state.first { it.currentItem?.id == original.id && it.isPlaying }
+        assertEquals(original, restarted.source.item)
+        val freshBinding = assertNotNull(restarted.source.executionBinding?.id)
+        assertNotEquals(originalSelection.bindingId.value, freshBinding)
+        assertNotEquals(competingSelection.bindingId.value, freshBinding)
+        assertEquals(listOf(original.title), fixture.gateway.queries.toList(),
+            "The disagreement admits the requested episode freshly; never the competing occurrence")
+        val canonical = fixture.store.acquisitionView().acquisition
+        val currentId = assertNotNull(canonical.queues.getValue(QueueContext.PODCAST).currentOccurrenceId)
+        assertNotEquals(competingOccurrence.id, currentId)
+        val current = canonical.occurrences.getValue(currentId)
+        assertEquals(original.id, current.subjectId?.value)
+        assertEquals(original.title,
+            canonical.requests.getValue(requireNotNull(current.requestId)).request.completeTitle)
+        assertEquals(competing.id, canonical.occurrences.getValue(competingOccurrence.id).subjectId?.value,
+            "The competing occurrence remains historical, never relabelled")
+        assertTrue(fixture.gateway.resolutions.none { it.purpose == ResolvePurpose.DOWNLOAD })
         fixture.assertNoNetwork()
     }
 
@@ -1020,36 +1464,50 @@ class AppContainerIntegrationTest {
     }
 
     @Test fun uiLibraryDoesNotAdvertiseRestartedRoomCompleteAsReadyBeforeThisProcessValidatesIt() = checkCase {
-        val fixture = newFixture()
+        val seed = newFixture(initialize = false)
         val original = item()
-        fixture.gateway.onDownload = { transfer -> writeFakeTransfer(transfer) }
-        fixture.play(original)
-        fixture.app.onPodcastAction(PodcastAction.Download(original.id))
-        val persisted = fixture.store.state.first { state -> state.downloads.values.any { it.status == DownloadStatus.COMPLETE } }
-        val id = persisted.downloads.values.single().id
-        fixture.app.changeSettings { it.copy(offlineOnly = true) }
-        fixture.store.state.first { it.settings.offlineOnly }
-        fixture.app.close()
+        val selection = seed.seedSelection(original)
+        val jobId = seed.seedCompleteJob(selection, seed.clockRef.epochMs(), "restarted-complete-download")
+        val asset = assertNotNull(seed.asset(jobId))
+        seed.close()
 
         val reopened = newFixture(initialize = false)
         val validating = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()
-        reopened.platform.validateAsset = { validating.complete(Unit); release.await(); AssetValidation.Valid(12_345L) }
+        reopened.platform.validateLocal = { input ->
+            assertEquals(asset.uri, input.uri)
+            validating.complete(Unit)
+            release.await()
+            AssetValidation.Valid(12_345L)
+        }
         coroutineScope {
             val observed = ConcurrentLinkedQueue<DownloadStatus>()
             val observing = launch(start = CoroutineStart.UNDISPATCHED) {
-                reopened.app.library.collect { snapshot -> snapshot.downloads[id]?.let { observed += it.status } }
+                reopened.app.downloads.acquisitionPresentation.collect { presentation ->
+                    presentation.states[jobId]?.let { observed += it.status }
+                }
             }
             try {
                 reopened.app.initialize()
                 validating.await()
-                assertEquals(DownloadStatus.COMPLETE, reopened.store.state.value.downloads.getValue(id).status,
+                assertEquals(DownloadStatus.COMPLETE, reopened.store.acquisitionView()
+                    .acquisition.physicalDownloads.getValue(jobId).status,
                     "The historical Room receipt remains intact while session-only validation is pending")
-                reopened.app.library.first { it.downloads[id]?.status == DownloadStatus.VERIFYING }
-                assertFalse(DownloadStatus.COMPLETE in observed, "Core UI must never flash Ready from unchecked historical rows")
+                assertEquals(DownloadStatus.VERIFYING, reopened.app.downloads.acquisitionPresentation
+                    .value.states.getValue(jobId).status,
+                    "The current-process projection must be honestly Checking, not Ready")
+                assertFalse(DownloadStatus.COMPLETE in observed, "No projection may flash Ready from unchecked historical rows")
+                assertTrue(reopened.app.library.value.downloads.isEmpty(),
+                    "A typed physical job must not masquerade as a legacy Ready compatibility row")
                 assertTrue(reopened.platform.engine.preparations.isEmpty())
                 release.complete(Unit)
-                reopened.app.library.first { it.downloads[id]?.status == DownloadStatus.COMPLETE }
+                withTimeout(15_000) {
+                    reopened.app.downloads.acquisitionPresentation.first {
+                        it.states[jobId]?.status == DownloadStatus.COMPLETE
+                    }
+                }
+                assertEquals(DownloadStatus.COMPLETE,
+                    reopened.store.acquisitionView().acquisition.physicalDownloads.getValue(jobId).status)
             } finally { release.complete(Unit); observing.cancelAndJoin() }
         }
         reopened.assertNoNetwork()
@@ -1058,6 +1516,7 @@ class AppContainerIntegrationTest {
     @Test fun queuedDownloadRetainsTheRecordingChosenAtIntentAfterAnotherFreshPlayOfSameItem() = checkCase {
         val fixture = newFixture()
         val original = item()
+        fixture.store.upsertCatalog(listOf(original)).getOrThrow()
         val downloadEntered = CompletableDeferred<Unit>()
         val permitDownload = CompletableDeferred<Unit>()
         fixture.platform.acquireDownload = {
@@ -1076,13 +1535,28 @@ class AppContainerIntegrationTest {
             assertNotEquals(first.id, second.id)
             assertNotEquals(first.selectedVideoId, second.selectedVideoId)
             permitDownload.complete(Unit)
-            val saved = fixture.store.state.first { snapshot -> snapshot.downloads.values.any { it.status == DownloadStatus.COMPLETE } }
-            assertEquals(first.id, saved.downloads.values.single().executionBindingId)
-            assertEquals(first.id, saved.downloads.values.single().asset?.executionBindingId)
+            val view = withTimeout(20_000) {
+                var current = fixture.store.acquisitionViews.value
+                while (current.acquisition.physicalDownloads.values.none { it.status == DownloadStatus.COMPLETE && it.assetId != null }) {
+                    delay(10)
+                    current = fixture.store.acquisitionViews.value
+                }
+                current
+            }
+            val state = view.acquisition
+            val job = state.physicalDownloads.values.single { it.status == DownloadStatus.COMPLETE }
+            val asset = state.materializations.getValue(assertNotNull(job.assetId))
+            assertEquals(first.id, job.producer.bindingId?.value)
+            assertEquals(first.id, asset.producer.bindingId?.value)
+            assertEquals(first.selectedVideoId, state.recordings.getValue(requireNotNull(job.producer.recordingId)).canonicalId)
             assertEquals(first, fixture.gateway.transfers.single().binding)
-            assertEquals(second, fixture.app.playback.state.value.executionBinding)
+            assertEquals(first, fixture.gateway.transfers.single().persisted)
+            assertTrue(fixture.gateway.transfers.single().completed)
+            assertEquals(1, fixture.gateway.typedCompletions.size)
+            assertEquals(second.id, fixture.app.playback.state.value.currentSelection?.bindingId?.value)
             assertEquals(listOf(original.title, original.title), fixture.gateway.queries.toList())
             assertEquals(first, fixture.gateway.resolutions.single { it.purpose == ResolvePurpose.DOWNLOAD }.binding)
+            assertEquals(1, fixture.gateway.typedTransfers.size)
         } finally { permitDownload.complete(Unit) }
         fixture.assertNoNetwork()
     }
@@ -1090,6 +1564,8 @@ class AppContainerIntegrationTest {
     @Test fun slowDownloadRemovalCleanupCannotBlockUiPauseOrPersistedOfflineChange() = checkCase {
         val fixture = newFixture()
         val playing = item(SourceProvider.COMMONS, "independent-playing-item")
+        val downloadItem = item(SourceProvider.COMMONS, "slow-removal-download")
+        fixture.store.upsertCatalog(listOf(playing, downloadItem)).getOrThrow()
         fixture.play(playing)
         val transferEntered = CompletableDeferred<Unit>()
         val cleanupEntered = CompletableDeferred<Unit>()
@@ -1099,13 +1575,14 @@ class AppContainerIntegrationTest {
             try { awaitCancellation() }
             finally { withContext(NonCancellable) { cleanupEntered.complete(Unit); releaseCleanup.await() } }
         }
-        fixture.app.onMusicAction(MusicUiAction.Download(item()))
+        fixture.app.onMusicAction(MusicUiAction.Download(downloadItem))
         transferEntered.await()
-        val downloadId = fixture.store.state.value.downloads.values.single().id
+        val downloadId = fixture.store.acquisitionView().acquisition.physicalDownloads.values
+            .single { it.producer.subjectId.value == downloadItem.id }.id
         try {
             fixture.app.onMusicAction(MusicUiAction.RemoveDownload(downloadId))
             cleanupEntered.await()
-            assertTrue(fixture.store.state.value.downloads.getValue(downloadId).cleanupPending)
+            assertTrue(fixture.store.acquisitionView().acquisition.physicalDownloads.getValue(downloadId).cleanupPending)
             fixture.app.onMusicAction(MusicUiAction.TogglePlayPause)
             withTimeout(10_000L) {
                 fixture.app.playback.state.first { it.currentItem?.id == playing.id && !it.desiredPlaying && !it.isPlaying }
@@ -1114,39 +1591,63 @@ class AppContainerIntegrationTest {
             withTimeout(10_000L) { fixture.store.state.first { it.settings.offlineOnly } }
             assertFalse(releaseCleanup.isCompleted, "Pause/Offline must finish before slow media cleanup is released")
         } finally { releaseCleanup.complete(Unit) }
-        fixture.store.state.first { downloadId !in it.downloads }
+        withTimeout(15_000L) {
+            fixture.store.acquisitionViews.first { view ->
+                val job = view.acquisition.physicalDownloads[downloadId]
+                job == null || !job.cleanupPending && job.assetId == null && job.stagingPath == null
+            }
+        }
+        assertTrue(fixture.store.state.value.downloads.isEmpty(), "Typed physical cleanup is not a legacy row deletion")
+        assertEquals(2, fixture.gateway.queries.size, "Play plus the one admitted selection query; removal searches nothing")
+        // The held transfer was actually invoked and then cancelled; a zero completion list alone
+        // would not prove that no source execution started.
+        assertEquals(1, fixture.gateway.transfers.size)
+        assertFalse(fixture.gateway.transfers.single().completed)
+        assertTrue(fixture.gateway.transfers.single().failure is CancellationException)
+        assertEquals(1, fixture.gateway.typedTransfers.size)
+        assertTrue(fixture.gateway.typedCompletions.isEmpty())
         fixture.assertNoNetwork()
     }
 
     @Test fun ownedFileRemovalWaitsForNativeStopButDoesNotBlockOfflineUiIntent() = checkCase {
-        val fixture = newFixture()
-        val original = item()
-        fixture.gateway.onDownload = { transfer -> writeFakeTransfer(transfer) }
-        fixture.play(original)
-        fixture.app.onPodcastAction(PodcastAction.Download(original.id))
-        val snapshot = fixture.store.state.first { state -> state.downloads.values.any { it.status == DownloadStatus.COMPLETE } }
-        val record = snapshot.downloads.values.single()
-        val asset = assertNotNull(record.asset)
-        assertTrue(fixture.play(original).source.isLocal)
+        val fixture = newFixture(initialize = false)
+        val original = item(title = "Owned local removal — إزالة الملف المحلي")
+        val selection = fixture.seedSelection(original)
+        fixture.seedQueue(selection, PlaybackControlsMode.PODCAST, activate = true)
+        val jobId = fixture.seedCompleteJob(selection, fixture.clockRef.epochMs(), "owned-file-removal")
+        val asset = assertNotNull(fixture.asset(jobId))
+        fixture.app.initialize()
+        fixture.awaitChecked(jobId, asset)
+        assertEquals(PlaybackPhase.PAUSED, fixture.app.playback.state.value.phase)
+        val offline = fixture.resumeRestored(original)
+        assertTrue(offline.source.isLocal)
+        assertEquals(asset.uri, offline.source.uri)
+        assertEquals(selection.bindingId.value, offline.source.executionBinding?.id)
         val stopEntered = CompletableDeferred<Unit>()
         val releaseStop = CompletableDeferred<Unit>()
         fixture.platform.engine.beforeStop = { stopEntered.complete(Unit); releaseStop.await() }
         try {
-            fixture.app.onPodcastAction(PodcastAction.RemoveDownload(record.id))
+            fixture.app.onPodcastAction(PodcastAction.RemoveDownload(jobId))
             stopEntered.await()
             assertTrue(Files.isRegularFile(Path.of(asset.uri)), "Durable intent is not native file-release acknowledgement")
-            assertTrue(fixture.store.state.value.downloads.getValue(record.id).cleanupPending)
+            assertTrue(fixture.store.acquisitionView().acquisition.physicalDownloads.getValue(jobId).cleanupPending)
             fixture.app.changeSettings { it.copy(offlineOnly = true) }
             withTimeout(10_000L) { fixture.store.state.first { it.settings.offlineOnly } }
             assertTrue(Files.isRegularFile(Path.of(asset.uri)), "Offline settings may change while deletion safely waits")
-            assertNull(fixture.store.state.value.downloads.getValue(record.id).failure)
+            assertNull(fixture.store.acquisitionView().acquisition.physicalDownloads.getValue(jobId).failure)
         } finally {
             fixture.platform.engine.beforeStop = {}
             releaseStop.complete(Unit)
         }
-        fixture.store.state.first { record.id !in it.downloads }
+        withTimeout(15_000L) {
+            fixture.store.acquisitionViews.first { view ->
+                val job = view.acquisition.physicalDownloads[jobId]
+                job == null || !job.cleanupPending && job.assetId == null
+            }
+        }
         assertFalse(Files.exists(Path.of(asset.uri)))
-        assertEquals(1, fixture.gateway.queries.size, "Opening a completed local artifact cannot fresh-search")
+        assertTrue(fixture.gateway.queries.isEmpty(), "Opening the completed local artifact cannot fresh-search")
+        assertTrue(fixture.gateway.resolutions.isEmpty())
         fixture.assertNoNetwork()
     }
 
@@ -1281,31 +1782,24 @@ class AppContainerIntegrationTest {
             artworkUrl = "https://images.example.com/missing-authored-cover.png",
             localArtworkPath = directory.resolve("artwork/files/missing-authored-cover.png").toString())
         val pending = item(id = "scheduling-pending")
-        val binding = bindingFor(historical)
-        // This is historical metadata pointing at an ABSENT file, not a playable fixture.
-        // Scheduling-only initialization may neither validate it nor clear its artwork path.
-        val asset = OfflineAsset("historical-asset", historical.id,
-            seed.app.files.finalPath(historical.id, 1, "audio/mpeg").toString(), NON_AUDIO.size.toLong(),
-            mimeType = "audio/mpeg", representationId = REPRESENTATION, executionBindingId = binding.id)
-        val complete = DownloadRecord(seed.app.files.key(historical.id), historical.id, DownloadStatus.COMPLETE,
-            asset = asset, executionBindingId = binding.id, representationId = REPRESENTATION)
-        val queued = DownloadRecord(seed.app.files.key(pending.id), pending.id)
-        val occurrence = QueueEntry("scheduling-restored-occurrence", historical.id)
-        val queue = QueueSnapshot(listOf(occurrence), occurrence.id, positionMs = 3_210,
-            originalOrder = listOf(occurrence.id))
+        val historicalSelection = seed.seedSelection(historical)
+        seed.seedQueue(historicalSelection, PlaybackControlsMode.MUSIC, positionMs = 3_210)
+        val completeJobId = seed.seedCompleteJob(historicalSelection, seed.clockRef.epochMs(), "scheduling-historical-download")
+        val completeAsset = assertNotNull(seed.asset(completeJobId))
+        val pendingSelection = seed.seedSelection(pending)
+        val queuedJobId = seed.seedJob(pendingSelection, seed.clockRef.epochMs(), "scheduling-pending-download")
         val collection = MediaCollection("scheduling-restored-collection", "Complete restored collection — المجموعة",
             SourceRef(SourceProvider.YOUTUBE, "PLauthoredSchedulingCollection",
                 "https://www.youtube.com/playlist?list=PLauthoredSchedulingCollection"), kind = BrowseKind.PLAYLIST)
         val navigation = AppNavigation(AppDestination.LIBRARY,
             details = listOf(AppDetail(DetailKind.COLLECTION, collection.id, collection)))
-        val seeded = seed.store.update { snapshot -> snapshot.copy(
-            media = mapOf(historical.id to historical, pending.id to pending),
-            downloads = mapOf(complete.id to complete, queued.id to queued),
-            playbackBindings = mapOf(binding.id to binding),
-            queues = snapshot.queues + (QueueContext.MUSIC to queue),
-            navigation = navigation.persisted(),
-        ) }.getOrThrow()
-        assertEquals(navigation, AppNavigation.restore(seeded), "The collection fixture must genuinely be restorable")
+        seed.store.update { snapshot -> snapshot.copy(navigation = navigation.persisted()) }.getOrThrow()
+        assertEquals(navigation, AppNavigation.restore(seed.store.state.value), "The collection fixture must genuinely be restorable")
+        // The old fixture pointed at an ABSENT historical file without creating directories.
+        // Publication above needed real staging/final paths; remove only those test-owned
+        // directories so the cold bootstrap is proved not to recreate them.
+        seed.deleteDirectory(directory.resolve("media"))
+        val seededView = seed.store.acquisitionView()
         seed.assertSchedulingOnly()
         seed.close()
 
@@ -1313,10 +1807,16 @@ class AppContainerIntegrationTest {
         assertIs<StoreStatus.Uninitialized>(reopened.store.status.value)
         repeat(2) { reopened.app.initializeScheduling() }
         assertIs<StoreStatus.Ready>(reopened.store.status.value)
-        assertEquals(seeded, reopened.store.flush().getOrThrow(), "Headless bootstrap must be a read, not library reconciliation")
+        assertEquals(seededView, reopened.store.acquisitionView(), "Headless bootstrap must be a read, not library reconciliation")
         assertEquals(navigation, AppNavigation.restore(reopened.store.state.value))
         assertEquals(historical.localArtworkPath, reopened.store.state.value.media.getValue(historical.id).localArtworkPath)
-        assertEquals(DownloadStatus.COMPLETE, reopened.store.state.value.downloads.getValue(complete.id).status)
+        val restored = reopened.store.acquisitionView()
+        assertEquals(DownloadStatus.COMPLETE, restored.acquisition.physicalDownloads.getValue(completeJobId).status)
+        assertEquals(completeAsset.id, restored.acquisition.physicalDownloads.getValue(completeJobId).assetId)
+        assertEquals(completeAsset, restored.acquisition.materializations.getValue(completeAsset.id))
+        assertEquals(DownloadStatus.QUEUED, restored.acquisition.physicalDownloads.getValue(queuedJobId).status)
+        assertEquals(3_210L, restored.acquisition.queues.getValue(QueueContext.MUSIC).positionMs)
+        assertNotNull(restored.acquisition.queues.getValue(QueueContext.MUSIC).currentOccurrenceId)
         assertNull(reopened.app.cachedArtworkPath(historical.id), "An unverified stored path is not a trusted image")
         reopened.assertSchedulingOnly()
         Files.newInputStream(directory.resolve("library/veyra.db")).use {
@@ -1374,11 +1874,25 @@ class AppContainerIntegrationTest {
         val newPodcast = item(id = "held-actor-new-podcast")
         val members = listOf(item(SourceProvider.COMMONS, "held-actor-member-one"),
             item(SourceProvider.COMMONS, "held-actor-member-two"))
-        val paused = listOf(music, podcast).map { original ->
-            DownloadRecord(fixture.app.files.key(original.id), original.id, DownloadStatus.PAUSED, userPaused = true)
+        val pausedMusic = fixture.seedSelection(music)
+        val pausedPodcast = fixture.seedSelection(podcast)
+        val now = fixture.clockRef.epochMs()
+        val musicJob = fixture.seedAttemptJob(pausedMusic, now, "held-actor-paused-music-download",
+            status = DownloadStatus.PAUSED, attemptStatus = DownloadAttemptStatus.PAUSED,
+            intent = DownloadBatchIntent.PAUSED)
+        val podcastJob = fixture.seedAttemptJob(pausedPodcast, now, "held-actor-paused-podcast-download",
+            status = DownloadStatus.PAUSED, attemptStatus = DownloadAttemptStatus.PAUSED,
+            intent = DownloadBatchIntent.PAUSED)
+        // Ensure the nonblocking published view used during the held writer is current BEFORE
+        // the authored transaction starts.
+        fixture.store.acquisitionViews.first { view ->
+            listOf(musicJob, podcastJob).all { id ->
+                view.acquisition.physicalDownloads[id]?.let { it.status == DownloadStatus.PAUSED && it.userPaused } == true &&
+                    view.acquisition.claims.values.single { it.physicalJobId == id }.intent == DownloadBatchIntent.PAUSED
+            }
         }
-        fixture.store.update { it.copy(media = listOf(music, podcast, newPodcast).associateBy { original -> original.id },
-            downloads = paused.associateBy { record -> record.id }) }.getOrThrow()
+        fixture.deleteDirectory(directory.resolve("media"))
+        fixture.store.upsertCatalog(listOf(newMusic, newPodcast) + members).getOrThrow()
         val coverageEntered = CompletableDeferred<Unit>()
         val permitCoverage = CompletableDeferred<Unit>()
         fixture.platform.ensureCoverage = { coverageEntered.complete(Unit); permitCoverage.await() }
@@ -1409,21 +1923,34 @@ class AppContainerIntegrationTest {
                 rejectsAtTap { fixture.app.onMusicAction(MusicUiAction.Download(newMusic)) }
                 rejectsAtTap { fixture.app.onMusicAction(MusicUiAction.DownloadCollection(members)) }
                 rejectsAtTap { fixture.app.onPodcastAction(PodcastAction.Download(newPodcast.id)) }
-                rejectsAtTap { fixture.app.onMusicAction(MusicUiAction.ResumeDownload(paused[0].id)) }
-                rejectsAtTap { fixture.app.onPodcastAction(PodcastAction.ResumeDownload(paused[1].id)) }
-                assertEquals(paused.associateBy { it.id }, fixture.store.state.value.downloads)
+                rejectsAtTap { fixture.app.onMusicAction(MusicUiAction.ResumeDownload(musicJob)) }
+                rejectsAtTap { fixture.app.onPodcastAction(PodcastAction.ResumeDownload(podcastJob)) }
+                // Nonblocking inspection of the ALREADY-PUBLISHED view while the authored
+                // transform still holds the action actor AND Room's write transaction. Do not use
+                // acquisitionView()/job()/claim() here: they would wait for this writer.
+                val held = fixture.store.acquisitionViews.value.acquisition
+                assertEquals(DownloadStatus.PAUSED, held.physicalDownloads.getValue(musicJob).status)
+                assertEquals(DownloadStatus.PAUSED, held.physicalDownloads.getValue(podcastJob).status)
+                assertEquals(DownloadBatchIntent.PAUSED,
+                    held.claims.values.single { it.physicalJobId == musicJob }.intent)
+                assertEquals(DownloadBatchIntent.PAUSED,
+                    held.claims.values.single { it.physicalJobId == podcastJob }.intent)
                 fixture.assertNoDownloadExecution()
 
-                // Cancel remains admissible. Commit it BEFORE accepting coverage so an older
-                // rejected resume/download cannot wake up on the later successful ACK.
-                fixture.app.onMusicAction(MusicUiAction.CancelDownload(paused[0].id))
-                fixture.app.onPodcastAction(PodcastAction.CancelDownload(paused[1].id))
+                // Cancel remains admissible AT THE PUBLIC BOUNDARY WHILE THE ACTOR IS HELD.
+                // Commit it BEFORE accepting coverage so an older rejected resume/download cannot
+                // wake up on the later successful ACK. The effects wait on the writer; the intents
+                // are already accepted by submit/trySend and will commit as soon as it releases.
+                fixture.app.onMusicAction(MusicUiAction.CancelDownload(musicJob))
+                fixture.app.onPodcastAction(PodcastAction.CancelDownload(podcastJob))
                 permitActor.countDown()
-                fixture.store.state.first { snapshot -> paused.all { record ->
-                    snapshot.downloads[record.id]?.let {
-                        it.status == DownloadStatus.CANCELLED && it.userPaused && it.cleanupPending
-                    } == true
-                } }
+                fixture.store.state.first { it.settings.skipBackSeconds == 20 }
+                fixture.store.acquisitionViews.first { view ->
+                    listOf(musicJob, podcastJob).all { id ->
+                        val job = view.acquisition.physicalDownloads[id]
+                        job != null && job.status == DownloadStatus.CANCELLED && job.userPaused && job.cleanupPending
+                    }
+                }
                 assertFalse(actorTimedOut.get())
                 assertEquals(20, fixture.store.state.value.settings.skipBackSeconds)
                 assertEquals(0, fixture.platform.coverageAcknowledgements.get())
@@ -1433,18 +1960,30 @@ class AppContainerIntegrationTest {
                 fixture.platform.coverageAcknowledged.await()
                 initializing.await()
                 assertNull(fixture.app.downloadRestriction.value)
-                fixture.store.state.first { snapshot -> paused.all { record ->
-                    snapshot.downloads[record.id]?.let { it.status == DownloadStatus.CANCELLED && !it.cleanupPending } == true
-                } }
+                fixture.store.acquisitionViews.first { view ->
+                    listOf(musicJob, podcastJob).all { id ->
+                        view.acquisition.physicalDownloads[id]?.let { !it.cleanupPending && it.status == DownloadStatus.CANCELLED } == true
+                    }
+                }
                 fixture.awaitDownloadIdle()
                 // Fence the action consumer too, rather than merely sampling before it runs.
                 fixture.app.changeSettings { it.copy(skipForwardSeconds = 60) }
                 fixture.store.state.first { it.settings.skipForwardSeconds == 60 }
-                val final = fixture.store.flush().getOrThrow()
-                assertEquals(paused.map { it.id }.toSet(), final.downloads.keys)
-                assertTrue(final.downloads.values.all { it.status == DownloadStatus.CANCELLED && it.userPaused })
-                assertTrue(final.downloadAttempts.isEmpty())
-                assertTrue(final.playbackBindings.isEmpty())
+                val final = fixture.store.acquisitionView()
+                assertEquals(DownloadStatus.CANCELLED, final.acquisition.physicalDownloads.getValue(musicJob).status)
+                assertEquals(DownloadStatus.CANCELLED, final.acquisition.physicalDownloads.getValue(podcastJob).status)
+                assertTrue(final.acquisition.physicalDownloads.getValue(musicJob).userPaused)
+                assertTrue(final.acquisition.physicalDownloads.getValue(podcastJob).userPaused)
+                assertEquals(DownloadBatchIntent.CANCELLED, final.acquisition.claims.getValue(fixture.claim(musicJob).id).intent)
+                assertEquals(DownloadBatchIntent.CANCELLED, final.acquisition.claims.getValue(fixture.claim(podcastJob).id).intent)
+                // Cancel (not Remove) stops unfinished work but retains any already-completed asset.
+                assertTrue(final.acquisition.claims.getValue(fixture.claim(musicJob).id).retainCompletedAsset)
+                assertTrue(final.acquisition.claims.getValue(fixture.claim(podcastJob).id).retainCompletedAsset)
+                assertTrue(final.acquisition.physicalDownloads.values.all { it.leaseOwner == null })
+                assertTrue(final.acquisition.physicalAttempts.values.all { it.finishedEpochMs != null })
+                assertTrue(final.acquisition.physicalAttempts.values.none { it.status == DownloadAttemptStatus.RUNNING })
+                assertTrue(final.snapshot.playbackBindings.isEmpty(), "Cancelled downloads do not fabricate legacy bindings")
+                assertTrue(fixture.store.state.value.downloads.isEmpty())
                 assertTrue(fixture.gateway.queries.isEmpty())
                 assertTrue(fixture.gateway.resolutions.isEmpty())
                 assertTrue(fixture.gateway.transfers.isEmpty())
@@ -1468,85 +2007,100 @@ class AppContainerIntegrationTest {
         val fixture = newFixture(initialize = false, clock = clock)
         val media = listOf(item(SourceProvider.COMMONS, "headless-pause"), item(id = "headless-cancel"),
             item(SourceProvider.COMMONS, "headless-remove"))
-        val records = media.map { original ->
-            DownloadRecord(fixture.app.files.key(original.id), original.id,
-                nextRetryEpochMs = clock.epochMs() + 60_000, automaticRetryCount = 2)
-        }
-        fixture.store.update { it.copy(media = media.associateBy { original -> original.id },
-            downloads = records.associateBy { record -> record.id }) }.getOrThrow()
+        val now = clock.epochMs()
+        val pause = fixture.seedSelection(media[0])
+        val cancel = fixture.seedSelection(media[1])
+        val remove = fixture.seedSelection(media[2])
+        val retryDeadline = now + 60_000
+        val pauseJob = fixture.seedAttemptJob(pause, now, "headless-pause-download",
+            nextRetryEpochMs = retryDeadline, automaticRetryCount = 2,
+            intent = DownloadBatchIntent.PAUSED)
+        val cancelJob = fixture.seedAttemptJob(cancel, now, "headless-cancel-download",
+            nextRetryEpochMs = retryDeadline, automaticRetryCount = 2)
+        val removeJob = fixture.seedAttemptJob(remove, now, "headless-remove-download",
+            nextRetryEpochMs = retryDeadline, automaticRetryCount = 2)
+        fixture.deleteDirectory(directory.resolve("media"))
         fixture.app.initializeScheduling()
-        fixture.app.downloads.pause(records[0].id)
-        fixture.app.downloads.cancel(records[1].id)
-        fixture.app.downloads.remove(records[2].id)
-        val expected = listOf(
-            records[0].copy(status = DownloadStatus.PAUSED, userPaused = true, nextRetryEpochMs = null, updatedEpochMs = clock.epochMs()),
-            records[1].copy(status = DownloadStatus.CANCELLED, userPaused = true, cleanupPending = true,
-                nextRetryEpochMs = null, updatedEpochMs = clock.epochMs()),
-            records[2].copy(status = DownloadStatus.CANCELLED, userPaused = true, cleanupPending = true, removeWhenClean = true,
-                nextRetryEpochMs = null, updatedEpochMs = clock.epochMs()),
-        ).associateBy { it.id }
-        assertEquals(expected, fixture.store.flush().getOrThrow().downloads)
+        fixture.app.downloads.pause(pauseJob)
+        fixture.app.downloads.cancel(cancelJob)
+        fixture.app.downloads.remove(removeJob)
+        fun assertIntent(view: dev.veyra.data.LibraryAcquisitionView) {
+            val paused = view.acquisition.physicalDownloads.getValue(pauseJob)
+            assertEquals(DownloadStatus.PAUSED, paused.status)
+            assertTrue(paused.userPaused)
+            assertEquals(DownloadBatchIntent.PAUSED,
+                view.acquisition.claims.values.single { it.physicalJobId == pauseJob }.intent)
+            assertEquals(2, paused.automaticRetryCount)
+            assertEquals(retryDeadline, paused.nextRetryEpochMs,
+                "Typed user intent is separate from the persisted scheduling deadline")
+            val cancelled = view.acquisition.physicalDownloads.getValue(cancelJob)
+            assertEquals(DownloadStatus.CANCELLED, cancelled.status)
+            assertTrue(cancelled.userPaused)
+            assertTrue(cancelled.cleanupPending)
+            assertEquals(DownloadBatchIntent.CANCELLED,
+                view.acquisition.claims.values.single { it.physicalJobId == cancelJob }.intent)
+            assertEquals(2, cancelled.automaticRetryCount)
+            val removed = view.acquisition.physicalDownloads.getValue(removeJob)
+            assertEquals(DownloadStatus.CANCELLED, removed.status)
+            assertTrue(removed.userPaused)
+            assertTrue(removed.cleanupPending)
+            assertTrue(removed.removeWhenClean)
+            assertEquals(2, removed.automaticRetryCount)
+        }
+        assertIntent(fixture.store.acquisitionView())
         fixture.assertSchedulingOnly()
         fixture.close()
 
         val reopened = newFixture(initialize = false, clock = clock)
         reopened.app.initializeScheduling()
-        assertEquals(expected, reopened.store.flush().getOrThrow().downloads,
-            "Remove intent remains durable until an activated native maintenance owner acknowledges cleanup")
+        assertIntent(reopened.store.acquisitionView())
         reopened.assertSchedulingOnly()
+        assertFalse(Files.exists(directory.resolve("media")),
+            "Remove intent remains durable until an activated native maintenance owner acknowledges cleanup")
     }
 
     @Test fun musicAndPodcastPauseCancelRemoveRemainUsableAfterCoverageFailureButPhysicalCleanupWaitsForExplicitActivation() = checkCase {
         val fixture = newFixture(initialize = false)
         val music = listOf("pause", "cancel", "remove").map { item(SourceProvider.COMMONS, "restricted-music-$it") }
         val podcasts = listOf("pause", "cancel", "remove").map { item(id = "restricted-podcast-$it") }
-        val media = music + podcasts
-        val removable = listOf(music[2], podcasts[2])
-        val bindings = removable.map(::bindingFor)
-        // Authored NON-AUDIO bytes establish actual deletion/retention, never native media validity.
-        fixture.app.files.initialize()
-        val assets = removable.associate { original ->
-            val asset = OfflineAsset("owned-" + original.id, original.id,
-                fixture.app.files.finalPath(original.id, 1, "audio/mpeg").toString(), NON_AUDIO.size.toLong(),
-                mimeType = "audio/mpeg", representationId = REPRESENTATION, executionBindingId = bindingFor(original).id)
-            Files.write(Path.of(asset.uri), NON_AUDIO)
-            original.id to asset
-        }
-        val records = media.associate { original ->
-            val asset = assets[original.id]
-            val record = DownloadRecord(fixture.app.files.key(original.id), original.id,
-                if (asset == null) DownloadStatus.QUEUED else DownloadStatus.COMPLETE, asset = asset,
-                executionBindingId = asset?.executionBindingId, representationId = asset?.representationId)
-            original.id to record
-        }
-        fixture.store.update { it.copy(media = media.associateBy { original -> original.id },
-            downloads = records.values.associateBy { record -> record.id },
-            playbackBindings = bindings.associateBy { binding -> binding.id }) }.getOrThrow()
+        val musicSelections = music.map { fixture.seedSelection(it) }
+        val podcastSelections = podcasts.map { fixture.seedSelection(it) }
+        val now = fixture.clockRef.epochMs()
+        val musicPause = fixture.seedAttemptJob(musicSelections[0], now, "restricted-music-pause-download")
+        val musicCancel = fixture.seedAttemptJob(musicSelections[1], now, "restricted-music-cancel-download")
+        val musicRemove = fixture.seedCompleteJob(musicSelections[2], now, "restricted-music-remove-download")
+        val podcastPause = fixture.seedAttemptJob(podcastSelections[0], now, "restricted-podcast-pause-download")
+        val podcastCancel = fixture.seedAttemptJob(podcastSelections[1], now, "restricted-podcast-cancel-download")
+        val podcastRemove = fixture.seedCompleteJob(podcastSelections[2], now, "restricted-podcast-remove-download")
+        val removable = listOf(musicRemove, podcastRemove)
+        val removeAssets = removable.associateWith { assertNotNull(fixture.asset(it)) }
         val denied = AppFailure(FailureCode.BACKGROUND_RESTRICTED, "authored_scheduler_install_failure")
         fixture.platform.ensureCoverage = { throw VeyraException(denied) }
         fixture.app.initialize()
         assertEquals(AppInitialization.Ready, fixture.app.initialization.value)
         assertEquals(denied, fixture.app.downloadRestriction.value)
-        fixture.app.onMusicAction(MusicUiAction.PauseDownload(records.getValue(music[0].id).id))
-        fixture.app.onMusicAction(MusicUiAction.CancelDownload(records.getValue(music[1].id).id))
-        fixture.app.onMusicAction(MusicUiAction.RemoveDownload(records.getValue(music[2].id).id))
-        fixture.app.onPodcastAction(PodcastAction.PauseDownload(records.getValue(podcasts[0].id).id))
-        fixture.app.onPodcastAction(PodcastAction.CancelDownload(records.getValue(podcasts[1].id).id))
-        fixture.app.onPodcastAction(PodcastAction.RemoveDownload(records.getValue(podcasts[2].id).id))
-        val pausedIds = listOf(music[0], podcasts[0]).map { records.getValue(it.id).id }.toSet()
-        val cancelledIds = listOf(music[1], podcasts[1]).map { records.getValue(it.id).id }.toSet()
-        val removedIds = removable.map { records.getValue(it.id).id }.toSet()
-        val intent = fixture.store.state.first { snapshot ->
-            pausedIds.all { snapshot.downloads[it]?.let { row -> row.status == DownloadStatus.PAUSED && row.userPaused } == true } &&
-                (cancelledIds + removedIds).all { id -> snapshot.downloads[id]?.let { row ->
-                    row.status == DownloadStatus.CANCELLED && row.userPaused && row.cleanupPending && row.removeWhenClean == (id in removedIds)
+        fixture.app.onMusicAction(MusicUiAction.PauseDownload(musicPause))
+        fixture.app.onMusicAction(MusicUiAction.CancelDownload(musicCancel))
+        fixture.app.onMusicAction(MusicUiAction.RemoveDownload(musicRemove))
+        fixture.app.onPodcastAction(PodcastAction.PauseDownload(podcastPause))
+        fixture.app.onPodcastAction(PodcastAction.CancelDownload(podcastCancel))
+        fixture.app.onPodcastAction(PodcastAction.RemoveDownload(podcastRemove))
+        val pausedIds = listOf(musicPause, podcastPause).toSet()
+        val cancelledIds = listOf(musicCancel, podcastCancel).toSet()
+        val removedIds = removable.toSet()
+        val intent = fixture.store.acquisitionViews.first { view ->
+            pausedIds.all { id -> view.acquisition.physicalDownloads[id]?.let { it.status == DownloadStatus.PAUSED && it.userPaused } == true } &&
+                (cancelledIds + removedIds).all { id -> view.acquisition.physicalDownloads[id]?.let { job ->
+                    job.status == DownloadStatus.CANCELLED && job.userPaused && job.cleanupPending &&
+                        job.removeWhenClean == (id in removedIds)
                 } == true }
-        }
-        assertEquals(records.size, intent.downloads.size)
-        assets.forEach { (mediaId, asset) ->
-            assertEquals(asset, intent.downloads.getValue(records.getValue(mediaId).id).asset)
+        }.acquisition
+        assertEquals(6, intent.physicalDownloads.size)
+        removeAssets.forEach { (id, asset) ->
+            assertEquals(asset, intent.materializations.getValue(assertNotNull(intent.physicalDownloads.getValue(id).assetId)))
             assertContentEquals(NON_AUDIO, Files.readAllBytes(Path.of(asset.uri)))
         }
+        cancelledIds.forEach { assertNull(fixture.asset(it), "Cancelled unfinished jobs cannot own a published asset") }
         fixture.assertNoDownloadExecution()
         assertEquals(1, fixture.platform.ensureCoverageCalls.get())
         assertEquals(0, fixture.platform.coverageAcknowledgements.get())
@@ -1554,14 +2108,31 @@ class AppContainerIntegrationTest {
         fixture.platform.ensureCoverage = {}
         assertTrue(fixture.app.activateUserDownloads())
         assertNull(fixture.app.downloadRestriction.value)
-        fixture.store.state.first { snapshot ->
-            removedIds.none { it in snapshot.downloads } &&
-                cancelledIds.all { snapshot.downloads[it]?.let { row -> row.status == DownloadStatus.CANCELLED && !row.cleanupPending } == true }
+        fixture.store.acquisitionViews.first { view ->
+            removedIds.none { id -> view.acquisition.physicalDownloads[id]?.assetId != null } &&
+                removedIds.all { id -> view.acquisition.physicalDownloads[id]?.let { !it.cleanupPending && it.assetId == null } == true } &&
+                cancelledIds.all { id -> view.acquisition.physicalDownloads[id]?.let { !it.cleanupPending && it.status == DownloadStatus.CANCELLED } == true }
         }
         fixture.awaitDownloadIdle()
         assertEquals(AppInitialization.Ready, fixture.app.initialization.value)
-        assertTrue(pausedIds.all { fixture.store.state.value.downloads[it]?.let { row -> row.status == DownloadStatus.PAUSED && row.userPaused } == true })
-        assets.values.forEach { assertFalse(Files.exists(Path.of(it.uri))) }
+        val final = fixture.store.acquisitionView().acquisition
+        assertTrue(pausedIds.all { final.physicalDownloads[it]?.let { job -> job.status == DownloadStatus.PAUSED && job.userPaused } == true })
+        assertTrue(cancelledIds.all { final.physicalDownloads[it]?.status == DownloadStatus.CANCELLED })
+        removeAssets.forEach { (id, asset) ->
+            assertFalse(Files.exists(Path.of(asset.uri)))
+            assertNull(final.materializations[asset.id])
+            assertEquals(asset.receipt(), final.materializationReceipts[asset.id],
+                "The immutable receipt survives live-file removal")
+            val job = assertNotNull(final.physicalDownloads[id])
+            assertNull(job.assetId)
+            assertNull(job.stagingPath)
+            assertFalse(job.cleanupPending)
+        }
+        cancelledIds.forEach { id ->
+            val job = assertNotNull(final.physicalDownloads[id])
+            assertNull(job.assetId)
+            assertNull(job.stagingPath)
+        }
         assertEquals(2, fixture.platform.ensureCoverageCalls.get())
         assertEquals(1, fixture.platform.coverageAcknowledgements.get())
         assertTrue(fixture.platform.gateCoverageAcknowledgements.isNotEmpty())
@@ -1578,48 +2149,69 @@ class AppContainerIntegrationTest {
     @Test fun acceptedCoveragePrecedesEveryGateAndTheExistingDurableQueueExecutesOnlyAfterThatAck() = checkCase {
         val seed = newFixture(initialize = false)
         val original = item(title = "Persisted complete requested title — طابور التنزيل المحفوظ")
-        val record = DownloadRecord(seed.app.files.key(original.id), original.id)
-        seed.store.update { it.copy(media = mapOf(original.id to original), downloads = mapOf(record.id to record)) }.getOrThrow()
+        val selection = seed.seedSelection(original)
+        val jobId = seed.seedJob(selection, seed.clockRef.epochMs(), "coverage-durable-download")
         seed.close()
         val fixture = newFixture(initialize = false)
         val entered = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()
         fixture.platform.ensureCoverage = { entered.complete(Unit); release.await() }
         fixture.platform.acquireDownload = {
-            assertEquals(1, fixture.platform.coverageAcknowledgements.get(), "Native allowance cannot precede durable coverage ACK")
+            assertEquals(1, fixture.platform.coverageAcknowledgements.get(),
+                "Native allowance cannot precede durable coverage ACK")
             DownloadExecutionLease {}
         }
-        fixture.gateway.onFirst = { title ->
+        fixture.gateway.onDownload = { transfer ->
             assertEquals(1, fixture.platform.coverageAcknowledgements.get())
             assertTrue(fixture.platform.downloadGateCalls.get() > 0)
-            KmpFirstResult(title, FirstResultKind.VIDEO, FIRST, "Authored selected recording", "https://www.youtube.com/watch?v=$FIRST")
+            writeFakeTransfer(transfer)
         }
-        fixture.gateway.onDownload = ::writeFakeTransfer
         coroutineScope {
             val initializing = async { fixture.app.initialize() }
             try {
                 entered.await()
                 assertEquals(AppInitialization.Ready, fixture.app.initialization.value)
                 assertFalse(initializing.isCompleted)
-                assertEquals(record, fixture.store.state.value.downloads[record.id])
+                assertEquals(DownloadStatus.QUEUED, fixture.store.acquisitionView()
+                    .acquisition.physicalDownloads.getValue(jobId).status)
                 fixture.assertNoDownloadExecution()
                 release.complete(Unit)
                 fixture.platform.coverageAcknowledged.await()
                 initializing.await()
             } finally { release.complete(Unit) }
         }
-        val saved = fixture.store.state.first { it.downloads[record.id]?.status == DownloadStatus.COMPLETE }
-        val complete = saved.downloads.getValue(record.id)
-        val asset = assertNotNull(complete.asset)
-        val binding = saved.playbackBindings.getValue(assertNotNull(complete.executionBindingId))
+        val view = withTimeout(20_000) {
+            var current = fixture.store.acquisitionViews.value
+            while (current.acquisition.physicalDownloads.none { it.value.status == DownloadStatus.COMPLETE && it.value.assetId != null }) {
+                delay(10)
+                current = fixture.store.acquisitionViews.value
+            }
+            current
+        }
+        val state = view.acquisition
+        val job = state.physicalDownloads.getValue(jobId)
+        val asset = state.materializations.getValue(assertNotNull(job.assetId))
+        val accepted = state.requests.values.single { it.state == AcquisitionJobState.COMMITTED }
+        val single = assertIs<AcquisitionOutcome.Single>(accepted.outcome)
         fixture.awaitDownloadIdle()
         assertNull(fixture.app.downloadRestriction.value)
-        assertEquals(listOf(original.title), fixture.gateway.queries.toList())
-        assertEquals(original.title, binding.queryTitle)
-        assertEquals(FIRST, binding.selectedVideoId)
-        assertEquals(binding, fixture.gateway.transfers.single().persisted)
-        assertEquals(binding.id, asset.executionBindingId)
+        assertEquals(original.title, accepted.request.completeTitle)
+        assertEquals(original.title, single.let {
+            (state.receipts.getValue(it.receiptId) as FirstResultReceipt.Observed).observation.queryTitle
+        })
+        assertEquals(selection.bindingId, job.producer.bindingId)
+        assertEquals(selection.bindingId, asset.producer.bindingId)
+        assertEquals(single.bindingId, job.producer.bindingId)
+        assertEquals(selection.bindingId.value, fixture.gateway.transfers.single().binding.id)
+        assertEquals(original.title, fixture.gateway.transfers.single().persisted?.queryTitle)
+        assertTrue(fixture.gateway.transfers.single().completed)
+        assertEquals(1, fixture.gateway.typedCompletions.size)
         assertContentEquals(NON_AUDIO, Files.readAllBytes(Path.of(asset.uri)))
+        assertTrue(state.assetUses.any {
+            it.requestedBindingId == selection.bindingId && it.materializationAssetId == asset.id
+        })
+        assertTrue(fixture.gateway.queries.isEmpty(), "Activated typed execution reuses the accepted receipt, never re-searches")
+        assertEquals(1, fixture.gateway.typedTransfers.size)
         assertEquals(1, fixture.platform.ensureCoverageCalls.get())
         assertEquals(1, fixture.platform.coverageAcknowledgements.get())
         assertTrue(fixture.platform.gateCoverageAcknowledgements.isNotEmpty())
@@ -1634,12 +2226,27 @@ class AppContainerIntegrationTest {
         val pausedItem = item(SourceProvider.COMMONS, "retry-stays-user-paused")
         val futureItem = item(id = "retry-resumes-at-future-deadline")
         val deadline = clock.epochMs() + 60_000
-        val paused = DownloadRecord(fixture.app.files.key(pausedItem.id), pausedItem.id, DownloadStatus.PAUSED,
-            userPaused = true, automaticRetryCount = 2, nextRetryEpochMs = deadline + 30_000)
-        val future = DownloadRecord(fixture.app.files.key(futureItem.id), futureItem.id, DownloadStatus.NEEDS_FOREGROUND,
-            failure = AppFailure(FailureCode.BACKGROUND_RESTRICTED), automaticRetryCount = 3, nextRetryEpochMs = deadline)
-        fixture.store.update { it.copy(media = listOf(pausedItem, futureItem).associateBy { original -> original.id },
-            downloads = listOf(paused, future).associateBy { record -> record.id }) }.getOrThrow()
+        val pausedSelection = fixture.seedSelection(pausedItem)
+        val futureSelection = fixture.seedSelection(futureItem)
+        val now = clock.epochMs()
+        val paused = fixture.seedAttemptJob(pausedSelection, now, "retry-paused-download",
+            status = DownloadStatus.PAUSED, attemptStatus = DownloadAttemptStatus.PAUSED,
+            nextRetryEpochMs = deadline + 30_000, automaticRetryCount = 2,
+            intent = DownloadBatchIntent.PAUSED)
+        // A real typed backoff is WAITING_NETWORK + the original deadline; NEEDS_FOREGROUND is
+        // a host restriction, not an automatic retry slot. Explicit foreground activation must
+        // not silently clear this independent future deadline.
+        val future = fixture.seedAttemptJob(futureSelection, now, "retry-future-download",
+            status = DownloadStatus.WAITING_NETWORK, attemptStatus = DownloadAttemptStatus.FAILED,
+            failure = AppFailure(FailureCode.NETWORK_UNAVAILABLE), nextRetryEpochMs = deadline,
+            automaticRetryCount = 3)
+        val pausedBefore = fixture.job(paused)
+        val futureBefore = fixture.job(future)
+        assertEquals(deadline + 30_000, pausedBefore.nextRetryEpochMs)
+        assertEquals(2, pausedBefore.automaticRetryCount)
+        assertEquals(deadline, futureBefore.nextRetryEpochMs)
+        assertEquals(3, futureBefore.automaticRetryCount)
+        assertEquals(DownloadStatus.WAITING_NETWORK, futureBefore.status)
         fixture.gateway.onDownload = ::writeFakeTransfer
         fixture.platform.ensureCoverage = { throw VeyraException(AppFailure(FailureCode.BACKGROUND_RESTRICTED)) }
         fixture.app.initialize()
@@ -1652,14 +2259,12 @@ class AppContainerIntegrationTest {
         fixture.platform.ensureCoverage = {}
         assertTrue(fixture.app.activateUserDownloads())
         assertNull(fixture.app.downloadRestriction.value)
-        val activated = fixture.store.flush().getOrThrow()
-        assertEquals(paused, activated.downloads[paused.id], "Foreground activation must not reinterpret a user pause")
-        val resumed = activated.downloads.getValue(future.id)
-        assertEquals(DownloadStatus.QUEUED, resumed.status)
-        assertFalse(resumed.userPaused)
-        assertNull(resumed.failure)
-        assertEquals(deadline, resumed.nextRetryEpochMs)
-        assertEquals(3, resumed.automaticRetryCount)
+        val activated = fixture.store.acquisitionViews.first { view ->
+            view.acquisition.physicalDownloads.getValue(future) == futureBefore
+        }.acquisition
+        assertEquals(pausedBefore, activated.physicalDownloads.getValue(paused), "Foreground activation must not reinterpret a user pause")
+        assertEquals(DownloadBatchIntent.PAUSED,
+            activated.claims.values.single { it.physicalJobId == paused }.intent)
         val deferred = fixture.awaitDownloadIdle()
         assertEquals(deadline, deferred.plan.nextNetworkEpochMs)
         assertNull(deferred.plan.nextLocalEpochMs)
@@ -1673,11 +2278,18 @@ class AppContainerIntegrationTest {
         assertFalse(fixture.app.downloads.schedulingPlan().hasDueWork)
         fixture.assertNoDownloadExecution()
         clock.advance(1)
-        fixture.store.state.first { it.downloads[future.id]?.status == DownloadStatus.COMPLETE }
+        fixture.store.acquisitionViews.first { view ->
+            view.acquisition.physicalDownloads.getValue(future).status == DownloadStatus.COMPLETE
+        }
         fixture.awaitDownloadIdle()
-        assertEquals(paused, fixture.store.state.value.downloads[paused.id])
-        assertEquals(listOf(futureItem.title), fixture.gateway.queries.toList())
-        assertEquals(futureItem.id, fixture.gateway.transfers.single().binding.mediaId)
+        val final = fixture.store.acquisitionView().acquisition
+        assertEquals(pausedBefore, final.physicalDownloads.getValue(paused))
+        assertEquals(DownloadStatus.COMPLETE, final.physicalDownloads.getValue(future).status)
+        assertEquals(futureSelection.bindingId.value, fixture.gateway.transfers.single().binding.id)
+        assertEquals(futureItem.title, fixture.gateway.transfers.single().persisted?.queryTitle)
+        assertTrue(fixture.gateway.transfers.single().completed)
+        assertEquals(1, fixture.gateway.typedCompletions.size)
+        assertTrue(fixture.gateway.queries.isEmpty(), "Activated typed execution reuses the accepted receipt, never re-searches")
         assertEquals(2, fixture.platform.ensureCoverageCalls.get())
         assertEquals(1, fixture.platform.coverageAcknowledgements.get())
         assertTrue(fixture.platform.gateCoverageAcknowledgements.all { it == 1 })
@@ -1695,9 +2307,15 @@ class AppContainerIntegrationTest {
         fixture.app.initialize()
         assertNull(fixture.app.downloadRestriction.value, "Accepted coverage and connectivity are different eligibility checks")
         val original = item(SourceProvider.COMMONS, "connectivity-gated-download")
+        fixture.store.upsertCatalog(listOf(original)).getOrThrow()
         fixture.app.onMusicAction(MusicUiAction.Download(original))
-        val id = fixture.app.files.key(original.id)
-        fixture.store.state.first { id in it.downloads }
+        val admitted = fixture.store.acquisitionViews.first { view ->
+            view.acquisition.physicalDownloads.values.any { it.producer.subjectId.value == original.id }
+        }.acquisition
+        val job = admitted.physicalDownloads.values.single()
+        val bindingId = assertNotNull(job.producer.bindingId)
+        val receipt = admitted.receipts.getValue(admitted.bindings.getValue(bindingId).firstReceiptId) as FirstResultReceipt.Observed
+        assertEquals(original.title, receipt.observation.queryTitle)
         for (network in listOf(DownloadNetworkState.UNKNOWN, DownloadNetworkState.DISCONNECTED)) {
             fixture.platform.downloadNetworkState.value = network
             val plan = fixture.app.downloads.schedulingPlan()
@@ -1709,17 +2327,30 @@ class AppContainerIntegrationTest {
             // A real poll interval, plus a fresh authoritative plan/Room read; not just an
             // immediate zero counter. CONNECTED completion below proves the worker was live.
             delay(1_100)
-            val waiting = fixture.store.flush().getOrThrow()
-            assertEquals(DownloadStatus.QUEUED, waiting.downloads.getValue(id).status)
-            assertTrue(waiting.downloadAttempts.isEmpty())
-            assertTrue(waiting.playbackBindings.isEmpty())
-            fixture.assertNoDownloadExecution()
+            val waiting = fixture.store.acquisitionView().acquisition
+            assertEquals(DownloadStatus.QUEUED, waiting.physicalDownloads.getValue(job.id).status)
+            assertTrue(waiting.physicalAttempts.isEmpty())
+            assertTrue(fixture.store.state.value.downloads.isEmpty(), "Typed intent is not a legacy download row")
+            assertTrue(fixture.store.state.value.playbackBindings.isEmpty(),
+                "The typed receipt is not a legacy compatibility binding")
+            assertEquals(1, fixture.gateway.queries.size, "Only the admitted selection queried; no execution search ran")
+            assertTrue(fixture.gateway.transfers.isEmpty())
+            assertEquals(0, fixture.platform.downloadGateCalls.get())
+            assertTrue(fixture.platform.gateCoverageAcknowledgements.isEmpty())
+            assertTrue(fixture.platform.engine.preparations.isEmpty())
+            assertTrue(fixture.gateway.resolutions.isEmpty())
+            fixture.assertNoNetwork()
         }
         fixture.platform.downloadNetworkState.value = DownloadNetworkState.CONNECTED
-        fixture.store.state.first { it.downloads[id]?.status == DownloadStatus.COMPLETE }
+        fixture.store.acquisitionViews.first { view ->
+            view.acquisition.physicalDownloads.getValue(job.id).status == DownloadStatus.COMPLETE
+        }
         fixture.awaitDownloadIdle()
         assertEquals(listOf(original.title), fixture.gateway.queries.toList())
-        assertEquals(original.id, fixture.gateway.transfers.single().binding.mediaId)
+        assertEquals(bindingId.value, fixture.gateway.transfers.single().binding.id)
+        assertEquals(original.title, fixture.gateway.transfers.single().persisted?.queryTitle)
+        assertTrue(fixture.gateway.transfers.single().completed)
+        assertEquals(1, fixture.gateway.typedCompletions.size)
         assertEquals(1, fixture.platform.ensureCoverageCalls.get())
         assertEquals(1, fixture.platform.coverageAcknowledgements.get())
         assertTrue(fixture.platform.gateCoverageAcknowledgements.isNotEmpty())
@@ -1728,30 +2359,44 @@ class AppContainerIntegrationTest {
         fixture.assertNoNetwork()
     }
 
+    /**
+     * The current typed prepared-download contract creates NO DOWNLOAD PlaybackResource; the
+     * live owner handed to execution/cleanup is the native DownloadExecutionLease. The old
+     * resource-lifetime assertions map to that exact dependent owner: the transfer and native
+     * validation succeed and publish first, then the allowance close fails, every later
+     * dependent stage (publication/path/slot/dependent clients) is withheld, and only an explicit
+     * close retry may consume it. The transfer is never replayed.
+     */
     @Test fun handedDownloadResourceFailureRetainsRoomRuntimeClientsAndLifetimeUntilExplicitCloseRetry() = checkCase {
         val fixture = newFixture()
         assertFalse(fixture.app.dependencyReleaseSafeAfterClose, "A never-closed application has no release receipt")
         val allowRelease = AtomicBoolean()
+        val consumed = CompletableDeferred<Unit>()
         val allowanceCloses = AtomicInteger()
-        val resource = Resource {
-            if (!allowRelease.get()) throw IllegalStateException("authored private download owner was not consumed")
-        }
-        fixture.platform.acquireDownload = { DownloadExecutionLease { allowanceCloses.incrementAndGet(); Unit } }
-        fixture.gateway.onResolve = { binding, _, purpose ->
-            assertEquals(ResolvePurpose.DOWNLOAD, purpose)
-            plan(binding).copy(resource = resource)
+        fixture.platform.acquireDownload = {
+            DownloadExecutionLease {
+                allowanceCloses.incrementAndGet()
+                if (!allowRelease.get()) throw IllegalStateException("authored private download owner was not consumed")
+                consumed.complete(Unit)
+            }
         }
         fixture.gateway.onDownload = ::writeFakeTransfer
         val original = item(SourceProvider.COMMONS, "retained-download-resource")
+        fixture.store.upsertCatalog(listOf(original)).getOrThrow()
         try {
             fixture.app.onMusicAction(MusicUiAction.Download(original))
             fixture.app.downloads.lastFailure.first { it == DOWNLOAD_CLEANUP_FAILURE }
-            val complete = fixture.store.state.value.downloads.getValue(fixture.app.files.key(original.id))
-            val asset = assertNotNull(complete.asset)
+            val view = fixture.store.acquisitionView().acquisition
+            val job = view.physicalDownloads.values.single()
+            val asset = view.materializations.getValue(assertNotNull(job.assetId))
+            assertEquals(DownloadStatus.COMPLETE, job.status)
             assertContentEquals(NON_AUDIO, Files.readAllBytes(Path.of(asset.uri)))
-            assertEquals(1, resource.closeCalls.get())
-            assertFalse(resource.closed.isCompleted)
-            assertEquals(0, allowanceCloses.get(), "Allowance is dependent on successful resource consumption")
+            assertEquals(1, allowanceCloses.get())
+            assertEquals(1, fixture.gateway.transfers.size, "A cleanup retry may not replay the transfer")
+            assertTrue(fixture.gateway.transfers.single().completed, "The consumed transfer itself must have returned")
+            assertEquals(1, fixture.gateway.typedCompletions.size)
+            assertEquals(1, fixture.platform.localValidations.get(), "Successful native validation is not repeated")
+            assertFalse(consumed.isCompleted)
             assertEquals(DOWNLOAD_CLEANUP_FAILURE,
                 assertFailsWith<VeyraException> { fixture.app.downloads.drainForBackground() }.failure)
 
@@ -1761,52 +2406,52 @@ class AppContainerIntegrationTest {
             assertNull(first.cause)
             assertTrue(first.suppressedExceptions.isEmpty())
             assertFalse(first.toString().contains("private download owner"))
-            assertEquals(2, resource.closeCalls.get(), "This explicit close retries the already failed owner once")
-            assertEquals(0, allowanceCloses.get())
+            assertEquals(2, allowanceCloses.get(), "This explicit close retries the already failed owner once")
             fixture.assertDownloadCleanupRetainsDependencies()
-            assertEquals(asset, fixture.store.state.value.downloads.getValue(complete.id).asset)
+            assertEquals(asset, fixture.store.acquisitionView().acquisition.materializations[asset.id])
             assertEquals(listOf(original.title), fixture.gateway.queries.toList())
-            assertEquals(1, fixture.gateway.transfers.size, "Cleanup retries may not replay the transfer")
+            assertEquals(1, fixture.gateway.typedTransfers.size, "Cleanup retries may not replay the transfer")
 
             allowRelease.set(true)
             val afterDrain = assertFailsWith<VeyraException> { fixture.app.close() }
             assertEquals(first.failure, afterDrain.failure, "Later consumption cannot certify the earlier failed close")
-            resource.closed.await()
-            assertEquals(3, resource.closeCalls.get())
-            assertEquals(1, allowanceCloses.get())
+            consumed.await()
+            assertEquals(3, allowanceCloses.get())
+            assertEquals(1, fixture.gateway.typedTransfers.size)
             fixture.assertDownloadCleanupDependenciesClosedOnce()
             assertEquals(first.failure, assertFailsWith<VeyraException> { fixture.app.close() }.failure)
-            assertEquals(3, resource.closeCalls.get())
-            assertEquals(1, allowanceCloses.get())
+            assertEquals(3, allowanceCloses.get())
+            assertEquals(1, fixture.platform.localValidations.get())
             fixture.assertDownloadCleanupDependenciesClosedOnce()
             fixture.assertNoNetwork()
         } finally { allowRelease.set(true) }
     }
 
+    /** Maps the old successful resource stage to the native validation/transfer that must not repeat. */
     @Test fun throwingDownloadAllowanceRetainsDependenciesWithoutReclosingTheAlreadyConsumedResource() = checkCase {
         val fixture = newFixture()
         assertFalse(fixture.app.dependencyReleaseSafeAfterClose, "A never-closed application has no release receipt")
         val allowRelease = AtomicBoolean()
         val allowanceCloses = AtomicInteger()
-        val resource = Resource()
+        val consumed = CompletableDeferred<Unit>()
         fixture.platform.acquireDownload = {
             DownloadExecutionLease {
                 allowanceCloses.incrementAndGet()
                 if (!allowRelease.get()) throw AssertionError("authored private native allowance failure")
+                consumed.complete(Unit)
             }
-        }
-        fixture.gateway.onResolve = { binding, _, purpose ->
-            assertEquals(ResolvePurpose.DOWNLOAD, purpose)
-            plan(binding).copy(resource = resource)
         }
         fixture.gateway.onDownload = ::writeFakeTransfer
         val original = item(SourceProvider.COMMONS, "retained-download-allowance")
+        fixture.store.upsertCatalog(listOf(original)).getOrThrow()
         try {
             fixture.app.onMusicAction(MusicUiAction.Download(original))
             fixture.app.downloads.lastFailure.first { it == DOWNLOAD_CLEANUP_FAILURE }
-            resource.closed.await()
-            assertEquals(1, resource.closeCalls.get())
             assertEquals(1, allowanceCloses.get())
+            assertEquals(1, fixture.platform.localValidations.get(), "The successful earlier native stage must never be repeated")
+            assertEquals(1, fixture.gateway.transfers.size)
+            assertTrue(fixture.gateway.transfers.single().completed)
+            assertEquals(1, fixture.gateway.typedCompletions.size)
             val first = assertFailsWith<VeyraException> { fixture.app.close() }
             fixture.expectedCloseFailure = first.failure
             assertEquals(DOWNLOAD_CLEANUP_FAILURE, first.failure)
@@ -1814,19 +2459,21 @@ class AppContainerIntegrationTest {
             assertTrue(first.suppressedExceptions.isEmpty())
             assertFalse(first.toString().contains("private native allowance"))
             assertEquals(2, allowanceCloses.get())
-            assertEquals(1, resource.closeCalls.get(), "The successful earlier stage must never be repeated")
+            assertEquals(1, fixture.platform.localValidations.get())
             fixture.assertDownloadCleanupRetainsDependencies()
 
             allowRelease.set(true)
             assertEquals(first.failure, assertFailsWith<VeyraException> { fixture.app.close() }.failure)
+            consumed.await()
             assertEquals(3, allowanceCloses.get())
-            assertEquals(1, resource.closeCalls.get())
+            assertEquals(1, fixture.platform.localValidations.get(), "The successful earlier stage must never be repeated")
             fixture.assertDownloadCleanupDependenciesClosedOnce()
             assertEquals(first.failure, assertFailsWith<VeyraException> { fixture.app.close() }.failure)
             assertEquals(3, allowanceCloses.get())
-            assertEquals(1, resource.closeCalls.get())
+            assertEquals(1, fixture.platform.localValidations.get())
             assertEquals(listOf(original.title), fixture.gateway.queries.toList())
             assertEquals(1, fixture.gateway.transfers.size)
+            assertEquals(1, fixture.gateway.typedTransfers.size)
             fixture.assertDownloadCleanupDependenciesClosedOnce()
             fixture.assertNoNetwork()
         } finally { allowRelease.set(true) }
@@ -1840,28 +2487,30 @@ class AppContainerIntegrationTest {
         val closeResult = CompletableDeferred<Throwable?>()
         val cleanupActive = ConcurrentLinkedQueue<Boolean>()
         val allowanceCloses = AtomicInteger()
-        val resource = Resource { attempt ->
-            cleanupActive += currentCoroutineContext().isActive
-            if (attempt == 1) throw CancellationException("authored close returned cancellation without consuming owner")
-            retryEntered.complete(Unit)
-            permitConsumption.await()
-            assertTrue(currentCoroutineContext().isActive)
-            assertFalse(fixture.app.dependencyReleaseSafeAfterClose, "A close still consuming its owner cannot publish an ACK")
-            assertIs<StoreStatus.Ready>(fixture.store.status.value)
-            assertEquals(0, fixture.platform.runtimeCloseCalls.get())
-            assertEquals(0, fixture.platform.youtubeCloseCalls.get())
-            assertEquals(0, fixture.http.closeCalls.get())
-        }
-        fixture.platform.acquireDownload = { DownloadExecutionLease { allowanceCloses.incrementAndGet(); Unit } }
-        fixture.gateway.onResolve = { binding, _, purpose ->
-            assertEquals(ResolvePurpose.DOWNLOAD, purpose)
-            plan(binding).copy(resource = resource)
+        val consumed = CompletableDeferred<Unit>()
+        fixture.platform.acquireDownload = {
+            DownloadExecutionLease {
+                cleanupActive += currentCoroutineContext().isActive
+                val attempt = allowanceCloses.incrementAndGet()
+                if (attempt == 1) throw CancellationException("authored close returned cancellation without consuming owner")
+                retryEntered.complete(Unit)
+                permitConsumption.await()
+                assertTrue(currentCoroutineContext().isActive)
+                assertFalse(fixture.app.dependencyReleaseSafeAfterClose, "A close still consuming its owner cannot publish an ACK")
+                assertIs<StoreStatus.Ready>(fixture.store.status.value)
+                assertEquals(0, fixture.platform.runtimeCloseCalls.get())
+                assertEquals(0, fixture.platform.youtubeCloseCalls.get())
+                assertEquals(0, fixture.http.closeCalls.get())
+                consumed.complete(Unit)
+            }
         }
         fixture.gateway.onDownload = ::writeFakeTransfer
         val original = item(SourceProvider.COMMONS, "cancelled-caller-download-cleanup")
+        fixture.store.upsertCatalog(listOf(original)).getOrThrow()
         try {
             fixture.app.onMusicAction(MusicUiAction.Download(original))
             fixture.app.downloads.lastFailure.first { it == DOWNLOAD_CLEANUP_FAILURE }
+            assertEquals(1, allowanceCloses.get())
             supervisorScope {
                 val closing = launch { closeResult.complete(runCatching { fixture.app.close() }.exceptionOrNull()) }
                 try {
@@ -1870,8 +2519,9 @@ class AppContainerIntegrationTest {
                     assertTrue(closing.isCancelled)
                     assertFalse(closing.isCompleted, "Cancellation cannot acknowledge a still-waiting native owner")
                     assertFalse(closeResult.isCompleted)
-                    assertFalse(resource.closed.isCompleted)
-                    assertEquals(0, allowanceCloses.get())
+                    assertFalse(consumed.isCompleted)
+                    assertEquals(2, allowanceCloses.get())
+                    assertEquals(1, fixture.platform.localValidations.get())
                     fixture.assertDownloadCleanupRetainsDependencies(expectedEngineCloseCalls = 0)
                 } finally { permitConsumption.complete(Unit) }
                 closing.join()
@@ -1882,14 +2532,15 @@ class AppContainerIntegrationTest {
             assertNull(first.cause)
             assertTrue(first.suppressedExceptions.isEmpty())
             assertFalse(first.toString().contains("authored close"))
-            resource.closed.await()
+            consumed.await()
             assertEquals(listOf(true, true), cleanupActive.toList())
-            assertEquals(2, resource.closeCalls.get())
-            assertEquals(1, allowanceCloses.get())
+            assertEquals(2, allowanceCloses.get())
+            assertEquals(1, fixture.platform.localValidations.get(), "Consumed earlier stages are never repeated")
+            assertTrue(fixture.gateway.transfers.single().completed)
+            assertEquals(1, fixture.gateway.typedCompletions.size)
             fixture.assertDownloadCleanupDependenciesClosedOnce()
             assertEquals(first.failure, assertFailsWith<VeyraException> { fixture.app.close() }.failure)
-            assertEquals(2, resource.closeCalls.get())
-            assertEquals(1, allowanceCloses.get())
+            assertEquals(2, allowanceCloses.get())
             assertEquals(1, fixture.gateway.transfers.size)
             fixture.assertDownloadCleanupDependenciesClosedOnce()
             fixture.assertNoNetwork()
@@ -1972,6 +2623,7 @@ class AppContainerIntegrationTest {
         assertEquals(single.receiptId, accepted.request.let { state.receipts[single.receiptId]?.id })
         assertEquals(listOf(track.title), fixture.gateway.queries.toList(), "Exactly one unchanged complete-title first-result query")
         assertEquals(1, fixture.gateway.typedTransfers.size, "The same accepted recording executes through the existing kmpYT plan/transfer")
+        assertEquals(1, fixture.gateway.typedCompletions.size)
         val asset = state.materializations.getValue(assertNotNull(physical.assetId))
         assertTrue(state.assetUses.any { it.requestedBindingId == single.bindingId && it.materializationAssetId == asset.id })
         assertTrue(Files.exists(Path.of(asset.uri)))
@@ -2028,6 +2680,7 @@ class AppContainerIntegrationTest {
             val job = state.physicalDownloads.values.single { it.status == DownloadStatus.COMPLETE }
             assertEquals(single.bindingId, job.producer.bindingId)
             assertEquals(1, fixture.gateway.typedTransfers.size)
+            assertEquals(1, fixture.gateway.typedCompletions.size)
             assertEquals(changed.title, fixture.store.state.value.media[displayed.id]?.title,
                 "The catalogue may move on; the accepted immutable request does not")
         } finally { release.complete(Unit) }
@@ -2085,6 +2738,9 @@ class AppContainerIntegrationTest {
         fun bindingFor(item: MediaItem) = PlaybackBinding(
             "authored-binding-" + item.id, item.id, item.title, FirstResultKind.VIDEO, FIRST,
             "Authored historical first recording", "https://www.youtube.com/watch?v=$FIRST", selectedVideoId = FIRST)
+
+        fun sha256Hex(bytes: ByteArray): String =
+            MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 
         suspend fun writeFakeTransfer(transfer: Transfer): YouTubeTransferResult {
             Files.write(Path.of(transfer.destination), NON_AUDIO)
