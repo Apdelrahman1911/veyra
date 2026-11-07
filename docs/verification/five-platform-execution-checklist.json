@@ -12,17 +12,41 @@
     "kmpytPin": "c0a08090fe7dbd76e20216559b8184ad2cccde63",
     "currentRoomSchemaVersion": 2,
     "finalTaskACommit": null,
-    "finalTaskASchemaVersion": null
+    "finalTaskASchemaVersion": null,
+    "correctionBaseCommit": "5328be09b6e9abcba4ee4a9793b934116e4e86f5",
+    "correctionBaseDescription": "Reviewed merge of Room-foundations PR #2; retains Room schema 2 and is not the final Task A gate.",
+    "originalPrHead": "7d90520366f8a8fd4d8c6dec9d825f592dcafc14",
+    "integrationMergeCommit": "3bc09ca3665c656314b295a7d24fcf7eb7b70d13",
+    "integrationMergeParents": [
+      "5328be09b6e9abcba4ee4a9793b934116e4e86f5",
+      "7d90520366f8a8fd4d8c6dec9d825f592dcafc14"
+    ],
+    "originalDocumentHashes": {
+      "docs/verification/five-platform-preparation.md": "867d2eaa607431feb0ae08a4e523cb68dcc172007a825d2cab7897450c7e78a4",
+      "docs/verification/five-platform-execution-checklist.json": "06d80bf59b728339f5eecc24df81591cef26d38c2e83891f1458cbffd24383c6"
+    },
+    "correctionWorktree": "/root/.t3/worktrees/Veyra/t3-8cb909e8",
+    "correctionBranch": "t3/correct-ios-preparation-docs",
+    "finalPrBranch": "t3/five-platform-preparation-1"
   },
   "preparationExecution": {
     "model": "opencode-go/deepseek-v4.1-flash",
     "variantRequested": "max",
     "attestation": "No independent runtime/back-end or variant attestation exposed by the harness; accepted launch configuration only.",
     "subagentsCreated": 0,
-    "finalTaskACommitSupplied": false
+    "finalTaskACommitSupplied": false,
+    "correctionRun": {
+      "model": "opencode-go/deepseek-v4.1-flash",
+      "variantRequested": "max",
+      "attestation": "No independent runtime/back-end or variant attestation exposed by the harness; accepted launch configuration only.",
+      "subagentsCreated": 0,
+      "documentationOnly": true,
+      "buildsOrNativeOperations": 0,
+      "workflowDispatches": 0
+    }
   },
   "readyToExecute": false,
-  "dependencyGate": "Awaiting the lead-provided, reviewed, merged and validated Task A integration SHA with accepted schema-3/download-recovery evidence. First Room-foundations PR is not sufficient. ec97925 is not a final revision.",
+  "dependencyGate": "Awaiting the lead-provided, reviewed, merged and validated Task A integration SHA with accepted schema-3/download-recovery evidence. First Room-foundations PR (5328be09, schema 2) is not sufficient. ec97925 is not a final revision.",
   "statusVocabulary": {
     "inspected": "Source/configuration/documentation read; no execution claimed.",
     "configured": "Entrypoint/runner/task is named but no execution is proven.",
@@ -73,6 +97,10 @@
     "artifactPath": "path",
     "artifactBytes": "integer",
     "artifactSha256": "64 lowercase hex",
+    "retentionRoute": "approved durable route identifier; empty until B-RET-01/B-RET-02",
+    "retentionLocation": "actual durable location of the retained package/log/XML/metadata set",
+    "retainedAtUtc": "ISO-8601 UTC when the actual final set was retained",
+    "retentionManifestSha256": "SHA-256 of the retained manifest, verified by independent readback",
     "inventoryPaths": "array",
     "generatedLegalHashes": "object",
     "correspondingSourcePaths": "array",
@@ -119,15 +147,50 @@
       "os": "iOS",
       "architectures": [
         "arm64",
-        "x86_64"
+        "x64"
       ],
       "runnerLabels": [
         "macos-15",
         "macos-15-intel"
       ],
       "artifactContracts": [
-        ".work/xcode/DerivedData-simulator-<arch>/Build/Products/<Config>-iphonesimulator/Veyra.app"
-      ]
+        ".work/xcode/DerivedData-simulator-arm64/Build/Products/<Config>-iphonesimulator/Veyra.app",
+        ".work/xcode/DerivedData-simulator-x86_64/Build/Products/<Config>-iphonesimulator/Veyra.app"
+      ],
+      "architectureDetails": [
+        {
+          "runnerLabel": "macos-15",
+          "hostArchitecture": "arm64",
+          "unameArch": "arm64",
+          "kotlinTarget": "iosSimulatorArm64",
+          "configuredCompileTask": ":shared:compileTestKotlinIosSimulatorArm64",
+          "candidateTestTasks": [
+            ":shared:iosSimulatorArm64Test",
+            ":composeApp:iosSimulatorArm64Test"
+          ],
+          "inventoryTarget": "ios-simulator-arm64",
+          "inventoryFile": ".work/verification/runtime-inventory/ios-simulator-arm64.json",
+          "derivedDataSuffix": "arm64",
+          "receipt": ".work/verification/ios-simulator-arm64.json"
+        },
+        {
+          "runnerLabel": "macos-15-intel",
+          "hostArchitecture": "x64",
+          "unameArch": "x86_64",
+          "kotlinTarget": "iosX64",
+          "configuredCompileTask": ":shared:compileTestKotlinIosX64",
+          "candidateTestTasks": [
+            ":shared:iosX64Test",
+            ":composeApp:iosX64Test"
+          ],
+          "inventoryTarget": "ios-simulator-x64",
+          "inventoryFile": ".work/verification/runtime-inventory/ios-simulator-x64.json",
+          "derivedDataSuffix": "x86_64",
+          "receipt": ".work/verification/ios-simulator-x86_64.json",
+          "note": "Canonical inventory label is x64; build-ios.sh uses uname -m and therefore x86_64 in DerivedData/receipt names."
+        }
+      ],
+      "note": "Architecture-specific rows: arm64 on macos-15, x64 on macos-15-intel. Canonical inventory labels use x64 while build-ios.sh paths use x86_64; map names explicitly."
     },
     {
       "id": "ios-device",
@@ -137,11 +200,26 @@
         "arm64"
       ],
       "runnerLabels": [
-        "macos-15"
+        "macos-15",
+        "macos-15-intel"
       ],
       "artifactContracts": [
         ".work/xcode/DerivedData-device-arm64/Build/Products/<Config>-iphoneos/Veyra.app"
-      ]
+      ],
+      "architectureDetails": [
+        {
+          "runnerLabel": "macos-15",
+          "hostArchitecture": "arm64",
+          "unameArch": "arm64",
+          "kotlinTarget": "iosArm64",
+          "inventoryTarget": "ios-arm64",
+          "inventoryFile": ".work/verification/runtime-inventory/ios-arm64.json",
+          "derivedDataSuffix": "device-arm64",
+          "receipt": ".work/verification/ios-device-arm64.json",
+          "note": "ios-arm64 inventory requires macOS but permits either arm64 or x64 host architecture; the canonical inspected device build is from macos-15 arm64."
+        }
+      ],
+      "note": "Device target is always arm64; inventory host constraint is macOS (either host architecture). Unsigned device .app is not an installable IPA."
     },
     {
       "id": "windows-x64",
@@ -205,9 +283,9 @@
     }
   ],
   "summary": {
-    "totalTasks": 89,
-    "blocked": 21,
-    "notRun": 63,
+    "totalTasks": 100,
+    "blocked": 28,
+    "notRun": 67,
     "inspected": 1,
     "executedPassed": 0,
     "executedFailed": 0,
@@ -218,7 +296,7 @@
     "Apple signing team/cert/profile for installable iOS IPA/TestFlight/App Store build, or explicit simulator-only/unsigned limitation.",
     "Android production signing key/alias/passwords for store-ready APK/AAB, or explicit debug-only/unsigned limitation.",
     "Windows Authenticode and macOS Developer ID/notarization identities, or explicit unsigned/SmartScreen/Gatekeeper limitation.",
-    "Authorization to create a tag/public GitHub Release and a trusted contents:write release job, or an approved retrieval alternative.",
+    "Approve a free durable retention route (design/availability before remote builds, implementation/canary separately), and authorize publication of the exact retained artifact set via a trusted contents:write release job/public Release or an approved zero-purchase alternative; no Actions artifact storage assumption.",
     "Authorization for an external clean installation environment (Windows VM, macOS machine, Ubuntu/device), or acceptance of extraction/launch smoke only.",
     "Node/Chromium helper notice/source strategy and libmpv/FFmpeg/JDK corresponding-source delivery.",
     "Separate hardware/source work for physical-audio and live central-source release holds."
@@ -274,7 +352,7 @@
     {
       "id": "G-10",
       "priority": "P0",
-      "summary": "Add authorized public Release retention/publication without Actions artifact storage",
+      "summary": "Establish and implement an approved free durable retention route before remote ephemeral builds, then retain the actual final artifact/log/XML/manifest set and verify readback; publication remains a separate authorization.",
       "files": [
         ".github/workflows/verify.yml"
       ]
@@ -323,7 +401,8 @@
       "artifacts": [],
       "blockers": [],
       "acceptance": [
-        "Matrix rows, runner labels, tool prerequisites, artifact contracts and blockers are source-verified and recorded."
+        "Matrix rows, runner labels, tool prerequisites, artifact contracts and blockers are source-verified and recorded; iOS arm64/x64 simulator rows map host, Kotlin target, inventory and path suffix explicitly.",
+        "Intel runner availability and x64 simulator behavior remain unverified; no successful run is inferred."
       ],
       "evidenceRunIds": [],
       "runbookSection": "4",
@@ -410,7 +489,7 @@
     {
       "id": "B-GATE-04",
       "platform": "all",
-      "title": "Preflight host, toolchain and runner-image availability read-only",
+      "title": "Preflight each intended host read-only with OS-specific probes",
       "category": "precondition",
       "inScope": true,
       "status": "not-run",
@@ -420,21 +499,34 @@
       ],
       "existingEntrypoint": true,
       "commands": [
+        "# Linux x64 only:",
         "uname -s; uname -m; nproc",
         "df -B1 .",
         "awk '/MemTotal|MemAvailable|SwapTotal/{print}' /proc/meminfo",
         "java -version",
-        "command -v cmake make cc bash dpkg-deb Xvfb xauth unshare gh strace"
+        "command -v cmake make cc bash dpkg-deb Xvfb xauth unshare gh strace",
+        "# macOS (matching arm64 or x64 host):",
+        "uname -s; uname -m",
+        "java -version",
+        "xcodebuild -version",
+        "xcrun --sdk iphonesimulator --show-sdk-version",
+        "command -v cmake make clang bash hdiutil codesign lipo otool plutil"
       ],
-      "candidateCommands": [],
+      "candidateCommands": [
+        "# Windows x64 candidate probes; not executed in this Linux correction:",
+        "Get-Command cl, lib, dumpbin, cmake, make, bash, java -ErrorAction SilentlyContinue",
+        "& \"C:\\msys64\\usr\\bin\\make.exe\" --version",
+        "Get-Command wix -ErrorAction SilentlyContinue"
+      ],
       "artifacts": [],
       "blockers": [],
       "acceptance": [
-        "Every required tool is present or the task is blocked; no installation/global configuration."
+        "Linux-only probes are used only on Linux; macOS/Windows probes are selected for their host. Every required tool is present or the task is blocked; no installation/global configuration.",
+        "The memory command reads /proc/meminfo and does not wait on stdin. Unverified Windows alternatives remain candidates."
       ],
       "evidenceRunIds": [],
       "runbookSection": "6.2",
-      "notes": ""
+      "notes": "Linux /proc/meminfo, GNU df/nproc, /dev/kvm and Android SDK checks are not portable. Windows commands are candidates pending a real runner preflight."
     },
     {
       "id": "B-GATE-05",
@@ -496,7 +588,8 @@
       "status": "not-run",
       "verificationLevel": "not-run",
       "dependsOn": [
-        "B-GATE-06"
+        "B-GATE-06",
+        "B-GATE-09"
       ],
       "existingEntrypoint": true,
       "commands": [
@@ -563,6 +656,110 @@
       "notes": ""
     },
     {
+      "id": "B-RET-01",
+      "platform": "all",
+      "title": "Establish an approved free durable retention route before remote ephemeral production builds",
+      "category": "gate",
+      "inScope": true,
+      "status": "blocked",
+      "verificationLevel": "inspected",
+      "dependsOn": [],
+      "existingEntrypoint": false,
+      "commands": [],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [
+        "No verified approved retention route: verify.yml is workflow_dispatch-only, permissions contents:read, and has no upload-artifact/cache/release step.",
+        "No owner authorization for a trusted contents:write release job or an approved free alternative; Actions artifact storage is not assumed free.",
+        "The route must preserve package bytes, logs/XML, source/pin/version/host metadata and SHA-256 manifests from each runner."
+      ],
+      "acceptance": [
+        "A free, policy-compliant, owner-approved design is recorded with storage location, asset/size limits, credentials/permissions, retention period, retrieval and independent hash readback.",
+        "The design is approved before any remote ephemeral production build; implementation, actual retention and publication remain separate tasks B-RET-02/B-RET-03/B-DIST-*.",
+        "Local-only authorized work using repository .work is a distinct lifetime; it cannot satisfy remote retention or publication."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "6.3A / 10",
+      "notes": "Planning/availability gate only; no workflow/retention implementation in this documentation PR. It must not depend on final package/legal/native outcomes."
+    },
+    {
+      "id": "B-RET-02",
+      "platform": "all",
+      "title": "Implement the approved retention route and prove a non-production canary",
+      "category": "distribution",
+      "inScope": true,
+      "status": "blocked",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-RET-01"
+      ],
+      "existingEntrypoint": false,
+      "commands": [],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [
+        "B-RET-01 design/approval is blocked.",
+        "Workflow/retention implementation is outside this documentation-only PR and requires separate review/authorization.",
+        "No canary has been executed or independently read back."
+      ],
+      "acceptance": [
+        "Separately reviewed implementation only: a non-production canary (small artifact + log/XML + metadata) is retained, independently downloaded and SHA-256 matched; retention/deletion behavior recorded.",
+        "No final package is used as the canary; no paid storage, secrets, tag or publication."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "6.3A / 10",
+      "notes": "Implementation and canary proof are separate from design and from actual final-artifact retention."
+    },
+    {
+      "id": "B-RET-03",
+      "platform": "all",
+      "title": "Retain the actual final package/log/XML/metadata set from each runner and verify readback",
+      "category": "distribution",
+      "inScope": true,
+      "status": "blocked",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-RET-02",
+        "B-LIN-07",
+        "B-AND-06",
+        "B-WIN-08",
+        "B-MACARM-08",
+        "B-MACX64-08",
+        "B-IOS-07",
+        "B-IOS-07A",
+        "B-IOS-07X",
+        "B-REG-06",
+        "B-LEGAL-02",
+        "B-LEGAL-01"
+      ],
+      "existingEntrypoint": false,
+      "commands": [],
+      "candidateCommands": [],
+      "artifacts": [
+        {
+          "pathContract": ".work/verification/task-b/<run-id>/retention/retained-manifest.json",
+          "kind": "retention-manifest",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        }
+      ],
+      "blockers": [
+        "B-RET-01/B-RET-02 are blocked; no approved route exists.",
+        "Final package, regression and legal asset evidence is not yet produced.",
+        "A runner path printed in a log is not durable retention."
+      ],
+      "acceptance": [
+        "For each intended final artifact set, preserve the exact package, logs/XML, source/pin/version/host metadata and SHA-256 manifest at the approved durable location.",
+        "Independently download and hash-match the actual retained bytes; record retention timestamps/locations. Source/notices asset set is included where applicable.",
+        "Actual retention is not inferred from an intended upload, workflow path, or local .work directory."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "6.9 / 10",
+      "notes": "Actual retention follows final package inspection and integrated regression; it does not depend on publication."
+    },
+    {
       "id": "B-REG-01",
       "platform": "all",
       "title": "Execute integrated shared JVM tests from the final SHA",
@@ -622,7 +819,8 @@
       "status": "not-run",
       "verificationLevel": "not-run",
       "dependsOn": [
-        "B-GATE-07"
+        "B-GATE-07",
+        "B-RET-01"
       ],
       "existingEntrypoint": true,
       "commands": [
@@ -641,27 +839,32 @@
     {
       "id": "B-REG-04",
       "platform": "ios-simulator",
-      "title": "Compile iOS Kotlin test sources and debug framework on macOS",
+      "title": "Record arm64 and x64 iOS compile regression evidence on the matching macOS hosts",
       "category": "test",
       "inScope": true,
       "status": "not-run",
       "verificationLevel": "compiled",
       "dependsOn": [
-        "B-GATE-07"
+        "B-IOS-02",
+        "B-IOS-02X"
       ],
       "existingEntrypoint": true,
       "commands": [
+        "# macos-15 arm64:",
+        "DEVELOPER_DIR=/Applications/Xcode_26.0.1.app/Contents/Developer scripts/ci.sh ios",
+        "# macos-15-intel x64:",
         "DEVELOPER_DIR=/Applications/Xcode_26.0.1.app/Contents/Developer scripts/ci.sh ios"
       ],
       "candidateCommands": [],
       "artifacts": [],
       "blockers": [],
       "acceptance": [
-        "Compile/link exits 0; test execution is a separate task; no simulator/device claim."
+        "Both host compile results are recorded with exact receipts/logs: IosSimulatorArm64 on macos-15 and IosX64 on macos-15-intel.",
+        "Compile/link exits 0 on the matching host; test execution is a separate blocked task; no simulator/device claim and no x64 inference from arm64."
       ],
       "evidenceRunIds": [],
       "runbookSection": "7.2",
-      "notes": ""
+      "notes": "Rollup of the two architecture-specific compile rows; it does not replace B-IOS-03/B-IOS-03X execution."
     },
     {
       "id": "B-REG-05",
@@ -693,18 +896,31 @@
     {
       "id": "B-REG-06",
       "platform": "all",
-      "title": "Re-run integrated regression against the final packaged SHA",
+      "title": "Integrated regression and platform-evidence gate for the final packaged SHA",
       "category": "test",
       "inScope": true,
-      "status": "not-run",
+      "status": "blocked",
       "verificationLevel": "not-run",
       "dependsOn": [
+        "B-REG-01",
+        "B-REG-02",
+        "B-REG-03",
+        "B-REG-04",
+        "B-REG-05",
+        "B-WIN-02",
+        "B-MACARM-02",
+        "B-MACX64-02",
+        "B-IOS-03",
+        "B-IOS-03X",
+        "B-AND-07",
         "B-LIN-07",
         "B-AND-06",
         "B-WIN-08",
         "B-MACARM-08",
         "B-MACX64-08",
-        "B-IOS-07"
+        "B-IOS-07",
+        "B-IOS-07A",
+        "B-IOS-07X"
       ],
       "existingEntrypoint": true,
       "commands": [
@@ -713,13 +929,18 @@
       ],
       "candidateCommands": [],
       "artifacts": [],
-      "blockers": [],
+      "blockers": [
+        "Android instrumentation B-AND-07 is blocked.",
+        "iOS arm64/x64 native test execution B-IOS-03/B-IOS-03X is blocked; compile-only is not execution.",
+        "Final package inspections must exist for the same SHA/pin/version."
+      ],
       "acceptance": [
-        "Tests executed from the same SHA/pin as the final packages; nonzero executed tests; zero failures/errors; exact XML/log hashes."
+        "All required shared/platform regression results and package inspections are bound to the same final SHA/pin/version; nonzero executed tests where required; zero failures/errors.",
+        "Any affected task is re-run after a source/tooling/legal change; exact XML/log hashes recorded. This gate does not erase a blocked native-test row."
       ],
       "evidenceRunIds": [],
       "runbookSection": "6.8",
-      "notes": "Any source fix creates a new SHA and invalidates affected inventories/notices/packages."
+      "notes": "Any source fix creates a new SHA and invalidates affected inventories/notices/packages. Publication requires this gate and B-REV-01."
     },
     {
       "id": "B-UX-01",
@@ -807,20 +1028,24 @@
       "status": "blocked",
       "verificationLevel": "configured",
       "dependsOn": [
-        "B-IOS-08"
+        "B-IOS-08",
+        "B-IOS-08X"
       ],
       "existingEntrypoint": true,
       "commands": [],
       "candidateCommands": [
-        "xcrun simctl launch <udid> dev.veyra.app",
-        "xcrun simctl io <udid> screenshot <owned>.png"
+        "xcrun simctl launch <arm64-udid> dev.veyra.app",
+        "xcrun simctl io <arm64-udid> screenshot <owned>.png",
+        "xcrun simctl launch <x64-udid> dev.veyra.app",
+        "xcrun simctl io <x64-udid> screenshot <owned>.png"
       ],
       "artifacts": [],
       "blockers": [
-        "No simulator smoke script/execution."
+        "No reviewed simulator smoke script/execution.",
+        "Both arm64 and x64 simulator rows are blocked; Intel runtime availability unverified."
       ],
       "acceptance": [
-        "Actual en/ar screenshots/behavior on the stated simulator."
+        "Actual en/ar screenshots/behavior on each stated simulator architecture; no device/emulator substitution."
       ],
       "evidenceRunIds": [],
       "runbookSection": "7.6",
@@ -864,7 +1089,8 @@
       "verificationLevel": "not-run",
       "dependsOn": [
         "B-LIN-01",
-        "B-GATE-07"
+        "B-GATE-07",
+        "B-RET-01"
       ],
       "existingEntrypoint": true,
       "commands": [
@@ -1194,7 +1420,8 @@
       "status": "not-run",
       "verificationLevel": "not-run",
       "dependsOn": [
-        "B-GATE-07"
+        "B-GATE-07",
+        "B-RET-01"
       ],
       "existingEntrypoint": true,
       "commands": [
@@ -1473,7 +1700,7 @@
     {
       "id": "B-IOS-01",
       "platform": "ios-device",
-      "title": "Preflight macOS/Xcode 26.0.1 and native toolchain",
+      "title": "Preflight macOS/Xcode 26.0.1 and native toolchain on both simulator hosts",
       "category": "precondition",
       "inScope": true,
       "status": "not-run",
@@ -1483,6 +1710,7 @@
       ],
       "existingEntrypoint": true,
       "commands": [
+        "uname -s; uname -m",
         "test -d /Applications/Xcode_26.0.1.app/Contents/Developer",
         "xcodebuild -version",
         "xcrun --sdk iphonesimulator --show-sdk-version"
@@ -1491,35 +1719,53 @@
       "artifacts": [],
       "blockers": [],
       "acceptance": [
-        "Pinned Xcode and tools present; no implicit Xcode switch."
+        "Pinned Xcode and tools present on macos-15 arm64 and macos-15-intel x64, or the affected host is explicitly blocked; no implicit Xcode switch.",
+        "Intel runner availability, Xcode tool presence and x64 simulator runtime remain unverified until an actual host run."
       ],
       "evidenceRunIds": [],
       "runbookSection": "7.2",
-      "notes": ""
+      "notes": "Run once per host. Preflight is read-only and does not execute tests or launch a simulator."
     },
     {
       "id": "B-IOS-02",
       "platform": "ios-simulator",
-      "title": "Compile simulator/device host and Kotlin test sources",
+      "title": "Compile arm64 simulator Kotlin test sources and full Swift host on macos-15",
       "category": "build",
       "inScope": true,
       "status": "not-run",
       "verificationLevel": "compiled",
       "dependsOn": [
         "B-IOS-01",
-        "B-GATE-07"
+        "B-GATE-07",
+        "B-RET-01"
       ],
+      "host": {
+        "runnerLabel": "macos-15",
+        "os": "macOS",
+        "architecture": "arm64",
+        "unameArch": "arm64",
+        "canonicalArchitecture": "arm64",
+        "kotlinTarget": "iosSimulatorArm64"
+      },
       "existingEntrypoint": true,
       "commands": [
-        "scripts/ci.sh ios",
+        "DEVELOPER_DIR=/Applications/Xcode_26.0.1.app/Contents/Developer scripts/ci.sh ios",
         "VEYRA_IOS_CONFIGURATION=Release scripts/build-ios.sh simulator",
         "VEYRA_IOS_CONFIGURATION=Release scripts/build-ios.sh device"
       ],
       "candidateCommands": [],
       "artifacts": [
         {
-          "pathContract": ".work/xcode/DerivedData-simulator-<arch>/Build/Products/<Config>-iphonesimulator/Veyra.app",
+          "pathContract": ".work/xcode/DerivedData-simulator-arm64/Build/Products/<Config>-iphonesimulator/Veyra.app",
           "kind": "ios-simulator-app",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        },
+        {
+          "pathContract": ".work/verification/ios-simulator-arm64.json",
+          "kind": "ios-receipt",
           "bytes": null,
           "sha256": null,
           "signed": null,
@@ -1528,14 +1774,6 @@
         {
           "pathContract": ".work/xcode/DerivedData-device-arm64/Build/Products/<Config>-iphoneos/Veyra.app",
           "kind": "ios-device-unsigned-app",
-          "bytes": null,
-          "sha256": null,
-          "signed": null,
-          "installable": null
-        },
-        {
-          "pathContract": ".work/verification/ios-simulator-<arch>.json",
-          "kind": "ios-receipt",
           "bytes": null,
           "sha256": null,
           "signed": null,
@@ -1552,16 +1790,91 @@
       ],
       "blockers": [],
       "acceptance": [
-        "Full Swift host built; receipt says launched=false/installed=false/productionSigned=false; config recorded."
+        "Existing ci.sh compiles :shared:compileTestKotlinIosSimulatorArm64 and :composeApp:compileTestKotlinIosSimulatorArm64 and links :composeApp:linkDebugFrameworkIosArm64; build-ios.sh builds the arm64 simulator and arm64 device Swift hosts.",
+        "Receipts say launched=false/installed=false/productionSigned=false; config recorded; no test/simulator/device execution claim."
       ],
       "evidenceRunIds": [],
       "runbookSection": "7.2",
-      "notes": ""
+      "notes": "Arm64 only. DerivedData/receipt suffix is arm64; inventory label is ios-simulator-arm64."
+    },
+    {
+      "id": "B-IOS-02X",
+      "platform": "ios-simulator",
+      "title": "Compile x64 simulator Kotlin test sources and full Swift host on macos-15-intel",
+      "category": "build",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "compiled",
+      "dependsOn": [
+        "B-IOS-01",
+        "B-GATE-07",
+        "B-RET-01"
+      ],
+      "host": {
+        "runnerLabel": "macos-15-intel",
+        "os": "macOS",
+        "architecture": "x64",
+        "unameArch": "x86_64",
+        "canonicalArchitecture": "x64",
+        "kotlinTarget": "iosX64"
+      },
+      "existingEntrypoint": true,
+      "commands": [
+        "DEVELOPER_DIR=/Applications/Xcode_26.0.1.app/Contents/Developer scripts/ci.sh ios",
+        "VEYRA_IOS_CONFIGURATION=Release scripts/build-ios.sh simulator",
+        "VEYRA_IOS_CONFIGURATION=Release scripts/build-ios.sh device"
+      ],
+      "candidateCommands": [],
+      "artifacts": [
+        {
+          "pathContract": ".work/xcode/DerivedData-simulator-x86_64/Build/Products/<Config>-iphonesimulator/Veyra.app",
+          "kind": "ios-simulator-app",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        },
+        {
+          "pathContract": ".work/verification/ios-simulator-x86_64.json",
+          "kind": "ios-receipt",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        },
+        {
+          "pathContract": ".work/xcode/DerivedData-device-arm64/Build/Products/<Config>-iphoneos/Veyra.app",
+          "kind": "ios-device-unsigned-app",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        },
+        {
+          "pathContract": ".work/verification/ios-device-arm64.json",
+          "kind": "ios-receipt",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        }
+      ],
+      "blockers": [
+        "macos-15-intel runner availability, Xcode 26.0.1 tool presence and x64 simulator runtime are not verified."
+      ],
+      "acceptance": [
+        "ci.sh selects IosX64 on the Intel host; build-ios.sh uses uname -m=x86_64 and builds the x86_64 simulator host. The device framework/host remains arm64.",
+        "Receipt is ios-simulator-x86_64.json, mapped explicitly to canonical inventory label ios-simulator-x64; do not rename the receipt silently.",
+        "Receipts say launched=false/installed=false/productionSigned=false; no test/simulator/device execution claim."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "4.2 / 4.2.1 / 6.4 / 7.2",
+      "notes": "x64 only. Device arm64 output from this host is a cross-check, not the canonical device artifact inspected by B-IOS-07."
     },
     {
       "id": "B-IOS-03",
       "platform": "ios-simulator",
-      "title": "Execute iOS Kotlin tests in a simulator",
+      "title": "Execute arm64 iOS Kotlin tests in a simulator (candidate task names)",
       "category": "test",
       "inScope": true,
       "status": "blocked",
@@ -1569,6 +1882,14 @@
       "dependsOn": [
         "B-IOS-02"
       ],
+      "host": {
+        "runnerLabel": "macos-15",
+        "os": "macOS",
+        "architecture": "arm64",
+        "unameArch": "arm64",
+        "canonicalArchitecture": "arm64",
+        "kotlinTarget": "iosSimulatorArm64"
+      },
       "existingEntrypoint": true,
       "commands": [],
       "candidateCommands": [
@@ -1577,20 +1898,60 @@
       "artifacts": [],
       "blockers": [
         "Scheme Testables empty",
-        "KMP simulator test task existence/behavior unconfirmed",
-        "No reviewed simulator execution path"
+        "Kotlin/Native simulator test task names and behavior are unconfirmed by Gradle discovery or execution",
+        "No reviewed simulator execution path",
+        "ci.sh only compiles :shared:compileTestKotlinIosSimulatorArm64 and :composeApp:compileTestKotlinIosSimulatorArm64; compilation is not test execution"
       ],
       "acceptance": [
-        "Actual test counts/XML or explicit blocked result; no compile-only pass."
+        "Actual arm64 test counts/XML, or an explicit blocked result; no compile-only pass. Confirm the task names on macos-15 before execution."
       ],
       "evidenceRunIds": [],
       "runbookSection": "7.2",
-      "notes": ""
+      "notes": "Candidate execution tasks only; this preparation did not run Gradle task discovery."
+    },
+    {
+      "id": "B-IOS-03X",
+      "platform": "ios-simulator",
+      "title": "Execute x64 iOS Kotlin tests in a simulator (candidate task names)",
+      "category": "test",
+      "inScope": true,
+      "status": "blocked",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-IOS-02X"
+      ],
+      "host": {
+        "runnerLabel": "macos-15-intel",
+        "os": "macOS",
+        "architecture": "x64",
+        "unameArch": "x86_64",
+        "canonicalArchitecture": "x64",
+        "kotlinTarget": "iosX64"
+      },
+      "existingEntrypoint": true,
+      "commands": [],
+      "candidateCommands": [
+        "scripts/gradle.sh :shared:iosX64Test :composeApp:iosX64Test"
+      ],
+      "artifacts": [],
+      "blockers": [
+        "Scheme Testables empty",
+        "Kotlin/Native iosX64 test task names and simulator behavior are unconfirmed by Gradle discovery or execution",
+        "macos-15-intel runner and x64 simulator runtime availability are unverified",
+        "No reviewed simulator execution path",
+        "ci.sh only compiles :shared:compileTestKotlinIosX64 and :composeApp:compileTestKotlinIosX64; compilation is not test execution"
+      ],
+      "acceptance": [
+        "Actual x64 test counts/XML, or an explicit blocked result; no compile-only pass. Confirm the task names on macos-15-intel before execution."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "4.2.1 / 7.2",
+      "notes": "Candidate execution tasks only; no x64 simulator run is claimed."
     },
     {
       "id": "B-IOS-04",
       "platform": "ios-simulator",
-      "title": "Export iOS production inventories",
+      "title": "Export arm64 simulator and device production inventories on macos-15",
       "category": "legal",
       "inScope": true,
       "status": "not-run",
@@ -1598,6 +1959,14 @@
       "dependsOn": [
         "B-IOS-02"
       ],
+      "host": {
+        "runnerLabel": "macos-15",
+        "os": "macOS",
+        "architecture": "arm64",
+        "unameArch": "arm64",
+        "canonicalArchitecture": "arm64",
+        "kotlinTarget": "iosSimulatorArm64"
+      },
       "existingEntrypoint": true,
       "commands": [
         "scripts/gradle.sh -I scripts/runtime-inventory.init.gradle :composeApp:exportProductionInventory -Pveyra.inventory.platform=ios-arm64",
@@ -1624,16 +1993,72 @@
       ],
       "blockers": [],
       "acceptance": [
-        "Inventories on macOS; exact KLIB link inputs; not a final linked binary SBOM."
+        "Both inventories are generated on the same arm64 host after local artifacts exist; exact KLIB/link inputs recorded; not a final linked binary SBOM.",
+        "The device ios-arm64 inventory is preserved separately from the simulator inventory; neither is substituted for the other."
       ],
       "evidenceRunIds": [],
       "runbookSection": "6.5",
-      "notes": ""
+      "notes": "ios-arm64 requires macOS but permits either host architecture; this row uses the arm64 host."
+    },
+    {
+      "id": "B-IOS-04X",
+      "platform": "ios-simulator",
+      "title": "Export x64 simulator and device production inventories on macos-15-intel",
+      "category": "legal",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-IOS-02X"
+      ],
+      "host": {
+        "runnerLabel": "macos-15-intel",
+        "os": "macOS",
+        "architecture": "x64",
+        "unameArch": "x86_64",
+        "canonicalArchitecture": "x64",
+        "kotlinTarget": "iosX64"
+      },
+      "existingEntrypoint": true,
+      "commands": [
+        "scripts/gradle.sh -I scripts/runtime-inventory.init.gradle :composeApp:exportProductionInventory -Pveyra.inventory.platform=ios-arm64",
+        "scripts/gradle.sh -I scripts/runtime-inventory.init.gradle :composeApp:exportProductionInventory -Pveyra.inventory.platform=ios-simulator-x64"
+      ],
+      "candidateCommands": [],
+      "artifacts": [
+        {
+          "pathContract": ".work/verification/runtime-inventory/ios-arm64.json",
+          "kind": "runtime-inventory",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        },
+        {
+          "pathContract": ".work/verification/runtime-inventory/ios-simulator-x64.json",
+          "kind": "runtime-inventory",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        }
+      ],
+      "blockers": [
+        "macos-15-intel runner and Xcode tool presence are unverified."
+      ],
+      "acceptance": [
+        "Both inventories are generated on the same x64 host after local artifacts exist. The exporter enforces host macos/x64 for ios-simulator-x64.",
+        "The x64 simulator inventory uses the canonical label ios-simulator-x64 even though build-ios.sh receipt/DerivedData names use x86_64; record the mapping explicitly.",
+        "The device ios-arm64 inventory remains separate and is not replaced by simulator data."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "4.2.1 / 6.5",
+      "notes": "x64 only. ios-arm64 inventory has no host-architecture constraint beyond macOS."
     },
     {
       "id": "B-IOS-05",
       "platform": "ios-simulator",
-      "title": "Generate and check iOS target notices",
+      "title": "Generate and check arm64 simulator/device target notices",
       "category": "legal",
       "inScope": true,
       "status": "not-run",
@@ -1641,6 +2066,14 @@
       "dependsOn": [
         "B-IOS-04"
       ],
+      "host": {
+        "runnerLabel": "macos-15",
+        "os": "macOS",
+        "architecture": "arm64",
+        "unameArch": "arm64",
+        "canonicalArchitecture": "arm64",
+        "kotlinTarget": "iosSimulatorArm64"
+      },
       "existingEntrypoint": true,
       "commands": [
         "scripts/dev.sh python3 -B scripts/package-notices.py --inventory .work/verification/runtime-inventory/ios-arm64.json --inventory .work/verification/runtime-inventory/ios-simulator-arm64.json --output composeApp/src/commonMain/composeResources/files/legal --require-notices-complete",
@@ -1650,16 +2083,54 @@
       "artifacts": [],
       "blockers": [],
       "acceptance": [
-        "Generation/--check exit 0 or gaps recorded; generated hashes captured."
+        "Generation and --check use the same arm64 simulator inventory plus the separate device inventory; exit 0 or gaps recorded; generated hashes captured.",
+        "Do not mix arm64 and x64 simulator inventories; binaryRedistributionReady remains false."
       ],
       "evidenceRunIds": [],
       "runbookSection": "6.6",
-      "notes": ""
+      "notes": "Arm64 host only. The common legal directory is shared, so regenerate immediately before this target's final build."
+    },
+    {
+      "id": "B-IOS-05X",
+      "platform": "ios-simulator",
+      "title": "Generate and check x64 simulator/device target notices",
+      "category": "legal",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-IOS-04X"
+      ],
+      "host": {
+        "runnerLabel": "macos-15-intel",
+        "os": "macOS",
+        "architecture": "x64",
+        "unameArch": "x86_64",
+        "canonicalArchitecture": "x64",
+        "kotlinTarget": "iosX64"
+      },
+      "existingEntrypoint": true,
+      "commands": [
+        "scripts/dev.sh python3 -B scripts/package-notices.py --inventory .work/verification/runtime-inventory/ios-arm64.json --inventory .work/verification/runtime-inventory/ios-simulator-x64.json --output composeApp/src/commonMain/composeResources/files/legal --require-notices-complete",
+        "scripts/dev.sh python3 -B scripts/package-notices.py --inventory .work/verification/runtime-inventory/ios-arm64.json --inventory .work/verification/runtime-inventory/ios-simulator-x64.json --check"
+      ],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [
+        "macos-15-intel runner/tool availability and x64 artifacts are required first."
+      ],
+      "acceptance": [
+        "Generation and --check use the x64 simulator inventory plus the separate device inventory; every recorded artifact file must exist on this host.",
+        "Do not combine the x64 inventory with arm64 simulator artifacts; binaryRedistributionReady remains false."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "4.2.1 / 6.6",
+      "notes": "x64 host only. The common legal directory is shared; regenerate immediately before this target's final build."
     },
     {
       "id": "B-IOS-06",
       "platform": "ios-simulator",
-      "title": "Final Release simulator/device host rebuild with exact notices",
+      "title": "Final Release arm64 simulator/device host rebuild with exact notices",
       "category": "build",
       "inScope": true,
       "status": "not-run",
@@ -1667,25 +2138,137 @@
       "dependsOn": [
         "B-IOS-05"
       ],
+      "host": {
+        "runnerLabel": "macos-15",
+        "os": "macOS",
+        "architecture": "arm64",
+        "unameArch": "arm64",
+        "canonicalArchitecture": "arm64",
+        "kotlinTarget": "iosSimulatorArm64"
+      },
       "existingEntrypoint": true,
       "commands": [
         "VEYRA_IOS_CONFIGURATION=Release scripts/build-ios.sh simulator",
         "VEYRA_IOS_CONFIGURATION=Release scripts/build-ios.sh device"
       ],
       "candidateCommands": [],
-      "artifacts": [],
+      "artifacts": [
+        {
+          "pathContract": ".work/xcode/DerivedData-simulator-arm64/Build/Products/Release-iphonesimulator/Veyra.app",
+          "kind": "ios-simulator-app",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        },
+        {
+          "pathContract": ".work/xcode/DerivedData-device-arm64/Build/Products/Release-iphoneos/Veyra.app",
+          "kind": "ios-device-unsigned-app",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        },
+        {
+          "pathContract": ".work/verification/ios-simulator-arm64.json",
+          "kind": "ios-receipt",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        },
+        {
+          "pathContract": ".work/verification/ios-device-arm64.json",
+          "kind": "ios-receipt",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        }
+      ],
       "blockers": [],
       "acceptance": [
-        "New .app bytes/hashes; legal files packaged; receipts refreshed."
+        "New arm64 simulator .app and arm64 device .app bytes/hashes; legal files packaged; receipts refreshed; configuration Release recorded.",
+        "No x64 simulator claim from this task; device .app remains unsigned and is not an IPA."
       ],
       "evidenceRunIds": [],
       "runbookSection": "6.7",
-      "notes": ""
+      "notes": "Arm64 host final rebuild. Canonical device build for B-IOS-07 comes from this task."
+    },
+    {
+      "id": "B-IOS-06X",
+      "platform": "ios-simulator",
+      "title": "Final Release x64 simulator/device host rebuild with exact notices",
+      "category": "build",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "not-run",
+      "dependsOn": [
+        "B-IOS-05X"
+      ],
+      "host": {
+        "runnerLabel": "macos-15-intel",
+        "os": "macOS",
+        "architecture": "x64",
+        "unameArch": "x86_64",
+        "canonicalArchitecture": "x64",
+        "kotlinTarget": "iosX64"
+      },
+      "existingEntrypoint": true,
+      "commands": [
+        "VEYRA_IOS_CONFIGURATION=Release scripts/build-ios.sh simulator",
+        "VEYRA_IOS_CONFIGURATION=Release scripts/build-ios.sh device"
+      ],
+      "candidateCommands": [],
+      "artifacts": [
+        {
+          "pathContract": ".work/xcode/DerivedData-simulator-x86_64/Build/Products/Release-iphonesimulator/Veyra.app",
+          "kind": "ios-simulator-app",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        },
+        {
+          "pathContract": ".work/xcode/DerivedData-device-arm64/Build/Products/Release-iphoneos/Veyra.app",
+          "kind": "ios-device-unsigned-app",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        },
+        {
+          "pathContract": ".work/verification/ios-simulator-x86_64.json",
+          "kind": "ios-receipt",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        },
+        {
+          "pathContract": ".work/verification/ios-device-arm64.json",
+          "kind": "ios-receipt",
+          "bytes": null,
+          "sha256": null,
+          "signed": null,
+          "installable": null
+        }
+      ],
+      "blockers": [
+        "macos-15-intel runner, Xcode tool presence and x64 simulator runtime are unverified."
+      ],
+      "acceptance": [
+        "New x86_64 simulator .app bytes/hashes on the Intel host; legal files packaged; receipt ios-simulator-x86_64.json refreshed.",
+        "The arm64 device .app rebuilt here is a cross-check; B-IOS-07 inspects the canonical arm64-host device build, not this copy."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "4.2.1 / 6.7 / 7.2",
+      "notes": "x64 host final rebuild. Canonical inventory label for the simulator output is ios-simulator-x64."
     },
     {
       "id": "B-IOS-07",
       "platform": "ios-device",
-      "title": "Inspect final iOS app bundle metadata and contents",
+      "title": "Inspect final arm64 device app bundle metadata and contents",
       "category": "package",
       "inScope": true,
       "status": "not-run",
@@ -1707,12 +2290,89 @@
       ],
       "evidenceRunIds": [],
       "runbookSection": "7.2",
-      "notes": ""
+      "notes": "Device arm64 only. Canonical device build is from the arm64 host (B-IOS-06)."
+    },
+    {
+      "id": "B-IOS-07A",
+      "platform": "ios-simulator",
+      "title": "Inspect final arm64 simulator app bundle metadata and contents",
+      "category": "package",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "packaged",
+      "dependsOn": [
+        "B-IOS-06"
+      ],
+      "host": {
+        "runnerLabel": "macos-15",
+        "os": "macOS",
+        "architecture": "arm64",
+        "unameArch": "arm64",
+        "canonicalArchitecture": "arm64",
+        "kotlinTarget": "iosSimulatorArm64"
+      },
+      "existingEntrypoint": true,
+      "commands": [
+        "plutil -p .work/xcode/DerivedData-simulator-arm64/Build/Products/Release-iphonesimulator/Veyra.app/Info.plist",
+        "lipo -archs .work/xcode/DerivedData-simulator-arm64/Build/Products/Release-iphonesimulator/Veyra.app/Veyra",
+        "codesign -dv --verbose=4 .work/xcode/DerivedData-simulator-arm64/Build/Products/Release-iphonesimulator/Veyra.app 2>&1 || true"
+      ],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [
+        "Final arm64 simulator app from B-IOS-06 is not yet built."
+      ],
+      "acceptance": [
+        "Bundle id/version/deployment/localizations/background modes/ATS/arm64 architecture/signing recorded; packaged legal files match generated hashes.",
+        "Simulator-only label; no device or IPA claim."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "4.2.1 / 7.2",
+      "notes": "Arm64 simulator app inspection; distinct from device inspection B-IOS-07."
+    },
+    {
+      "id": "B-IOS-07X",
+      "platform": "ios-simulator",
+      "title": "Inspect final x64 simulator app bundle metadata and contents",
+      "category": "package",
+      "inScope": true,
+      "status": "not-run",
+      "verificationLevel": "packaged",
+      "dependsOn": [
+        "B-IOS-06X"
+      ],
+      "host": {
+        "runnerLabel": "macos-15-intel",
+        "os": "macOS",
+        "architecture": "x64",
+        "unameArch": "x86_64",
+        "canonicalArchitecture": "x64",
+        "kotlinTarget": "iosX64"
+      },
+      "existingEntrypoint": true,
+      "commands": [
+        "plutil -p .work/xcode/DerivedData-simulator-x86_64/Build/Products/Release-iphonesimulator/Veyra.app/Info.plist",
+        "lipo -archs .work/xcode/DerivedData-simulator-x86_64/Build/Products/Release-iphonesimulator/Veyra.app/Veyra",
+        "codesign -dv --verbose=4 .work/xcode/DerivedData-simulator-x86_64/Build/Products/Release-iphonesimulator/Veyra.app 2>&1 || true"
+      ],
+      "candidateCommands": [],
+      "artifacts": [],
+      "blockers": [
+        "Final x64 simulator app from B-IOS-06X is not yet built.",
+        "macos-15-intel runner and x64 simulator tooling are unverified."
+      ],
+      "acceptance": [
+        "Bundle id/version/deployment/localizations/background modes/ATS/x86_64 architecture/signing recorded; packaged legal files match generated hashes.",
+        "Simulator-only label; no device or IPA claim; do not infer x64 from arm64 or vice versa."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "4.2.1 / 7.2",
+      "notes": "x64 simulator app inspection; lipo reports x86_64, not the canonical label x64."
     },
     {
       "id": "B-IOS-08",
       "platform": "ios-simulator",
-      "title": "Install/launch the simulator app and capture owned evidence",
+      "title": "Install/launch the arm64 simulator app and capture owned evidence",
       "category": "native",
       "inScope": true,
       "status": "blocked",
@@ -1720,11 +2380,19 @@
       "dependsOn": [
         "B-IOS-06"
       ],
+      "host": {
+        "runnerLabel": "macos-15",
+        "os": "macOS",
+        "architecture": "arm64",
+        "unameArch": "arm64",
+        "canonicalArchitecture": "arm64",
+        "kotlinTarget": "iosSimulatorArm64"
+      },
       "existingEntrypoint": true,
       "commands": [],
       "candidateCommands": [
         "xcrun simctl boot <udid>",
-        "xcrun simctl install <udid> <app>",
+        "xcrun simctl install <udid> .work/xcode/DerivedData-simulator-arm64/Build/Products/Release-iphonesimulator/Veyra.app",
         "xcrun simctl launch <udid> dev.veyra.app",
         "xcrun simctl io <udid> screenshot <owned>.png",
         "xcrun simctl shutdown <udid>"
@@ -1735,11 +2403,53 @@
         "CoreSimulator containment review pending"
       ],
       "acceptance": [
-        "Actual install/launch/screenshot; app-owned ready evidence or explicit failure; simulator-only label."
+        "Actual arm64 install/launch/screenshot; app-owned ready evidence or explicit failure; simulator-only label."
       ],
       "evidenceRunIds": [],
       "runbookSection": "7.2",
-      "notes": ""
+      "notes": "Arm64 simulator only. Candidate commands are not an existing reviewed script."
+    },
+    {
+      "id": "B-IOS-08X",
+      "platform": "ios-simulator",
+      "title": "Install/launch the x64 simulator app and capture owned evidence",
+      "category": "native",
+      "inScope": true,
+      "status": "blocked",
+      "verificationLevel": "runtime-smoke-tested",
+      "dependsOn": [
+        "B-IOS-06X"
+      ],
+      "host": {
+        "runnerLabel": "macos-15-intel",
+        "os": "macOS",
+        "architecture": "x64",
+        "unameArch": "x86_64",
+        "canonicalArchitecture": "x64",
+        "kotlinTarget": "iosX64"
+      },
+      "existingEntrypoint": true,
+      "commands": [],
+      "candidateCommands": [
+        "xcrun simctl boot <udid>",
+        "xcrun simctl install <udid> .work/xcode/DerivedData-simulator-x86_64/Build/Products/Release-iphonesimulator/Veyra.app",
+        "xcrun simctl launch <udid> dev.veyra.app",
+        "xcrun simctl io <udid> screenshot <owned>.png",
+        "xcrun simctl shutdown <udid>"
+      ],
+      "artifacts": [],
+      "blockers": [
+        "No reviewed simulator smoke script",
+        "macos-15-intel runner and x64 simulator runtime availability are unverified",
+        "CoreSimulator containment review pending"
+      ],
+      "acceptance": [
+        "Actual x64 install/launch/screenshot; app-owned ready evidence or explicit failure; simulator-only label.",
+        "No arm64/device/IPA claim and no inference from the arm64 simulator run."
+      ],
+      "evidenceRunIds": [],
+      "runbookSection": "4.2.1 / 7.2",
+      "notes": "x64 simulator only; candidate commands require review."
     },
     {
       "id": "B-IOS-09",
@@ -1766,7 +2476,7 @@
       ],
       "evidenceRunIds": [],
       "runbookSection": "7.2 / 9.1",
-      "notes": ""
+      "notes": "Uses the canonical arm64 device build from B-IOS-06; no x64 device target exists."
     },
     {
       "id": "B-IOS-10",
@@ -1777,7 +2487,8 @@
       "status": "blocked",
       "verificationLevel": "inspected",
       "dependsOn": [
-        "B-IOS-07"
+        "B-IOS-07",
+        "B-IOS-09"
       ],
       "existingEntrypoint": true,
       "commands": [],
@@ -1787,7 +2498,7 @@
         "Unsigned device app is not an installable IPA."
       ],
       "acceptance": [
-        "Simulator-only/unsigned-device/installable-IPA statuses separated."
+        "Simulator-only (arm64/x64), unsigned-device arm64 and installable-IPA statuses separated; no IPA claim without owner credentials."
       ],
       "evidenceRunIds": [],
       "runbookSection": "7.2",
@@ -1862,7 +2573,9 @@
       "status": "not-run",
       "verificationLevel": "not-run",
       "dependsOn": [
-        "B-WIN-01"
+        "B-WIN-01",
+        "B-RET-01",
+        "B-GATE-09"
       ],
       "existingEntrypoint": true,
       "commands": [
@@ -2217,7 +2930,9 @@
       "status": "not-run",
       "verificationLevel": "not-run",
       "dependsOn": [
-        "B-MACARM-01"
+        "B-MACARM-01",
+        "B-RET-01",
+        "B-GATE-09"
       ],
       "existingEntrypoint": true,
       "commands": [
@@ -2522,7 +3237,9 @@
       "status": "not-run",
       "verificationLevel": "not-run",
       "dependsOn": [
-        "B-MACX64-01"
+        "B-MACX64-01",
+        "B-RET-01",
+        "B-GATE-09"
       ],
       "existingEntrypoint": true,
       "commands": [
@@ -2847,47 +3564,63 @@
         "No binaryRedistributionReady certification; open helper/native/JDK source gates."
       ],
       "acceptance": [
-        "Independent review accepts exact packages/sources/notices or records remaining redistribution blockers."
+        "Independent review accepts the exact intended packages/sources/notices with no open notice, corresponding-source or redistribution blocker for those artifacts.",
+        "If blockers remain, they are recorded precisely and prevent publication of the affected artifacts; binaryRedistributionReady stays false. A warning-only substitution does not satisfy this gate."
       ],
       "evidenceRunIds": [],
       "runbookSection": "8.5",
-      "notes": ""
+      "notes": "Legal acceptance is artifact-set-specific; an unrelated preparation success or a successful generator exit does not certify redistribution."
     },
     {
       "id": "B-DIST-01",
       "platform": "all",
-      "title": "Decide and implement a zero-purchase artifact retention/publication path",
+      "title": "Authorize publication of the exact retained final artifact set",
       "category": "distribution",
       "inScope": true,
       "status": "blocked",
       "verificationLevel": "inspected",
       "dependsOn": [
+        "B-REV-01",
+        "B-REV-03",
+        "B-RET-03",
         "B-LEGAL-03",
-        "B-LIN-07",
-        "B-AND-06",
-        "B-WIN-08",
+        "B-REG-06",
+        "B-LIN-08",
+        "B-WIN-09",
         "B-MACARM-08",
         "B-MACX64-08",
-        "B-IOS-07"
+        "B-IOS-08",
+        "B-IOS-08X",
+        "B-LIN-09",
+        "B-AND-08",
+        "B-WIN-10",
+        "B-MACARM-09",
+        "B-MACX64-09",
+        "B-IOS-10"
       ],
       "existingEntrypoint": true,
       "commands": [],
       "candidateCommands": [],
       "artifacts": [],
       "blockers": [
-        "Workflow has no upload/cache; publication/tag/contents:write not authorized."
+        "No owner publication authorization, tag or trusted release job.",
+        "Retention route and actual retained bytes are absent (B-RET-01/02/03 blocked).",
+        "Required Windows/iOS native smoke and signing/installability classifications remain blocked.",
+        "Legal/redistribution closure is not certified; binaryRedistributionReady=false."
       ],
       "acceptance": [
-        "Owner-authorized public Release assets or alternative; no paid storage."
+        "Owner/lead approves the exact artifact set, platform coverage and publication scope. All five required platform rows are accounted for; any intended subset requires a separate explicit owner/lead exception that records blocked/unverified rows and is not labeled complete. This checklist does not pre-authorize such an exception.",
+        "Requires accepted Task A SHA/pin/version, B-REG-06 for the same inputs, native smoke evidence or an explicit blocked status that prevents a success claim, package inspection, B-REV-01 review, B-REV-03 seal, B-RET-03 actual retained bytes, and B-LEGAL-03 acceptance for the exact intended artifacts with no open notice/source/redistribution blocker. A recorded legal blocker prevents publication of the affected artifact(s).",
+        "Publication approval does not satisfy physical-audio/live-source holds or mark the Goal complete."
       ],
       "evidenceRunIds": [],
-      "runbookSection": "10",
-      "notes": ""
+      "runbookSection": "6.9 / 10",
+      "notes": "This gate is after build/package/legal/regression/review/retention; it is not the early retention-design gate B-RET-01."
     },
     {
       "id": "B-DIST-02",
       "platform": "all",
-      "title": "Publish authorized final assets and SHA-256 manifest",
+      "title": "Publish the authorized exact artifact set and SHA-256 manifest",
       "category": "distribution",
       "inScope": true,
       "status": "blocked",
@@ -2900,36 +3633,42 @@
       "candidateCommands": [],
       "artifacts": [],
       "blockers": [
+        "B-DIST-01 authorization is blocked by missing review/retention/native/legal evidence.",
         "Publication not authorized."
       ],
       "acceptance": [
-        "Assets uploaded to authorized public Release with exact hashes; no secrets/media."
+        "Only the exact lead-approved, independently reviewed and retained bytes are published with a SHA-256 manifest; no secrets/media/copyrighted audio.",
+        "Publication is recorded; blocked native/legal/physical/source rows remain explicitly unverified and prevent a success/completion claim."
       ],
       "evidenceRunIds": [],
-      "runbookSection": "10",
-      "notes": ""
+      "runbookSection": "6.9 / 10",
+      "notes": "Publication follows B-DIST-01; it does not retroactively validate a blocked platform or excluded hold."
     },
     {
       "id": "B-DIST-03",
       "platform": "all",
-      "title": "Retrieve and independently verify published assets",
+      "title": "Retrieve and independently verify published assets against retained manifests",
       "category": "distribution",
       "inScope": true,
       "status": "blocked",
       "verificationLevel": "not-run",
       "dependsOn": [
-        "B-DIST-02"
+        "B-DIST-02",
+        "B-RET-03"
       ],
       "existingEntrypoint": true,
       "commands": [],
       "candidateCommands": [],
       "artifacts": [],
-      "blockers": [],
+      "blockers": [
+        "B-DIST-02 publication is blocked; no published assets exist to retrieve."
+      ],
       "acceptance": [
-        "Independent download, hash match, package inspection, notices/source present."
+        "Independent download from the durable public route; hashes match both the retained and published manifests; package/notices/source presence inspected.",
+        "Record the publication/retrieval result; mismatches or missing assets fail the gate."
       ],
       "evidenceRunIds": [],
-      "runbookSection": "10",
+      "runbookSection": "6.9 / 10",
       "notes": ""
     },
     {
@@ -2938,7 +3677,7 @@
       "title": "Independent lead review of complete evidence/diff/source references",
       "category": "review",
       "inScope": true,
-      "status": "not-run",
+      "status": "blocked",
       "verificationLevel": "inspected",
       "dependsOn": [
         "B-LIN-07",
@@ -2946,30 +3685,51 @@
         "B-WIN-08",
         "B-MACARM-08",
         "B-MACX64-08",
-        "B-IOS-07"
+        "B-IOS-07",
+        "B-IOS-07A",
+        "B-IOS-07X",
+        "B-REG-06",
+        "B-LIN-08",
+        "B-WIN-09",
+        "B-IOS-08",
+        "B-IOS-08X",
+        "B-LIN-09",
+        "B-AND-08",
+        "B-WIN-10",
+        "B-MACARM-09",
+        "B-MACX64-09",
+        "B-IOS-10",
+        "B-LEGAL-03",
+        "B-RET-03"
       ],
       "existingEntrypoint": true,
       "commands": [],
       "candidateCommands": [],
       "artifacts": [],
-      "blockers": [],
+      "blockers": [
+        "Windows native smoke B-WIN-09 and iOS simulator smoke B-IOS-08/B-IOS-08X are blocked/unverified.",
+        "Actual retained bytes B-RET-03 and legal closure B-LEGAL-03 are not available.",
+        "Integrated regression B-REG-06 is blocked by Android instrumentation and iOS native test execution."
+      ],
       "acceptance": [
-        "Lead accepts or returns exact defects; no agent self-acceptance."
+        "Lead independently reviews the exact final SHA/pin/version, all five target rows, integrated B-REG-06, native smoke or an explicit blocking status, package inspection, legal acceptance of the exact artifacts, and actual retained bytes.",
+        "No self-acceptance and no publication claim from package generation or unrelated preparation tasks; any missing required evidence remains a blocking defect."
       ],
       "evidenceRunIds": [],
       "runbookSection": "6.9",
-      "notes": ""
+      "notes": "Review precedes publication. It covers the complete evidence set, not only selected platform successes."
     },
     {
       "id": "B-REV-02",
       "platform": "all",
-      "title": "Publish the final verification matrix and remaining holds",
+      "title": "Publish the final verification matrix, publication result and remaining holds",
       "category": "review",
       "inScope": true,
       "status": "not-run",
       "verificationLevel": "inspected",
       "dependsOn": [
-        "B-REV-01"
+        "B-REV-01",
+        "B-DIST-03"
       ],
       "existingEntrypoint": true,
       "commands": [],
@@ -2977,22 +3737,24 @@
       "artifacts": [],
       "blockers": [],
       "acceptance": [
-        "Build/package/native/install/signing/physical levels separated; unverified criteria remain visible."
+        "Post-publication matrix records actual build/package/native/install/signing/physical levels, publication/retrieval result and every remaining hold.",
+        "Unverified native/source/physical criteria remain visible; no partial artifact set is relabeled as five-platform completion."
       ],
       "evidenceRunIds": [],
       "runbookSection": "6.9",
-      "notes": ""
+      "notes": "Post-publication recording; it does not authorize publication."
     },
     {
       "id": "B-REV-03",
       "platform": "all",
-      "title": "Seal artifact/log/XML hash manifest and preserve evidence",
+      "title": "Seal pre-publication evidence and retained SHA-256 manifest",
       "category": "review",
       "inScope": true,
       "status": "not-run",
       "verificationLevel": "inspected",
       "dependsOn": [
-        "B-REV-01"
+        "B-REV-01",
+        "B-RET-03"
       ],
       "existingEntrypoint": true,
       "commands": [],
@@ -3000,7 +3762,8 @@
       "artifacts": [],
       "blockers": [],
       "acceptance": [
-        "Manifest hashes all evidence; task-owned outputs preserved; no secrets/media."
+        "Manifest hashes the actual retained packages, logs/XML, source/pin/version/host metadata and legal/source asset set; no secrets/media.",
+        "Seal happens after independent review and before publication; post-publication retrieval is verified separately."
       ],
       "evidenceRunIds": [],
       "runbookSection": "5.3 / 11",
@@ -3076,5 +3839,88 @@
       "notes": ""
     }
   ],
-  "runs": []
+  "runs": [],
+  "correctedAtUtc": "2026-11-07T06:40:57Z",
+  "reviewCorrections": [
+    {
+      "id": "RC-A",
+      "finding": "iOS simulator plan hardcoded arm64 test, inventory and notice paths on both macOS host architectures.",
+      "tasks": [
+        "B-IOS-02",
+        "B-IOS-02X",
+        "B-IOS-03",
+        "B-IOS-03X",
+        "B-IOS-04",
+        "B-IOS-04X",
+        "B-IOS-05",
+        "B-IOS-05X",
+        "B-IOS-06",
+        "B-IOS-06X",
+        "B-IOS-07",
+        "B-IOS-07A",
+        "B-IOS-07X",
+        "B-IOS-08",
+        "B-IOS-08X"
+      ],
+      "runbookSections": [
+        "4.2",
+        "4.2.1",
+        "4.3",
+        "6.4",
+        "6.5",
+        "6.6",
+        "6.7",
+        "7.2",
+        "Appendix B"
+      ],
+      "result": "Arm64 and x64 simulator rows now select matching host, Kotlin target, candidate test task, inventory target/output, tests, DerivedData/receipt path and notice check. Device arm64 remains separate."
+    },
+    {
+      "id": "RC-B",
+      "finding": "Retention was decided only after all platform builds and legal review, too late for ephemeral runners.",
+      "tasks": [
+        "B-RET-01",
+        "B-RET-02",
+        "B-RET-03"
+      ],
+      "runbookSections": [
+        "6.3A",
+        "6.9",
+        "10"
+      ],
+      "result": "A blocked pre-build design/availability gate now precedes remote ephemeral builds; implementation/canary and actual final-set retention are separate tasks. No route is claimed available."
+    },
+    {
+      "id": "RC-C",
+      "finding": "Publication could follow package/legal success without integrated regressions, native smoke, independent review or actual retained bytes.",
+      "tasks": [
+        "B-REG-06",
+        "B-REV-01",
+        "B-REV-02",
+        "B-REV-03",
+        "B-DIST-01",
+        "B-DIST-02",
+        "B-DIST-03"
+      ],
+      "runbookSections": [
+        "6.8",
+        "6.9",
+        "10"
+      ],
+      "result": "Publication now transitively requires same-input regressions, native smoke or a blocking status, package/legal inspection, lead review, retained-byte integrity, signing/installability classification and owner publication authorization. Post-publication retrieval/matrix recording follows."
+    },
+    {
+      "id": "RC-D",
+      "finding": "Linux-only preflight was presented as portable and the memory awk command had no file operand.",
+      "tasks": [
+        "B-GATE-04",
+        "B-IOS-01"
+      ],
+      "runbookSections": [
+        "6.2",
+        "7.2"
+      ],
+      "result": "Linux probes are separated from macOS/Windows probes; the Linux awk reads /proc/meminfo; unverified non-Linux alternatives are labeled candidate."
+    }
+  ]
 }

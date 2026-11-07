@@ -2,17 +2,24 @@
 
 **Status: preparation only. No Gradle invocation, native build, package build, device/emulator/simulator operation, workflow dispatch, live-source check, or release publication was performed for this document.**
 
-- **Prepared:** 2026-11-07 UTC
+- **Original preparation:** 2026-11-07T05:36:45Z UTC at `ec97925883f7a26765b7e3409ba5a81e358082b9`, in worktree `/root/.t3/worktrees/Veyra/t3-61a2201d` on branch `t3/five-platform-preparation-1`.
+- **Review correction applied:** 2026-11-07T06:40:57Z UTC, documentation-only.
+- **Correction base:** `5328be09b6e9abcba4ee4a9793b934116e4e86f5` — the reviewed merge of Room-foundations PR #2. It retains Room schema 2 and is **not** the final Task A gate.
+- **Original PR head merged for the correction:** `7d90520366f8a8fd4d8c6dec9d825f592dcafc14`.
+- **Integration merge:** `3bc09ca3665c656314b295a7d24fcf7eb7b70d13`; parents are `5328be09` and `7d90520`, and its tree against `5328be09` adds only the two original preparation documents (hashes `867d2eaa607431feb0ae08a4e523cb68dcc172007a825d2cab7897450c7e78a4` and `06d80bf59b728339f5eecc24df81591cef26d38c2e83891f1458cbffd24383c6`).
+- **Correction worktree/branch:** `/root/.t3/worktrees/Veyra/t3-8cb909e8`, local `t3/correct-ios-preparation-docs`; corrections are pushed to the existing PR branch `t3/five-platform-preparation-1`.
 - **Repository:** <https://github.com/Apdelrahman1911/veyra> (public)
 - **Integration branch and PR base:** `feat/veyra-integration`
 - **Preparation branch:** `t3/five-platform-preparation-1`
-- **Verified starting commit:** `ec97925883f7a26765b7e3409ba5a81e358082b9` — “Checkpoint durable download recovery and platform lifecycle safeguards”
-- **Verified remote tip at preparation:** `ec97925883f7a26765b7e3409ba5a81e358082b9`
+- **Verified starting commit (original snapshot):** `ec97925883f7a26765b7e3409ba5a81e358082b9` — “Checkpoint durable download recovery and platform lifecycle safeguards”
+- **Verified remote tip at original preparation:** `ec97925883f7a26765b7e3409ba5a81e358082b9`
 - **Pinned kmpYT revision:** `c0a08090fe7dbd76e20216559b8184ad2cccde63`
 - **Current Room schema in this base:** version 2 (`shared/schemas/dev.veyra.data.room.VeyraDatabase/2.json`)
 - **Default `main`:** `304d4dcde725899d2f50c72497c624d8f416a54c` — workflow-bootstrap ancestry only; do not target this work at `main`.
 
-This runbook is the source-verified execution plan for **Task B**. Task B may start only after the lead supplies the precise reviewed, merged and validated **Task A** integration SHA. The first Room-foundations PR is not that gate: typed schema-3/download-recovery integration and regressions remain pending beyond it. Do not treat `ec97925` as the final revision and do not package it as one.
+This runbook is the source-verified execution plan for **Task B**. Task B may start only after the lead supplies the precise reviewed, merged and validated **Task A** integration SHA. The first Room-foundations PR (`5328be09`, schema 2) is not that gate: typed schema-3/download-recovery integration and regressions remain pending beyond it. Do not treat `ec97925` or `5328be09` as the final revision and do not package either as one.
+
+This review correction did not re-run the 43-file input manifest, any Gradle/native/package operation, legal regeneration, workflow dispatch, simulator/device operation, or publication. It inspected the relevant source definitions, the two complete preparation documents, and the existing PR/integration ancestry; it records source facts separately from original preparation provenance.
 
 ---
 
@@ -53,7 +60,7 @@ The existing real-source and physical-audio release holds remain visible and unm
 
 ### 1.4 Launch configuration and attestation
 
-This preparation ran as **`opencode-go/deepseek-v4.1-flash`** (DeepSeek 4.1 Flash), as displayed by the harness. The lead requested **variant `max`**. The harness exposes the model/provider identity in this session but provides **no independent runtime/back-end or variant attestation**. I therefore record the accepted launch configuration and the attestation limit, and I do not claim a stronger runtime identity. The older `AGENTS.md` GPT-6 Astra allocation is superseded by the explicit owner preference for this task. No subagents were created; this work was done directly in the assigned checkout.
+The original preparation and this review correction ran as **`opencode-go/deepseek-v4.1-flash`** (DeepSeek 4.1 Flash), as displayed by the harness. The lead requested **variant `max`**. The harness exposes the model/provider identity in this session but provides **no independent runtime/back-end or variant attestation**. I therefore record the accepted launch configuration and the attestation limit, and I do not claim a stronger runtime identity. The older `AGENTS.md` GPT-6 Astra allocation is superseded by the explicit owner preference for this task. No subagents were created; both the original preparation and this correction were done directly in the assigned checkout. The correction made no build, native, workflow, generated-resource, legal-regeneration, or publication action.
 
 ---
 
@@ -79,6 +86,20 @@ This preparation ran as **`opencode-go/deepseek-v4.1-flash`** (DeepSeek 4.1 Flas
 | Open pull requests | 0 at inspection | `gh pr list --state open` |
 
 The submodule checkout is present in this isolated worktree at the pinned revision. No submodule initialization/download was needed for this preparation; the directory content and `git submodule status` were inspected read-only. The parent `docs/STATE.md` records earlier HEADs (`fa8d87c`, etc.); those are historical and do not override `ec97925`.
+
+**Review-correction checkout state (separate from the original snapshot above):**
+
+| Fact | Observed value | Source / command |
+|---|---|---|
+| Worktree | `/root/.t3/worktrees/Veyra/t3-8cb909e8` | `pwd`, `git rev-parse --show-toplevel` |
+| Local branch | `t3/correct-ios-preparation-docs`; pushed to `t3/five-platform-preparation-1` | `git branch --show-current`, push refspec |
+| Starting parent | `5328be09b6e9abcba4ee4a9793b934116e4e86f5` | `git rev-parse HEAD` before fast-forward |
+| Integration merge | `3bc09ca3665c656314b295a7d24fcf7eb7b70d13`; parents `5328be09` and `7d90520` | `git rev-list --parents -n 1` |
+| Merge tree delta against `5328be09` | only `docs/verification/five-platform-preparation.md` and `docs/verification/five-platform-execution-checklist.json` | `git diff --name-status 5328be09 3bc09ca` |
+| Original document hashes at the merge | md `867d2eaa607431feb0ae08a4e523cb68dcc172007a825d2cab7897450c7e78a4`; JSON `06d80bf59b728339f5eecc24df81591cef26d38c2e83891f1458cbffd24383c6` | `git show 3bc09ca:<path> \| sha256sum` |
+| Worktree before authoring | clean | `git status --porcelain=v2` |
+
+The original 43-file manifest was **not** re-run for this correction. The correction rechecked only the source/task facts it changed and the integration ancestry above; rehash the final Task A inputs afresh.
 
 ### 2.2 Inspected paths
 
@@ -189,6 +210,8 @@ The most critical hash prefixes verified independently in this worktree (full va
 
 **This table is an inspection aid, not the authority.** The authority is the lead manifest above; rehash the final Task A SHA inputs afresh. Do not reuse these hashes as evidence for a later revision.
 
+The review correction did not re-run the 43/43 manifest. It verified the correction-base/merge ancestry, the two original document hashes, and the specific iOS/retention/preflight source definitions cited below. Those are source inspections, not a new 43-file attestation or execution evidence.
+
 ### 2.4 Current source-only legal-resource blocker (important)
 
 Running the existing bounded offline check in this clean checkout produced:
@@ -209,7 +232,7 @@ Cause: root `NOTICE.md` at `ec97925` contains the newer kmpYT merge/pin text, bu
 
 Consequence: a **clean checkout of `ec97925` fails `scripts/ci.sh` before any build**, because `ci.sh` runs `scripts/package-notices.py --check` unconditionally. The final Task A SHA must either (a) include an explicitly reviewed regeneration commit for these three deterministic files, or (b) Task B must regenerate them in the disposable build workspace before invoking `ci.sh`, and record the diff/hashes. Option (a) is required for clean-checkout reproducibility; option (b) is acceptable only as a build-workspace step and must not be committed silently. This is a **P0 gate**, not a warning.
 
-Do not copy the parent’s unstaged files into this preparation branch. They are evidence of the intended regeneration, not a source commit.
+Do not copy the parent’s unstaged files into this preparation branch. They are evidence of the intended regeneration, not a source commit. The correction base `5328be09` does not reconcile this stale source-only legal baseline; the original P0 finding remains open and is not hidden by the documentation correction.
 
 Minimal future repair (separate reviewed commit, not this preparation): run `scripts/dev.sh python3 -B scripts/package-notices.py` in a clean final checkout, run `--check`, inspect the three-file diff, and stage only those generated files. If the final Task A SHA changes the source notice text, the expected hashes change; re-record them. This is a deterministic source-derived regeneration, not a silent generated-file sweep.
 
@@ -227,7 +250,7 @@ Minimal future repair (separate reviewed commit, not this preparation): run `scr
 | Local command absences | `fakeroot`, `rpm`, `xcodebuild`, `xcrun`, `cl` (MSVC) |
 | Workflow runs | none |
 
-The lead’s earlier measurement (4,133,810,176 bytes free) and this measurement differ; disk state is volatile. Re-inventory immediately before any execution and never infer capacity from this table. The parent `/root/projects/Veyra` and this worktree share the same overlay filesystem in the current environment, but the free-space value can change with unrelated workloads. Do not kill or clean unrelated workloads.
+The lead’s earlier measurement (4,133,810,176 bytes free) and this measurement differ; disk state is volatile. Re-inventory immediately before any execution and never infer capacity from this table. The parent `/root/projects/Veyra` and this worktree share the same overlay filesystem in the current environment, but the free-space value can change with unrelated workloads. Do not kill or clean unrelated workloads. The review correction ran on a Linux x86_64 host but performed no build or toolchain installation; the table above remains an original-preparation snapshot, not a new host attestation.
 
 ### 2.6 Historical evidence that must not be promoted
 
@@ -300,14 +323,28 @@ Parent `.work`, historical evidence, private staging and caches are read-only in
 | ID | Target | Configured host | Tool prerequisites (existing only) | Existing build/test entrypoint | Existing execution level | Produced artifact type and path contract | Signing / installability | Inventory/legal target | Retrieval | Primary blockers |
 |---|---|---|---|---|---|---|---|---|---|---|
 | **AND** | Android (device/emulator; app builds on Linux x64) | `ubuntu-24.04` x64; local Linux x64 | JDK 21, SDK 36, build-tools 35.0.0, ADB/emulator for instrumentation, KVM for acceleration (not local) | `scripts/ci.sh android`; tasks `:shared:testDebugUnitTest :composeApp:testDebugUnitTest :composeApp:assembleDebug :composeApp:lintDebug` | JVM unit + APK + lint configured; **instrumentation not executed**; 36 methods historically compiled | Debug APK: `composeApp/build/outputs/apk/debug/composeApp-debug.apk` (historical). Release/APK/AAB paths are conventions under `composeApp/build/outputs/{apk,bundle}/release/`; capture exact file | Debug-signed installable APK; release unsigned; no production key | `android-debug`, `android-release` | Local `.work` or future public Release; current workflow uploads nothing | No KVM locally; no reviewed instrumentation runner; no release signing key; lint incomplete; final SHA not supplied |
-| **IOS-SIM** | iOS Simulator arm64 (and x64 on Intel) | `macos-15` arm64; `macos-15-intel` x64 | Xcode 26.0.1, JDK 21, `xcodebuild`, `xcrun`, `plutil`, `lipo` | `scripts/ci.sh ios`; `scripts/build-ios.sh simulator` | Compile only: Kotlin test sources + debug framework + full Swift host; **no simulator launch/test execution** | `iosApp` build output under `.work/xcode/DerivedData-simulator-<arch>/Build/Products/<Config>-iphonesimulator/Veyra.app`; result bundle `.work/xcode/results/…xcresult`; receipt `.work/verification/ios-simulator-<arch>.json` | Unsigned; **simulator-only**, not device-installable | `ios-simulator-arm64`, `ios-simulator-x64` (Intel) | Future public Release; current workflow uploads nothing | Empty scheme `<Testables/>`; no simulator launch; no test execution; Xcode path/tool presence must be proven |
-| **IOS-DEV** | iOS device arm64 | `macos-15` arm64 | Xcode 26.0.1, Apple signing identity/team/profile for installable IPA (none seen) | `scripts/build-ios.sh device` | Compile/link unsigned device host; **no signing/install** | `.work/xcode/DerivedData-device-arm64/Build/Products/<Config>-iphoneos/Veyra.app`; receipt `.work/verification/ios-device-arm64.json` | **Unsigned device build; NOT an installable IPA**; no production signing | `ios-arm64` | Future public Release only if an installable/signed artifact exists | No Apple team/profile/credentials; no device hardware; export/notarization not configured |
+| **IOS-SIM-ARM** | iOS Simulator arm64 | `macos-15` arm64 | Xcode 26.0.1, JDK 21, `xcodebuild`, `xcrun`, `plutil`, `lipo` | `scripts/ci.sh ios`; `scripts/build-ios.sh simulator` | Compile only: Kotlin test sources + debug framework + full Swift host; **no simulator launch/test execution** | `.work/xcode/DerivedData-simulator-arm64/Build/Products/<Config>-iphonesimulator/Veyra.app`; result bundle `.work/xcode/results/…xcresult`; receipt `.work/verification/ios-simulator-arm64.json` | Unsigned; **simulator-only**, not device-installable | `ios-simulator-arm64` | Future public Release; current workflow uploads nothing | Empty scheme `<Testables/>`; no simulator launch; no test execution; Xcode path/tool presence must be proven |
+| **IOS-SIM-X64** | iOS Simulator x64 (host `uname -m` = `x86_64`) | `macos-15-intel` x64 | Xcode 26.0.1, JDK 21, `xcodebuild`, `xcrun`, `plutil`, `lipo` | `scripts/ci.sh ios`; `scripts/build-ios.sh simulator` | Compile only: Kotlin test sources + debug framework + full Swift host; **no simulator launch/test execution** | `.work/xcode/DerivedData-simulator-x86_64/Build/Products/<Config>-iphonesimulator/Veyra.app`; result bundle `.work/xcode/results/…xcresult`; receipt `.work/verification/ios-simulator-x86_64.json` (canonical inventory label `ios-simulator-x64`; do not rename) | Unsigned; **simulator-only**, not device-installable | `ios-simulator-x64` | Future public Release; current workflow uploads nothing | Empty scheme `<Testables/>`; no simulator launch; no test execution; Intel runner/Xcode/runtime availability unverified |
+| **IOS-DEV** | iOS device arm64 | `macos-15` arm64 (canonical); `macos-15-intel` x64 also compiles the arm64 device host as a cross-check | Xcode 26.0.1, Apple signing identity/team/profile for installable IPA (none seen) | `scripts/ci.sh ios`; `scripts/build-ios.sh device` | Compile/link unsigned device host; **no signing/install** | `.work/xcode/DerivedData-device-arm64/Build/Products/<Config>-iphoneos/Veyra.app`; receipt `.work/verification/ios-device-arm64.json` | **Unsigned device build; NOT an installable IPA**; no production signing | `ios-arm64` (macOS; either host architecture) | Future public Release only if an installable/signed artifact exists | No Apple team/profile/credentials; no device hardware; export/notarization not configured |
 | **WIN** | Windows 10+ x64 | `windows-2022` x64 | JDK 21, VS 2022 x64 (`cl`, `lib`, `dumpbin`), CMake ≥3.24, GNU make + bash (MSYS2), WiX 3, jpackage | `scripts/ci.sh desktop`; `native/bundle.py --target windows-x64`; `scripts/package.sh` → `:composeApp:packageMsi` | JVM desktop tests configured; native helper/FFmpeg **not matching-host built in checkpoint**; MSI not built | MSI under `composeApp/build/compose/binaries/main/msi/`; app image under `.../app/Veyra/`; native resources staged at `.work/desktop-native/resources/windows-x64/dev/veyra/desktop/native/windows-x64/` | Unsigned MSI; no Authenticode; SmartScreen/trust unresolved; installer transaction external | `desktop-windows-x64` | Future public Release; current workflow uploads nothing | No local Windows host; `make`/MSVC env unproven; scoped `LOCALAPPDATA`/Chromium startup risk; unsigned; installer test boundary |
 | **MAC-ARM** | macOS 13+ arm64 | `macos-15` arm64 | Xcode 26.0.1/CLT, JDK 21, CMake ≥3.24, `clang`, `make`, `bash`, `hdiutil`, `codesign` | `scripts/ci.sh desktop`; `native/bundle.py --target macos-arm64`; `scripts/package.sh` → `:composeApp:packageDmg` | JVM desktop tests configured; native ObjC++ helper/FFmpeg not matching-host built in checkpoint; DMG not built | DMG under `composeApp/build/compose/binaries/main/dmg/`; app `.../app/Veyra.app`; session helper `libveyra-session.dylib` staged under native resources | Unsigned; no Developer ID/notarization; Gatekeeper blocks downloaded unsigned copy | `desktop-macos-arm64` | Future public Release; current workflow uploads nothing | No local macOS host; nested signing/notarization absent; session helper compile unproven |
 | **MAC-X64** | macOS 13+ x64 | `macos-15-intel` x64 | Same as MAC-ARM but x64 | Same entrypoint with `--target macos-x64` | Same as MAC-ARM; **separate x64 execution required** | Same DMG/app paths, x64 | Unsigned; no notarization | `desktop-macos-x64` | Future public Release; current workflow uploads nothing | Intel runner availability/tool presence; no local host; unsigned |
 | **LIN** | Ubuntu 24.04+ x64 | `ubuntu-24.04` x64; local Linux x64 | JDK 21, CMake ≥3.24, `cc`, GNU `make`, `bash`, `dpkg-deb`, `fakeroot` (runner), Xvfb/`xauth` for display tests, libmpv system dependencies | `scripts/ci.sh desktop`; `native/bundle.py --target linux-x64`; `scripts/package.sh` → `:composeApp:packageDeb` | JVM/desktop tests configured with project-owned Xvfb; Linux FFmpeg output historically exists; **DEB not built**; no physical audio | DEB under `composeApp/build/compose/binaries/main/deb/`; app image under `.../app/` | Unsigned DEB; no repository signature; `dpkg-deb -x` extraction ≠ system installation | `desktop-linux-x64` | Local `.work` or future public Release | `fakeroot` absent locally; no physical audio; package/launch not run; final SHA not supplied |
 
 **macOS x64 and arm64 are separate rows and separate binary/runtime evidence.** Do not infer x64 from arm64 or vice versa. Linux arm64 is outside this assignment.
+
+#### 4.2.1 iOS simulator host/architecture mapping (source-verified)
+
+`shared/build.gradle.kts` declares `iosArm64()`, `iosSimulatorArm64()` and `iosX64()`; `composeApp/build.gradle.kts` declares the same three targets. `scripts/build-ios.sh` chooses the simulator `ARCHS`/DerivedData/receipt suffix from `uname -m` (`arm64` or `x86_64`), while `scripts/runtime-inventory.init.gradle` uses canonical labels (`ios-simulator-arm64`, `ios-simulator-x64`). The mapping is explicit; do not pass one name as the other.
+
+| Host | `uname -m` / Xcode `ARCHS` | Kotlin simulator target | Existing compile task (via `ci.sh ios`) | Candidate test task (unconfirmed) | Inventory target → file | DerivedData suffix / receipt | Notices input |
+|---|---|---|---|---|---|---|---|
+| `macos-15` arm64 | `arm64` | `iosSimulatorArm64` | `:shared:compileTestKotlinIosSimulatorArm64`, `:composeApp:compileTestKotlinIosSimulatorArm64` | `:shared:iosSimulatorArm64Test`, `:composeApp:iosSimulatorArm64Test` | `ios-simulator-arm64` → `.work/verification/runtime-inventory/ios-simulator-arm64.json` | `simulator-arm64` / `.work/verification/ios-simulator-arm64.json` | `ios-arm64` + `ios-simulator-arm64` |
+| `macos-15-intel` x64 | `x86_64` | `iosX64` | `:shared:compileTestKotlinIosX64`, `:composeApp:compileTestKotlinIosX64` | `:shared:iosX64Test`, `:composeApp:iosX64Test` | `ios-simulator-x64` → `.work/verification/runtime-inventory/ios-simulator-x64.json` | `simulator-x86_64` / `.work/verification/ios-simulator-x86_64.json` | `ios-arm64` + `ios-simulator-x64` |
+
+Both hosts run `:composeApp:linkDebugFrameworkIosArm64` and `scripts/build-ios.sh device`; the device target is always arm64. `ios-arm64` inventory requires macOS but has no host-architecture constraint. The Intel runner label, Xcode tool presence, x64 simulator runtime and native task execution remain **unverified** until an actual host run. The scheme has empty `<Testables/>`; Kotlin test-source compilation or a Swift host compile is not test execution.
+
+`iosSimulatorArm64Test`/`iosX64Test` and their `composeApp` equivalents are **candidate labels** derived from the declared KMP targets, not confirmed by Gradle task discovery or execution in this preparation. The existing `ci.sh ios` compile tasks above are source-verified.
 
 ### 4.3 CI entrypoints and actual execution levels
 
@@ -319,7 +356,7 @@ The workflow is manual `workflow_dispatch` only (inputs `scope` = `all|desktop|a
 |---|---|---|---|
 | `desktop` | Linux: `scripts/with-display.sh scripts/gradle.sh :shared:jvmTest :composeApp:desktopTest`; other hosts: `scripts/gradle.sh :shared:jvmTest :composeApp:desktopTest`; `verification-summary.py --phase desktop --require-tests shared composeApp`; optional `scripts/package.sh` | JVM/desktop tests executed (fresh XML), optional current-OS package | No native helper build/launch, package inspection, installation, signing, or physical audio |
 | `android` | SDK 36/build-tools 35.0.0 check; `:shared:testDebugUnitTest :composeApp:testDebugUnitTest :composeApp:assembleDebug :composeApp:lintDebug`; summary `--require-tests` | JVM Android tests, debug APK, lint | No instrumentation, install, emulator/device, background/OS, or physical audio |
-| `ios` | Darwin/Xcode check; `:shared:compileTestKotlinIosSimulatorArm64` (or `IosX64`), `:composeApp:compileTestKotlinIosSimulatorArm64`, `:composeApp:linkDebugFrameworkIosArm64`; `build-ios.sh simulator`; `build-ios.sh device`; summary (zero iOS tests by design) | Kotlin test-source compile, framework link, full Swift host compile | No native test execution, simulator/device launch/install, signing, IPA, or physical audio |
+| `ios` | Darwin/Xcode check; on `macos-15` arm64: `:shared:compileTestKotlinIosSimulatorArm64`, `:composeApp:compileTestKotlinIosSimulatorArm64`; on `macos-15-intel` x64: `:shared:compileTestKotlinIosX64`, `:composeApp:compileTestKotlinIosX64`; both: `:composeApp:linkDebugFrameworkIosArm64`, `build-ios.sh simulator` (host `ARCHS`), `build-ios.sh device` (arm64), summary (zero iOS tests by design) | Kotlin test-source compile for the selected simulator target, arm64 framework link, full Swift host compile | No native test execution, simulator/device launch/install, signing, IPA, or physical audio |
 
 Configured matrix controls: desktop `max-parallel: 2`, `timeout-minutes: 60`; iOS `max-parallel: 1`, `timeout-minutes: 90`; all jobs use `fail-fast: false`. Concurrency is per-ref with `cancel-in-progress: true`. These are settings, not evidence of available capacity.
 
@@ -372,6 +409,8 @@ Create one ignored run directory per execution:
   native/                     # FFmpeg/session-helper manifests, ldd/otool/dumpbin output
   packages/
     package-manifest.json     # copy of .work/verification/packages.json
+  retention/
+    retained-manifest.json    # B-RET-03 actual retained bytes/metadata/readback
   review.json                 # independent review result
   inputs-after.json
 ```
@@ -384,6 +423,7 @@ Every record must include:
 - `testLevel`, `tests {suites,tests,failures,errors,skipped}`, exact `junitPaths`.
 - `logPath`, `logSha256`.
 - `artifactPath`, `artifactBytes`, `artifactSha256`.
+- `retentionRoute`, `retentionLocation`, `retainedAtUtc`, `retentionManifestSha256` (empty until B-RET-01/B-RET-02 exist and B-RET-03 actually retains the final set).
 - `generatedLegalHashes`, `inventoryPaths`, `correspondingSourcePaths`.
 - `signingStatus`, `installability`, `launchLevel`.
 - `reviewer`, `reviewStatus`, `notes`.
@@ -435,12 +475,14 @@ If any check fails, stop and return the exact mismatch to the lead. Do not “fi
 
 ### 6.2 Gate 1 — host/tool preflight and one heavy-build slot
 
-Run a minimal read-only preflight on each intended host. Do not install missing tools.
+Run a minimal read-only preflight on each intended host. Do not install missing tools. Select only the block for the actual OS; these probes are not portable across Linux, macOS and Windows.
+
+**Linux x64 only** (source-verified commands; run only on a Linux host):
 
 ```sh
 uname -s; uname -m; nproc
 df -B1 .
-awk '/MemTotal|MemAvailable|SwapTotal/{print}'
+awk '/MemTotal|MemAvailable|SwapTotal/{print}' /proc/meminfo
 java -version
 command -v cmake make cc bash dpkg-deb Xvfb xauth unshare gh strace
 ```
@@ -455,7 +497,27 @@ test -e /dev/kvm && echo "kvm-present" || echo "kvm-absent"
 
 Do **not** run `adb devices`, connect to port 5037, start an emulator, or query unrelated ADB state during preflight. The host’s port 5037 belongs to an unrelated context.
 
-On macOS, record `xcodebuild -version`, `xcrun --sdk iphonesimulator --show-sdk-version`, `cmake --version`, and the exact `DEVELOPER_DIR`. On Windows, record the Visual Studio environment activation, `cl`, `lib`, `dumpbin`, `cmake`, MSYS2 `make`/`bash`, WiX, and JDK 21. If any required tool is absent, stop and report it; do not use `apt`, Homebrew, Chocolatey, `pacman`, `sdkmanager`, or another global installer.
+**macOS** (run separately on `macos-15` arm64 and `macos-15-intel` x64):
+
+```sh
+uname -s; uname -m
+java -version
+xcodebuild -version
+xcrun --sdk iphonesimulator --show-sdk-version
+command -v cmake make clang bash hdiutil codesign lipo otool plutil
+```
+
+Record the exact `DEVELOPER_DIR`. The Intel runner label, Xcode 26.0.1 presence and x64 simulator runtime are unverified until the host actually runs.
+
+**Windows x64** (candidate PowerShell probes; not executed or verified by this Linux correction):
+
+```powershell
+Get-Command cl, lib, dumpbin, cmake, make, bash, java -ErrorAction SilentlyContinue
+& "C:\msys64\usr\bin\make.exe" --version
+Get-Command wix -ErrorAction SilentlyContinue
+```
+
+Record Visual Studio environment activation, MSVC `cl`/`lib`/`dumpbin`, CMake, MSYS2 `make`/`bash`, WiX and JDK 21. If any required tool is absent, stop and report it; do not use `apt`, Homebrew, Chocolatey, `pacman`, `sdkmanager`, or another global installer. `/proc/meminfo`, GNU `df`/`nproc`, `/dev/kvm` and the Android SDK paths are Linux-only and must not be presented as macOS/Windows preflight.
 
 Resource rules:
 
@@ -475,7 +537,7 @@ Resource rules:
 
 ### 6.3 Gate 2 — existing source-only regressions
 
-Run the repository’s existing bounded offline checks before any heavy build. These are not a release gate but catch stale source/legal/tooling state early.
+Run the repository’s existing bounded offline checks before any heavy build. These are not a release gate but catch stale source/legal/tooling state early. Run them after `B-GATE-09` re-freezes the final SHA following any reviewed tooling/legal PR, so the checks are bound to the same revision the builds will use.
 
 ```sh
 scripts/dev.sh python3 -B scripts/tests/test_tooling.py
@@ -499,9 +561,23 @@ scripts/dev.sh python3 -B native/ffmpeg/test_build.py
 
 These are authored archive/scope/receipt/process tests; they do not compile or execute the native production helper/FFmpeg.
 
+### 6.3A Gate 2A — pre-build retention design/availability (remote ephemeral builds)
+
+No remote/ephemeral production build may start until **B-RET-01** is approved. This gate is deliberately **before** Gate 3 and **must not depend on final package, legal or native outcomes**; otherwise the plan would require the artifacts in order to decide how to keep them.
+
+Required design/availability evidence for B-RET-01:
+
+- An existing, approved, free, policy-compliant route that can preserve, from each runner: the exact package bytes; build logs and JUnit XML; source commit, kmpYT pin, versions and host metadata; generated legal hashes; and a SHA-256 manifest.
+- Storage location, per-asset/per-run size limits, retention period, access permissions and independent retrieval/readback procedure. A printed runner path, a local `.work` directory or an assumed Actions artifact allowance is not a route.
+- Explicit separation of planning/availability (B-RET-01), implementation plus a non-production canary (B-RET-02), actual final-set retention and readback (B-RET-03), and public publication (B-DIST-01/02/03).
+
+Current state: the workflow is manual `workflow_dispatch` only, `permissions: contents: read`, with no `upload-artifact`, cache or release/publish step; no Veyra workflow run or release exists. No owner-approved retention route is recorded. **B-RET-01 is therefore blocked**, and all platform build tasks list it as a direct or prerequisite ancestor. The documented public-GitHub-Release option in §10 is a candidate requiring separate owner authorization and a reviewed trusted workflow; it is not implemented or approved by this preparation.
+
+Local authorized work that keeps evidence inside this repository’s `.work` has a different lifetime: it can support a local build/debug run, but it is not durable distribution, cannot preserve an ephemeral remote runner, and cannot satisfy B-RET-03 or publication. Local-only work does not become a Task B production/publication claim and remains subject to the lead’s separate authorization. A generic retention gate must not be used to block unrelated local development that is outside this checklist.
+
 ### 6.4 Gate 3 — prerequisite build on each target
 
-This is the first build, not the final package. It produces the local artifacts that the inventory task requires. Do not treat its package bytes as final.
+This is the first build, not the final package. It produces the local artifacts that the inventory task requires. Do not treat its package bytes as final. Any remote/ephemeral execution additionally requires the approved retention route (B-RET-01); local authorized work may use `.work` but cannot claim durable remote retention or publication.
 
 Platform commands are in §7. In general:
 
@@ -509,7 +585,8 @@ Platform commands are in §7. In general:
 - Windows: `scripts/ci.sh desktop` then `native/bundle.py --target windows-x64` then `scripts/package.sh` once.
 - macOS arm64/x64: same with the matching target.
 - Android: `scripts/ci.sh android`; optionally `:composeApp:assembleRelease`.
-- iOS: `scripts/ci.sh ios`, then `scripts/build-ios.sh simulator` and `device` (or the release configuration).
+- iOS arm64 host: `scripts/ci.sh ios`, then `VEYRA_IOS_CONFIGURATION=Release scripts/build-ios.sh simulator` and `scripts/build-ios.sh device`.
+- iOS x64 host: `scripts/ci.sh ios` (selects `IosX64`), then the same Release commands; `build-ios.sh simulator` uses `ARCHS=x86_64` and writes `DerivedData-simulator-x86_64`/`ios-simulator-x86_64.json`. The device host remains arm64.
 
 Record exact commands, logs, exit codes, and **pre-existing package paths** before packaging.
 
@@ -533,11 +610,13 @@ Repeat with exactly one target key:
 | `desktop-macos-arm64` | macOS arm64 |
 | `android-debug` | host with Android project artifacts |
 | `android-release` | host with Android project artifacts |
-| `ios-arm64` | macOS |
-| `ios-simulator-arm64` | macOS arm64 |
-| `ios-simulator-x64` | macOS x64 |
+| `ios-arm64` | macOS; either arm64 or x64 host architecture (device target remains arm64) |
+| `ios-simulator-arm64` | macOS arm64 only |
+| `ios-simulator-x64` | macOS x64 only; canonical label `x64`, while `build-ios.sh` receipt/DerivedData suffix is `x86_64` |
 
 Expected output: `.work/verification/runtime-inventory/<platform>.json`.
+
+The exporter enforces the host constraints above. The simulator inventory filename is canonical (`ios-simulator-arm64.json` or `ios-simulator-x64.json`); the `build-ios.sh` receipt is named from `uname -m` (`ios-simulator-arm64.json` or `ios-simulator-x86_64.json`). Record both paths explicitly and never substitute one for the other. The device `ios-arm64` inventory is a separate target and artifact contract, not a simulator inventory.
 
 Copy each inventory to the run evidence directory and hash it before any regeneration. The inventory records exact coordinates, variants, bytes, SHA-256s, POMs, critical build inputs, and the kmpYT pin. It explicitly sets `finalPackageInventory:false`, `nativeClosureVerified:false`, `correspondingSourceVerified:false`, `physicalAudioVerified:false`. **Do not edit these claims.**
 
@@ -566,9 +645,34 @@ scripts/dev.sh python3 -B scripts/package-notices.py \
   --require-notices-complete
 ```
 
+iOS must pair the device inventory with the **matching simulator architecture** and run the matching `--check` locally:
+
+```sh
+# macos-15 arm64
+scripts/dev.sh python3 -B scripts/package-notices.py \
+  --inventory .work/verification/runtime-inventory/ios-arm64.json \
+  --inventory .work/verification/runtime-inventory/ios-simulator-arm64.json \
+  --output composeApp/src/commonMain/composeResources/files/legal \
+  --require-notices-complete
+scripts/dev.sh python3 -B scripts/package-notices.py \
+  --inventory .work/verification/runtime-inventory/ios-arm64.json \
+  --inventory .work/verification/runtime-inventory/ios-simulator-arm64.json --check
+
+# macos-15-intel x64
+scripts/dev.sh python3 -B scripts/package-notices.py \
+  --inventory .work/verification/runtime-inventory/ios-arm64.json \
+  --inventory .work/verification/runtime-inventory/ios-simulator-x64.json \
+  --output composeApp/src/commonMain/composeResources/files/legal \
+  --require-notices-complete
+scripts/dev.sh python3 -B scripts/package-notices.py \
+  --inventory .work/verification/runtime-inventory/ios-arm64.json \
+  --inventory .work/verification/runtime-inventory/ios-simulator-x64.json --check
+```
+
 Rules:
 
 - Do **not** combine inventories whose artifact paths are absent on the generating host; `package-notices.py` verifies every recorded file.
+- Do **not** feed the arm64 simulator inventory to a macos-15-intel x64 notice run, or the x64 inventory to an arm64 host. The device `ios-arm64` inventory may accompany either simulator architecture, but only when its device artifacts exist on that same host.
 - The common legal resource directory is shared by all targets. Do not generate notices for target A and then build target B from that working tree. Use a separate runner/worktree per target, or regenerate immediately before each target’s final build.
 - Record `git status` and `git diff --stat` after generation. The tracked legal directory will be dirty. Copy the generated files and their hashes to the run evidence directory.
 - Do **not** commit the generated files in Task B. After all builds/checks in that workspace are complete, restore the reviewed baseline with `git restore --source=HEAD -- composeApp/src/commonMain/composeResources/files/legal` (or leave the dirty state recorded if the lead explicitly prefers). Never rebuild after restoring without regenerating.
@@ -610,17 +714,26 @@ Run the platform-specific inspection and smoke commands in §7. Verify the **act
 - Signing status and installability are recorded honestly.
 - If signing/notarization occurs, hash the **signed** artifact, not the unsigned intermediate. Signing changes bytes and can invalidate a previously recorded package hash/inventory; regenerate the final package manifest after signing.
 
-After the final rebuild, re-run the integrated regression matrix against the **same final SHA/pin** (`:shared:jvmTest`, `:composeApp:desktopTest` on the matching host, Android JVM tests, and the native test tasks that are actually configured). Tests do not change package bytes, but a package built from one SHA and tests run against another are not a matched result. If the regression run exposes a source defect, stop: any source fix creates a new SHA and invalidates the affected inventories/notices/packages.
+For iOS, run the final Release rebuild on **each simulator host** after its own matching notices are generated:
+
+- `macos-15` arm64: `VEYRA_IOS_CONFIGURATION=Release scripts/build-ios.sh simulator` writes `DerivedData-simulator-arm64` and `ios-simulator-arm64.json`; `... device` writes `DerivedData-device-arm64` and `ios-device-arm64.json`.
+- `macos-15-intel` x64: the same commands select `ARCHS=x86_64` and write `DerivedData-simulator-x86_64`/`ios-simulator-x86_64.json`; the device host remains arm64 and is a cross-check, not the canonical device artifact inspected by B-IOS-07.
+
+Do not inspect the arm64 simulator app as if it were x64, or vice versa. The simulator app is simulator-only; the device `.app` is unsigned and is not an IPA.
+
+After the final rebuild, re-run the integrated regression matrix against the **same final SHA/pin** (`:shared:jvmTest`, `:composeApp:desktopTest` on the matching host, Windows/macOS JVM tests, Android JVM tests and instrumentation, and the iOS native test tasks confirmed on each matching host; the `iosSimulatorArm64Test`/`iosX64Test` names above are candidates until discovery). The machine checklist’s `B-REG-06` is an integration gate, not one host command: it requires B-REG-01 through B-REG-05, Windows/macOS JVM tests, arm64/x64 iOS test execution (B-IOS-03/B-IOS-03X), Android instrumentation (B-AND-07), and all final package inspections bound to the same SHA/pin/version. A blocked required row prevents a success claim; compile-only iOS sources do not satisfy test execution. Tests do not change package bytes, but a package built from one SHA and tests run against another are not a matched result. If the regression run exposes a source defect, stop: any source fix creates a new SHA and invalidates the affected inventories/notices/packages.
 
 ### 6.9 Gate 8 — independent review, retention, and publication decision
 
 The lead independently inspects the complete docs/diff/source references and evidence. Exactly one platform lane owns each result packet. The lead resolves disagreements with evidence.
 
-Retention:
+Retention is split into three stages so a late decision cannot discard ephemeral outputs:
 
-- Copy artifacts/logs/XML/manifests into the ignored evidence directory; hash the manifest.
-- Ephemeral CI paths are **not** delivered distribution. The current workflow has no artifact-upload/cache action.
-- Publication is a separate gated action. Do not create tags/releases or change workflow permissions during Task B preparation or execution unless the owner separately authorizes it (§10).
+1. **B-RET-01 — design/availability before builds.** No remote/ephemeral production build starts until an approved free route is recorded (§6.3A). This gate does not depend on final artifacts and is currently blocked.
+2. **B-RET-02 — implementation and non-production canary.** A separately reviewed workflow/tooling change proves that a small non-release artifact, log/XML and metadata can be retained and independently read back. This PR does not implement it.
+3. **B-RET-03 — actual final-set retention.** After the final packages, regression evidence and legal asset set exist, retain the exact package, logs/XML, source/pin/version/host metadata and SHA-256 manifest, then independently download and hash-match the actual bytes.
+
+Local `.work` files are evidence of a local run, not durable remote retention or distribution. The current workflow has no artifact-upload/cache/release action. Publication is a separate gated action: lead review/evidence seal (`B-REV-01`, `B-REV-03`) → publication authorization (`B-DIST-01`) → publication (`B-DIST-02`) → independent retrieval (`B-DIST-03`) → final matrix/recording (`B-REV-02`). Do not create tags/releases or change workflow permissions during Task B preparation or execution unless the owner separately authorizes it (§10). Publication cannot precede integrated regression, native smoke or a blocking status, package/legal inspection, and actual retained bytes.
 
 ---
 
@@ -717,62 +830,60 @@ Record the signer certificate, `applicationId`, `versionCode`, `versionName`, mi
 
 **Ownership for later execution:** iOS lane. Exclusive files if a fix is required: `iosApp/**`, `composeApp/src/iosMain/**`, `composeApp/src/iosTest/**`, iOS targets in `composeApp/build.gradle.kts`, `scripts/build-ios.sh`, `scripts/xcode-framework.sh`, and the `ios` workflow job. Do not edit `shared/` Room/source.
 
-**Existing entrypoint**
+**Existing entrypoint — run on each simulator host**
 
 ```sh
 DEVELOPER_DIR=/Applications/Xcode_26.0.1.app/Contents/Developer scripts/ci.sh ios
 ```
 
-`ci.sh ios` requires Darwin, checks the pinned Xcode path, selects `IosSimulatorArm64` on arm64 or `IosX64` on Intel, then runs:
+`ci.sh ios` requires Darwin and the pinned Xcode path. It selects `IosSimulatorArm64` on an arm64 host or `IosX64` on an Intel host, compiles the matching test sources, links `:composeApp:linkDebugFrameworkIosArm64`, and then runs `scripts/build-ios.sh simulator` and `device` in Debug. The final Release rebuild is §6.7. Both hosts build an arm64 device host; the device target never becomes x64.
 
-```sh
-scripts/gradle.sh \
-  ":shared:compileTestKotlin$simulator" \
-  ":composeApp:compileTestKotlin$simulator" \
-  :composeApp:linkDebugFrameworkIosArm64
-scripts/build-ios.sh simulator
-scripts/build-ios.sh device
-```
+| Host | `uname -m` | Selected simulator target | Existing compile tasks | `build-ios.sh` simulator suffix / receipt | Inventory target → file | Candidate test task (unconfirmed) |
+|---|---|---|---|---|---|---|
+| `macos-15` arm64 | `arm64` | `IosSimulatorArm64` | `:shared:compileTestKotlinIosSimulatorArm64`, `:composeApp:compileTestKotlinIosSimulatorArm64` | `arm64` / `.work/verification/ios-simulator-arm64.json` | `ios-simulator-arm64` → `.work/verification/runtime-inventory/ios-simulator-arm64.json` | `:shared:iosSimulatorArm64Test`, `:composeApp:iosSimulatorArm64Test` |
+| `macos-15-intel` x64 | `x86_64` | `IosX64` | `:shared:compileTestKotlinIosX64`, `:composeApp:compileTestKotlinIosX64` | `x86_64` / `.work/verification/ios-simulator-x86_64.json` | `ios-simulator-x64` → `.work/verification/runtime-inventory/ios-simulator-x64.json` | `:shared:iosX64Test`, `:composeApp:iosX64Test` |
 
-`build-ios.sh` builds the **full Swift host** with `xcodebuild`, repository-local DerivedData/SourcePackages, `CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO`, and writes `.work/verification/ios-<platform>-<arch>.json` plus a build log. It checks the built executable architecture. The receipt explicitly says `launched=false`, `installed=false`, `productionSigned=false`, `physicalAudioVerified=false`.
+The canonical inventory label is `x64`; `build-ios.sh` derives its suffix from `uname -m` and therefore uses `x86_64`. The receipt is `.work/verification/ios-simulator-x86_64.json`, not `ios-simulator-x64.json`. Do not silently interchange the receipt path and inventory target. The Intel runner label, Xcode 26.0.1 tool presence, x64 simulator runtime and native test execution remain **unverified** until an actual host run; no x64 result may be inferred from arm64.
 
-**What this proves:** Kotlin test sources compiled, debug framework linked, Swift host compiled for simulator/device. **It does not prove any test ran, the app launched, simulator installation, device installation, signing, or native audio.**
+`scripts/build-ios.sh` builds the **full Swift host** with `xcodebuild`, repository-local DerivedData/SourcePackages, `CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO`, and writes `.work/verification/ios-<platform>-<arch>.json` plus a build log. It checks the built executable architecture. The receipt explicitly says `launched=false`, `installed=false`, `productionSigned=false`, `physicalAudioVerified=false`.
+
+**What this proves:** Kotlin test sources compiled for the selected simulator target, the arm64 debug framework linked, and the Swift host compiled for the selected simulator architecture and for arm64 device. **It does not prove any test ran, the app launched, simulator installation, device installation, signing, or native audio.**
 
 **Artifact paths**
 
-- Simulator: `.work/xcode/DerivedData-simulator-<arch>/Build/Products/<Config>-iphonesimulator/Veyra.app`
-- Device: `.work/xcode/DerivedData-device-arm64/Build/Products/<Config>-iphoneos/Veyra.app`
+- Arm64 simulator: `.work/xcode/DerivedData-simulator-arm64/Build/Products/<Config>-iphonesimulator/Veyra.app`
+- x64 simulator: `.work/xcode/DerivedData-simulator-x86_64/Build/Products/<Config>-iphonesimulator/Veyra.app` (x86_64 binary; canonical inventory label `ios-simulator-x64`)
+- Device arm64: `.work/xcode/DerivedData-device-arm64/Build/Products/<Config>-iphoneos/Veyra.app`
 - Result bundle: `.work/xcode/results/<platform>-<arch>-<uuid>.xcresult`
-- Receipts: `.work/verification/ios-simulator-<arch>.json`, `.work/verification/ios-device-arm64.json`
+- Receipts: `.work/verification/ios-simulator-arm64.json`, `.work/verification/ios-simulator-x86_64.json`, `.work/verification/ios-device-arm64.json`
 
 `build-ios.sh` defaults to `Debug`. For a final distribution build, set `VEYRA_IOS_CONFIGURATION=Release` and record the exact configuration. Debug-vs-Release is a bytes/optimization difference, not a signing claim.
 
 **Tests/native execution — current gap**
 
 - Scheme `Veyra.xcscheme` has `<Testables/>` empty. `xcodebuild test` has no test target/testable; it cannot certify app tests.
-- `composeApp/src/iosTest` contains 5 test files; `shared/src/iosTest` does not exist. CI only compiles the simulator test sources; it does not run them.
-- Candidate (not verified, task existence must be confirmed before execution):
-
-  ```sh
-  scripts/gradle.sh :shared:iosSimulatorArm64Test :composeApp:iosSimulatorArm64Test
-  ```
-
-  This would run Kotlin/Native tests in a simulator environment if the tasks exist and the host supports it. Do not claim the task names/behavior until a matching-host run proves them.
-- Candidate simulator smoke (not an existing script; requires review):
+- `composeApp/src/iosTest` contains 5 test files; `shared/src/iosTest` does not exist. CI only compiles the matching simulator test sources; it does not run them.
+- Candidate (not verified, task existence/behavior must be confirmed before execution):
+  - arm64 (`macos-15`): `scripts/gradle.sh :shared:iosSimulatorArm64Test :composeApp:iosSimulatorArm64Test`
+  - x64 (`macos-15-intel`): `scripts/gradle.sh :shared:iosX64Test :composeApp:iosX64Test`
+  These names are derived from the declared KMP targets but were not confirmed by Gradle discovery or execution. Do not claim the tasks exist, run, or produce XML until a matching-host run proves it.
+- Candidate simulator smoke (not an existing script; requires review), run separately per architecture:
 
   ```sh
   xcrun simctl list devices available
   xcrun simctl boot <owned-or-existing-udid>
-  xcrun simctl install <udid> <built-Veyra.app>
+  xcrun simctl install <udid> .work/xcode/DerivedData-simulator-<suffix>/Build/Products/Release-iphonesimulator/Veyra.app
   xcrun simctl launch <udid> dev.veyra.app
   xcrun simctl io <udid> screenshot <owned-dir>/launch.png
   xcrun simctl terminate <udid> dev.veyra.app
   xcrun simctl shutdown <udid>
   ```
 
-  CoreSimulator service state is host-managed; `scripts/env.sh` scopes homes/caches but does not prove all simulator writes are contained. Review before execution. Do not use this to claim device or physical behavior.
+  Use `suffix=arm64` on macos-15 and `suffix=x86_64` on macos-15-intel. CoreSimulator service state is host-managed; `scripts/env.sh` scopes homes/caches but does not prove all simulator writes are contained. Review before execution. Do not use this to claim device or physical behavior, and do not run the arm64 app on the x64 row or vice versa.
 
 **Inspection**
+
+Inspect the exact final bundle per architecture/host; do not reuse an arm64 inspection for x64 or for device:
 
 ```sh
 plutil -p <app>/Info.plist
@@ -780,22 +891,23 @@ lipo -archs <app>/<CFBundleExecutable>
 codesign -dv --verbose=4 <app> 2>&1 || true
 ```
 
-Record the actual `CFBundleIdentifier`, version/build, deployment target, supported orientations, background modes, ATS keys, architectures, and signing state.
+Record the actual `CFBundleIdentifier`, version/build, deployment target, supported orientations, background modes, ATS keys, architecture (`arm64` vs `x86_64`), packaged legal hashes, and signing state. `lipo` reports `x86_64`, while the inventory label is `x64`.
 
 **Signing/installability**
 
-- Simulator `.app`: simulator-only; not device-installable.
-- Device `.app`: unsigned; **not an installable IPA**.
+- Simulator `.app` (arm64 or x64): simulator-only; not device-installable.
+- Device `.app`: unsigned arm64; **not an installable IPA**.
 - No `DEVELOPMENT_TEAM`, signing certificate, provisioning profile, App Store Connect team, or export options are present. Creating an installable IPA/TestFlight/App Store build requires an owner-provided authorized Apple team/certificate/profile and a reviewed export/signing step. Do not purchase, enroll, or guess credentials.
-- If no identity exists, Task B may deliver a simulator app plus an unsigned device compile only, with the limitation explicit. That does **not** satisfy an installable iOS distribution gate.
+- If no identity exists, Task B may deliver simulator apps plus an unsigned device compile only, with the limitation explicit. That does **not** satisfy an installable iOS distribution gate.
 
 **Failure/edge cases**
 
 - Pinned Xcode path absent: fail; do not select another Xcode implicitly.
-- Xcode toolchain/KGP compatibility: Kotlin 2.2.21’s published table includes Xcode 26.0; the pinned 26.0.1 is the nearest patch. Actual host build is the evidence.
-- Empty Testables must not be reported as “tests pass.”
+- `macos-15-intel` unavailable or missing Xcode/x64 simulator runtime: block the x64 row; do not relabel an arm64 run as x64.
+- Xcode toolchain/KGP compatibility: Kotlin 2.2.21's published table includes Xcode 26.0; the pinned 26.0.1 is the nearest patch. Actual host build is the evidence.
+- Empty Testables must not be reported as "tests pass." A Kotlin test-source compile is not execution.
 - A Swift host compile is not a framework-only success; preserve the distinction.
-- Cleanup: shut down owned simulator, terminate owned app; preserve `.work` evidence; do not delete parent Xcode caches or other users’ derived data.
+- Cleanup: shut down owned simulator, terminate owned app; preserve `.work` evidence; do not delete parent Xcode caches or other users' derived data.
 
 ### 7.3 Windows x64
 
@@ -1082,7 +1194,7 @@ The required English/Arabic/RTL compatibility is checked through existing UI beh
 - Static resources: `scripts/tests/test_design_resources.py` and `scripts/verify-design-resources.py` (run by `ci.sh`).
 - Desktop: `:composeApp:desktopTest` includes narrow Arabic large-text, compact navigation label clipping, RTL mirroring, keyboard/focus, and player transport tests. Screenshots are written under `composeApp/build/test-evidence/music/core-shell/...`; preserve and review the fresh PNGs. A test pass does not prove every visual/OS state.
 - Android: candidate emulator/device en/ar launch and screenshot; needs the instrumentation/runtime guest path. Not executed here.
-- iOS: candidate simulator en/ar launch and screenshot; needs the simulator path. Not executed here.
+- iOS: candidate arm64 and x64 simulator en/ar launch and screenshot; each architecture needs its own reviewed simulator path. Not executed here.
 - No source/UI redesign is authorized to make a check pass. If a real layout defect appears, report it to the lead; do not weaken assertions.
 
 ---
@@ -1158,7 +1270,7 @@ Three distinct things:
 2. **Resolved production inventory** — exact Maven/runtime components for one target; still not native/JDK/helper/package closure.
 3. **Final package closure** — actual packaged JDK, libmpv/native libraries, FFmpeg, session helper, Node/Chromium delivery, fonts/CA, legal files, corresponding sources, signing/distribution. No current tool certifies this end-to-end.
 
-`index.json` always has `binaryRedistributionReady:false`. `--require-notices-complete` is a notice-gap gate, not legal approval. Complete-text supplements require exact hashes, role, provenance, and explicit `completeTextVerified`; a filename/POM URL is not a license.
+`index.json` always has `binaryRedistributionReady:false`. `--require-notices-complete` is a notice-gap gate, not legal approval. Complete-text supplements require exact hashes, role, provenance, and explicit `completeTextVerified`; a filename/POM URL is not a license. Final legal review (`B-LEGAL-03`) is artifact-set-specific: recording an open notice/source/redistribution blocker prevents publication of the affected artifacts; it is not converted into a warning-only success.
 
 **Provisioned Node/Chromium helpers** are downloaded on demand, not Maven components. Their manifests/installed-file selections/source mappings are separate. The current Chromium snapshot contains only a 401-byte sample credits page (SHA-256 `c2a338c4f1f5f5e19d3020a25f8dc47e394ba4fed1ec2d8dc5b2a915170e02bc`), not complete third-party terms. `package-notices.py --helper-inventory` can record reviewed helper inventories, but no complete enrollment exists; the generator’s fake-fixture tests are not real upstream evidence. Do not declare Chromium notice/source closure or fabricate a receipt. This is a release/legal decision, not a code shortcut.
 
@@ -1175,13 +1287,13 @@ Priorities: **P0** blocks a truthful final build/native verification/distributio
 | G-01 | P0 | Clean `ec97925` fails `package-notices.py --check`; three generated legal files stale (see §2.4) | Explicit reviewed regeneration of `composeApp/src/commonMain/composeResources/files/legal/{NOTICE.md,THIRD_PARTY_NOTICES.txt,index.json}` from current source, or a lead-approved Task A commit containing it. No production code change. | `package-notices.py --check` exit 0; `test_package_notices.py` passes; diff limited to generated legal files; clean checkout reproduces |
 | G-02 | P0 | Final Task A SHA/schema-3 not supplied | None in this branch; lead supplies exact SHA + schema/migration evidence | `VeyraDatabase.VERSION==3`, `3.json` hash, migration tests accepted; no schema-2 packaging |
 | G-03 | P0 | Android instrumentation not executed; `--run` exits 78; no reviewed runner; local no KVM | New reviewed `scripts/android-instrumented-tests.sh` (or equivalent) + workflow job using a disposable emulator/guest; reuse/adapt Stage 0 containment, private ADB port, owned AVD, no host ADB 5037. Do not install KVM/SDK. | Actual 36-method suite executed with exact XML/results; `apksigner`/`aapt2`; no guest claim from compile; owner/lead authorization recorded |
-| G-04 | P0 | iOS scheme Testables empty; no simulator test/launch | Option A: add/confirm Gradle `iosSimulatorArm64Test` execution. Option B: add a minimal reviewed simulator smoke script (`scripts/ios-simulator-smoke.sh`) using `simctl`; do not add a full XCTest target unless needed. Files: `scripts/`, `.github/workflows/verify.yml`, scheme only if a test target is added. | Kotlin tests executed (counts) and/or simulator app installed/launched with owned screenshots; `launched=true` evidence; no device/IPA claim |
+| G-04 | P0 | iOS scheme Testables empty; no simulator test/launch; arm64 and x64 rows unverified | Option A: confirm Gradle `iosSimulatorArm64Test` on `macos-15` and `iosX64Test` on `macos-15-intel` (plus `composeApp` equivalents). Option B: add a minimal reviewed simulator smoke script (`scripts/ios-simulator-smoke.sh`) using `simctl` per architecture; do not add a full XCTest target unless needed. Files: `scripts/`, `.github/workflows/verify.yml`, scheme only if a test target is added. | Kotlin tests executed with counts per architecture and/or each simulator app installed/launched with owned screenshots; `launched=true` evidence; x64 not inferred from arm64; no device/IPA claim |
 | G-05 | P0 | iOS installable IPA/signing absent | Owner provides authorized Apple team/cert/profile; add reviewed signing/export step (project settings + script/workflow), no portal mutation. | Signed/exported IPA verified, or explicit owner decision to ship simulator-only/unsigned and keep distribution gate incomplete |
 | G-06 | P0 | Android release signing/store artifacts absent | Owner provides release keystore/alias/passwords via approved secret mechanism; add signing config only after review; never commit keys. | `apksigner` production cert; release APK/AAB verified; or explicit debug-only/unsigned decision |
 | G-07 | P0 | Windows native toolchain (GNU make/MSVC env) unproven; FFmpeg/session helper not built | Preflight first. If a tool is missing, stop. A repository-local portable tool acquisition needs separate review; no `choco`/`pacman`. | `native/bundle.py --target windows-x64` exit 0; `dumpbin` architecture; `ffmpeg --verify-output`; MSI built |
 | G-08 | P0 | Windows scoped `LOCALAPPDATA`/Chromium known-folder risk; diagnostic did not launch browser | Minimal reviewed fix creating the scoped `AppData\Local`/helper home (likely `scripts/env.sh` or desktop runtime), with a focused test; do not claim the old diagnostic was the sole cause. | Browser/helper startup test in scoped Windows environment; no live source required for packaging; failure classified |
 | G-09 | P0 | Windows Authenticode and macOS Developer ID/notarization absent; unsigned downloads blocked | Owner decision/provisioning. If provided, add nested-signing order (helper/FFmpeg then app then DMG), notarize/staple; never disable Gatekeeper. | `codesign --verify --deep --strict`, `spctl`/notary acceptance, or explicit unsigned limitation |
-| G-10 | P0 | Final artifact retention/distribution absent; workflow has no upload/cache; ephemeral runner paths vanish | Add a separately authorized release job with `contents:write` on a trusted ref that uploads to a public GitHub Release (no Actions artifact storage), or an owner-approved alternative. Do not change permissions in Task B without authorization. | Release assets uploaded, downloaded independently, SHA-256 matched; source/notices included; no secrets/media |
+| G-10 | P0 | Pre-build retention design absent; workflow has no upload/cache/release; ephemeral runner paths vanish; B-RET-01 is blocked | First approve a free retention design/availability route (B-RET-01) before remote builds; implement it plus a non-production canary separately (B-RET-02); then retain the actual final set and verify readback (B-RET-03). Candidate only: trusted `contents:write` job to a public GitHub Release, no Actions artifact storage; owner authorization required. Do not change permissions in Task B without authorization. | Approved route + canary retained/read back; actual final package/log/XML/metadata/manifests retained, independently downloaded and SHA-256 matched; source/notices included; no secrets/media |
 | G-11 | P0 | Chromium/Node helper legal closure incomplete; sample credits only | Legal/release decision; if helpers are delivered, build exact helper inventories + original source/terms + complete-set review. No fake receipts. | `--helper-inventory` accepted with reviewed evidence; or explicit non-redistribution/on-demand limitation documented |
 | G-12 | P0 | Physical audio/crossfade and live-source release holds remain | Separate owner/hardware work, outside Task B. Do not relax. | Physical evidence on each supported platform; not mockable |
 | G-13 | P1 | `package-manifest.py` scans pre-existing packages; no source/commit binding | Add `--expected`/`--build-started-at`/`--source-sha` and record commit/pin/task; or operator binds pre/post scans. Files: `scripts/package-manifest.py`, new focused test; add to `ci.sh` only if reviewed. | Stale package rejected; new artifact bound to commit/command; test covers pre-existing file |
@@ -1199,7 +1311,7 @@ Ask only where code/evidence cannot decide:
 1. **Apple signing identity/team/profile** for an installable iOS IPA/TestFlight/App Store build — or explicit acceptance of simulator-only/unsigned device artifacts with the distribution gate left incomplete.
 2. **Android production signing key/alias/passwords** for a store-ready APK/AAB — or explicit debug-only/unsigned limitation.
 3. **Windows Authenticode and macOS Developer ID/notarization credentials** — or explicit unsigned/SmartScreen/Gatekeeper limitation.
-4. **Authorization to publish** a tag/public GitHub Release and add a trusted `contents:write` release job (zero-purchase public Release assets), or an owner-approved retrieval alternative.
+4. **Retention route and publication authorization** — approve a free durable retention design/availability route before remote builds, implement it separately with a canary, then authorize publication of the exact retained artifact set via a trusted `contents:write` release job/public GitHub Release (zero-purchase) or an owner-approved retrieval alternative. These are distinct decisions/stages; neither implies the other.
 5. **External clean installation environment** (Windows VM, macOS machine, Ubuntu/device) for actual installer/device verification, or explicit acceptance that only extraction/launch smoke is available.
 6. **Helper/legal strategy** for on-demand Node/Chromium delivery (enroll reviewed notices/source or document why they are not redistributed) and corresponding-source delivery for libmpv/FFmpeg/JDK.
 7. **Physical-audio/live-source holds** — separate hardware/source work; not Task B.
@@ -1212,14 +1324,22 @@ Do not ask broad preference questions that the source/commands already answer.
 
 Current state: `.github/workflows/verify.yml` has `permissions: contents: read` and **no** artifact-upload/cache/publish action. JSON/logs/packages remain on the ephemeral runner. A path printed by a job is not a delivered distribution.
 
-Zero-purchase documented option for a later authorized action:
+Retention stages, in order:
 
-- Publish final assets directly from a trusted build job to a **public GitHub Release** using the workflow’s scoped `GITHUB_TOKEN` (`contents: write` only in that job/event). Do not use `pull_request_target` or run untrusted code with publication credentials.
-- Release assets must be below GitHub’s per-asset limit (research recorded 2 GiB) and within the 1,000-asset limit; no total-size/bandwidth assumption beyond the public-release documentation. Do not use Actions artifact storage, caches, cloud uploads, or paid storage.
+1. **B-RET-01 — design/availability (blocked).** Before any remote ephemeral production build, record an existing approved, free, policy-compliant route. It must identify the durable location, asset/size limits, permissions, retention period, retrieval and independent hash readback, and cover package bytes, logs/XML, source/pin/version/host metadata and SHA-256 manifests. This gate is deliberately independent of final package/legal/native outcomes.
+2. **B-RET-02 — implementation and canary (blocked).** A separately reviewed workflow/tooling change, not this documentation PR, proves a small non-release artifact plus log/XML/metadata can be retained and independently read back. No paid storage, secrets, tag or publication.
+3. **B-RET-03 — actual final-set retention (blocked).** After the final packages, regression evidence and legal asset set exist, retain the exact bytes and metadata, then independently download and hash-match them. An intended upload or `.work` path is not actual retention.
+
+The documented zero-purchase **candidate** for later authorization is:
+
+- Publish final assets directly from a trusted build job to a **public GitHub Release** using the workflow's scoped `GITHUB_TOKEN` (`contents: write` only in that job/event). Do not use `pull_request_target` or run untrusted code with publication credentials.
+- Release assets must be below GitHub's per-asset limit (research recorded 2 GiB) and within the 1,000-asset limit; no total-size/bandwidth assumption beyond the public-release documentation. Do not use Actions artifact storage, caches, cloud uploads, or paid storage.
 - Include: per-platform package, SHA-256 manifest, legal notice bundle, FFmpeg/libmpv/JDK corresponding-source/build materials where applicable, and a verification summary with exact commits/checks. Exclude copyrighted media, cookies, signed URLs, private captures, and listening data.
-- Publication is a separate gated action. Do not create a tag/release or change workflow permissions in Task B without owner authorization.
+- This candidate is **not approved or implemented** by this preparation. No route is currently verified available, so B-RET-01 and every remote build's retention ancestor are blocked.
 
-If no publication/retrieval path is authorized, Task B can still produce and verify local Linux/Android artifacts in `.work`, but Windows/macOS/iOS artifacts cannot be retained across ephemeral runners. That is a distribution blocker, not a packaging success.
+Publication is a separate gated action after the evidence path above: `B-REV-01` independent review of the exact artifacts, `B-REV-03` seal, `B-DIST-01` owner/lead authorization, `B-DIST-02` publication, `B-DIST-03` independent retrieval/hash check, then `B-REV-02` final matrix recording. Do not create a tag/release or change workflow permissions in Task B without owner authorization. Publication cannot precede integrated regression B-REG-06, native smoke evidence or a blocking status, package inspection, legal acceptance of the exact artifacts with no open notice/source/redistribution blocker, actual retained bytes and signing/installability classification; a recorded legal blocker prevents publication of the affected artifacts and `binaryRedistributionReady` stays false. Publication does not satisfy the physical-audio or live-source holds.
+
+Local `.work` evidence is scoped to a local checkout and has a different lifetime from remote-runner retention. Task B can still produce and verify local Linux/Android artifacts there under separate lead authorization, but Windows/macOS/iOS artifacts from ephemeral runners cannot be retained or published without an approved route. That is a distribution blocker, not a packaging success. All five target rows are required for a completion claim; any partial/intended subset needs a separate explicit lead/owner exception that records the blocked rows and is not labeled complete.
 
 ---
 
@@ -1238,16 +1358,21 @@ If no publication/retrieval path is authorized, Task B can still produce and ver
 
 ## 12. Validation of this preparation
 
-Performed for this documentation-only PR:
+Performed for the original preparation and this documentation-only review correction:
 
-- JSON parseability and internal consistency of `docs/verification/five-platform-execution-checklist.json` (schema fields, unique task IDs, dependency references, no dangling refs).
-- Every repository path/link/task/CLI name referenced here checked against the actual source, or explicitly labeled candidate/proposed/absent.
+- JSON parseability, unique task IDs, dependency resolution, no self-dependency and an acyclic complete graph for `docs/verification/five-platform-execution-checklist.json`; summary counts derived from the actual 100 task statuses.
+- Architecture checks for both iOS simulator rows: host `uname -m`, Kotlin target, existing compile task, candidate test task, inventory target/output, DerivedData/receipt suffix and notice input all match; the device `ios-arm64` row remains separate.
+- Publication transitive-ancestor check: publication requires same-input regressions, native smoke or a blocking status, package/legal inspection, independent lead review, actual retained bytes and signing/installability classification; no cycle or path skips the required evidence.
+- Remote pre-build/build tasks have the retention-design gate `B-RET-01` as a direct or prerequisite ancestor; `B-RET-01` has no final-artifact dependency. Actual retention and publication are later separate tasks.
+- Linux preflight memory command reads `/proc/meminfo`; Linux-only probes are separated from macOS/Windows candidate probes.
+- Every changed repository path/task/CLI name checked against source, or explicitly labeled candidate/unverified/absent.
 - `git diff --check` for whitespace/errors.
-- `git status` and complete diff inspection before commit.
-- Submodule gitlink unchanged.
-- No generated legal files, build outputs, secrets, or unrelated changes staged.
-- Offline source-only notice check was run read-only and **failed** at `ec97925` for the stale generated legal resources recorded in §2.4; this is a real blocker finding, not a test of the docs.
-- No Gradle/native/package/device/workflow operation was run.
+- `git status` and full diff inspection before commit; only the two intended preparation documents differ from the integration base.
+- Submodule gitlink unchanged; no generated legal files, build outputs, secrets, or unrelated changes staged.
+- Offline source-only notice check was not re-run in the correction; the original real failure at the stale generated legal resources (§2.4) remains recorded, not waived.
+- No Gradle/native/package/device/emulator/simulator/workflow/legal-regeneration/publication operation was run. Bounded document validators are tests of the documents, not a platform build.
+
+Correction validation evidence (ignored, not committed): `.work/validation/validate.py` exited 0 with 100 unique tasks, 28 blocked / 67 not-run / 1 inspected / 1 configured / 3 excluded / 0 executed, 24 build/package tasks with a `B-RET-01` ancestor, and 88 publication-path ancestors checked. `.work/validation/preflight-linux.txt` records the bounded read-only Linux preflight, including the `awk ... /proc/meminfo` operand. These validate document semantics only; no platform build/test/native result is inferred.
 
 Acceptance of this preparation is documentation review, not Task B completion. Task B remains unexecuted until the lead supplies the final Task A SHA and separately authorizes the build/native/distribution work.
 
@@ -1263,7 +1388,7 @@ Acceptance of this preparation is documentation review, not Task B completion. T
 | Scoped command | `scripts/dev.sh <command>` | yes | project-owned homes/caches/temp |
 | CI desktop | `scripts/ci.sh desktop [--package]` | yes | Linux uses `with-display.sh`; other hosts direct |
 | CI Android | `scripts/ci.sh android` | yes | JVM tests + debug APK + lint |
-| CI iOS | `scripts/ci.sh ios` | yes | compile only; no simulator/device run |
+| CI iOS | `scripts/ci.sh ios` | yes | compiles arm64 or x64 simulator test sources by host; no simulator/device run |
 | Package current OS | `scripts/package.sh` | yes | Deb/Dmg/Msi only, current host |
 | Package manifest | `scripts/package-manifest.py` | yes | scans output root; stale-file caveat |
 | iOS build | `scripts/build-ios.sh simulator\|device` | yes | unsigned; `launched=false` |
@@ -1283,8 +1408,9 @@ Acceptance of this preparation is documentation review, not Task B completion. T
 These are **not existing repository entrypoints** and must not be reported as executed:
 
 - `:composeApp:assembleRelease`, `:composeApp:bundleRelease` — task names are conventional for AGP; confirm at final SHA.
-- `:shared:iosSimulatorArm64Test`, `:composeApp:iosSimulatorArm64Test` — KMP task existence/simulator behavior unconfirmed; use `:iosX64Test` on Intel.
-- `xcrun simctl` install/launch/screenshot — no reviewed script; CoreSimulator containment review required.
+- `:shared:iosSimulatorArm64Test`, `:composeApp:iosSimulatorArm64Test` on `macos-15` arm64; `:shared:iosX64Test`, `:composeApp:iosX64Test` on `macos-15-intel` x64 — KMP task existence/simulator behavior unconfirmed; the existing `:compileTestKotlin...` tasks only compile. No execution is claimed.
+- `xcrun simctl` install/launch/screenshot — no reviewed script; CoreSimulator containment review required for each architecture.
+- Public GitHub Release upload / retention workflow — not implemented or approved; separately authorized workflow/release action.
 - Windows `dumpbin`/`7z`/`Get-AuthenticodeSignature` inspection — tools documented on the image but not locally verified; confirm on the runner.
 - `hdiutil attach`/`codesign`/`spctl` inspection — macOS-only; `spctl` will reject unsigned artifacts.
 - `msiexec /a`, `dpkg -i`, `/Applications` copy, Gatekeeper launch — installation-level actions requiring an external authorized environment.
@@ -1294,14 +1420,15 @@ These are **not existing repository entrypoints** and must not be reported as ex
 
 The companion file `docs/verification/five-platform-execution-checklist.json` contains:
 
-- `schemaVersion`, `kind`, `document`, `preparedFrom` (commit/branch/pin), `preparationExecution`, `preparedAtUtc`, `readyToExecute`, `dependencyGate`.
+- `schemaVersion`, `kind`, `document`, `preparedFrom` (original commit/branch/pin plus correction base, original PR head, integration merge and original document hashes), `preparationExecution`, `preparedAtUtc`, `correctedAtUtc`, `readyToExecute`, `dependencyGate`.
 - `statusVocabulary` with definitions for `inspected`, `configured`, `blocked`, `not-run`, `executed-passed`, `executed-failed`, `excluded`.
 - `verificationLevels` (1–9 as in §5.1).
-- `platforms` with runner labels, architectures, and artifact contracts.
-- `tasks` with unique IDs, `platform`, `title`, `category`, `inScope`, `status`, `verificationLevel`, `dependsOn`, `existingEntrypoint`, `commands`, `candidateCommands`, `artifacts`, `blockers`, `acceptance`, `evidenceRunIds`.
+- `platforms` with runner labels, architectures and artifact contracts; the iOS platforms include `architectureDetails` mapping host `uname -m` to Kotlin target, inventory label/file and build suffix.
+- `reviewCorrections` mapping the four correction findings to tasks and runbook sections.
+- `tasks` (100) with unique IDs, `platform`, `title`, `category`, `inScope`, `status`, `verificationLevel`, `dependsOn`, optional `host`, `existingEntrypoint`, `commands`, `candidateCommands`, `artifacts`, `blockers`, `acceptance`, `evidenceRunIds`, `runbookSection`, `notes`.
 - `evidenceRecordSchema` and `runs: []` to be populated later with exact commit/pin/os/arch/runner/image/tool versions/command/timestamps/exit/test counts/log/XML/artifact bytes/SHA-256/generated-legal hashes/corresponding-source paths/signing/installability/reviewer.
 - `ownerDecisions` and `proposedChanges` as concise references to §9.
 
-Statuses are initialized honestly: no build/package/native task is marked executed; no timestamp/SHA/count/path is invented. A task with a missing prerequisite is `blocked`; a ready-but-not-attempted task is `not-run`; a source-only observation is `inspected`; a configured but unproven entrypoint is `configured`; out-of-scope holds are `excluded`.
+Statuses are initialized honestly: no build/package/native task is marked executed; no timestamp/SHA/count/path is invented. A task whose own required input, decision or prerequisite is currently missing is `blocked`; a ready-but-not-attempted task is `not-run`; a source-only observation is `inspected`; a configured but unproven entrypoint is `configured`; out-of-scope holds are `excluded`. A downstream `not-run` task does not override a blocked ancestor; the dependency graph remains authoritative.
 
 **Final dependency gate:** Task B execution starts only from the lead’s precise reviewed/merged/validated Task A integration SHA, with schema-3/download-recovery evidence accepted. Preparation of this runbook does not complete Task B or any platform release gate.
