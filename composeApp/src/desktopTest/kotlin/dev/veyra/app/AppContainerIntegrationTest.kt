@@ -632,6 +632,61 @@ class AppContainerIntegrationTest {
             assertEquals(StoreStatus.Closed, store.status.value)
         }
 
+        /**
+         * Exact post-migration proof for the authored historical receipt. The production migration
+         * is the only schema-3 producer here; no current-process binding write, first-result query,
+         * acquisition capture, transfer, validator admission or native handoff is allowed.
+         */
+        suspend fun assertMigratedSchema2Receipt(historical: AppContainerSchema2Fixture.Receipt) {
+            assertEquals(AppInitialization.Ready, app.initialization.value)
+            val snapshot = store.state.value
+            val item = snapshot.media.getValue(historical.item.id)
+            assertEquals(historical.item.id, item.id)
+            assertEquals(historical.item.title, item.title)
+            assertEquals(historical.item.kind, item.kind)
+            assertEquals(historical.item.source.provider, item.source.provider)
+            assertEquals(historical.item.source.canonicalId, item.source.canonicalId)
+            assertEquals(historical.binding, snapshot.playbackBindings.getValue(historical.binding.id))
+            assertEquals(setOf(historical.binding.id), snapshot.playbackBindings.keys)
+            assertNotEquals(historical.binding.queryTitle, item.title,
+                "The preserved historical query must not be recaptured from current metadata")
+
+            val view = store.acquisitionView()
+            val execution = assertNotNull(view.acquisition.bindings[ExecutionBindingId(historical.binding.id)])
+            assertEquals(ExecutionBindingOrigin.SCHEMA2_EXECUTABLE, execution.origin)
+            assertEquals(historical.binding.mediaId, execution.subjectId.value)
+            assertEquals(ExecutionBindingId(historical.binding.id), execution.id)
+            val receipt = assertIs<FirstResultReceipt.Schema2>(view.acquisition.receipts.getValue(execution.firstReceiptId))
+            assertEquals(historical.binding.id, receipt.id.value)
+            assertEquals(historical.binding.mediaId, receipt.mediaId)
+            assertEquals(historical.binding.queryTitle, receipt.queryTitle)
+            assertEquals(historical.binding.firstResultKind, receipt.firstResultKind)
+            assertEquals(historical.binding.firstResultId, receipt.firstResultId)
+            assertEquals(historical.binding.firstResultTitle, receipt.firstResultTitle)
+            assertEquals(historical.binding.firstResultUrl, receipt.canonicalUrl)
+            assertEquals(historical.binding.selectedVideoId, receipt.selectedVideoId)
+            assertEquals(historical.binding.resolvedEpochMs, receipt.resolvedEpochMs)
+            assertEquals(historical.binding.selectionOrdinal, receipt.selectionOrdinal)
+            assertEquals(1, view.acquisition.receipts.size)
+            assertEquals(1, view.acquisition.bindings.size)
+
+            assertTrue(view.acquisition.requests.isEmpty(), "Migration must not fabricate a request")
+            assertTrue(view.acquisition.occurrences.isEmpty(), "Migration must not fabricate an occurrence")
+            assertTrue(view.acquisition.physicalDownloads.isEmpty(), "The fixture has no download history")
+            assertTrue(view.acquisition.materializations.isEmpty(), "The fixture has no completed/offline asset")
+            assertTrue(view.acquisition.assetUses.isEmpty(), "Migration is not local validation permission")
+            assertEquals(0, platform.runtimePrepareCalls.get())
+            assertEquals(0, platform.localValidations.get())
+            assertTrue(platform.validations.isEmpty())
+            assertTrue(platform.engine.preparations.isEmpty())
+            assertTrue(gateway.queries.isEmpty(), "Migration must not perform a first-result query")
+            assertTrue(gateway.resolutions.isEmpty())
+            assertTrue(gateway.transfers.isEmpty())
+            assertTrue(gateway.typedTransfers.isEmpty())
+            assertNoNetwork()
+            AppContainerSchema2Fixture.assertPreserved(historical)
+        }
+
         /** Detached historical fixture row prepared by actual production commands. */
         class Seeded(
             val media: MediaItem,
@@ -813,6 +868,22 @@ class AppContainerIntegrationTest {
         private val fixtures = mutableListOf<Fixture>()
         suspend fun newFixture(initialize: Boolean = true, productionGateway: Boolean = false, clock: Clock = SystemClock()): Fixture =
             Fixture(directory, productionGateway, clock).also { fixtures += it; if (initialize) it.app.initialize() }
+
+        /**
+         * A real exported schema-2 database (authored baseline/context/settings/catalog/track/
+         * binding rows only) opened through the production AppContainer/Room migration. This is
+         * not a schema-3 seed: there is no offline asset, download, queue occurrence or source I/O.
+         */
+        suspend fun newSchema2Fixture(): Pair<Fixture, AppContainerSchema2Fixture.Receipt> {
+            val historical = AppContainerSchema2Fixture.seed(directory)
+            val fixture = Fixture(directory, productionGateway = false, SystemClock()).also {
+                fixtures += it
+                it.app.initialize()
+            }
+            fixture.assertMigratedSchema2Receipt(historical)
+            return fixture to historical
+        }
+
         suspend fun close() {
             var primary: Throwable? = null
             for (fixture in fixtures.asReversed()) try { fixture.close() }
@@ -1033,10 +1104,11 @@ class AppContainerIntegrationTest {
     }
 
     /**
-     * App-owned typed resolver lifetime. The former external caller used the legacy
-     * `AppContainer.resolver`, which cannot acquire a schema-3 binding (legacy snapshot binding
-     * writes are intentionally rejected), so that entrypoint is no longer the app execution path.
-     * The controller-owned resolve below is the current legal external/UI route.
+     * App-owned typed resolver lifetime. This keeps the controller path honest and is NOT a
+     * replacement for the external historical-receipt contract below: a NEW fresh legacy
+     * acquisition cannot write a schema-3 binding, but `AppSourceResolver.resolveWithBinding`
+     * still rejoins a preserved schema-2 VIDEO receipt with `reuseBindingId` and no fresh query
+     * or legacy binding write. That reachable external route has its own control below.
      */
     @Test fun finalCloseCancelsAppOwnedTypedResolveAndAwaitsItsLateRejectedResourceBeforeClosingDependencies() = checkCase {
         val fixture = newFixture()
@@ -1062,6 +1134,7 @@ class AppContainerIntegrationTest {
         }
         // The controller's resolver job is app-owned, but the policy operation registers the
         // SAME admitted-acquisition completion that shutdown awaits before dependent release.
+        // This app-owned route does not substitute for the external historical-receipt control.
         fixture.app.onMusicAction(MusicUiAction.Play(item()))
         resolving.await()
         coroutineScope {
@@ -1092,6 +1165,206 @@ class AppContainerIntegrationTest {
         assertEquals(1, fixture.http.closeCalls.get())
         assertEquals(StoreStatus.Closed, fixture.store.status.value)
         fixture.assertNoNetwork()
+    }
+
+    /**
+     * R12: the ORIGINAL external-caller shutdown contract for a preserved schema-2 VIDEO receipt.
+     * A fresh legacy binding write is forbidden after schema 3, but `resolveWithBinding` is a
+     * public historical-reuse route: it rejoins the migrated binding without a new first-result
+     * query or a legacy binding write. The caller is deliberately outside appLifetime/playback/
+     * effects, so only the real `online` closed observer can cancel it. The policy registers its
+     * completion before that scope and completes it only after NonCancellable rejection cleanup.
+     */
+    @Test fun finalCloseCancelsExternalResolverAndAwaitsItsLateRejectedResourceBeforeClosingDependencies() = checkCase {
+        val (fixture, historical) = newSchema2Fixture()
+        val resolving = CompletableDeferred<Unit>()
+        val resolveCancelled = CompletableDeferred<Unit>()
+        val releasing = CompletableDeferred<Unit>()
+        val permitRelease = CompletableDeferred<Unit>()
+        val resource = Resource { attempt ->
+            if (attempt == 1) {
+                releasing.complete(Unit)
+                permitRelease.await()
+                throw IllegalStateException("authored late historical resource release failed once")
+            }
+        }
+        fixture.gateway.onResolve = { binding, _, purpose ->
+            assertEquals(ResolvePurpose.PLAYBACK, purpose)
+            assertEquals(historical.binding, binding, "The external caller must resolve the exact preserved receipt")
+            resolving.complete(Unit)
+            try { awaitCancellation() }
+            catch (_: CancellationException) {
+                resolveCancelled.complete(Unit)
+                plan(binding).copy(uri = resource.localEndpoint.uri, resource = resource)
+            }
+        }
+        val revisionBefore = fixture.store.state.value.revision
+        supervisorScope {
+            // Deliberately external to the app's playback/download/effect jobs. Keeping this
+            // parent alive is the condition under test: app.close must cancel it through the
+            // real policy/online closed observer, not through fixture teardown.
+            val resolution = async {
+                fixture.app.resolver.resolveWithBinding(
+                    historical.item,
+                    fixture.platform.engine.capabilities,
+                    purpose = ResolvePurpose.PLAYBACK,
+                    reuseBindingId = historical.binding.id,
+                )
+            }
+            resolving.await()
+            val closing = async { runCatching { fixture.app.close() } }
+            try {
+                releasing.await()
+                assertTrue(resolveCancelled.isCompleted, "Final close must cancel the external historical resolver")
+                assertFalse(closing.isCompleted, "Close must await the retained resource cleanup")
+                assertFalse(resource.closed.isCompleted)
+                assertEquals(0, fixture.platform.runtimeCloseCalls.get())
+                assertEquals(0, fixture.platform.youtubeCloseCalls.get())
+                assertEquals(0, fixture.http.closeCalls.get())
+                assertIs<StoreStatus.Ready>(fixture.store.status.value)
+                assertFalse(fixture.app.dependencyReleaseSafeAfterClose)
+                fixture.store.flush().getOrThrow() // Room remains genuinely usable while cleanup is blocked.
+                assertTrue(fixture.platform.engine.preparations.isEmpty(), "No native handoff may occur")
+                assertTrue(fixture.platform.engine.calls.none { it.startsWith("prepare") })
+                assertTrue(fixture.store.state.value.revision >= revisionBefore,
+                    "Historical reuse must not roll the schema revision back")
+                assertEquals(1, fixture.store.state.value.playbackBindings.size,
+                    "Historical reuse must not fabricate a legacy binding row")
+            } finally { permitRelease.complete(Unit) }
+            assertFailsWith<CancellationException> { resolution.await() }
+            val failure = assertIs<VeyraException>(closing.await().exceptionOrNull())
+            fixture.expectedCloseFailure = failure.failure
+            assertEquals(AppFailure(FailureCode.UNEXPECTED), failure.failure)
+            assertNull(failure.cause)
+            assertFalse(failure.toString().contains("authored late historical resource release failed once"),
+                "The retained native failure must stay sanitized")
+        }
+        resource.closed.await()
+        assertEquals(2, resource.closeCalls.get(), "The retained resource is retried exactly once at explicit close")
+        val repeated = assertFailsWith<VeyraException> { fixture.app.close() }
+        assertEquals(fixture.expectedCloseFailure, repeated.failure)
+        assertNull(repeated.cause)
+        assertEquals(2, resource.closeCalls.get(), "A successfully drained resource must not be closed again")
+        assertEquals(1, fixture.platform.runtimeCloseCalls.get())
+        assertEquals(1, fixture.platform.youtubeCloseCalls.get())
+        assertEquals(1, fixture.platform.engine.closeCalls.get())
+        assertEquals(1, fixture.http.closeCalls.get())
+        assertEquals(StoreStatus.Closed, fixture.store.status.value)
+        assertEquals(1, fixture.gateway.resolutions.size, "One historical resolve, never a fresh acquisition")
+        assertEquals(historical.binding, fixture.gateway.resolutions.single().persisted)
+        assertEquals(ResolvePurpose.PLAYBACK, fixture.gateway.resolutions.single().purpose)
+        assertTrue(fixture.gateway.queries.isEmpty(), "No new first-result query is allowed")
+        assertTrue(fixture.gateway.transfers.isEmpty())
+        assertTrue(fixture.gateway.typedTransfers.isEmpty())
+        assertTrue(fixture.platform.validations.isEmpty())
+        assertEquals(0, fixture.platform.localValidations.get())
+        assertTrue(fixture.platform.engine.preparations.isEmpty())
+        AppContainerSchema2Fixture.assertPreserved(historical)
+        fixture.assertNoNetwork()
+    }
+
+    /**
+     * R12: the corresponding external historical-receipt OFFLINE control. The same migrated
+     * receipt is resolved from a caller outside playback/effects; switching offline must cancel
+     * that live caller through the real policy observer, close the late returned resource, and
+     * leave the application/dependencies open. This is distinct from final-close cancellation.
+     */
+    @Test fun offlineToggleCancelsExternalHistoricalResolverAndClosesLateResultBeforeNativeHandoff() = checkCase {
+        val (fixture, historical) = newSchema2Fixture()
+        val entered = CompletableDeferred<Unit>()
+        val cancelled = CompletableDeferred<Unit>()
+        val resource = Resource()
+        fixture.gateway.onResolve = { binding, _, purpose ->
+            assertEquals(ResolvePurpose.PLAYBACK, purpose)
+            assertEquals(historical.binding, binding, "Offline reuse must keep the exact historical receipt")
+            entered.complete(Unit)
+            try { awaitCancellation() }
+            catch (_: CancellationException) {
+                cancelled.complete(Unit)
+                plan(binding).copy(uri = resource.localEndpoint.uri, resource = resource)
+            }
+        }
+        val revisionBefore = fixture.store.state.value.revision
+        supervisorScope {
+            val resolution = async {
+                fixture.app.resolver.resolveWithBinding(
+                    historical.item,
+                    fixture.platform.engine.capabilities,
+                    purpose = ResolvePurpose.PLAYBACK,
+                    reuseBindingId = historical.binding.id,
+                )
+            }
+            entered.await()
+            fixture.app.changeSettings { it.copy(offlineOnly = true) }
+            fixture.store.state.first { it.settings.offlineOnly }
+            cancelled.await()
+            resource.closed.await()
+            assertFailsWith<CancellationException> { resolution.await() }
+        }
+        assertEquals(1, resource.closeCalls.get())
+        assertTrue(fixture.platform.engine.preparations.isEmpty(), "The late resource never reached native handoff")
+        assertTrue(fixture.platform.engine.calls.none { it.startsWith("prepare") })
+        assertEquals(AppInitialization.Ready, fixture.app.initialization.value)
+        assertIs<StoreStatus.Ready>(fixture.store.status.value, "Offline policy is not application shutdown")
+        assertFalse(fixture.app.retainedForCleanup)
+        assertEquals(0, fixture.platform.runtimeCloseCalls.get())
+        assertEquals(0, fixture.platform.youtubeCloseCalls.get())
+        assertEquals(0, fixture.platform.engine.closeCalls.get())
+        assertEquals(0, fixture.http.closeCalls.get())
+        assertEquals(1, fixture.gateway.resolutions.size)
+        assertEquals(historical.binding, fixture.gateway.resolutions.single().persisted)
+        assertTrue(fixture.gateway.queries.isEmpty(), "Reuse must not query a new first result")
+        assertTrue(fixture.gateway.transfers.isEmpty())
+        assertTrue(fixture.gateway.typedTransfers.isEmpty())
+        assertTrue(fixture.platform.validations.isEmpty())
+        assertEquals(0, fixture.platform.localValidations.get())
+        assertTrue(fixture.store.state.value.revision >= revisionBefore,
+            "Offline policy may persist settings but may not roll the schema revision back")
+        val view = fixture.store.acquisitionView()
+        assertEquals(mapOf(historical.binding.id to historical.binding), view.snapshot.playbackBindings)
+        assertEquals(1, view.acquisition.bindings.size, "No fresh execution binding may be written")
+        assertEquals(1, view.acquisition.receipts.size, "Only the migrated schema2 receipt exists")
+        assertTrue(view.acquisition.requests.isEmpty())
+        assertTrue(view.acquisition.occurrences.isEmpty())
+        assertTrue(view.acquisition.physicalDownloads.isEmpty())
+        assertTrue(view.acquisition.materializations.isEmpty())
+        assertTrue(view.acquisition.assetUses.isEmpty())
+        AppContainerSchema2Fixture.assertPreserved(historical)
+        fixture.assertNoNetwork()
+
+        // Cold reopen through the same production root: no recapture, no new work.
+        val preserved = view
+        fixture.app.close()
+        assertEquals(1, fixture.platform.runtimeCloseCalls.get())
+        assertEquals(1, fixture.platform.youtubeCloseCalls.get())
+        assertEquals(1, fixture.platform.engine.closeCalls.get())
+        assertEquals(1, fixture.http.closeCalls.get())
+        assertEquals(StoreStatus.Closed, fixture.store.status.value)
+        val reopened = newFixture(initialize = false)
+        assertIs<StoreStatus.Uninitialized>(reopened.store.status.value)
+        reopened.app.initialize()
+        assertEquals(AppInitialization.Ready, reopened.app.initialization.value)
+        val restored = reopened.store.acquisitionView()
+        assertEquals(preserved.snapshot.playbackBindings, restored.snapshot.playbackBindings)
+        assertEquals(preserved.acquisition.receipts, restored.acquisition.receipts)
+        assertEquals(preserved.acquisition.bindings, restored.acquisition.bindings)
+        assertEquals(historical.binding, restored.snapshot.playbackBindings.getValue(historical.binding.id))
+        assertTrue(restored.acquisition.requests.isEmpty())
+        assertTrue(restored.acquisition.occurrences.isEmpty())
+        assertTrue(restored.acquisition.physicalDownloads.isEmpty())
+        assertTrue(restored.acquisition.materializations.isEmpty())
+        assertTrue(restored.acquisition.assetUses.isEmpty())
+        assertTrue(reopened.gateway.queries.isEmpty())
+        assertTrue(reopened.gateway.transfers.isEmpty())
+        assertTrue(reopened.platform.engine.preparations.isEmpty())
+        AppContainerSchema2Fixture.assertPreserved(historical)
+        reopened.assertNoNetwork()
+        reopened.app.close()
+        assertEquals(1, reopened.platform.runtimeCloseCalls.get())
+        assertEquals(1, reopened.platform.youtubeCloseCalls.get())
+        assertEquals(1, reopened.platform.engine.closeCalls.get())
+        assertEquals(1, reopened.http.closeCalls.get())
+        assertEquals(StoreStatus.Closed, reopened.store.status.value)
     }
 
     @Test fun offlineToggleCancelsRunningGatewayCoroutineAndClosesLateResultBeforeNativeHandoff() = checkCase {
