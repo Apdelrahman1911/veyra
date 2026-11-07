@@ -1032,7 +1032,13 @@ class AppContainerIntegrationTest {
         fixture.assertNoNetwork()
     }
 
-    @Test fun finalCloseCancelsExternalResolverAndAwaitsItsLateRejectedResourceBeforeClosingDependencies() = checkCase {
+    /**
+     * App-owned typed resolver lifetime. The former external caller used the legacy
+     * `AppContainer.resolver`, which cannot acquire a schema-3 binding (legacy snapshot binding
+     * writes are intentionally rejected), so that entrypoint is no longer the app execution path.
+     * The controller-owned resolve below is the current legal external/UI route.
+     */
+    @Test fun finalCloseCancelsAppOwnedTypedResolveAndAwaitsItsLateRejectedResourceBeforeClosingDependencies() = checkCase {
         val fixture = newFixture()
         val resolving = CompletableDeferred<Unit>()
         val resolveCancelled = CompletableDeferred<Unit>()
@@ -1368,6 +1374,49 @@ class AppContainerIntegrationTest {
         assertEquals(2, canonical.requests.values.count { it.state == AcquisitionJobState.COMMITTED })
         assertEquals(2, canonical.bindings.size)
         assertEquals(other.id, fixture.app.playback.state.value.currentSelection?.catalogMedia?.id)
+        fixture.assertNoNetwork()
+    }
+
+    /**
+     * Stale/competing queue control for the Start Over chain. The playback-state selection is
+     * advisory; the authoritative current occurrence can move outside the controller. Start Over
+     * must neither reactivate the competing occurrence nor reuse the stale one. It falls back to
+     * the established fresh admission for the requested episode, and a binding/queue CAS failure
+     * after dispatch is never converted into a silent fallback.
+     */
+    @Test fun podcastStartOverWithACompetingQueueActivationDoesNotRestartTheWrongOccurrence() = checkCase {
+        val fixture = newFixture(initialize = false)
+        val original = item(id = "stale-start-original", title = "Original restart episode — الحلقة الأصلية")
+        val competing = item(id = "stale-start-competing", title = "Competing episode — حلقة منافسة")
+        val originalSelection = fixture.seedSelection(original)
+        fixture.seedQueue(originalSelection, PlaybackControlsMode.PODCAST, activate = true)
+        fixture.app.initialize()
+        assertEquals(PlaybackPhase.PAUSED, fixture.app.playback.state.value.phase)
+
+        // A competing canonical activation outside the playback owner. Both the advisory
+        // playback state and the authoritative queue can now disagree about the current
+        // occurrence; Start Over(original) must not prefer either stale binding.
+        val competingSelection = fixture.seedSelection(competing)
+        val competingOccurrence = fixture.seedQueue(competingSelection, PlaybackControlsMode.PODCAST, activate = true)
+        fixture.app.onPodcastAction(PodcastAction.StartOver(original.id))
+        val restarted = withTimeout(15_000) { fixture.platform.engine.prepared.receive() }
+        fixture.app.playback.state.first { it.currentItem?.id == original.id && it.isPlaying }
+        assertEquals(original, restarted.source.item)
+        val freshBinding = assertNotNull(restarted.source.executionBinding?.id)
+        assertNotEquals(originalSelection.bindingId.value, freshBinding)
+        assertNotEquals(competingSelection.bindingId.value, freshBinding)
+        assertEquals(listOf(original.title), fixture.gateway.queries.toList(),
+            "The disagreement admits the requested episode freshly; never the competing occurrence")
+        val canonical = fixture.store.acquisitionView().acquisition
+        val currentId = assertNotNull(canonical.queues.getValue(QueueContext.PODCAST).currentOccurrenceId)
+        assertNotEquals(competingOccurrence.id, currentId)
+        val current = canonical.occurrences.getValue(currentId)
+        assertEquals(original.id, current.subjectId?.value)
+        assertEquals(original.title,
+            canonical.requests.getValue(requireNotNull(current.requestId)).request.completeTitle)
+        assertEquals(competing.id, canonical.occurrences.getValue(competingOccurrence.id).subjectId?.value,
+            "The competing occurrence remains historical, never relabelled")
+        assertTrue(fixture.gateway.resolutions.none { it.purpose == ResolvePurpose.DOWNLOAD })
         fixture.assertNoNetwork()
     }
 
@@ -1843,21 +1892,26 @@ class AppContainerIntegrationTest {
                 rejectsAtTap { fixture.app.onPodcastAction(PodcastAction.Download(newPodcast.id)) }
                 rejectsAtTap { fixture.app.onMusicAction(MusicUiAction.ResumeDownload(musicJob)) }
                 rejectsAtTap { fixture.app.onPodcastAction(PodcastAction.ResumeDownload(podcastJob)) }
-                // Release the authored synchronous transform before reading Room: the old order
-                // awaited canonical reads inside the writer's own transaction and could only
-                // time out, which is not evidence about the production boundary.
-                permitActor.countDown()
-                fixture.store.state.first { it.settings.skipBackSeconds == 20 }
-                assertEquals(DownloadStatus.PAUSED, fixture.job(musicJob).status)
-                assertEquals(DownloadStatus.PAUSED, fixture.job(podcastJob).status)
-                assertEquals(DownloadBatchIntent.PAUSED, fixture.claim(musicJob).intent)
-                assertEquals(DownloadBatchIntent.PAUSED, fixture.claim(podcastJob).intent)
+                // Nonblocking inspection of the ALREADY-PUBLISHED view while the authored
+                // transform still holds the action actor AND Room's write transaction. Do not use
+                // acquisitionView()/job()/claim() here: they would wait for this writer.
+                val held = fixture.store.acquisitionViews.value.acquisition
+                assertEquals(DownloadStatus.PAUSED, held.physicalDownloads.getValue(musicJob).status)
+                assertEquals(DownloadStatus.PAUSED, held.physicalDownloads.getValue(podcastJob).status)
+                assertEquals(DownloadBatchIntent.PAUSED,
+                    held.claims.values.single { it.physicalJobId == musicJob }.intent)
+                assertEquals(DownloadBatchIntent.PAUSED,
+                    held.claims.values.single { it.physicalJobId == podcastJob }.intent)
                 fixture.assertNoDownloadExecution()
 
-                // Cancel remains admissible. Commit it BEFORE accepting coverage so an older
-                // rejected resume/download cannot wake up on the later successful ACK.
+                // Cancel remains admissible AT THE PUBLIC BOUNDARY WHILE THE ACTOR IS HELD.
+                // Commit it BEFORE accepting coverage so an older rejected resume/download cannot
+                // wake up on the later successful ACK. The effects wait on the writer; the intents
+                // are already accepted by submit/trySend and will commit as soon as it releases.
                 fixture.app.onMusicAction(MusicUiAction.CancelDownload(musicJob))
                 fixture.app.onPodcastAction(PodcastAction.CancelDownload(podcastJob))
+                permitActor.countDown()
+                fixture.store.state.first { it.settings.skipBackSeconds == 20 }
                 fixture.store.acquisitionViews.first { view ->
                     listOf(musicJob, podcastJob).all { id ->
                         val job = view.acquisition.physicalDownloads[id]
