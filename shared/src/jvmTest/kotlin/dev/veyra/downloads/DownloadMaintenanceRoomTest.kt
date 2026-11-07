@@ -345,59 +345,39 @@ class DownloadMaintenanceRoomTest {
         assertTrue(scheduler.dependencyReleaseSafeAfterClose)
     }
 
-    @Test fun completedMaintenanceCloseAndQueuedCallbackCannotSuspendAFreshTransfer() = acquisitionDownloadRoomCase {
-        val (store, port) = maintenancePortStore()
-        val owner = owner(store)
-        val seeded = prepareFinalizationSchema3(owner)
-        owner.validation = { AssetValidation.Valid(31_234) }
-        owner.denyFinalizationSchema3Acquisition()
+    @Test fun completedMaintenanceCloseAndQueuedCallbackCannotSuspendAFreshTransfer() = executorSchema3Case {
+        val owner = owner()
         val holding = barrier()
-        owner.gateway.transfer = { prepared, path, progress ->
-            holding.stop()
-            Files.write(Path.of(path), authoredBytes)
-            progress(AcquisitionTransferProgress(authoredBytes.size.toLong(), authoredBytes.size.toLong()))
-            AcquisitionTransferResult(prepared.context, authoredBytes.size.toLong(), prepared.representation)
-        }
+        owner.validation = { AssetValidation.Valid(31_234) }
+        val (recoveryId, _) = enqueue(owner)
+        val intent = recoveryIntent(owner, recoveryId)
+        advance(1_100) // Authored process-loss setup expires only its real canonical lease.
+        owner.gateway.transfer = { call -> holding.stop(); call.complete() }
         val a = owner.coordinator
         a.start(DownloadActivation.DURABLE_WORK)
-        awaitState(owner.store) { it.physicalDownloads[seeded.record.id]?.status == DownloadStatus.COMPLETE && owner.gate.closes.get() >= 1 }
-        owner.assertFinalizationSchema3Recovered(seeded)
+        val recovered = awaitJob(owner, recoveryId) { it.job.status == DownloadStatus.COMPLETE && it.asset != null }
+        assertEquals(intent.finalPath, assertNotNull(recovered.asset).uri)
+        assertEquals(0, owner.gateway.transfers.size, "Local recovery never issues a source transfer")
+        assertEquals(1, owner.selector.requests.size)
+        assertEquals(1, owner.gate.closes.get())
         val oldExpiration: suspend () -> Unit = owner.gate.expirations[0]
-        port.beforeTransform = { before ->
-            val fresh = before.state().physicalDownloads.filterKeys { it != seeded.record.id }
-            if (fresh.isNotEmpty()) owner.events += "tx-begin:" + fresh.values.joinToString {
-                "${it.status}/${it.representationId}/${it.stagingPath != null}"
-            }
-        }
-        port.beforeCommit = { _, next ->
-            owner.events += "commit-r${next.revision}"
-        }
-        val accepted = acceptNeutral(owner, "after-recovery", "AFTERRECOV1")
-        val id = enqueue(owner, accepted)
-        val enteredFresh = withTimeoutOrNull(10_000) { holding.entered.await(); true }
-        if (enteredFresh == null) {
-            val pending = join(owner, id)
-            fail("fresh transfer did not start: status=${pending.job.status} lease=${pending.job.leaseOwner} " +
-                "failure=${pending.job.failure} plan=${a.schedulingPlan()} last=${a.lastFailure.value} " +
-                "pendingWork=${a.hasPendingWork.value} scheduled=${a.schedulingPlan().nextNetworkEpochMs} " +
-                "events=${owner.events.toList()} validations=${owner.validations.size} " +
-                "producer=${pending.job.producer} staging=${pending.job.stagingPath} " +
-                "attempts=${pending.attempts.map { it.id + ':' + it.status + ':' + it.stagingPath }} " +
-                "context=${pending.producerContext} txFailure=${port.transformFailure?.let { it::class.java.name + ':' + it.message + ':' + it.stackTrace.take(6).joinToString("|") }}")
-        }
-        val before = owner.store.acquisitionView().acquisition.physicalDownloads.getValue(id)
+        val (id, selection) = enqueue(owner, item("after-recovery"), "AFTERRECOV1")
+        holding.entered.await()
+        val before = join(owner, id)
         oldExpiration()
         delay(160)
-        val after = owner.store.acquisitionView().acquisition.physicalDownloads.getValue(id)
-        assertEquals(DownloadStatus.RUNNING, after.status)
-        assertEquals(before.activeAttemptId, after.activeAttemptId)
-        assertEquals(before.leaseOwner, after.leaseOwner)
-        assertEquals(before.ownershipGeneration, after.ownershipGeneration)
+        val after = join(owner, id)
+        assertEquals(DownloadStatus.RUNNING, after.job.status)
+        assertEquals(before.job.activeAttemptId, after.job.activeAttemptId)
+        assertEquals(before.job.leaseOwner, after.job.leaseOwner)
+        assertEquals(before.job.ownershipGeneration, after.job.ownershipGeneration)
+        assertEquals(selection.context, after.producerContext)
         holding.release()
-        awaitState(owner.store) { it.physicalDownloads[id]?.status == DownloadStatus.COMPLETE }
+        complete(owner, id)
         assertEquals(1, owner.gateway.transfers.size)
-        assertEquals(2, owner.gate.closes.get())
         assertEquals(2, owner.gate.expirations.size)
+        assertEquals(2, owner.selector.requests.size, "The queued recovery callback cannot start a second selection")
+        assertTrue(owner.selector.requests.contains(selection.record.request))
         owner.legacy.assertUnused()
         a.close()
         assertTrue(a.dependencyReleaseSafeAfterClose)
