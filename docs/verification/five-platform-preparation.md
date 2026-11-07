@@ -3,11 +3,14 @@
 **Status: preparation only. No Gradle invocation, native build, package build, device/emulator/simulator operation, workflow dispatch, live-source check, or release publication was performed for this document.**
 
 - **Original preparation:** 2026-11-07T05:36:45Z UTC at `ec97925883f7a26765b7e3409ba5a81e358082b9`, in worktree `/root/.t3/worktrees/Veyra/t3-61a2201d` on branch `t3/five-platform-preparation-1`.
-- **Review correction applied:** 2026-11-07T06:40:57Z UTC, documentation-only.
+- **First review correction applied:** 2026-11-07T06:40:57Z UTC, documentation-only.
+- **Second (operational-retention) review correction applied:** 2026-11-07T07:17:36Z UTC, documentation-only.
 - **Correction base:** `5328be09b6e9abcba4ee4a9793b934116e4e86f5` — the reviewed merge of Room-foundations PR #2. It retains Room schema 2 and is **not** the final Task A gate.
-- **Original PR head merged for the correction:** `7d90520366f8a8fd4d8c6dec9d825f592dcafc14`.
+- **Original PR head merged for the first correction:** `7d90520366f8a8fd4d8c6dec9d825f592dcafc14`.
+- **Reviewed head merged for the second correction:** `a3584c6feed3120090ac7552cc05604b5fa4dfb2`; it includes `5328be09` and differs from it only by the two preparation documents. It was merged fast-forward into the supplied checkout.
 - **Integration merge:** `3bc09ca3665c656314b295a7d24fcf7eb7b70d13`; parents are `5328be09` and `7d90520`, and its tree against `5328be09` adds only the two original preparation documents (hashes `867d2eaa607431feb0ae08a4e523cb68dcc172007a825d2cab7897450c7e78a4` and `06d80bf59b728339f5eecc24df81591cef26d38c2e83891f1458cbffd24383c6`).
-- **Correction worktree/branch:** `/root/.t3/worktrees/Veyra/t3-8cb909e8`, local `t3/correct-ios-preparation-docs`; corrections are pushed to the existing PR branch `t3/five-platform-preparation-1`.
+- **First correction worktree/branch:** `/root/.t3/worktrees/Veyra/t3-8cb909e8`, local `t3/correct-ios-preparation-docs`.
+- **Second correction worktree/branch:** `/root/.t3/worktrees/Veyra/t3-96ca78c0`, local `t3/pr3-retention-gating`; corrections from both passes are pushed to the existing PR branch `t3/five-platform-preparation-1`.
 - **Repository:** <https://github.com/Apdelrahman1911/veyra> (public)
 - **Integration branch and PR base:** `feat/veyra-integration`
 - **Preparation branch:** `t3/five-platform-preparation-1`
@@ -19,7 +22,7 @@
 
 This runbook is the source-verified execution plan for **Task B**. Task B may start only after the lead supplies the precise reviewed, merged and validated **Task A** integration SHA. The first Room-foundations PR (`5328be09`, schema 2) is not that gate: typed schema-3/download-recovery integration and regressions remain pending beyond it. Do not treat `ec97925` or `5328be09` as the final revision and do not package either as one.
 
-This review correction did not re-run the 43-file input manifest, any Gradle/native/package operation, legal regeneration, workflow dispatch, simulator/device operation, or publication. It inspected the relevant source definitions, the two complete preparation documents, and the existing PR/integration ancestry; it records source facts separately from original preparation provenance.
+The review corrections did not re-run the 43-file input manifest, any Gradle/native/package operation, legal regeneration, workflow dispatch, simulator/device operation, or publication. The second correction additionally rechecked the complete 100-task dependency graph, the operational-retention prerequisites, the publication ancestor set, the iOS candidate-test metadata, and the relevant source definitions. It records source facts separately from original preparation provenance.
 
 ---
 
@@ -60,7 +63,7 @@ The existing real-source and physical-audio release holds remain visible and unm
 
 ### 1.4 Launch configuration and attestation
 
-The original preparation and this review correction ran as **`opencode-go/deepseek-v4.1-flash`** (DeepSeek 4.1 Flash), as displayed by the harness. The lead requested **variant `max`**. The harness exposes the model/provider identity in this session but provides **no independent runtime/back-end or variant attestation**. I therefore record the accepted launch configuration and the attestation limit, and I do not claim a stronger runtime identity. The older `AGENTS.md` GPT-6 Astra allocation is superseded by the explicit owner preference for this task. No subagents were created; both the original preparation and this correction were done directly in the assigned checkout. The correction made no build, native, workflow, generated-resource, legal-regeneration, or publication action.
+The original preparation and both review corrections ran as **`opencode-go/deepseek-v4.1-flash`** (DeepSeek 4.1 Flash), as displayed by the harness. The lead requested **variant `max`**. The harness exposes the model/provider identity in this session but provides **no independent runtime/back-end or variant attestation**. I therefore record the accepted launch configuration and the attestation limit, and I do not claim a stronger runtime identity. The older `AGENTS.md` GPT-6 Astra allocation is superseded by the explicit owner preference for this task. No subagents were created; all three preparation/correction runs were done directly in the assigned checkout. The corrections made no build, native, workflow, generated-resource, legal-regeneration, or publication action.
 
 ---
 
@@ -99,7 +102,19 @@ The submodule checkout is present in this isolated worktree at the pinned revisi
 | Original document hashes at the merge | md `867d2eaa607431feb0ae08a4e523cb68dcc172007a825d2cab7897450c7e78a4`; JSON `06d80bf59b728339f5eecc24df81591cef26d38c2e83891f1458cbffd24383c6` | `git show 3bc09ca:<path> \| sha256sum` |
 | Worktree before authoring | clean | `git status --porcelain=v2` |
 
-The original 43-file manifest was **not** re-run for this correction. The correction rechecked only the source/task facts it changed and the integration ancestry above; rehash the final Task A inputs afresh.
+**Second (operational-retention) correction checkout state:**
+
+| Fact | Observed value | Source / command |
+|---|---|---|
+| Worktree | `/root/.t3/worktrees/Veyra/t3-96ca78c0` | `pwd`, `git rev-parse --show-toplevel` |
+| Local branch | `t3/pr3-retention-gating`; pushed to `t3/five-platform-preparation-1` | `git branch --show-current`, push refspec |
+| Starting parent | `5328be09b6e9abcba4ee4a9793b934116e4e86f5` | `git rev-parse HEAD` before fast-forward |
+| Reviewed PR head merged | `a3584c6feed3120090ac7552cc05604b5fa4dfb2`; parents include `3bc09ca` | `git rev-parse HEAD`, `git rev-list --parents -n 1` |
+| Merge result | fast-forward `5328be0..a3584c6`; tree against `5328be09` adds only the two preparation documents | `git merge --ff-only`, `git diff --name-status 5328be09..HEAD` |
+| Reviewed-head document hashes at the merge | md `19038370066d4a5ad43c8d7f85790a9ee592bb7b5452fe5b9ecf934ae804cf9a`; JSON `e9e1f994945e5bde21323705ac6ad7bfee2d2e97a1e255eefc8cbea1cc0f1dc1` | `sha256sum` |
+| Worktree before authoring | clean; 0 tracked/untracked changes | `git status --porcelain=v1 -uall` |
+
+The original 43-file manifest was **not** re-run for either correction. The second correction rechecked only the source/task facts it changed, the complete task graph and the integration ancestry above; rehash the final Task A inputs afresh.
 
 ### 2.2 Inspected paths
 
@@ -210,7 +225,7 @@ The most critical hash prefixes verified independently in this worktree (full va
 
 **This table is an inspection aid, not the authority.** The authority is the lead manifest above; rehash the final Task A SHA inputs afresh. Do not reuse these hashes as evidence for a later revision.
 
-The review correction did not re-run the 43/43 manifest. It verified the correction-base/merge ancestry, the two original document hashes, and the specific iOS/retention/preflight source definitions cited below. Those are source inspections, not a new 43-file attestation or execution evidence.
+Neither review correction re-ran the 43/43 manifest. They verified the correction-base/merge ancestry, the original and reviewed document hashes, and the specific iOS/retention/preflight source definitions cited below. The second correction additionally verified the full 100-task graph and the 40 remote-ephemeral retention prerequisites. Those are source/document inspections, not a new 43-file attestation or execution evidence.
 
 ### 2.4 Current source-only legal-resource blocker (important)
 
@@ -232,7 +247,7 @@ Cause: root `NOTICE.md` at `ec97925` contains the newer kmpYT merge/pin text, bu
 
 Consequence: a **clean checkout of `ec97925` fails `scripts/ci.sh` before any build**, because `ci.sh` runs `scripts/package-notices.py --check` unconditionally. The final Task A SHA must either (a) include an explicitly reviewed regeneration commit for these three deterministic files, or (b) Task B must regenerate them in the disposable build workspace before invoking `ci.sh`, and record the diff/hashes. Option (a) is required for clean-checkout reproducibility; option (b) is acceptable only as a build-workspace step and must not be committed silently. This is a **P0 gate**, not a warning.
 
-Do not copy the parent’s unstaged files into this preparation branch. They are evidence of the intended regeneration, not a source commit. The correction base `5328be09` does not reconcile this stale source-only legal baseline; the original P0 finding remains open and is not hidden by the documentation correction.
+Do not copy the parent’s unstaged files into this preparation branch. They are evidence of the intended regeneration, not a source commit. The correction base `5328be09` does not reconcile this stale source-only legal baseline; the original P0 finding remains open and is not hidden by either documentation correction. The second correction did not copy, alter, stash, reset, regenerate or commit these three tracked previews; they remain byte-identical to the recorded committed hashes.
 
 Minimal future repair (separate reviewed commit, not this preparation): run `scripts/dev.sh python3 -B scripts/package-notices.py` in a clean final checkout, run `--check`, inspect the three-file diff, and stage only those generated files. If the final Task A SHA changes the source notice text, the expected hashes change; re-record them. This is a deterministic source-derived regeneration, not a silent generated-file sweep.
 
@@ -561,23 +576,26 @@ scripts/dev.sh python3 -B native/ffmpeg/test_build.py
 
 These are authored archive/scope/receipt/process tests; they do not compile or execute the native production helper/FFmpeg.
 
-### 6.3A Gate 2A — pre-build retention design/availability (remote ephemeral builds)
+### 6.3A Gates 2A/2B — retention design and operational route before remote ephemeral builds
 
-No remote/ephemeral production build may start until **B-RET-01** is approved. This gate is deliberately **before** Gate 3 and **must not depend on final package, legal or native outcomes**; otherwise the plan would require the artifacts in order to decide how to keep them.
+No remote/ephemeral production build, package, native build or test-build job may start until **both** retention prerequisites are satisfied:
 
-Required design/availability evidence for B-RET-01:
+1. **B-RET-01 — approved design/availability.** An existing, approved, free, policy-compliant route is recorded, including storage location, per-asset/per-run size limits, retention period, access permissions, retrieval and independent hash readback. A printed runner path, a local `.work` directory or an assumed Actions artifact allowance is not a route.
+2. **B-RET-02 — operational implementation plus a successful non-production canary.** A separately reviewed workflow/tooling change implements the route, and a small non-release artifact plus log/XML and metadata is actually retained, independently downloaded and SHA-256 matched. **A design approval alone is not an operational retention route.** No final package is used as the canary.
 
-- An existing, approved, free, policy-compliant route that can preserve, from each runner: the exact package bytes; build logs and JUnit XML; source commit, kmpYT pin, versions and host metadata; generated legal hashes; and a SHA-256 manifest.
-- Storage location, per-asset/per-run size limits, retention period, access permissions and independent retrieval/readback procedure. A printed runner path, a local `.work` directory or an assumed Actions artifact allowance is not a route.
-- Explicit separation of planning/availability (B-RET-01), implementation plus a non-production canary (B-RET-02), actual final-set retention and readback (B-RET-03), and public publication (B-DIST-01/02/03).
+The dependency graph makes B-RET-02 a direct prerequisite of every listed remote-ephemeral build/package/native/test row, including test rows that create required JUnit XML or logs. B-RET-01 and B-RET-02 depend only on the retention design/implementation; they deliberately do **not** depend on final packages, global regression or publication, so no cycle or pre-publication disclosure gate is introduced.
 
-Current state: the workflow is manual `workflow_dispatch` only, `permissions: contents: read`, with no `upload-artifact`, cache or release/publish step; no Veyra workflow run or release exists. No owner-approved retention route is recorded. **B-RET-01 is therefore blocked**, and all platform build tasks list it as a direct or prerequisite ancestor. The documented public-GitHub-Release option in §10 is a candidate requiring separate owner authorization and a reviewed trusted workflow; it is not implemented or approved by this preparation.
+**Per-runner capture is mandatory before teardown.** Each remote job must capture, checksum and transfer its own packet before the runner is destroyed: the exact produced package/artifact bytes where applicable; command/build/test logs; actual JUnit XML where tests ran; the exact source commit, kmpYT pin, tool versions and host metadata; generated legal hashes/inventories where applicable; and a SHA-256 manifest. On failure or cancellation, preserve the available partial diagnostics, mark the packet incomplete, and never convert it into a successful final-artifact record. Per-runner staging/capture is not cross-platform acceptance.
 
-Local authorized work that keeps evidence inside this repository’s `.work` has a different lifetime: it can support a local build/debug run, but it is not durable distribution, cannot preserve an ephemeral remote runner, and cannot satisfy B-RET-03 or publication. Local-only work does not become a Task B production/publication claim and remains subject to the lead’s separate authorization. A generic retention gate must not be used to block unrelated local development that is outside this checklist.
+**B-RET-03 is later aggregation and independent readback.** It verifies the already-retained per-runner packets and the actual final artifact/evidence set after the applicable final-package/legal/regression gates. It must not be the first attempt to copy files from a runner that has already exited.
+
+Current state: the workflow is manual `workflow_dispatch` only, `permissions: contents: read`, with no `upload-artifact`, cache or release/publish step; no Veyra workflow run or release exists. No owner-approved retention route is recorded, implemented or canaried. **B-RET-01 and B-RET-02 are therefore blocked**, and every listed remote build/package/native/test row carries B-RET-02 as a direct prerequisite. The documented public-GitHub-Release option in §10 is a candidate requiring separate owner authorization and a reviewed trusted workflow; it is not implemented or approved by this preparation.
+
+**Local build-only exception (separate lifetime).** Lead-coordinated local Task B work that keeps evidence inside this repository’s ignored `.work` does not require the remote route design/canary: it must record its command, timestamps, exit, logs/XML, artifact hashes and inputs locally and label the evidence local-only. It never satisfies durable remote retention, remote-runner recovery, B-RET-03, publication or all-five-platform completion, and it still starts from the accepted final Task A SHA. A missing remote route must not be used to invent an owner permission gate for already-authorized local build work. A generic retention gate must not block unrelated local development outside this checklist.
 
 ### 6.4 Gate 3 — prerequisite build on each target
 
-This is the first build, not the final package. It produces the local artifacts that the inventory task requires. Do not treat its package bytes as final. Any remote/ephemeral execution additionally requires the approved retention route (B-RET-01); local authorized work may use `.work` but cannot claim durable remote retention or publication.
+This is the first build, not the final package. It produces the local artifacts that the inventory task requires. Do not treat its package bytes as final. Any remote/ephemeral execution additionally requires the approved design route and the implemented, canaried operational route (B-RET-01 + B-RET-02), and must capture/checksum/transfer its own packet before teardown. Lead-coordinated local authorized work may use `.work` under the separate local lifetime, but cannot claim durable remote retention or publication.
 
 Platform commands are in §7. In general:
 
@@ -727,13 +745,14 @@ After the final rebuild, re-run the integrated regression matrix against the **s
 
 The lead independently inspects the complete docs/diff/source references and evidence. Exactly one platform lane owns each result packet. The lead resolves disagreements with evidence.
 
-Retention is split into three stages so a late decision cannot discard ephemeral outputs:
+Retention is split into three gate stages plus mandatory per-runner capture so a late decision cannot discard ephemeral outputs:
 
-1. **B-RET-01 — design/availability before builds.** No remote/ephemeral production build starts until an approved free route is recorded (§6.3A). This gate does not depend on final artifacts and is currently blocked.
-2. **B-RET-02 — implementation and non-production canary.** A separately reviewed workflow/tooling change proves that a small non-release artifact, log/XML and metadata can be retained and independently read back. This PR does not implement it.
-3. **B-RET-03 — actual final-set retention.** After the final packages, regression evidence and legal asset set exist, retain the exact package, logs/XML, source/pin/version/host metadata and SHA-256 manifest, then independently download and hash-match the actual bytes.
+1. **B-RET-01 — design/availability before builds.** No remote/ephemeral production build starts until an approved free route is recorded (§6.3A), including the per-runner capture procedure and failure/cancellation diagnostics. This gate does not depend on final artifacts and is currently blocked.
+2. **B-RET-02 — implementation and non-production canary.** A separately reviewed workflow/tooling change implements the route and proves that a small non-release artifact, log/XML and metadata can be captured, transferred and independently read back. This PR does not implement it. B-RET-02 is a mandatory prerequisite of every remote-ephemeral build/package/native/test row; design approval alone does not unblock a build.
+3. **Per-runner capture before teardown (part of each remote row).** Each remote job captures, checksums and transfers its own artifact/log/XML/metadata/legal/manifest packet before the runner exits. Failure/cancellation packets are preserved as partial diagnostics and marked incomplete, never as successful final records. Per-runner capture is staging, not cross-platform acceptance.
+4. **B-RET-03 — aggregation and independent final-set readback.** After the final packages, regression evidence and legal asset set exist, B-RET-03 aggregates the already-retained per-runner packets and independently downloads and hash-matches the actual final package/log/XML/source/pin/version/host/legal metadata and SHA-256 manifests. It is not the first capture/transfer and cannot rely on a vanished runner path; missing or incomplete packets fail the gate.
 
-Local `.work` files are evidence of a local run, not durable remote retention or distribution. The current workflow has no artifact-upload/cache/release action. Publication is a separate gated action: lead review/evidence seal (`B-REV-01`, `B-REV-03`) → publication authorization (`B-DIST-01`) → publication (`B-DIST-02`) → independent retrieval (`B-DIST-03`) → final matrix/recording (`B-REV-02`). Do not create tags/releases or change workflow permissions during Task B preparation or execution unless the owner separately authorizes it (§10). Publication cannot precede integrated regression, native smoke or a blocking status, package/legal inspection, and actual retained bytes.
+Local `.work` files are evidence of an authorized local run, not durable remote retention or distribution. The local-build-only exception in §6.3A is separate: it does not require the remote route and survives a missing remote retention design, but it never satisfies B-RET-03, publication or all-five-platform completion. The current workflow has no artifact-upload/cache/release action. Publication is a separate gated action: lead review/evidence seal (`B-REV-01`, `B-REV-03`) → publication authorization (`B-DIST-01`) → publication (`B-DIST-02`) → independent retrieval (`B-DIST-03`) → final matrix/recording (`B-REV-02`). Do not create tags/releases or change workflow permissions during Task B preparation or execution unless the owner separately authorizes it (§10). Publication cannot precede integrated regression, native smoke or a blocking status, package/legal inspection, and actual retained bytes.
 
 ---
 
@@ -866,7 +885,7 @@ The canonical inventory label is `x64`; `build-ios.sh` derives its suffix from `
 - Candidate (not verified, task existence/behavior must be confirmed before execution):
   - arm64 (`macos-15`): `scripts/gradle.sh :shared:iosSimulatorArm64Test :composeApp:iosSimulatorArm64Test`
   - x64 (`macos-15-intel`): `scripts/gradle.sh :shared:iosX64Test :composeApp:iosX64Test`
-  These names are derived from the declared KMP targets but were not confirmed by Gradle discovery or execution. Do not claim the tasks exist, run, or produce XML until a matching-host run proves it.
+  These names are derived from the declared KMP targets but were not confirmed by Gradle discovery or execution. Do not claim the tasks exist, run, or produce XML until a matching-host run proves it. The checklist therefore records `B-IOS-03`/`B-IOS-03X` with `existingEntrypoint: false`, empty `commands` and blocked status; only the `:compileTestKotlin...` tasks in `ci.sh` are existing compile entrypoints, not test execution.
 - Candidate simulator smoke (not an existing script; requires review), run separately per architecture:
 
   ```sh
@@ -1293,7 +1312,7 @@ Priorities: **P0** blocks a truthful final build/native verification/distributio
 | G-07 | P0 | Windows native toolchain (GNU make/MSVC env) unproven; FFmpeg/session helper not built | Preflight first. If a tool is missing, stop. A repository-local portable tool acquisition needs separate review; no `choco`/`pacman`. | `native/bundle.py --target windows-x64` exit 0; `dumpbin` architecture; `ffmpeg --verify-output`; MSI built |
 | G-08 | P0 | Windows scoped `LOCALAPPDATA`/Chromium known-folder risk; diagnostic did not launch browser | Minimal reviewed fix creating the scoped `AppData\Local`/helper home (likely `scripts/env.sh` or desktop runtime), with a focused test; do not claim the old diagnostic was the sole cause. | Browser/helper startup test in scoped Windows environment; no live source required for packaging; failure classified |
 | G-09 | P0 | Windows Authenticode and macOS Developer ID/notarization absent; unsigned downloads blocked | Owner decision/provisioning. If provided, add nested-signing order (helper/FFmpeg then app then DMG), notarize/staple; never disable Gatekeeper. | `codesign --verify --deep --strict`, `spctl`/notary acceptance, or explicit unsigned limitation |
-| G-10 | P0 | Pre-build retention design absent; workflow has no upload/cache/release; ephemeral runner paths vanish; B-RET-01 is blocked | First approve a free retention design/availability route (B-RET-01) before remote builds; implement it plus a non-production canary separately (B-RET-02); then retain the actual final set and verify readback (B-RET-03). Candidate only: trusted `contents:write` job to a public GitHub Release, no Actions artifact storage; owner authorization required. Do not change permissions in Task B without authorization. | Approved route + canary retained/read back; actual final package/log/XML/metadata/manifests retained, independently downloaded and SHA-256 matched; source/notices included; no secrets/media |
+| G-10 | P0 | Pre-build retention design and operational route absent; workflow has no upload/cache/release; ephemeral runner paths vanish; B-RET-01/02 are blocked | First approve a free retention design/availability route (B-RET-01) before remote builds; implement it plus a non-production canary and independent readback separately (B-RET-02) before any remote build/test job; capture/checksum/transfer each runner's packet before teardown; aggregate and independently verify the actual final set later (B-RET-03). Candidate only: trusted `contents:write` job to a public GitHub Release, no Actions artifact storage; owner authorization required. Do not change permissions in Task B without authorization. | Approved route + implemented canary retained/read back; every remote runner packet captured before teardown including partial failure diagnostics; actual final package/log/XML/metadata/manifests aggregated, independently downloaded and SHA-256 matched; source/notices included; no secrets/media |
 | G-11 | P0 | Chromium/Node helper legal closure incomplete; sample credits only | Legal/release decision; if helpers are delivered, build exact helper inventories + original source/terms + complete-set review. No fake receipts. | `--helper-inventory` accepted with reviewed evidence; or explicit non-redistribution/on-demand limitation documented |
 | G-12 | P0 | Physical audio/crossfade and live-source release holds remain | Separate owner/hardware work, outside Task B. Do not relax. | Physical evidence on each supported platform; not mockable |
 | G-13 | P1 | `package-manifest.py` scans pre-existing packages; no source/commit binding | Add `--expected`/`--build-started-at`/`--source-sha` and record commit/pin/task; or operator binds pre/post scans. Files: `scripts/package-manifest.py`, new focused test; add to `ci.sh` only if reviewed. | Stale package rejected; new artifact bound to commit/command; test covers pre-existing file |
@@ -1311,7 +1330,7 @@ Ask only where code/evidence cannot decide:
 1. **Apple signing identity/team/profile** for an installable iOS IPA/TestFlight/App Store build — or explicit acceptance of simulator-only/unsigned device artifacts with the distribution gate left incomplete.
 2. **Android production signing key/alias/passwords** for a store-ready APK/AAB — or explicit debug-only/unsigned limitation.
 3. **Windows Authenticode and macOS Developer ID/notarization credentials** — or explicit unsigned/SmartScreen/Gatekeeper limitation.
-4. **Retention route and publication authorization** — approve a free durable retention design/availability route before remote builds, implement it separately with a canary, then authorize publication of the exact retained artifact set via a trusted `contents:write` release job/public GitHub Release (zero-purchase) or an owner-approved retrieval alternative. These are distinct decisions/stages; neither implies the other.
+4. **Retention route and publication authorization** — approve a free durable retention design/availability route before remote builds, then separately review/implement it with a non-production canary and independent readback before any remote build/test job; each runner must capture its packet before teardown; then aggregate/verify the actual retained set and authorize publication of those exact artifacts via a trusted `contents:write` release job/public GitHub Release (zero-purchase) or an owner-approved retrieval alternative. These are distinct decisions/stages; neither implies the other, and the local `.work` exception is not a remote route.
 5. **External clean installation environment** (Windows VM, macOS machine, Ubuntu/device) for actual installer/device verification, or explicit acceptance that only extraction/launch smoke is available.
 6. **Helper/legal strategy** for on-demand Node/Chromium delivery (enroll reviewed notices/source or document why they are not redistributed) and corresponding-source delivery for libmpv/FFmpeg/JDK.
 7. **Physical-audio/live-source holds** — separate hardware/source work; not Task B.
@@ -1326,9 +1345,10 @@ Current state: `.github/workflows/verify.yml` has `permissions: contents: read` 
 
 Retention stages, in order:
 
-1. **B-RET-01 — design/availability (blocked).** Before any remote ephemeral production build, record an existing approved, free, policy-compliant route. It must identify the durable location, asset/size limits, permissions, retention period, retrieval and independent hash readback, and cover package bytes, logs/XML, source/pin/version/host metadata and SHA-256 manifests. This gate is deliberately independent of final package/legal/native outcomes.
-2. **B-RET-02 — implementation and canary (blocked).** A separately reviewed workflow/tooling change, not this documentation PR, proves a small non-release artifact plus log/XML/metadata can be retained and independently read back. No paid storage, secrets, tag or publication.
-3. **B-RET-03 — actual final-set retention (blocked).** After the final packages, regression evidence and legal asset set exist, retain the exact bytes and metadata, then independently download and hash-match them. An intended upload or `.work` path is not actual retention.
+1. **B-RET-01 — design/availability (blocked).** Before any remote ephemeral production build, record an existing approved, free, policy-compliant route. It must identify the durable location, asset/size limits, permissions, retention period, retrieval and independent hash readback, and cover package bytes, logs/XML, source/pin/version/host metadata and SHA-256 manifests. It must also define the per-runner capture/checksum/transfer procedure and failure/cancellation diagnostics. This gate is deliberately independent of final package/legal/native outcomes.
+2. **B-RET-02 — implementation and canary (blocked).** A separately reviewed workflow/tooling change, not this documentation PR, implements the route and proves a small non-release artifact plus log/XML/metadata can be captured, transferred and independently read back. Every remote-ephemeral build/package/native/test row has B-RET-02 as a direct prerequisite; design approval alone cannot unblock a build. No paid storage, secrets, tag or publication.
+3. **Per-runner capture before teardown (part of every remote row).** Each remote job captures, checksums and transfers its own exact package/artifact bytes where applicable, logs, actual JUnit XML, source/pin/version/host metadata, generated legal hashes/inventories and SHA-256 manifest before the runner exits. On failure/cancellation, preserve the available partial diagnostics, mark the packet incomplete and never record it as a successful final artifact. This is staging, not cross-platform acceptance.
+4. **B-RET-03 — aggregation and independent final-set readback (blocked).** After the final packages, regression evidence and legal asset set exist, aggregate the already-retained per-runner packets and independently download/hash-match the actual final bytes and metadata. It is not the first capture/transfer and cannot rely on a vanished runner path. An intended upload or `.work` path is not actual durable retention.
 
 The documented zero-purchase **candidate** for later authorization is:
 
@@ -1339,7 +1359,7 @@ The documented zero-purchase **candidate** for later authorization is:
 
 Publication is a separate gated action after the evidence path above: `B-REV-01` independent review of the exact artifacts, `B-REV-03` seal, `B-DIST-01` owner/lead authorization, `B-DIST-02` publication, `B-DIST-03` independent retrieval/hash check, then `B-REV-02` final matrix recording. Do not create a tag/release or change workflow permissions in Task B without owner authorization. Publication cannot precede integrated regression B-REG-06, native smoke evidence or a blocking status, package inspection, legal acceptance of the exact artifacts with no open notice/source/redistribution blocker, actual retained bytes and signing/installability classification; a recorded legal blocker prevents publication of the affected artifacts and `binaryRedistributionReady` stays false. Publication does not satisfy the physical-audio or live-source holds.
 
-Local `.work` evidence is scoped to a local checkout and has a different lifetime from remote-runner retention. Task B can still produce and verify local Linux/Android artifacts there under separate lead authorization, but Windows/macOS/iOS artifacts from ephemeral runners cannot be retained or published without an approved route. That is a distribution blocker, not a packaging success. All five target rows are required for a completion claim; any partial/intended subset needs a separate explicit lead/owner exception that records the blocked rows and is not labeled complete.
+Local `.work` evidence is scoped to a local checkout and has a different lifetime from remote-runner retention. The explicit local-build-only exception (§6.3A) lets lead-coordinated local Linux/Android work continue from the accepted final Task A SHA without inventing a remote-route owner gate; it must still capture its local command/log/XML/artifact hashes and remains local-only. It never satisfies durable remote retention, B-RET-03, publication or all-five-platform completion. Windows/macOS/iOS artifacts from ephemeral runners cannot be retained or published without the approved operational route. That is a distribution blocker, not a packaging success. All five target rows are required for a completion claim; any partial/intended subset needs a separate explicit lead/owner exception that records the blocked rows and is not labeled complete.
 
 ---
 
@@ -1358,12 +1378,16 @@ Local `.work` evidence is scoped to a local checkout and has a different lifetim
 
 ## 12. Validation of this preparation
 
-Performed for the original preparation and this documentation-only review correction:
+Performed for the original preparation and both documentation-only review corrections:
 
 - JSON parseability, unique task IDs, dependency resolution, no self-dependency and an acyclic complete graph for `docs/verification/five-platform-execution-checklist.json`; summary counts derived from the actual 100 task statuses.
 - Architecture checks for both iOS simulator rows: host `uname -m`, Kotlin target, existing compile task, candidate test task, inventory target/output, DerivedData/receipt suffix and notice input all match; the device `ios-arm64` row remains separate.
 - Publication transitive-ancestor check: publication requires same-input regressions, native smoke or a blocking status, package/legal inspection, independent lead review, actual retained bytes and signing/installability classification; no cycle or path skips the required evidence.
-- Remote pre-build/build tasks have the retention-design gate `B-RET-01` as a direct or prerequisite ancestor; `B-RET-01` has no final-artifact dependency. Actual retention and publication are later separate tasks.
+- Every one of the 40 remote-ephemeral build/package/native/test rows has the operational-retention gate `B-RET-02` as a direct ancestor (and therefore `B-RET-01` transitively); the 24 lead-identified build/package rows are all included. `B-RET-01`/`B-RET-02` have no final-artifact, global-regression or publication dependency.
+- Per-runner capture/checksum/transfer is required before teardown for each remote row, with partial failure/cancellation diagnostics; `B-RET-03` is only aggregation and independent readback of already-retained packets, not first capture.
+- A negative document-graph case removes `B-RET-02` from a representative package row and from a representative test-build row and confirms the validator fails in both cases; the original document is restored and only the validator result is retained.
+- The local-build-only exception is explicitly independent of the remote route and cannot satisfy durable retention, publication or five-platform completion.
+- `B-IOS-03`/`B-IOS-03X` record `existingEntrypoint=false` with empty `commands` and candidate task names; no Gradle task existence is inferred from KMP naming.
 - Linux preflight memory command reads `/proc/meminfo`; Linux-only probes are separated from macOS/Windows candidate probes.
 - Every changed repository path/task/CLI name checked against source, or explicitly labeled candidate/unverified/absent.
 - `git diff --check` for whitespace/errors.
@@ -1372,7 +1396,7 @@ Performed for the original preparation and this documentation-only review correc
 - Offline source-only notice check was not re-run in the correction; the original real failure at the stale generated legal resources (§2.4) remains recorded, not waived.
 - No Gradle/native/package/device/emulator/simulator/workflow/legal-regeneration/publication operation was run. Bounded document validators are tests of the documents, not a platform build.
 
-Correction validation evidence (ignored, not committed): `.work/validation/validate.py` exited 0 with 100 unique tasks, 28 blocked / 67 not-run / 1 inspected / 1 configured / 3 excluded / 0 executed, 24 build/package tasks with a `B-RET-01` ancestor, and 88 publication-path ancestors checked. `.work/validation/preflight-linux.txt` records the bounded read-only Linux preflight, including the `awk ... /proc/meminfo` operand. These validate document semantics only; no platform build/test/native result is inferred.
+Correction validation evidence (ignored, not committed): `.work/validation/validate.py` (SHA-256 `ce3cb5d407a7aeb77bf25944f5e5328fa2d007e7bc26706742c5271718ce9464`) exited 0 with 1,110 checks passed and 0 failed: 100 unique tasks, 28 blocked / 67 not-run / 1 inspected / 1 configured / 3 excluded / 0 executed, 40 remote-ephemeral tasks each with a direct `B-RET-02` dependency and no final/publication ancestor on the retention gates, all 24 lead-identified build/package rows included, and the full publication ancestor chain checked. The negative case (`.work/validation/negative_check.py`, SHA-256 `b45f1835ed35d062138d5b353a9620ab56f0bc51d8fb822af622ed35e0f7a668`) removed `B-RET-02` from the package path `B-IOS-02`/`B-IOS-06`/`B-IOS-07` and separately from test-build row `B-WIN-02`; the validator exited 1 in both cases (4 and 2 failed checks respectively), and the original document was not modified. `.work/validation/result-retention-correction.json` records the argv, timestamps, exits, counts and output hashes; `.work/validation/result-retention-correction.txt` and `result-negative-cases.txt` are the captured outputs. These validate document semantics only; no platform build/test/native result is inferred.
 
 Acceptance of this preparation is documentation review, not Task B completion. Task B remains unexecuted until the lead supplies the final Task A SHA and separately authorizes the build/native/distribution work.
 
@@ -1424,8 +1448,9 @@ The companion file `docs/verification/five-platform-execution-checklist.json` co
 - `statusVocabulary` with definitions for `inspected`, `configured`, `blocked`, `not-run`, `executed-passed`, `executed-failed`, `excluded`.
 - `verificationLevels` (1–9 as in §5.1).
 - `platforms` with runner labels, architectures and artifact contracts; the iOS platforms include `architectureDetails` mapping host `uname -m` to Kotlin target, inventory label/file and build suffix.
-- `reviewCorrections` mapping the four correction findings to tasks and runbook sections.
-- `tasks` (100) with unique IDs, `platform`, `title`, `category`, `inScope`, `status`, `verificationLevel`, `dependsOn`, optional `host`, `existingEntrypoint`, `commands`, `candidateCommands`, `artifacts`, `blockers`, `acceptance`, `evidenceRunIds`, `runbookSection`, `notes`.
+- `retentionPolicy` with the B-RET-01/B-RET-02/B-RET-03 separation, the 40 remote-ephemeral task IDs, per-runner capture-before-teardown requirements and the explicit local-build-only exception.
+- `reviewCorrections` mapping the five correction findings to tasks and runbook sections.
+- `tasks` (100) with unique IDs, `platform`, `title`, `category`, `inScope`, `status`, `verificationLevel`, `dependsOn`, optional `host`, `existingEntrypoint`, `commands`, `candidateCommands`, `artifacts`, `blockers`, `acceptance`, `evidenceRunIds`, `retention` (remote rows), `runbookSection`, `notes`.
 - `evidenceRecordSchema` and `runs: []` to be populated later with exact commit/pin/os/arch/runner/image/tool versions/command/timestamps/exit/test counts/log/XML/artifact bytes/SHA-256/generated-legal hashes/corresponding-source paths/signing/installability/reviewer.
 - `ownerDecisions` and `proposedChanges` as concise references to §9.
 

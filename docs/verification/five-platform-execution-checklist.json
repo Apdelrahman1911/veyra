@@ -27,7 +27,15 @@
     },
     "correctionWorktree": "/root/.t3/worktrees/Veyra/t3-8cb909e8",
     "correctionBranch": "t3/correct-ios-preparation-docs",
-    "finalPrBranch": "t3/five-platform-preparation-1"
+    "finalPrBranch": "t3/five-platform-preparation-1",
+    "retentionCorrection": {
+      "worktree": "/root/.t3/worktrees/Veyra/t3-96ca78c0",
+      "localBranch": "t3/pr3-retention-gating",
+      "correctionHead": "a3584c6feed3120090ac7552cc05604b5fa4dfb2",
+      "integratedBaseCommit": "5328be09b6e9abcba4ee4a9793b934116e4e86f5",
+      "prBranch": "t3/five-platform-preparation-1",
+      "documentationOnly": true
+    }
   },
   "preparationExecution": {
     "model": "opencode-go/deepseek-v4.1-flash",
@@ -43,10 +51,97 @@
       "documentationOnly": true,
       "buildsOrNativeOperations": 0,
       "workflowDispatches": 0
+    },
+    "retentionCorrectionRun": {
+      "model": "opencode-go/deepseek-v4.1-flash",
+      "variantRequested": "max",
+      "attestation": "No independent runtime/back-end or variant attestation exposed by the harness; accepted launch configuration only.",
+      "subagentsCreated": 0,
+      "documentationOnly": true,
+      "buildsOrNativeOperations": 0,
+      "workflowDispatches": 0
     }
   },
   "readyToExecute": false,
   "dependencyGate": "Awaiting the lead-provided, reviewed, merged and validated Task A integration SHA with accepted schema-3/download-recovery evidence. First Room-foundations PR (5328be09, schema 2) is not sufficient. ec97925 is not a final revision.",
+  "retentionPolicy": {
+    "designGate": "B-RET-01",
+    "operationalGate": "B-RET-02",
+    "finalAggregationGate": "B-RET-03",
+    "rule": "Every remote-ephemeral build, package, native-build or test-build row must have B-RET-02 as a direct or transitive prerequisite, in addition to the B-RET-01 design/availability gate. No category-based exemption is permitted.",
+    "remoteEphemeralTaskIds": [
+      "B-LIN-02",
+      "B-LIN-03",
+      "B-LIN-06",
+      "B-LIN-07",
+      "B-AND-01",
+      "B-AND-02",
+      "B-AND-05",
+      "B-AND-06",
+      "B-AND-07",
+      "B-IOS-02",
+      "B-IOS-02X",
+      "B-IOS-03",
+      "B-IOS-03X",
+      "B-IOS-06",
+      "B-IOS-06X",
+      "B-IOS-07",
+      "B-IOS-07A",
+      "B-IOS-07X",
+      "B-WIN-02",
+      "B-WIN-03",
+      "B-WIN-04",
+      "B-WIN-07",
+      "B-WIN-08",
+      "B-WIN-09",
+      "B-MACARM-02",
+      "B-MACARM-03",
+      "B-MACARM-04",
+      "B-MACARM-07",
+      "B-MACARM-08",
+      "B-MACX64-02",
+      "B-MACX64-03",
+      "B-MACX64-04",
+      "B-MACX64-07",
+      "B-MACX64-08",
+      "B-REG-01",
+      "B-REG-02",
+      "B-REG-03",
+      "B-LIN-08",
+      "B-IOS-08",
+      "B-IOS-08X"
+    ],
+    "perRunnerCapture": {
+      "timing": "before that runner is torn down",
+      "appliesTo": "Every remote-ephemeral job that produces or consumes runner-local evidence, including build, package, native, test, inventory, notice, package-inspection and smoke jobs. remoteEphemeralTaskIds is the build/package/native/test enforcement set.",
+      "items": [
+        "exact produced package/artifact bytes where the task produces them",
+        "command and build/test logs",
+        "actual JUnit XML where the task executes tests",
+        "source commit, kmpYT pin, tool versions and host metadata",
+        "generated legal hashes, inventories and manifests where applicable",
+        "SHA-256 manifest for the packet"
+      ],
+      "failureAndCancellation": "Preserve available partial diagnostics, mark the packet incomplete and never record it as a successful final-artifact result.",
+      "notFinalAcceptance": "Per-runner capture is staging/evidence preservation, not cross-platform acceptance or publication proof.",
+      "aggregation": "B-RET-03 aggregates and independently reads back already-retained per-runner packets after the applicable final gates; it must never be the first copy from a vanished runner."
+    },
+    "localBuildOnlyException": {
+      "authorization": "lead-coordinated local Task B work",
+      "requiresRemoteRoute": false,
+      "scope": "An authorized local host and this repository's ignored .work only.",
+      "capture": "Record command, timestamps, exit, logs, XML, artifact hashes and inputs locally and label the evidence local-only.",
+      "doesNotSatisfy": [
+        "durable remote retention",
+        "remote-runner recovery",
+        "B-RET-03",
+        "publication",
+        "all-five-platform completion"
+      ],
+      "finalTaskAGateStillRequired": true,
+      "note": "A missing remote retention route must not be used to invent an owner permission gate for already-authorized local build work; conversely, local .work evidence never substitutes for remote retention or publication."
+    }
+  },
   "statusVocabulary": {
     "inspected": "Source/configuration/documentation read; no execution claimed.",
     "configured": "Entrypoint/runner/task is named but no execution is proven.",
@@ -290,7 +385,8 @@
     "executedPassed": 0,
     "executedFailed": 0,
     "excluded": 3,
-    "configured": 1
+    "configured": 1,
+    "remoteEphemeralTasks": 40
   },
   "ownerDecisions": [
     "Apple signing team/cert/profile for installable iOS IPA/TestFlight/App Store build, or explicit simulator-only/unsigned limitation.",
@@ -671,21 +767,22 @@
       "blockers": [
         "No verified approved retention route: verify.yml is workflow_dispatch-only, permissions contents:read, and has no upload-artifact/cache/release step.",
         "No owner authorization for a trusted contents:write release job or an approved free alternative; Actions artifact storage is not assumed free.",
-        "The route must preserve package bytes, logs/XML, source/pin/version/host metadata and SHA-256 manifests from each runner."
+        "The route must preserve each runner's package bytes, logs/XML, source/pin/version/host metadata and SHA-256 manifests before teardown, including partial failure diagnostics."
       ],
       "acceptance": [
         "A free, policy-compliant, owner-approved design is recorded with storage location, asset/size limits, credentials/permissions, retention period, retrieval and independent hash readback.",
-        "The design is approved before any remote ephemeral production build; implementation, actual retention and publication remain separate tasks B-RET-02/B-RET-03/B-DIST-*.",
+        "The design includes the per-runner capture/checksum/transfer procedure executed before each runner is torn down, including preserved partial diagnostics on failure/cancellation and a SHA-256 manifest; per-runner capture is not cross-platform acceptance.",
+        "The design is approved before any remote ephemeral production/test-build job; implementation, actual retention and publication remain separate tasks B-RET-02/B-RET-03/B-DIST-*.",
         "Local-only authorized work using repository .work is a distinct lifetime; it cannot satisfy remote retention or publication."
       ],
       "evidenceRunIds": [],
       "runbookSection": "6.3A / 10",
-      "notes": "Planning/availability gate only; no workflow/retention implementation in this documentation PR. It must not depend on final package/legal/native outcomes."
+      "notes": "Planning/availability gate only; no workflow/retention implementation in this documentation PR. It must not depend on final package/legal/native outcomes. B-RET-02 implementation/canary is a mandatory prerequisite of every remote ephemeral build/package/native/test row."
     },
     {
       "id": "B-RET-02",
       "platform": "all",
-      "title": "Implement the approved retention route and prove a non-production canary",
+      "title": "Implement the approved retention route and prove a non-production canary with independent readback",
       "category": "distribution",
       "inScope": true,
       "status": "blocked",
@@ -700,20 +797,21 @@
       "blockers": [
         "B-RET-01 design/approval is blocked.",
         "Workflow/retention implementation is outside this documentation-only PR and requires separate review/authorization.",
-        "No canary has been executed or independently read back."
+        "No canary has been executed or independently read back; no route is claimed existing or successful."
       ],
       "acceptance": [
-        "Separately reviewed implementation only: a non-production canary (small artifact + log/XML + metadata) is retained, independently downloaded and SHA-256 matched; retention/deletion behavior recorded.",
+        "Separately reviewed implementation only: the approved route is implemented and a non-production canary (small artifact + log/XML + metadata) is retained, independently downloaded and SHA-256 matched; retention/deletion behavior is recorded.",
+        "The implementation captures/checksums/transfers each remote runner's packet before teardown, including partial diagnostics on failure/cancellation, and is a direct or transitive prerequisite of every remote-ephemeral build/package/native/test row; design approval alone does not satisfy it.",
         "No final package is used as the canary; no paid storage, secrets, tag or publication."
       ],
       "evidenceRunIds": [],
       "runbookSection": "6.3A / 10",
-      "notes": "Implementation and canary proof are separate from design and from actual final-artifact retention."
+      "notes": "Implementation and canary proof must complete before any remote ephemeral build/test job starts. B-RET-03 only aggregates and verifies already-retained per-runner packets; it is never the first capture."
     },
     {
       "id": "B-RET-03",
       "platform": "all",
-      "title": "Retain the actual final package/log/XML/metadata set from each runner and verify readback",
+      "title": "Aggregate per-runner retained packets and independently verify the actual final artifact/evidence set",
       "category": "distribution",
       "inScope": true,
       "status": "blocked",
@@ -746,18 +844,18 @@
         }
       ],
       "blockers": [
-        "B-RET-01/B-RET-02 are blocked; no approved route exists.",
-        "Final package, regression and legal asset evidence is not yet produced.",
-        "A runner path printed in a log is not durable retention."
+        "B-RET-01/B-RET-02 are blocked; no approved operational route or canary exists.",
+        "Per-runner packets are absent because no remote build/test job has run.",
+        "Final package, regression and legal asset evidence is not yet produced."
       ],
       "acceptance": [
-        "For each intended final artifact set, preserve the exact package, logs/XML, source/pin/version/host metadata and SHA-256 manifest at the approved durable location.",
-        "Independently download and hash-match the actual retained bytes; record retention timestamps/locations. Source/notices asset set is included where applicable.",
+        "Each per-runner packet was already captured/checksummed/transferred before its runner teardown; this task aggregates the packets and independently downloads and hash-matches the actual final package, logs/XML, source/pin/version/host metadata, generated legal hashes and SHA-256 manifests.",
+        "It is not the first capture/transfer of runner-local files and cannot rely on a path from a runner that has exited; missing, incomplete or untransferred packets fail the gate.",
         "Actual retention is not inferred from an intended upload, workflow path, or local .work directory."
       ],
       "evidenceRunIds": [],
       "runbookSection": "6.9 / 10",
-      "notes": "Actual retention follows final package inspection and integrated regression; it does not depend on publication."
+      "notes": "Aggregation and independent readback after the applicable final gates. It never substitutes for per-runner capture before teardown and does not depend on publication."
     },
     {
       "id": "B-REG-01",
@@ -768,6 +866,7 @@
       "status": "not-run",
       "verificationLevel": "not-run",
       "dependsOn": [
+        "B-RET-02",
         "B-GATE-07"
       ],
       "existingEntrypoint": true,
@@ -782,7 +881,14 @@
       ],
       "evidenceRunIds": [],
       "runbookSection": "7.1 / Appendix A",
-      "notes": ""
+      "notes": "",
+      "retention": {
+        "mode": "remote-ephemeral",
+        "operationalGate": "B-RET-02",
+        "perRunnerCaptureBeforeTeardown": true,
+        "failureDiagnostics": "preserve-partial-and-mark-incomplete",
+        "finalAcceptance": "B-RET-03"
+      }
     },
     {
       "id": "B-REG-02",
@@ -793,6 +899,7 @@
       "status": "not-run",
       "verificationLevel": "not-run",
       "dependsOn": [
+        "B-RET-02",
         "B-GATE-07"
       ],
       "existingEntrypoint": true,
@@ -808,7 +915,14 @@
       ],
       "evidenceRunIds": [],
       "runbookSection": "7.5",
-      "notes": ""
+      "notes": "",
+      "retention": {
+        "mode": "remote-ephemeral",
+        "operationalGate": "B-RET-02",
+        "perRunnerCaptureBeforeTeardown": true,
+        "failureDiagnostics": "preserve-partial-and-mark-incomplete",
+        "finalAcceptance": "B-RET-03"
+      }
     },
     {
       "id": "B-REG-03",
@@ -820,7 +934,8 @@
       "verificationLevel": "not-run",
       "dependsOn": [
         "B-GATE-07",
-        "B-RET-01"
+        "B-RET-01",
+        "B-RET-02"
       ],
       "existingEntrypoint": true,
       "commands": [
@@ -834,7 +949,14 @@
       ],
       "evidenceRunIds": [],
       "runbookSection": "7.1",
-      "notes": ""
+      "notes": "",
+      "retention": {
+        "mode": "remote-ephemeral",
+        "operationalGate": "B-RET-02",
+        "perRunnerCaptureBeforeTeardown": true,
+        "failureDiagnostics": "preserve-partial-and-mark-incomplete",
+        "finalAcceptance": "B-RET-03"
+      }
     },
     {
       "id": "B-REG-04",
@@ -1090,7 +1212,8 @@
       "dependsOn": [
         "B-LIN-01",
         "B-GATE-07",
-        "B-RET-01"
+        "B-RET-01",
+        "B-RET-02"
       ],
       "existingEntrypoint": true,
       "commands": [
@@ -1121,7 +1244,14 @@
       ],
       "evidenceRunIds": [],
       "runbookSection": "7.5 / 8",
-      "notes": ""
+      "notes": "",
+      "retention": {
+        "mode": "remote-ephemeral",
+        "operationalGate": "B-RET-02",
+        "perRunnerCaptureBeforeTeardown": true,
+        "failureDiagnostics": "preserve-partial-and-mark-incomplete",
+        "finalAcceptance": "B-RET-03"
+      }
     },
     {
       "id": "B-LIN-03",
@@ -1132,6 +1262,7 @@
       "status": "not-run",
       "verificationLevel": "not-run",
       "dependsOn": [
+        "B-RET-02",
         "B-LIN-02"
       ],
       "existingEntrypoint": true,
@@ -1164,7 +1295,14 @@
       ],
       "evidenceRunIds": [],
       "runbookSection": "7.5",
-      "notes": ""
+      "notes": "",
+      "retention": {
+        "mode": "remote-ephemeral",
+        "operationalGate": "B-RET-02",
+        "perRunnerCaptureBeforeTeardown": true,
+        "failureDiagnostics": "preserve-partial-and-mark-incomplete",
+        "finalAcceptance": "B-RET-03"
+      }
     },
     {
       "id": "B-LIN-04",
@@ -1246,6 +1384,7 @@
       "status": "not-run",
       "verificationLevel": "not-run",
       "dependsOn": [
+        "B-RET-02",
         "B-LIN-05"
       ],
       "existingEntrypoint": true,
@@ -1277,7 +1416,14 @@
       ],
       "evidenceRunIds": [],
       "runbookSection": "6.7",
-      "notes": ""
+      "notes": "",
+      "retention": {
+        "mode": "remote-ephemeral",
+        "operationalGate": "B-RET-02",
+        "perRunnerCaptureBeforeTeardown": true,
+        "failureDiagnostics": "preserve-partial-and-mark-incomplete",
+        "finalAcceptance": "B-RET-03"
+      }
     },
     {
       "id": "B-LIN-07",
@@ -1288,6 +1434,7 @@
       "status": "not-run",
       "verificationLevel": "packaged",
       "dependsOn": [
+        "B-RET-02",
         "B-LIN-06"
       ],
       "existingEntrypoint": true,
@@ -1316,7 +1463,14 @@
       ],
       "evidenceRunIds": [],
       "runbookSection": "7.5",
-      "notes": ""
+      "notes": "",
+      "retention": {
+        "mode": "remote-ephemeral",
+        "operationalGate": "B-RET-02",
+        "perRunnerCaptureBeforeTeardown": true,
+        "failureDiagnostics": "preserve-partial-and-mark-incomplete",
+        "finalAcceptance": "B-RET-03"
+      }
     },
     {
       "id": "B-LIN-08",
@@ -1327,6 +1481,7 @@
       "status": "not-run",
       "verificationLevel": "runtime-smoke-tested",
       "dependsOn": [
+        "B-RET-02",
         "B-LIN-06"
       ],
       "existingEntrypoint": true,
@@ -1344,7 +1499,14 @@
       ],
       "evidenceRunIds": [],
       "runbookSection": "7.5",
-      "notes": ""
+      "notes": "",
+      "retention": {
+        "mode": "remote-ephemeral",
+        "operationalGate": "B-RET-02",
+        "perRunnerCaptureBeforeTeardown": true,
+        "failureDiagnostics": "preserve-partial-and-mark-incomplete",
+        "finalAcceptance": "B-RET-03"
+      }
     },
     {
       "id": "B-LIN-09",
@@ -1421,7 +1583,8 @@
       "verificationLevel": "not-run",
       "dependsOn": [
         "B-GATE-07",
-        "B-RET-01"
+        "B-RET-01",
+        "B-RET-02"
       ],
       "existingEntrypoint": true,
       "commands": [
@@ -1444,7 +1607,14 @@
       ],
       "evidenceRunIds": [],
       "runbookSection": "7.1",
-      "notes": ""
+      "notes": "",
+      "retention": {
+        "mode": "remote-ephemeral",
+        "operationalGate": "B-RET-02",
+        "perRunnerCaptureBeforeTeardown": true,
+        "failureDiagnostics": "preserve-partial-and-mark-incomplete",
+        "finalAcceptance": "B-RET-03"
+      }
     },
     {
       "id": "B-AND-02",
@@ -1455,6 +1625,7 @@
       "status": "not-run",
       "verificationLevel": "not-run",
       "dependsOn": [
+        "B-RET-02",
         "B-AND-01"
       ],
       "existingEntrypoint": true,
@@ -1489,7 +1660,14 @@
       ],
       "evidenceRunIds": [],
       "runbookSection": "7.1",
-      "notes": ""
+      "notes": "",
+      "retention": {
+        "mode": "remote-ephemeral",
+        "operationalGate": "B-RET-02",
+        "perRunnerCaptureBeforeTeardown": true,
+        "failureDiagnostics": "preserve-partial-and-mark-incomplete",
+        "finalAcceptance": "B-RET-03"
+      }
     },
     {
       "id": "B-AND-03",
@@ -1570,6 +1748,7 @@
       "status": "not-run",
       "verificationLevel": "not-run",
       "dependsOn": [
+        "B-RET-02",
         "B-AND-04"
       ],
       "existingEntrypoint": false,
@@ -1611,7 +1790,14 @@
       ],
       "evidenceRunIds": [],
       "runbookSection": "6.7",
-      "notes": "assembleDebug exists; assembleRelease/bundleRelease are conventional AGP tasks requiring confirmation at the final SHA."
+      "notes": "assembleDebug exists; assembleRelease/bundleRelease are conventional AGP tasks requiring confirmation at the final SHA.",
+      "retention": {
+        "mode": "remote-ephemeral",
+        "operationalGate": "B-RET-02",
+        "perRunnerCaptureBeforeTeardown": true,
+        "failureDiagnostics": "preserve-partial-and-mark-incomplete",
+        "finalAcceptance": "B-RET-03"
+      }
     },
     {
       "id": "B-AND-06",
@@ -1622,6 +1808,7 @@
       "status": "not-run",
       "verificationLevel": "packaged",
       "dependsOn": [
+        "B-RET-02",
         "B-AND-05"
       ],
       "existingEntrypoint": true,
@@ -1639,7 +1826,14 @@
       ],
       "evidenceRunIds": [],
       "runbookSection": "7.1",
-      "notes": ""
+      "notes": "",
+      "retention": {
+        "mode": "remote-ephemeral",
+        "operationalGate": "B-RET-02",
+        "perRunnerCaptureBeforeTeardown": true,
+        "failureDiagnostics": "preserve-partial-and-mark-incomplete",
+        "finalAcceptance": "B-RET-03"
+      }
     },
     {
       "id": "B-AND-07",
@@ -1650,6 +1844,7 @@
       "status": "blocked",
       "verificationLevel": "not-run",
       "dependsOn": [
+        "B-RET-02",
         "B-AND-05"
       ],
       "existingEntrypoint": true,
@@ -1670,7 +1865,14 @@
       ],
       "evidenceRunIds": [],
       "runbookSection": "7.1",
-      "notes": ""
+      "notes": "",
+      "retention": {
+        "mode": "remote-ephemeral",
+        "operationalGate": "B-RET-02",
+        "perRunnerCaptureBeforeTeardown": true,
+        "failureDiagnostics": "preserve-partial-and-mark-incomplete",
+        "finalAcceptance": "B-RET-03"
+      }
     },
     {
       "id": "B-AND-08",
@@ -1737,7 +1939,8 @@
       "dependsOn": [
         "B-IOS-01",
         "B-GATE-07",
-        "B-RET-01"
+        "B-RET-01",
+        "B-RET-02"
       ],
       "host": {
         "runnerLabel": "macos-15",
@@ -1795,7 +1998,14 @@
       ],
       "evidenceRunIds": [],
       "runbookSection": "7.2",
-      "notes": "Arm64 only. DerivedData/receipt suffix is arm64; inventory label is ios-simulator-arm64."
+      "notes": "Arm64 only. DerivedData/receipt suffix is arm64; inventory label is ios-simulator-arm64.",
+      "retention": {
+        "mode": "remote-ephemeral",
+        "operationalGate": "B-RET-02",
+        "perRunnerCaptureBeforeTeardown": true,
+        "failureDiagnostics": "preserve-partial-and-mark-incomplete",
+        "finalAcceptance": "B-RET-03"
+      }
     },
     {
       "id": "B-IOS-02X",
@@ -1808,7 +2018,8 @@
       "dependsOn": [
         "B-IOS-01",
         "B-GATE-07",
-        "B-RET-01"
+        "B-RET-01",
+        "B-RET-02"
       ],
       "host": {
         "runnerLabel": "macos-15-intel",
@@ -1869,7 +2080,14 @@
       ],
       "evidenceRunIds": [],
       "runbookSection": "4.2 / 4.2.1 / 6.4 / 7.2",
-      "notes": "x64 only. Device arm64 output from this host is a cross-check, not the canonical device artifact inspected by B-IOS-07."
+      "notes": "x64 only. Device arm64 output from this host is a cross-check, not the canonical device artifact inspected by B-IOS-07.",
+      "retention": {
+        "mode": "remote-ephemeral",
+        "operationalGate": "B-RET-02",
+        "perRunnerCaptureBeforeTeardown": true,
+        "failureDiagnostics": "preserve-partial-and-mark-incomplete",
+        "finalAcceptance": "B-RET-03"
+      }
     },
     {
       "id": "B-IOS-03",
@@ -1880,6 +2098,7 @@
       "status": "blocked",
       "verificationLevel": "not-run",
       "dependsOn": [
+        "B-RET-02",
         "B-IOS-02"
       ],
       "host": {
@@ -1890,7 +2109,7 @@
         "canonicalArchitecture": "arm64",
         "kotlinTarget": "iosSimulatorArm64"
       },
-      "existingEntrypoint": true,
+      "existingEntrypoint": false,
       "commands": [],
       "candidateCommands": [
         "scripts/gradle.sh :shared:iosSimulatorArm64Test :composeApp:iosSimulatorArm64Test"
@@ -1907,7 +2126,14 @@
       ],
       "evidenceRunIds": [],
       "runbookSection": "7.2",
-      "notes": "Candidate execution tasks only; this preparation did not run Gradle task discovery."
+      "notes": "No confirmed existing Gradle test task. commands is empty; the candidate task names are unconfirmed until actual future task discovery/execution. existingEntrypoint=false; status stays blocked.",
+      "retention": {
+        "mode": "remote-ephemeral",
+        "operationalGate": "B-RET-02",
+        "perRunnerCaptureBeforeTeardown": true,
+        "failureDiagnostics": "preserve-partial-and-mark-incomplete",
+        "finalAcceptance": "B-RET-03"
+      }
     },
     {
       "id": "B-IOS-03X",
@@ -1918,6 +2144,7 @@
       "status": "blocked",
       "verificationLevel": "not-run",
       "dependsOn": [
+        "B-RET-02",
         "B-IOS-02X"
       ],
       "host": {
@@ -1928,7 +2155,7 @@
         "canonicalArchitecture": "x64",
         "kotlinTarget": "iosX64"
       },
-      "existingEntrypoint": true,
+      "existingEntrypoint": false,
       "commands": [],
       "candidateCommands": [
         "scripts/gradle.sh :shared:iosX64Test :composeApp:iosX64Test"
@@ -1946,7 +2173,14 @@
       ],
       "evidenceRunIds": [],
       "runbookSection": "4.2.1 / 7.2",
-      "notes": "Candidate execution tasks only; no x64 simulator run is claimed."
+      "notes": "No confirmed existing Gradle test task. commands is empty; the candidate task names are unconfirmed until actual future task discovery/execution. existingEntrypoint=false; status stays blocked.",
+      "retention": {
+        "mode": "remote-ephemeral",
+        "operationalGate": "B-RET-02",
+        "perRunnerCaptureBeforeTeardown": true,
+        "failureDiagnostics": "preserve-partial-and-mark-incomplete",
+        "finalAcceptance": "B-RET-03"
+      }
     },
     {
       "id": "B-IOS-04",
@@ -2136,6 +2370,7 @@
       "status": "not-run",
       "verificationLevel": "not-run",
       "dependsOn": [
+        "B-RET-02",
         "B-IOS-05"
       ],
       "host": {
@@ -2193,7 +2428,14 @@
       ],
       "evidenceRunIds": [],
       "runbookSection": "6.7",
-      "notes": "Arm64 host final rebuild. Canonical device build for B-IOS-07 comes from this task."
+      "notes": "Arm64 host final rebuild. Canonical device build for B-IOS-07 comes from this task.",
+      "retention": {
+        "mode": "remote-ephemeral",
+        "operationalGate": "B-RET-02",
+        "perRunnerCaptureBeforeTeardown": true,
+        "failureDiagnostics": "preserve-partial-and-mark-incomplete",
+        "finalAcceptance": "B-RET-03"
+      }
     },
     {
       "id": "B-IOS-06X",
@@ -2204,6 +2446,7 @@
       "status": "not-run",
       "verificationLevel": "not-run",
       "dependsOn": [
+        "B-RET-02",
         "B-IOS-05X"
       ],
       "host": {
@@ -2263,7 +2506,14 @@
       ],
       "evidenceRunIds": [],
       "runbookSection": "4.2.1 / 6.7 / 7.2",
-      "notes": "x64 host final rebuild. Canonical inventory label for the simulator output is ios-simulator-x64."
+      "notes": "x64 host final rebuild. Canonical inventory label for the simulator output is ios-simulator-x64.",
+      "retention": {
+        "mode": "remote-ephemeral",
+        "operationalGate": "B-RET-02",
+        "perRunnerCaptureBeforeTeardown": true,
+        "failureDiagnostics": "preserve-partial-and-mark-incomplete",
+        "finalAcceptance": "B-RET-03"
+      }
     },
     {
       "id": "B-IOS-07",
@@ -2274,6 +2524,7 @@
       "status": "not-run",
       "verificationLevel": "packaged",
       "dependsOn": [
+        "B-RET-02",
         "B-IOS-06"
       ],
       "existingEntrypoint": true,
@@ -2290,7 +2541,14 @@
       ],
       "evidenceRunIds": [],
       "runbookSection": "7.2",
-      "notes": "Device arm64 only. Canonical device build is from the arm64 host (B-IOS-06)."
+      "notes": "Device arm64 only. Canonical device build is from the arm64 host (B-IOS-06).",
+      "retention": {
+        "mode": "remote-ephemeral",
+        "operationalGate": "B-RET-02",
+        "perRunnerCaptureBeforeTeardown": true,
+        "failureDiagnostics": "preserve-partial-and-mark-incomplete",
+        "finalAcceptance": "B-RET-03"
+      }
     },
     {
       "id": "B-IOS-07A",
@@ -2301,6 +2559,7 @@
       "status": "not-run",
       "verificationLevel": "packaged",
       "dependsOn": [
+        "B-RET-02",
         "B-IOS-06"
       ],
       "host": {
@@ -2328,7 +2587,14 @@
       ],
       "evidenceRunIds": [],
       "runbookSection": "4.2.1 / 7.2",
-      "notes": "Arm64 simulator app inspection; distinct from device inspection B-IOS-07."
+      "notes": "Arm64 simulator app inspection; distinct from device inspection B-IOS-07.",
+      "retention": {
+        "mode": "remote-ephemeral",
+        "operationalGate": "B-RET-02",
+        "perRunnerCaptureBeforeTeardown": true,
+        "failureDiagnostics": "preserve-partial-and-mark-incomplete",
+        "finalAcceptance": "B-RET-03"
+      }
     },
     {
       "id": "B-IOS-07X",
@@ -2339,6 +2605,7 @@
       "status": "not-run",
       "verificationLevel": "packaged",
       "dependsOn": [
+        "B-RET-02",
         "B-IOS-06X"
       ],
       "host": {
@@ -2367,7 +2634,14 @@
       ],
       "evidenceRunIds": [],
       "runbookSection": "4.2.1 / 7.2",
-      "notes": "x64 simulator app inspection; lipo reports x86_64, not the canonical label x64."
+      "notes": "x64 simulator app inspection; lipo reports x86_64, not the canonical label x64.",
+      "retention": {
+        "mode": "remote-ephemeral",
+        "operationalGate": "B-RET-02",
+        "perRunnerCaptureBeforeTeardown": true,
+        "failureDiagnostics": "preserve-partial-and-mark-incomplete",
+        "finalAcceptance": "B-RET-03"
+      }
     },
     {
       "id": "B-IOS-08",
@@ -2378,6 +2652,7 @@
       "status": "blocked",
       "verificationLevel": "runtime-smoke-tested",
       "dependsOn": [
+        "B-RET-02",
         "B-IOS-06"
       ],
       "host": {
@@ -2407,7 +2682,14 @@
       ],
       "evidenceRunIds": [],
       "runbookSection": "7.2",
-      "notes": "Arm64 simulator only. Candidate commands are not an existing reviewed script."
+      "notes": "Arm64 simulator only. Candidate commands are not an existing reviewed script.",
+      "retention": {
+        "mode": "remote-ephemeral",
+        "operationalGate": "B-RET-02",
+        "perRunnerCaptureBeforeTeardown": true,
+        "failureDiagnostics": "preserve-partial-and-mark-incomplete",
+        "finalAcceptance": "B-RET-03"
+      }
     },
     {
       "id": "B-IOS-08X",
@@ -2418,6 +2700,7 @@
       "status": "blocked",
       "verificationLevel": "runtime-smoke-tested",
       "dependsOn": [
+        "B-RET-02",
         "B-IOS-06X"
       ],
       "host": {
@@ -2449,7 +2732,14 @@
       ],
       "evidenceRunIds": [],
       "runbookSection": "4.2.1 / 7.2",
-      "notes": "x64 simulator only; candidate commands require review."
+      "notes": "x64 simulator only; candidate commands require review.",
+      "retention": {
+        "mode": "remote-ephemeral",
+        "operationalGate": "B-RET-02",
+        "perRunnerCaptureBeforeTeardown": true,
+        "failureDiagnostics": "preserve-partial-and-mark-incomplete",
+        "finalAcceptance": "B-RET-03"
+      }
     },
     {
       "id": "B-IOS-09",
@@ -2547,6 +2837,7 @@
       "status": "not-run",
       "verificationLevel": "not-run",
       "dependsOn": [
+        "B-RET-02",
         "B-WIN-01",
         "B-GATE-07"
       ],
@@ -2562,7 +2853,14 @@
       ],
       "evidenceRunIds": [],
       "runbookSection": "7.3",
-      "notes": ""
+      "notes": "",
+      "retention": {
+        "mode": "remote-ephemeral",
+        "operationalGate": "B-RET-02",
+        "perRunnerCaptureBeforeTeardown": true,
+        "failureDiagnostics": "preserve-partial-and-mark-incomplete",
+        "finalAcceptance": "B-RET-03"
+      }
     },
     {
       "id": "B-WIN-03",
@@ -2575,6 +2873,7 @@
       "dependsOn": [
         "B-WIN-01",
         "B-RET-01",
+        "B-RET-02",
         "B-GATE-09"
       ],
       "existingEntrypoint": true,
@@ -2614,7 +2913,14 @@
       ],
       "evidenceRunIds": [],
       "runbookSection": "7.3 / 8",
-      "notes": ""
+      "notes": "",
+      "retention": {
+        "mode": "remote-ephemeral",
+        "operationalGate": "B-RET-02",
+        "perRunnerCaptureBeforeTeardown": true,
+        "failureDiagnostics": "preserve-partial-and-mark-incomplete",
+        "finalAcceptance": "B-RET-03"
+      }
     },
     {
       "id": "B-WIN-04",
@@ -2625,6 +2931,7 @@
       "status": "not-run",
       "verificationLevel": "not-run",
       "dependsOn": [
+        "B-RET-02",
         "B-WIN-02",
         "B-WIN-03"
       ],
@@ -2657,7 +2964,14 @@
       ],
       "evidenceRunIds": [],
       "runbookSection": "7.3",
-      "notes": ""
+      "notes": "",
+      "retention": {
+        "mode": "remote-ephemeral",
+        "operationalGate": "B-RET-02",
+        "perRunnerCaptureBeforeTeardown": true,
+        "failureDiagnostics": "preserve-partial-and-mark-incomplete",
+        "finalAcceptance": "B-RET-03"
+      }
     },
     {
       "id": "B-WIN-05",
@@ -2728,6 +3042,7 @@
       "status": "not-run",
       "verificationLevel": "not-run",
       "dependsOn": [
+        "B-RET-02",
         "B-WIN-06"
       ],
       "existingEntrypoint": true,
@@ -2759,7 +3074,14 @@
       ],
       "evidenceRunIds": [],
       "runbookSection": "6.7",
-      "notes": ""
+      "notes": "",
+      "retention": {
+        "mode": "remote-ephemeral",
+        "operationalGate": "B-RET-02",
+        "perRunnerCaptureBeforeTeardown": true,
+        "failureDiagnostics": "preserve-partial-and-mark-incomplete",
+        "finalAcceptance": "B-RET-03"
+      }
     },
     {
       "id": "B-WIN-08",
@@ -2770,6 +3092,7 @@
       "status": "not-run",
       "verificationLevel": "packaged",
       "dependsOn": [
+        "B-RET-02",
         "B-WIN-07"
       ],
       "existingEntrypoint": true,
@@ -2787,7 +3110,14 @@
       ],
       "evidenceRunIds": [],
       "runbookSection": "7.3",
-      "notes": ""
+      "notes": "",
+      "retention": {
+        "mode": "remote-ephemeral",
+        "operationalGate": "B-RET-02",
+        "perRunnerCaptureBeforeTeardown": true,
+        "failureDiagnostics": "preserve-partial-and-mark-incomplete",
+        "finalAcceptance": "B-RET-03"
+      }
     },
     {
       "id": "B-WIN-09",
@@ -2798,6 +3128,7 @@
       "status": "blocked",
       "verificationLevel": "runtime-smoke-tested",
       "dependsOn": [
+        "B-RET-02",
         "B-WIN-07"
       ],
       "existingEntrypoint": true,
@@ -2816,7 +3147,14 @@
       ],
       "evidenceRunIds": [],
       "runbookSection": "7.3",
-      "notes": ""
+      "notes": "",
+      "retention": {
+        "mode": "remote-ephemeral",
+        "operationalGate": "B-RET-02",
+        "perRunnerCaptureBeforeTeardown": true,
+        "failureDiagnostics": "preserve-partial-and-mark-incomplete",
+        "finalAcceptance": "B-RET-03"
+      }
     },
     {
       "id": "B-WIN-10",
@@ -2904,6 +3242,7 @@
       "status": "not-run",
       "verificationLevel": "not-run",
       "dependsOn": [
+        "B-RET-02",
         "B-MACARM-01",
         "B-GATE-07"
       ],
@@ -2919,7 +3258,14 @@
       ],
       "evidenceRunIds": [],
       "runbookSection": "7.4",
-      "notes": ""
+      "notes": "",
+      "retention": {
+        "mode": "remote-ephemeral",
+        "operationalGate": "B-RET-02",
+        "perRunnerCaptureBeforeTeardown": true,
+        "failureDiagnostics": "preserve-partial-and-mark-incomplete",
+        "finalAcceptance": "B-RET-03"
+      }
     },
     {
       "id": "B-MACARM-03",
@@ -2932,6 +3278,7 @@
       "dependsOn": [
         "B-MACARM-01",
         "B-RET-01",
+        "B-RET-02",
         "B-GATE-09"
       ],
       "existingEntrypoint": true,
@@ -2971,7 +3318,14 @@
       ],
       "evidenceRunIds": [],
       "runbookSection": "7.4 / 8",
-      "notes": ""
+      "notes": "",
+      "retention": {
+        "mode": "remote-ephemeral",
+        "operationalGate": "B-RET-02",
+        "perRunnerCaptureBeforeTeardown": true,
+        "failureDiagnostics": "preserve-partial-and-mark-incomplete",
+        "finalAcceptance": "B-RET-03"
+      }
     },
     {
       "id": "B-MACARM-04",
@@ -2982,6 +3336,7 @@
       "status": "not-run",
       "verificationLevel": "not-run",
       "dependsOn": [
+        "B-RET-02",
         "B-MACARM-02",
         "B-MACARM-03"
       ],
@@ -3014,7 +3369,14 @@
       ],
       "evidenceRunIds": [],
       "runbookSection": "7.4",
-      "notes": ""
+      "notes": "",
+      "retention": {
+        "mode": "remote-ephemeral",
+        "operationalGate": "B-RET-02",
+        "perRunnerCaptureBeforeTeardown": true,
+        "failureDiagnostics": "preserve-partial-and-mark-incomplete",
+        "finalAcceptance": "B-RET-03"
+      }
     },
     {
       "id": "B-MACARM-05",
@@ -3085,6 +3447,7 @@
       "status": "not-run",
       "verificationLevel": "not-run",
       "dependsOn": [
+        "B-RET-02",
         "B-MACARM-06"
       ],
       "existingEntrypoint": true,
@@ -3116,7 +3479,14 @@
       ],
       "evidenceRunIds": [],
       "runbookSection": "6.7",
-      "notes": ""
+      "notes": "",
+      "retention": {
+        "mode": "remote-ephemeral",
+        "operationalGate": "B-RET-02",
+        "perRunnerCaptureBeforeTeardown": true,
+        "failureDiagnostics": "preserve-partial-and-mark-incomplete",
+        "finalAcceptance": "B-RET-03"
+      }
     },
     {
       "id": "B-MACARM-08",
@@ -3127,6 +3497,7 @@
       "status": "not-run",
       "verificationLevel": "packaged",
       "dependsOn": [
+        "B-RET-02",
         "B-MACARM-07"
       ],
       "existingEntrypoint": true,
@@ -3146,7 +3517,14 @@
       ],
       "evidenceRunIds": [],
       "runbookSection": "7.4",
-      "notes": ""
+      "notes": "",
+      "retention": {
+        "mode": "remote-ephemeral",
+        "operationalGate": "B-RET-02",
+        "perRunnerCaptureBeforeTeardown": true,
+        "failureDiagnostics": "preserve-partial-and-mark-incomplete",
+        "finalAcceptance": "B-RET-03"
+      }
     },
     {
       "id": "B-MACARM-09",
@@ -3211,6 +3589,7 @@
       "status": "not-run",
       "verificationLevel": "not-run",
       "dependsOn": [
+        "B-RET-02",
         "B-MACX64-01",
         "B-GATE-07"
       ],
@@ -3226,7 +3605,14 @@
       ],
       "evidenceRunIds": [],
       "runbookSection": "7.4",
-      "notes": ""
+      "notes": "",
+      "retention": {
+        "mode": "remote-ephemeral",
+        "operationalGate": "B-RET-02",
+        "perRunnerCaptureBeforeTeardown": true,
+        "failureDiagnostics": "preserve-partial-and-mark-incomplete",
+        "finalAcceptance": "B-RET-03"
+      }
     },
     {
       "id": "B-MACX64-03",
@@ -3239,6 +3625,7 @@
       "dependsOn": [
         "B-MACX64-01",
         "B-RET-01",
+        "B-RET-02",
         "B-GATE-09"
       ],
       "existingEntrypoint": true,
@@ -3278,7 +3665,14 @@
       ],
       "evidenceRunIds": [],
       "runbookSection": "7.4 / 8",
-      "notes": ""
+      "notes": "",
+      "retention": {
+        "mode": "remote-ephemeral",
+        "operationalGate": "B-RET-02",
+        "perRunnerCaptureBeforeTeardown": true,
+        "failureDiagnostics": "preserve-partial-and-mark-incomplete",
+        "finalAcceptance": "B-RET-03"
+      }
     },
     {
       "id": "B-MACX64-04",
@@ -3289,6 +3683,7 @@
       "status": "not-run",
       "verificationLevel": "not-run",
       "dependsOn": [
+        "B-RET-02",
         "B-MACX64-02",
         "B-MACX64-03"
       ],
@@ -3321,7 +3716,14 @@
       ],
       "evidenceRunIds": [],
       "runbookSection": "7.4",
-      "notes": ""
+      "notes": "",
+      "retention": {
+        "mode": "remote-ephemeral",
+        "operationalGate": "B-RET-02",
+        "perRunnerCaptureBeforeTeardown": true,
+        "failureDiagnostics": "preserve-partial-and-mark-incomplete",
+        "finalAcceptance": "B-RET-03"
+      }
     },
     {
       "id": "B-MACX64-05",
@@ -3392,6 +3794,7 @@
       "status": "not-run",
       "verificationLevel": "not-run",
       "dependsOn": [
+        "B-RET-02",
         "B-MACX64-06"
       ],
       "existingEntrypoint": true,
@@ -3423,7 +3826,14 @@
       ],
       "evidenceRunIds": [],
       "runbookSection": "6.7",
-      "notes": ""
+      "notes": "",
+      "retention": {
+        "mode": "remote-ephemeral",
+        "operationalGate": "B-RET-02",
+        "perRunnerCaptureBeforeTeardown": true,
+        "failureDiagnostics": "preserve-partial-and-mark-incomplete",
+        "finalAcceptance": "B-RET-03"
+      }
     },
     {
       "id": "B-MACX64-08",
@@ -3434,6 +3844,7 @@
       "status": "not-run",
       "verificationLevel": "packaged",
       "dependsOn": [
+        "B-RET-02",
         "B-MACX64-07"
       ],
       "existingEntrypoint": true,
@@ -3453,7 +3864,14 @@
       ],
       "evidenceRunIds": [],
       "runbookSection": "7.4",
-      "notes": ""
+      "notes": "",
+      "retention": {
+        "mode": "remote-ephemeral",
+        "operationalGate": "B-RET-02",
+        "perRunnerCaptureBeforeTeardown": true,
+        "failureDiagnostics": "preserve-partial-and-mark-incomplete",
+        "finalAcceptance": "B-RET-03"
+      }
     },
     {
       "id": "B-MACX64-09",
@@ -3921,6 +4339,67 @@
         "7.2"
       ],
       "result": "Linux probes are separated from macOS/Windows probes; the Linux awk reads /proc/meminfo; unverified non-Linux alternatives are labeled candidate."
+    },
+    {
+      "id": "RC-E",
+      "finding": "The operational retention implementation/canary (B-RET-02) was not a prerequisite of any remote build/package/test row, and per-runner capture was deferred to the final B-RET-03 rollup, so ephemeral runner files could be lost before retention.",
+      "tasks": [
+        "B-RET-01",
+        "B-RET-02",
+        "B-RET-03",
+        "B-LIN-02",
+        "B-LIN-03",
+        "B-LIN-06",
+        "B-LIN-07",
+        "B-AND-01",
+        "B-AND-02",
+        "B-AND-05",
+        "B-AND-06",
+        "B-AND-07",
+        "B-IOS-02",
+        "B-IOS-02X",
+        "B-IOS-03",
+        "B-IOS-03X",
+        "B-IOS-06",
+        "B-IOS-06X",
+        "B-IOS-07",
+        "B-IOS-07A",
+        "B-IOS-07X",
+        "B-WIN-02",
+        "B-WIN-03",
+        "B-WIN-04",
+        "B-WIN-07",
+        "B-WIN-08",
+        "B-WIN-09",
+        "B-MACARM-02",
+        "B-MACARM-03",
+        "B-MACARM-04",
+        "B-MACARM-07",
+        "B-MACARM-08",
+        "B-MACX64-02",
+        "B-MACX64-03",
+        "B-MACX64-04",
+        "B-MACX64-07",
+        "B-MACX64-08",
+        "B-REG-01",
+        "B-REG-02",
+        "B-REG-03",
+        "B-LIN-08",
+        "B-IOS-08",
+        "B-IOS-08X",
+        "B-IOS-03",
+        "B-IOS-03X"
+      ],
+      "runbookSections": [
+        "6.3A",
+        "6.4",
+        "6.9",
+        "10",
+        "12"
+      ],
+      "correctedAtUtc": "2026-11-07T07:17:36Z",
+      "result": "B-RET-02 is now a direct prerequisite of every remote-ephemeral build/package/native/test row (24 lead-identified build/package rows plus remote native builds and test lanes); each row requires per-runner capture/checksum/transfer before teardown; B-RET-03 aggregates and independently reads back already-retained packets; local authorized .work builds have an explicit separate lifetime that never satisfies durable retention, publication or five-platform completion. B-IOS-03/03X now record existingEntrypoint=false because their task names remain candidates."
     }
-  ]
+  ],
+  "retentionCorrectedAtUtc": "2026-11-07T07:17:36Z"
 }
