@@ -150,7 +150,7 @@ the replacement is explained rather than loosened to "any failure".
 | `schedulingOnlyPauseCancelAndRemovePersistAcrossRoomReopenWithoutMediaDirectoriesOrNativeMaintenance` | canonical staged jobs + intent commands | pause/cancel/remove intents persist across Room reopen; cleanup stays pending; no native maintenance, media dirs, engine or coverage work; typed retry deadline/count survive user intent (legacy cleared the deadline; removed-authority difference, not a weaker claim) |
 | `uncoveredMusicCollectionPodcastAndResumeTapsRejectAtThePublicBoundaryEvenWithAHeldActorAndCannotReplayAfterCancel` | canonical paused/staged jobs + held actor/coverage | tap rejection is synchronous and not actor-dependent; cancel commits before ACK and cannot replay; cleanup only after ACK; paused intent and claim preserved; no source/download execution |
 | `musicAndPodcastPauseCancelRemoveRemainUsableAfterCoverageFailureButPhysicalCleanupWaitsForExplicitActivation` | canonical complete/staged jobs; coverage failure | local intents persist while restricted; no gate/native work; activation ACKs coverage once and deletes removed assets/cancelled staging; paused work retained; immutable receipts survive; no validation/source calls |
-| `podcastStartOverIsAtomicWithDelayedSeekAndRetainsTheOfflineRecording` | restored offline occurrence + delayed seek + StartOver | same occurrence/binding/local asset at 0 with a new generation; no new query/resolution/transfer; outgoing held seek not lost; queue/progress reset and FlushProgress; delayed old seek rejected; durable progress and reopen; retained job/asset lineage |
+| `podcastStartOverIsAtomicWithDelayedSeekAndRetainsTheOfflineRecording` | restored offline occurrence + delayed seek + StartOver | same occurrence/binding/local asset at 0 with a new generation; no new query/resolution/transfer; outgoing held seek not lost; a real native zero sample is flushed to the typed occurrence checkpoint/queue; delayed old seek rejected; durable 1,000 ms queue/controller progress after reopen; retained job/asset lineage. Typed progress is asserted through the canonical queue/checkpoint, not the legacy `snapshot.progress` compatibility map |
 
 ## Narrow production repair (existing-app compatibility)
 
@@ -193,18 +193,56 @@ fallback for a non-current episode.
 
 ## Verification evidence
 
-Every heavy operation uses the shared
+Every heavy operation used the shared
 `/root/projects/Veyra/.work/verification/pr4-ports-wave-20261107/gradle.lock`
 with `flock -x`, held to process completion. One test fork, 384 MiB heap/256 MiB
 metaspace, SerialGC, two CPUs, project-local Gradle/home/temp. Runs redirect
 fresh exact-task XML with `-Dveyra.lead.evidence=<unique-dir>`.
 
-| Run | HEAD / tree | Tests | Result | Evidence |
-|---|---|---|---|---|
-| `run-focused-001` (red) | `66677e8` + dirty port (pre-repair) | 6 | 2 failures, 0 errors/skipped, exit 1 | `run-focused-001/stdout.log` 18,461 bytes, XML `TEST-dev.veyra.app.AppContainerIntegrationTest.xml` 6/2/0/0 |
-| Acceptance compile + focused/full class | post-repair commit below | 36 | PENDING | PENDING |
+The full-class acceptance run is `run-full-003` at code HEAD
+`d06b53fd8659e3d00d8a7d724172b00a2c011f28`:
 
-The parent's known 50 shared-test failures are the sibling's scope and are not
-claimed fixed. No iOS/Xcode/native/device/live-source proof is claimed; the
-native/source/transfer answers are authored fakes over non-audio bytes while
-Room/files/OS locks are real.
+- `:composeApp:compileKotlinDesktop` and
+  `:composeApp:compileTestKotlinDesktop` succeeded in the same invocation;
+- `:composeApp:desktopTest --tests dev.veyra.app.AppContainerIntegrationTest`
+  executed **36 tests, 0 failures, 0 errors, 0 skipped**, exit 0, `BUILD
+  SUCCESSFUL`;
+- log: 14,987 bytes, SHA-256
+  `21f8eaacf4b8fe3d907000ace19811694bf1623208e3c280887464b57b5c9e2c`;
+- XML `TEST-dev.veyra.app.AppContainerIntegrationTest.xml` SHA-256
+  `06ee5b940833c447972c5fa7c2027f3f79e834ae38fef1668fe1be3d9cb1ce82`;
+- UTC window 2026-11-07T16:47:45Z..16:49:00Z; clean worktree; before/after input
+  manifests equal (508 entries; test+doc hashes included); pin, gitlink
+  `c0a08090...` and schema `aab30e43...` recorded in `meta.txt`.
+
+| Run | HEAD / tree | Scope | Result |
+|---|---|---|---|
+| `run-focused-001` (red) | `66677e8` + dirty port (pre-repair) | 6 AppContainer methods | 2 failures / 0 errors / 0 skipped, exit 1: verified Start Over red (`OFFLINE_POLICY/acquisition_offline`, `selection=PENDING`, `binding=null`, `media=2`) plus a test-owned held-writer read deadlock (corrected later) |
+| `run-accept-001` | `4b7ff20` | compile, Start Over/control/held-actor, 4 headless classes, Android shared/app compile | 38 tests / 5 failures / 0 errors / 0 skipped, exit 1: two test-logic assertions (fixed in `bb2ffde`/`4d8ab98`) and three **pre-existing parent-baseline** failures in the unmodified legacy `DesktopRetainedLifetimeTest`; Android compile tasks succeeded |
+| `run-full-001` | `4d8ab98` | full AppContainer class | 36 / 1 / 0 / 0, exit 1: cached-snapshot read one tick after a correctly persisted zero checkpoint (fixed in `7b6bd05`) |
+| `run-full-002` | `7b6bd05` | full AppContainer class | 36 / 1 / 0 / 0, exit 1: typed progress asserted through the legacy compatibility map; durable queue/checkpoint read used instead (`d06b53f`) |
+| `run-full-003` | `d06b53f` | full AppContainer class | **36 / 0 / 0 / 0, exit 0** |
+| `run-final-001` | `d06b53f` | three relevant headless lifetime/startup/platform classes + Android shared/app compile | **30 / 0 / 0 / 0, exit 0, BUILD SUCCESSFUL**; `:shared:compileDebugKotlinAndroid` up-to-date, `:composeApp:compileDebugKotlinAndroid` executed; log SHA-256 `38c53e11...`, XMLs 7/18/5 tests, 0 failures; before/after inputs equal |
+
+`DesktopRetainedLifetimeTest` (5 tests) is unchanged from the parent and still
+authors the removed DOWNLOAD `PlaybackResource`; its three failures
+(`retainedDownloadAllowancePinsHostGraph...`,
+`concurrentAndCancelledCallersShareOneRetainedAttempt...`,
+`cancellationCannotReleaseTheHost...`) are a pre-existing legacy-fixture
+baseline, outside this assignment's exclusive files, and are not caused by the
+Start Over line. The other three relevant headless classes passed at the final
+code SHA in `run-final-001` (7, 18 and 5 tests, 0 failures, exit 0; window
+2026-11-07T16:57:04Z..16:58:41Z; log 16,205 bytes SHA-256
+`38c53e116dc6c87f60a852ddcee1fe48d99cdda74adfc27276c8bc918cb06352`; Android
+`:shared:compileDebugKotlinAndroid` up-to-date and
+`:composeApp:compileDebugKotlinAndroid` executed in the same invocation). The
+parent's known 50 shared-test failures
+are the sibling's scope and are not claimed fixed. No iOS/Xcode/native/device,
+audio, signing or distribution proof is claimed; native/source/transfer answers
+are authored fakes over non-audio bytes while Room, SQLite files and OS locks are
+real.
+
+All acceptance runs after the doc correction were code-frozen with
+`git status` clean and equal before/after manifests; the later doc-only update is
+not claimed as a new code execution. The tested code SHA is
+`d06b53f`; its doc-only successor is identified in the PR.
