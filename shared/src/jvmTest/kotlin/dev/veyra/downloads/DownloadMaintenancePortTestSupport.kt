@@ -4,6 +4,7 @@ import androidx.room.Room
 import dev.veyra.data.AcquisitionRepositoryState
 import dev.veyra.data.LibraryPersistence
 import dev.veyra.data.LibraryStore
+import dev.veyra.data.PhysicalDownloadJoin
 import dev.veyra.data.room.AcquisitionGraph
 import dev.veyra.data.room.AcquisitionMutation
 import dev.veyra.data.room.AcquisitionPersistence
@@ -12,7 +13,6 @@ import dev.veyra.data.room.RoomLibraryPersistence
 import dev.veyra.data.room.VeyraDatabase
 import dev.veyra.data.room.VeyraDatabaseConstructor
 import dev.veyra.data.room.buildVeyraDatabase
-import dev.veyra.model.PhysicalDownloadJoin
 import dev.veyra.model.VeyraException
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeout

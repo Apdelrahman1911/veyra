@@ -1,5 +1,7 @@
 package dev.veyra.downloads
 
+import dev.veyra.acquisition.AcquisitionTransferProgress
+import dev.veyra.acquisition.AcquisitionTransferResult
 import dev.veyra.data.LibraryPersistence
 import dev.veyra.data.getOrThrow
 import dev.veyra.model.*
@@ -202,7 +204,7 @@ class DownloadMaintenanceRoomTest {
         a.gate.beforeAcquire = { permission.stop() }
         a.beforeDelete = { nativeReleases.incrementAndGet() }
         a.coordinator.start(DownloadActivation.DURABLE_WORK)
-        val removal = async(start = CoroutineStart.UNDISPATCHED) { runCatching { a.coordinator.remove(id) } }
+        val removal = parent.async(start = CoroutineStart.UNDISPATCHED) { runCatching { a.coordinator.remove(id) } }
         permission.entered.await()
         assertEquals(0, nativeReleases.get())
         val blocked = join(a, id)
@@ -241,7 +243,7 @@ class DownloadMaintenanceRoomTest {
                 try { awaitCancellation() } finally { withContext(NonCancellable) { unwinding.stop() } }
             }
         }
-        val removal = async(start = CoroutineStart.UNDISPATCHED) { runCatching { a.coordinator.remove(id) } }
+        val removal = parent.async(start = CoroutineStart.UNDISPATCHED) { runCatching { a.coordinator.remove(id) } }
         entered.await()
         val expire: suspend () -> Unit = a.gate.expirations[0]
         withTimeout(3_000) { expire() }
@@ -289,8 +291,8 @@ class DownloadMaintenanceRoomTest {
         val scheduler = owner.coordinator
         scheduler.start(DownloadActivation.DURABLE_WORK)
         entered.await()
+        val oldExpiration: suspend () -> Unit = owner.gate.expirations[0]
         coroutineScope {
-            val oldExpiration: suspend () -> Unit = owner.gate.expirations[0]
             val expiration = async { oldExpiration() }
             try {
                 unwinding.entered.await()
@@ -330,7 +332,7 @@ class DownloadMaintenanceRoomTest {
         val owner = owner()
         val seeded = prepareFinalizationSchema3(owner)
         owner.validation = { AssetValidation.Valid(31_234) }
-        owner.gate.beforeClose = { expiration -> withContext(NonCancellable) { expiration() } }
+        owner.gate.beforeClose = { withContext(NonCancellable) { owner.gate.expirations.last().invoke() } }
         owner.denyFinalizationSchema3Acquisition()
         val holding = barrier()
         owner.gateway.transfer = { prepared, path, progress ->
