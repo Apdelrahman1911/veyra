@@ -8,6 +8,7 @@ import dev.veyra.model.RepeatMode
 import dev.veyra.model.SourceProvider
 import dev.veyra.source.MediaCollection
 import dev.veyra.source.SourcePage
+import dev.veyra.ui.downloads.DownloadSurface
 
 enum class SearchScope { EVERYWHERE, LIBRARY }
 enum class SearchKind { ALL, MUSIC, PODCASTS }
@@ -50,6 +51,11 @@ data class MusicUiOptions(
     val supportsImport: Boolean = true,
     val minSpeed: Float = 0.5f,
     val maxSpeed: Float = 2f,
+    /**
+     * The paired typed/schema2 projection supplied by the one app composition. Null keeps the
+     * existing schema2-only snapshot behaviour for direct/standalone surface callers.
+     */
+    val downloads: DownloadSurface? = null,
 )
 
 /** Every user intent is handled by the single app controller. Nothing here starts a private engine. */

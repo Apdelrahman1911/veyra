@@ -103,6 +103,7 @@ enum class TextKey(internal val english: String, internal val arabic: String) {
     Saved("Saved", "محفوظ"),
     Playlists("Playlists", "قوائم التشغيل"),
     Downloads("Downloads", "التنزيلات"),
+    SourceRecording("Source recording", "تسجيل من المصدر"),
     OnThisDevice("On this device", "على هذا الجهاز"),
     ImportAudio("Import audio", "استيراد ملفات صوتية"),
     ImportDescription("Copy audio you own or may use into Veyra's local storage.", "انسخ ملفات صوتية تملكها أو يُسمح لك باستخدامها إلى تخزين ڤيرا المحلي."),
