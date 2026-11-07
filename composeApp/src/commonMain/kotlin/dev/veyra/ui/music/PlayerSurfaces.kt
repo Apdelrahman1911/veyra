@@ -1,6 +1,7 @@
 package dev.veyra.ui.music
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -25,6 +26,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -33,6 +35,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -43,6 +46,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -87,10 +91,14 @@ fun MiniPlayer(
     onAction: (MusicUiAction) -> Unit,
     modifier: Modifier = Modifier,
     options: MusicUiOptions = MusicUiOptions(),
+    compactHeight: Boolean = false,
 ) {
     val item = playback.currentItem ?: return
     val binding = playback.executionBinding?.takeIf { it.mediaId == item.id }
     val strings = LocalStrings.current
+    // Short panes reserve room for the actual screen, not a second multi-line detail view.
+    // Both identities remain visible here and complete through the OpenPlayer action.
+    val metadataLines = if (compactHeight) 1 else 2
     var timerDialog by remember { mutableStateOf(false) }
     Surface(modifier = modifier.fillMaxWidth().testTag("mini-player"), color = MaterialTheme.colorScheme.surfaceContainerHigh, tonalElevation = 2.dp) {
         Column {
@@ -99,19 +107,21 @@ fun MiniPlayer(
                     onClick = { onAction(MusicUiAction.OpenPlayer) },
                     modifier = Modifier.weight(1f).heightIn(min = 64.dp).testTag("mini-open-player"),
                     contentPadding = PaddingValues(4.dp),
+                    // Multiline metadata must not inherit a pill clip at its corner lines.
+                    shape = RectangleShape,
                 ) {
                     Artwork(item.artworkUrl, item.title, Modifier.size(44.dp), offlineOnly = snapshot.settings.offlineOnly, localPath = item.localArtworkPath)
                     Column(Modifier.weight(1f).padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        MetadataText(item.title, Modifier.fillMaxWidth(), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        MetadataText(item.title, Modifier.fillMaxWidth(), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface, maxLines = metadataLines, overflow = TextOverflow.Ellipsis)
                         if (binding != null) {
-                            Text(strings.format(TextKey.ResolvedTitleValue, binding.firstResultTitle), Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Text(strings.format(TextKey.ResolvedTitleValue, binding.firstResultTitle), Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = metadataLines, overflow = TextOverflow.Ellipsis)
                         } else if (item.creator.isNotBlank()) MetadataText(item.creator, Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         if (playback.crossfade?.phase == CrossfadePhase.OVERLAPPING) Text(strings.text(TextKey.CrossfadeActive), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                         if (playback.isBuffering || playback.failure != null) Text(
                             playback.failure?.let(strings::errorFor) ?: strings.text(playbackStatus(playback)),
                             style = MaterialTheme.typography.labelSmall,
                             color = if (playback.failure == null) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
-                            maxLines = 2,
+                            maxLines = metadataLines,
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
@@ -159,24 +169,38 @@ fun FullPlayer(
             }
             if (item == null) {
                 EmptyState(strings.text(TextKey.NothingPlaying), strings.text(TextKey.NothingPlayingDescription), strings.text(TextKey.Search), { onAction(MusicUiAction.OpenSearch(SearchKind.ALL)) }, Modifier.fillMaxWidth())
-            } else BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
-                // Large text consumes real space: collapse the split layout sooner instead of clipping it.
-                val split = maxWidth >= (720f * LocalDensity.current.fontScale.coerceAtLeast(1f)).dp
-                Column(
-                    Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(20.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    if (split) Row(Modifier.widthIn(max = 1_120.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(32.dp)) {
-                        Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                            Artwork(item.artworkUrl, item.title, Modifier.widthIn(max = 400.dp).fillMaxWidth().aspectRatio(1f), offlineOnly = snapshot.settings.offlineOnly, localPath = item.localArtworkPath)
+            } else {
+                BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+                    // The measured space left above transport, not window orientation, decides
+                    // when decoration yields to both listing and executed-recording identities.
+                    val fontScale = LocalDensity.current.fontScale.coerceAtLeast(1f)
+                    val compactIdentity = maxHeight < 420.dp || fontScale >= 1.5f
+                    val identityLines = if (maxHeight < (180f * fontScale).dp) 1 else 2
+                    val split = !compactIdentity && maxWidth >= (720f * fontScale).dp
+                    Column(
+                        Modifier.fillMaxWidth().testTag("player-details").verticalScroll(rememberScrollState())
+                            .padding(horizontal = 20.dp, vertical = if (compactIdentity) 8.dp else 20.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        if (split) Row(Modifier.widthIn(max = 1_120.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(32.dp)) {
+                            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                                Artwork(item.artworkUrl, item.title, Modifier.widthIn(max = 400.dp).fillMaxWidth().aspectRatio(1f), offlineOnly = snapshot.settings.offlineOnly, localPath = item.localArtworkPath)
+                            }
+                            PlayerDetails(item, snapshot, playback, onAction, options, { timerDialog = true }, { speedDialog = true }, Modifier.weight(1f))
+                        } else {
+                            if (!compactIdentity) {
+                                Artwork(item.artworkUrl, item.title, Modifier.size(224.dp), offlineOnly = snapshot.settings.offlineOnly, localPath = item.localArtworkPath)
+                                Spacer(Modifier.height(16.dp))
+                            }
+                            PlayerDetails(item, snapshot, playback, onAction, options, { timerDialog = true }, { speedDialog = true },
+                                Modifier.widthIn(max = 560.dp).fillMaxWidth(), compactIdentityLines = if (compactIdentity) identityLines else null)
                         }
-                        PlayerControls(item, snapshot, playback, onAction, options, { timerDialog = true }, { speedDialog = true }, Modifier.weight(1f))
-                    } else {
-                        Artwork(item.artworkUrl, item.title, Modifier.widthIn(max = 320.dp).fillMaxWidth().aspectRatio(1f), offlineOnly = snapshot.settings.offlineOnly, localPath = item.localArtworkPath)
-                        Spacer(Modifier.height(20.dp))
-                        PlayerControls(item, snapshot, playback, onAction, options, { timerDialog = true }, { speedDialog = true }, Modifier.widthIn(max = 560.dp).fillMaxWidth())
                     }
                 }
+                HorizontalDivider()
+                // Essential pause/seek/skip never sit below an arbitrarily long receipt or
+                // creator name. Resizing and reading details must not hide the active transport.
+                PlayerTransport(item, snapshot, playback, onAction)
             }
         }
     }
@@ -186,7 +210,7 @@ fun FullPlayer(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun PlayerControls(
+private fun PlayerDetails(
     item: MediaItem,
     snapshot: AppSnapshot,
     playback: PlaybackState,
@@ -195,12 +219,28 @@ private fun PlayerControls(
     openTimer: () -> Unit,
     openSpeed: () -> Unit,
     modifier: Modifier,
+    compactIdentityLines: Int? = null,
 ) {
     val strings = LocalStrings.current
     val isEpisode = item.kind == MediaKind.EPISODE
+    val compactIdentity = compactIdentityLines != null
+    val binding = playback.executionBinding?.takeIf { it.mediaId == item.id }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(strings.format(TextKey.OriginalMetadataSource, providerName(item.source.provider)), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-        MetadataText(item.title, Modifier.fillMaxWidth().testTag("player-title"), style = MaterialTheme.typography.headlineSmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
+        if (!compactIdentity) Text(strings.format(TextKey.OriginalMetadataSource, providerName(item.source.provider)), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+        MetadataText(item.title, Modifier.fillMaxWidth().testTag("player-title"), style = MaterialTheme.typography.headlineSmall,
+            maxLines = compactIdentityLines ?: 3, overflow = TextOverflow.Ellipsis)
+        if (compactIdentity) {
+            // This preview describes only the current owner's receipt, never a latest library
+            // lookup. Full immutable query/result titles remain in the disclosure below.
+            binding?.let { receipt ->
+                Text(strings.format(TextKey.ResolvedTitleValue, receipt.firstResultTitle),
+                    Modifier.fillMaxWidth().testTag("player-resolved-title"), style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = compactIdentityLines ?: 1,
+                    overflow = TextOverflow.Ellipsis)
+            }
+            Text(strings.format(TextKey.OriginalMetadataSource, providerName(item.source.provider)), Modifier.fillMaxWidth(),
+                style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+        }
         if (item.creator.isNotBlank()) MetadataText(item.creator, Modifier.fillMaxWidth(), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(strings.text(playbackStatus(playback)), Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite }, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -211,16 +251,6 @@ private fun PlayerControls(
             ErrorState(strings.errorFor(failure), onRetry = { onAction(MusicUiAction.TogglePlayPause) }, modifier = Modifier.fillMaxWidth().testTag("player-error").semantics { liveRegion = LiveRegionMode.Polite })
         }
         PlaybackProvenanceCard(item, playback.executionBinding)
-        PlayerSeek(playback, onAction)
-        MediaDirection {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically) {
-                if (isEpisode) SkipButton(-snapshot.settings.skipBackSeconds.toLong() * 1_000L, strings.format(TextKey.SkipBackSeconds, strings.number(snapshot.settings.skipBackSeconds.toLong())), VeyraIcons.SkipBack, playback, onAction, "player-skip-back")
-                else ActionIcon(VeyraIcons.Previous, strings.text(TextKey.Previous), { onAction(MusicUiAction.Previous) }, Modifier.testTag("player-previous"))
-                PlayPauseButton(playback, onAction, Modifier.size(64.dp).testTag("player-toggle"), prominent = true)
-                if (isEpisode) SkipButton(snapshot.settings.skipForwardSeconds.toLong() * 1_000L, strings.format(TextKey.SkipForwardSeconds, strings.number(snapshot.settings.skipForwardSeconds.toLong())), VeyraIcons.SkipForward, playback, onAction, "player-skip-forward")
-                else ActionIcon(VeyraIcons.Next, strings.text(TextKey.Next), { onAction(MusicUiAction.Next) }, Modifier.testTag("player-next"), enabled = hasNext(playback.queue))
-            }
-        }
         if (isEpisode) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 OutlinedButton(openSpeed, modifier = Modifier.heightIn(min = 48.dp).testTag("player-speed"), enabled = availableSpeeds(options.minSpeed, options.maxSpeed).isNotEmpty()) {
@@ -266,6 +296,28 @@ private fun PlayerControls(
 }
 
 @Composable
+private fun PlayerTransport(item: MediaItem, snapshot: AppSnapshot, playback: PlaybackState, onAction: (MusicUiAction) -> Unit) {
+    val strings = LocalStrings.current
+    val isEpisode = item.kind == MediaKind.EPISODE
+    Surface(Modifier.fillMaxWidth().testTag("player-transport"), color = MaterialTheme.colorScheme.surfaceContainerLow) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Column(Modifier.widthIn(max = 640.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                PlayerSeek(playback, onAction)
+                MediaDirection {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically) {
+                        if (isEpisode) SkipButton(-snapshot.settings.skipBackSeconds.toLong() * 1_000L, strings.format(TextKey.SkipBackSeconds, strings.number(snapshot.settings.skipBackSeconds.toLong())), VeyraIcons.SkipBack, playback, onAction, "player-skip-back")
+                        else ActionIcon(VeyraIcons.Previous, strings.text(TextKey.Previous), { onAction(MusicUiAction.Previous) }, Modifier.testTag("player-previous"))
+                        PlayPauseButton(playback, onAction, Modifier.size(64.dp).testTag("player-toggle"), prominent = true)
+                        if (isEpisode) SkipButton(snapshot.settings.skipForwardSeconds.toLong() * 1_000L, strings.format(TextKey.SkipForwardSeconds, strings.number(snapshot.settings.skipForwardSeconds.toLong())), VeyraIcons.SkipForward, playback, onAction, "player-skip-forward")
+                        else ActionIcon(VeyraIcons.Next, strings.text(TextKey.Next), { onAction(MusicUiAction.Next) }, Modifier.testTag("player-next"), enabled = hasNext(playback.queue))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun CrossfadeStatus(crossfade: CrossfadeState) {
     val strings = LocalStrings.current
     val label = when (crossfade.phase) {
@@ -289,11 +341,13 @@ private fun CrossfadeStatus(crossfade: CrossfadeState) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PlayerSeek(playback: PlaybackState, onAction: (MusicUiAction) -> Unit) {
     val strings = LocalStrings.current
     val duration = playback.durationMs?.takeIf { it > 0L }
     val enabled = playback.seekable && duration != null
+    val interactions = remember { MutableInteractionSource() }
     // Native position samples may arrive while dragging. They must not steal the user's thumb.
     var draft by remember(playback.currentEntryId, playback.generation) { mutableStateOf<Float?>(null) }
     val shownPosition = draft?.let { seekPosition(it, duration ?: 0L) } ?: playback.positionMs
@@ -310,6 +364,14 @@ private fun PlayerSeek(playback: PlaybackState, onAction: (MusicUiAction) -> Uni
                     draft = null
                 },
                 enabled = enabled,
+                interactionSource = interactions,
+                thumb = {
+                    // Material3 1.9.0 measures its gesture/merged-progress node from the thumb.
+                    // An outer 48dp allocation alone leaves that node at the default 44dp.
+                    // Enlarge the real thumb/layout, not just a test tag or reported bounds.
+                    SliderDefaults.Thumb(interactionSource = interactions, enabled = enabled,
+                        modifier = Modifier.height(48.dp))
+                },
                 modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("player-seek").semantics {
                     contentDescription = strings.text(TextKey.Seek)
                     stateDescription = spokenPosition

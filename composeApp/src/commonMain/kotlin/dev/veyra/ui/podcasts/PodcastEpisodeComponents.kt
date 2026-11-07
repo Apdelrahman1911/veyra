@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
@@ -52,6 +54,7 @@ import dev.veyra.ui.design.MetadataText
 import dev.veyra.ui.design.TextKey
 import dev.veyra.ui.design.VeyraIconButton
 import dev.veyra.ui.design.VeyraIcons
+import dev.veyra.ui.design.VeyraSpacing
 import dev.veyra.ui.music.PlaybackProvenanceCard
 import dev.veyra.ui.music.PlaybackProvenanceContext
 
@@ -104,13 +107,14 @@ fun PodcastEpisodeRow(
             PodcastEpisodeMetadata(state)
             PodcastEpisodeStatus(state)
             if (state.binding != null) PodcastEpisodeProvenance(state, onAction, compact = true)
-            if (state.inProgress) {
+            if (state.canResume) {
                 podcastProgressFraction(state.positionMs, state.progressDurationMs)?.let { fraction ->
                     val remaining = strings.format(TextKey.MediaRemaining,
                         strings.spokenDuration(podcastRemainingMs(state.positionMs, state.progressDurationMs)))
                     LinearProgressIndicator(
                         progress = { fraction },
-                        modifier = Modifier.fillMaxWidth().semantics { contentDescription = remaining },
+                        modifier = Modifier.fillMaxWidth().testTag("podcast-listening-progress-${state.episode.id}")
+                            .semantics { contentDescription = remaining },
                     )
                 }
             }
@@ -123,17 +127,20 @@ fun PodcastEpisodeRow(
                         .testTag("podcast-play-${state.episode.id}").semantics {
                             contentDescription = strings.format(TextKey.PlayItem, state.episode.title)
                             if (state.canResume) stateDescription = strings.format(TextKey.ResumeAt, strings.spokenDuration(state.positionMs))
+                            else podcastHistoricalProgressNoticeKey(state)?.let {
+                                stateDescription = strings.format(it, strings.spokenDuration(state.historicalPositionMs))
+                            }
                         },
                 ) {
                     Icon(VeyraIcons.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text(podcastPlayLabel(state, strings))
+                    PodcastActionText(podcastPlayLabel(state, strings))
                 }
                 PodcastEpisodeMenu(state, onAction)
             }
-            if (!state.canPlay) {
+            podcastUnavailablePlaybackNotice(state)?.let { notice ->
                 Text(
-                    strings.text(if (state.offlineOnly && state.hasAudioSource) TextKey.NotDownloaded else TextKey.EpisodeUnavailable),
+                    strings.text(notice),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -161,7 +168,7 @@ internal fun PodcastEpisodeProvenance(state: PodcastEpisodeUiState, onAction: (P
             TextButton(onClick = { onAction(PodcastAction.OpenPublisher(url)) }, enabled = !state.offlineOnly) {
                 Icon(VeyraIcons.OpenInNew, null, modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(8.dp))
-                Text(strings.text(TextKey.OpenSourcePage))
+                PodcastActionText(strings.text(TextKey.OpenSourcePage))
             }
         }
     }
@@ -199,7 +206,7 @@ internal fun PodcastEpisodeStatus(state: PodcastEpisodeUiState, modifier: Modifi
         when {
             state.played -> PodcastStatusLabel(strings.text(TextKey.Played))
             state.inProgress -> PodcastStatusLabel(strings.text(TextKey.InProgress))
-            state.positionMs == 0L -> PodcastStatusLabel(strings.text(TextKey.NewEpisode))
+            state.historicalPositionMs == 0L -> PodcastStatusLabel(strings.text(TextKey.NewEpisode))
         }
         if (state.saved) PodcastStatusLabel(strings.text(TextKey.SavedForLater))
         if (state.queued) PodcastStatusLabel(strings.text(TextKey.InQueue))
@@ -250,61 +257,64 @@ fun PodcastEpisodeMenu(
         )
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             DropdownMenuItem(
-                text = { Text(strings.text(TextKey.EpisodeDetails)) },
+                text = { PodcastActionText(strings.text(TextKey.EpisodeDetails)) },
                 onClick = { dispatch(PodcastAction.OpenEpisode(state.episode.id)) },
             )
             state.show?.let { show ->
-                DropdownMenuItem(text = { Text(strings.text(TextKey.ShowDetails)) },
+                DropdownMenuItem(text = { PodcastActionText(strings.text(TextKey.ShowDetails)) },
                     onClick = { dispatch(PodcastAction.OpenShow(show.id)) })
             }
             HorizontalDivider()
             DropdownMenuItem(
-                text = { Text(strings.text(if (state.saved) TextKey.Unsave else TextKey.SaveForLater)) },
+                text = { PodcastActionText(strings.text(if (state.saved) TextKey.Unsave else TextKey.SaveForLater)) },
                 leadingIcon = { Icon(if (state.saved) VeyraIcons.Bookmark else VeyraIcons.BookmarkBorder, null) },
                 onClick = { dispatch(PodcastAction.SetSaved(state.episode.id, !state.saved)) },
             )
             DropdownMenuItem(
-                text = { Text(strings.text(if (state.played) TextKey.MarkUnplayed else TextKey.MarkPlayed)) },
+                text = { PodcastActionText(strings.text(if (state.played) TextKey.MarkUnplayed else TextKey.MarkPlayed)) },
                 onClick = { dispatch(PodcastAction.SetPlayed(state.episode.id, !state.played)) },
             )
-            if (state.positionMs > 0L || state.played) {
+            if (state.historicalPositionMs > 0L || state.played) {
                 DropdownMenuItem(
-                    text = { Text(strings.text(TextKey.StartOver)) },
+                    text = { PodcastActionText(strings.text(TextKey.StartOver)) },
                     enabled = state.canPlay,
                     onClick = { expanded = false; confirmStartOver = true },
                 )
             }
             HorizontalDivider()
             if (state.queued) {
-                DropdownMenuItem(text = { Text(strings.text(TextKey.ShowQueue)) },
+                DropdownMenuItem(text = { PodcastActionText(strings.text(TextKey.ShowQueue)) },
                     onClick = { dispatch(PodcastAction.OpenQueue) })
             } else {
-                DropdownMenuItem(text = { Text(strings.text(TextKey.PlayNext)) },
+                DropdownMenuItem(text = { PodcastActionText(strings.text(TextKey.PlayNext)) },
                     onClick = { dispatch(PodcastAction.PlayNext(state.episode.id)) })
-                DropdownMenuItem(text = { Text(strings.text(TextKey.AddToEnd)) },
+                DropdownMenuItem(text = { PodcastActionText(strings.text(TextKey.AddToEnd)) },
                     onClick = { dispatch(PodcastAction.AddToEnd(state.episode.id)) })
             }
             HorizontalDivider()
             val downloadAction = podcastDownloadAction(state)
-            DropdownMenuItem(
-                text = { Text(strings.text(downloadAction.label)) },
-                enabled = downloadAction.enabled,
-                leadingIcon = { Icon(VeyraIcons.Download, null) },
-                onClick = {
-                    expanded = false
-                    if (downloadAction.requiresRemovalConfirmation) confirmRemoveDownload = true
-                    else downloadAction.action?.let(onAction)
-                },
-            )
-            state.download?.takeIf { it.status in cancellableDownloadStatuses }?.let { download ->
+            listOfNotNull(downloadAction, podcastRetainedAssetRemovalAction(state)).forEachIndexed { index, action ->
+                DropdownMenuItem(
+                    text = { PodcastActionText(strings.text(action.label)) },
+                    enabled = action.enabled,
+                    leadingIcon = { Icon(VeyraIcons.Download, null) },
+                    modifier = Modifier.testTag(if (index == 0) "podcast-menu-download" else "podcast-menu-remove-download"),
+                    onClick = {
+                        expanded = false
+                        if (action.requiresRemovalConfirmation) confirmRemoveDownload = true
+                        else action.action?.let(onAction)
+                    },
+                )
+            }
+            state.download?.takeIf(::podcastCanCancelDownload)?.let { download ->
                 if (downloadAction.action !is PodcastAction.CancelDownload) {
-                    DropdownMenuItem(text = { Text(strings.text(TextKey.CancelDownload)) },
+                    DropdownMenuItem(text = { PodcastActionText(strings.text(TextKey.CancelDownload)) },
                         onClick = { dispatch(PodcastAction.CancelDownload(download.id)) })
                 }
             }
             podcastPublisherUrl(state)?.let { url ->
                 DropdownMenuItem(
-                    text = { Text(strings.text(TextKey.OpenPublisher)) },
+                    text = { PodcastActionText(strings.text(TextKey.OpenPublisher)) },
                     leadingIcon = { Icon(VeyraIcons.OpenInNew, null) },
                     enabled = !state.offlineOnly,
                     onClick = { dispatch(PodcastAction.OpenPublisher(url)) },
@@ -339,37 +349,43 @@ internal fun PodcastEpisodeControls(state: PodcastEpisodeUiState, onAction: (Pod
     var confirmStartOver by remember(state.episode.id) { mutableStateOf(false) }
     FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Button(onClick = { onAction(PodcastAction.PlayEpisode(state.episode.id)) }, enabled = state.canPlay,
-            modifier = Modifier.testTag("podcast-detail-play").semantics {
+            modifier = Modifier.podcastActionTarget().testTag("podcast-detail-play").semantics {
                 contentDescription = strings.format(TextKey.PlayItem, state.episode.title)
                 if (state.canResume) stateDescription = strings.format(TextKey.ResumeAt, strings.spokenDuration(state.positionMs))
+                else podcastHistoricalProgressNoticeKey(state)?.let {
+                    stateDescription = strings.format(it, strings.spokenDuration(state.historicalPositionMs))
+                }
             }) {
             Icon(VeyraIcons.PlayArrow, null, modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(8.dp))
-            Text(podcastPlayLabel(state, strings))
+            PodcastActionText(podcastPlayLabel(state, strings))
         }
         PodcastDownloadButton(state, onAction)
         OutlinedButton(onClick = { onAction(PodcastAction.SetSaved(state.episode.id, !state.saved)) },
-            modifier = Modifier.testTag("podcast-detail-save")) {
+            modifier = Modifier.podcastActionTarget().testTag("podcast-detail-save")) {
             Icon(if (state.saved) VeyraIcons.Bookmark else VeyraIcons.BookmarkBorder, null,
                 modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(8.dp))
-            Text(strings.text(if (state.saved) TextKey.Unsave else TextKey.SaveForLater))
+            PodcastActionText(strings.text(if (state.saved) TextKey.Unsave else TextKey.SaveForLater))
         }
     }
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         if (state.queued) {
-            TextButton(onClick = { onAction(PodcastAction.OpenQueue) }) { Text(strings.text(TextKey.ShowQueue)) }
+            TextButton(onClick = { onAction(PodcastAction.OpenQueue) },
+                modifier = Modifier.podcastActionTarget().testTag("podcast-detail-show-queue")) { PodcastActionText(strings.text(TextKey.ShowQueue)) }
         } else {
-            TextButton(onClick = { onAction(PodcastAction.PlayNext(state.episode.id)) }) { Text(strings.text(TextKey.PlayNext)) }
-            TextButton(onClick = { onAction(PodcastAction.AddToEnd(state.episode.id)) }) { Text(strings.text(TextKey.AddToEnd)) }
+            TextButton(onClick = { onAction(PodcastAction.PlayNext(state.episode.id)) },
+                modifier = Modifier.podcastActionTarget().testTag("podcast-detail-play-next")) { PodcastActionText(strings.text(TextKey.PlayNext)) }
+            TextButton(onClick = { onAction(PodcastAction.AddToEnd(state.episode.id)) },
+                modifier = Modifier.podcastActionTarget().testTag("podcast-detail-add-to-end")) { PodcastActionText(strings.text(TextKey.AddToEnd)) }
         }
         TextButton(onClick = { onAction(PodcastAction.SetPlayed(state.episode.id, !state.played)) },
-            modifier = Modifier.testTag("podcast-detail-mark-played")) {
-            Text(strings.text(if (state.played) TextKey.MarkUnplayed else TextKey.MarkPlayed))
+            modifier = Modifier.podcastActionTarget().testTag("podcast-detail-mark-played")) {
+            PodcastActionText(strings.text(if (state.played) TextKey.MarkUnplayed else TextKey.MarkPlayed))
         }
-        if (state.positionMs > 0L || state.played) {
+        if (state.historicalPositionMs > 0L || state.played) {
             TextButton(onClick = { confirmStartOver = true }, enabled = state.canPlay,
-                modifier = Modifier.testTag("podcast-detail-start-over")) { Text(strings.text(TextKey.StartOver)) }
+                modifier = Modifier.podcastActionTarget().testTag("podcast-detail-start-over")) { PodcastActionText(strings.text(TextKey.StartOver)) }
         }
     }
     if (confirmStartOver) {
@@ -384,12 +400,15 @@ internal fun PodcastDownloadButton(state: PodcastEpisodeUiState, onAction: (Podc
     val strings = LocalStrings.current
     val action = podcastDownloadAction(state)
     var confirmRemoval by remember(state.episode.id) { mutableStateOf(false) }
-    OutlinedButton(onClick = {
-        if (action.requiresRemovalConfirmation) confirmRemoval = true else action.action?.let(onAction)
-    }, enabled = action.enabled, modifier = Modifier.testTag("podcast-detail-download")) {
-        Icon(if (state.downloaded) VeyraIcons.Check else VeyraIcons.Download, null, modifier = Modifier.size(20.dp))
-        Spacer(Modifier.width(8.dp))
-        Text(strings.text(action.label))
+    listOfNotNull(action, podcastRetainedAssetRemovalAction(state)).forEachIndexed { index, offered ->
+        OutlinedButton(onClick = {
+            if (offered.requiresRemovalConfirmation) confirmRemoval = true else offered.action?.let(onAction)
+        }, enabled = offered.enabled, modifier = Modifier.podcastActionTarget().testTag(
+            if (index == 0) "podcast-detail-download" else "podcast-detail-remove-download")) {
+            Icon(if (state.downloaded) VeyraIcons.Check else VeyraIcons.Download, null, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(8.dp))
+            PodcastActionText(strings.text(offered.label))
+        }
     }
     if (confirmRemoval) {
         PodcastActionConfirmation(strings.text(TextKey.RemoveDownload), strings.text(TextKey.RemoveDownloadConfirm),
@@ -427,17 +446,59 @@ internal fun PodcastActionConfirmation(title: String, description: String, onDis
     val strings = LocalStrings.current
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(title) },
-        text = { Text(description) },
-        confirmButton = { TextButton(onClick = onConfirm) { Text(strings.text(TextKey.Confirm)) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(strings.text(TextKey.Cancel)) } },
+        modifier = Modifier.testTag("podcast-action-confirmation"),
+        title = { PodcastActionText(title) },
+        text = { PodcastActionText(description) },
+        confirmButton = {
+            TextButton(onClick = onConfirm, modifier = Modifier.podcastActionTarget().testTag("podcast-action-confirm")) {
+                PodcastActionText(strings.text(TextKey.Confirm))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, modifier = Modifier.podcastActionTarget().testTag("podcast-action-dismiss")) {
+                PodcastActionText(strings.text(TextKey.Cancel))
+            }
+        },
     )
 }
 
+/**
+ * Keep action labels and confirmation copy content-sized within the available width.
+ * Painting and semantic text layout receive the same bounded width; long labels still
+ * wrap and grow vertically. A required width or a filled FlowRow would break that contract.
+ */
+@Composable
+private fun PodcastActionText(text: String) {
+    Text(text, modifier = Modifier.width(IntrinsicSize.Max))
+}
+
+// Minimum interactive geometry, not fixed height: long localized labels can still wrap and grow.
+private fun Modifier.podcastActionTarget(): Modifier =
+    sizeIn(minWidth = VeyraSpacing.TouchTarget, minHeight = VeyraSpacing.TouchTarget)
+
 internal fun podcastPlayLabel(state: PodcastEpisodeUiState, strings: AppStrings): String = when {
     state.canResume -> strings.format(TextKey.ResumeAt, strings.mediaTime(state.positionMs))
+    state.progressRecording != PodcastProgressRecording.MATCHED -> strings.text(TextKey.Play)
     state.played -> strings.text(TextKey.Replay)
     else -> strings.text(TextKey.Play)
+}
+
+internal fun podcastHistoricalProgressNoticeKey(state: PodcastEpisodeUiState): TextKey? =
+    if (state.historicalPositionMs <= 0L) null else when (state.progressRecording) {
+        PodcastProgressRecording.MATCHED -> null
+        PodcastProgressRecording.CHANGED -> TextKey.PodcastProgressRecordingChanged
+        PodcastProgressRecording.UNVERIFIED -> TextKey.PodcastProgressRecordingUnverified
+    }
+
+@Composable
+internal fun PodcastHistoricalProgressNotice(state: PodcastEpisodeUiState) {
+    val key = podcastHistoricalProgressNoticeKey(state) ?: return
+    val strings = LocalStrings.current
+    Text(strings.format(key, strings.mediaTime(state.historicalPositionMs)),
+        modifier = Modifier.fillMaxWidth().testTag("podcast-progress-recording-notice-${state.episode.id}").semantics {
+            contentDescription = strings.format(key, strings.spokenDuration(state.historicalPositionMs))
+        },
+        style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
 internal data class PodcastDownloadAction(
@@ -452,6 +513,36 @@ internal val cancellableDownloadStatuses = setOf(
     DownloadStatus.WAITING_NETWORK, DownloadStatus.NEEDS_FOREGROUND, DownloadStatus.VERIFYING,
 )
 
+// A committed file may be projected as checking/restricted until the current host validates it.
+// Cancel/resume of the durable COMPLETE record are no-ops; file ownership is not proof of Ready.
+private fun DownloadRecord.isCheckingExistingAsset(): Boolean = asset != null && !cleanupPending &&
+    status in setOf(DownloadStatus.VERIFYING, DownloadStatus.NEEDS_FOREGROUND)
+
+/** Explain retained-file checks without changing playback eligibility or claiming the asset is Ready. */
+internal fun podcastUnavailablePlaybackNotice(state: PodcastEpisodeUiState): TextKey? {
+    if (state.canPlay) return null
+    val checking = state.download?.takeIf { it.isCheckingExistingAsset() }
+    if (checking != null) {
+        return if (checking.status == DownloadStatus.VERIFYING)
+            TextKey.DownloadVerifying else TextKey.DownloadNeedsForeground
+    }
+    return if (state.offlineOnly && state.hasAudioSource) TextKey.NotDownloaded else TextKey.EpisodeUnavailable
+}
+
+internal fun podcastCanCancelDownload(download: DownloadRecord): Boolean =
+    download.status in cancellableDownloadStatuses && !download.isCheckingExistingAsset()
+
+internal fun podcastRetainedAssetRemovalAction(state: PodcastEpisodeUiState): PodcastDownloadAction? {
+    // Failed validation can retain owned bytes. Removing those bytes is a separate local action,
+    // not a retry, and must remain available offline through the coordinator's confirmed cleanup.
+    val download = state.download?.takeIf {
+        it.asset != null && !it.cleanupPending &&
+            it.status in setOf(DownloadStatus.VERIFYING, DownloadStatus.NEEDS_FOREGROUND, DownloadStatus.FAILED)
+    } ?: return null
+    return PodcastDownloadAction(TextKey.RemoveDownload, PodcastAction.RemoveDownload(download.id),
+        requiresRemovalConfirmation = true)
+}
+
 internal fun podcastDownloadAction(state: PodcastEpisodeUiState): PodcastDownloadAction {
     fun newDownload() = PodcastDownloadAction(TextKey.Download, PodcastAction.Download(state.episode.id),
         enabled = !state.offlineOnly && state.hasAudioSource)
@@ -459,6 +550,11 @@ internal fun podcastDownloadAction(state: PodcastEpisodeUiState): PodcastDownloa
     if (state.downloaded) {
         return PodcastDownloadAction(TextKey.RemoveDownload, PodcastAction.RemoveDownload(download.id),
             requiresRemovalConfirmation = true)
+    }
+    if (download.isCheckingExistingAsset()) {
+        return PodcastDownloadAction(
+            if (download.status == DownloadStatus.VERIFYING) TextKey.DownloadVerifying else TextKey.DownloadNeedsForeground,
+            action = null, enabled = false)
     }
     return when (download.status) {
         DownloadStatus.RUNNING -> PodcastDownloadAction(TextKey.PauseDownload, PodcastAction.PauseDownload(download.id))

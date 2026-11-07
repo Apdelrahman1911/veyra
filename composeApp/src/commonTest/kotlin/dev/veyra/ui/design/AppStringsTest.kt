@@ -136,6 +136,40 @@ class AppStringsTest {
         assertEquals(arabic.text(TextKey.UnknownDuration), arabic.spokenDuration(null))
     }
 
+    @Test fun podcastRecordingChangeNoticeKeepsHistoricalTimeSeparateFromStartingOver() {
+        val indic = AppStrings(LanguagePreference.ARABIC, arabicIndicDigits = true)
+        assertEquals(
+            "Saved position: \u20661:32\u2069, from a previous recording. This recording will play from the beginning.",
+            english.format(TextKey.PodcastProgressRecordingChanged, english.mediaTime(92_000)),
+        )
+        assertEquals(
+            "موضع الاستماع المحفوظ: \u2066١:٣٢\u2069، من تسجيل سابق. سيبدأ تشغيل هذا التسجيل من البداية.",
+            indic.format(TextKey.PodcastProgressRecordingChanged, indic.mediaTime(92_000)),
+        )
+    }
+
+    @Test fun unverifiedPodcastRecordingNoticeKeepsResumeConditionalAndSupportsSpokenPosition() {
+        assertEquals(
+            "Saved position: \u20661:32\u2069. Playback resumes there only if the selected recording matches.",
+            english.format(TextKey.PodcastProgressRecordingUnverified, english.mediaTime(92_000)),
+        )
+        assertEquals(
+            "موضع الاستماع المحفوظ: \u20661:32\u2069. يُستأنف التشغيل من هذا الموضع فقط إذا تطابق التسجيل المختار مع التسجيل السابق.",
+            arabic.format(TextKey.PodcastProgressRecordingUnverified, arabic.mediaTime(92_000)),
+        )
+        listOf(english, arabic).forEach { strings ->
+            listOf(TextKey.PodcastProgressRecordingChanged, TextKey.PodcastProgressRecordingUnverified).forEach { key ->
+                val spokenPosition = strings.spokenDuration(92_000)
+                assertEquals(
+                    strings.text(key).replace("{0}", displayMetadata(spokenPosition)),
+                    displayMetadata(strings.format(key, spokenPosition)),
+                )
+                assertEquals(strings.text(TextKey.InformationUnavailable), strings.format(key))
+                assertEquals(strings.text(TextKey.InformationUnavailable), strings.format(key, "1:32", "extra"))
+            }
+        }
+    }
+
     @Test fun byteSizesUseHonestBinaryUnitsAndCannotOverflow() {
         val examples = mapOf(
             0L to "0 B",
@@ -165,6 +199,51 @@ class AppStringsTest {
         listOf(english, arabic).forEach { strings ->
             assertEquals(strings.text(TextKey.ForegroundRequired),
                 strings.errorFor(AppFailure(FailureCode.BACKGROUND_RESTRICTED)))
+        }
+    }
+
+    @Test fun unknownDownloadOwnerDrainRequiresFullAppRestartInBothLanguages() {
+        val failure = AppFailure(
+            FailureCode.BACKGROUND_RESTRICTED,
+            detail = "download_owner_drain_failed_restart_required",
+        )
+        assertEquals(
+            "Download recovery requires restarting Veyra. Quit the app completely, reopen it, then retry.",
+            english.errorFor(failure),
+        )
+        assertEquals(
+            "تتطلّب استعادة التنزيلات إعادة تشغيل ڤيرا. أغلق التطبيق بالكامل، ثم افتحه مجددًا وأعِد المحاولة.",
+            arabic.errorFor(failure),
+        )
+        listOf(english, arabic).forEach { strings ->
+            assertEquals(strings.text(TextKey.DownloadRecoveryRestartRequired), strings.errorFor(failure))
+            assertEquals(strings.errorFor(failure), strings.errorFor(failure.copy(retryAfterMs = 30_000)))
+            assertFalse(strings.errorFor(failure).contains(failure.detail!!))
+        }
+    }
+
+    @Test fun downloadRestartCopyRequiresTheExactCodeAndCategoryWithoutEchoingUnknownDetails() {
+        val trustedCode = "download_owner_drain_failed_restart_required"
+        val unknownDetails = listOf(
+            null, "", " $trustedCode", "$trustedCode ", trustedCode.uppercase(),
+            "prefix_$trustedCode", "${trustedCode}_suffix", "$trustedCode\n",
+            "$trustedCode https://example.invalid/?credential=do-not-render",
+        )
+        listOf(english, arabic).forEach { strings ->
+            unknownDetails.forEach { detail ->
+                assertEquals(
+                    strings.text(TextKey.ForegroundRequired),
+                    strings.errorFor(AppFailure(FailureCode.BACKGROUND_RESTRICTED, detail)),
+                    "Only the exact allowlisted code may select restart copy",
+                )
+            }
+            FailureCode.entries.filter { it != FailureCode.BACKGROUND_RESTRICTED }.forEach { code ->
+                assertEquals(
+                    strings.errorFor(AppFailure(code)),
+                    strings.errorFor(AppFailure(code, trustedCode)),
+                    "The same detail under another failure category must not change public copy",
+                )
+            }
         }
     }
 

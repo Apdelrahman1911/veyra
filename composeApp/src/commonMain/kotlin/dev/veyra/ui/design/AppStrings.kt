@@ -258,6 +258,8 @@ enum class TextKey(internal val english: String, internal val arabic: String) {
     Publisher("Publisher", "الناشر"),
     StartOver("Start over", "البدء من جديد"),
     StartOverConfirm("Start this episode from the beginning? Your previous position can be restored with Undo.", "هل تريد بدء الحلقة من أولها؟ يمكنك استعادة الموضع السابق باستخدام التراجع."),
+    PodcastProgressRecordingChanged("Saved position: {0}, from a previous recording. This recording will play from the beginning.", "موضع الاستماع المحفوظ: {0}، من تسجيل سابق. سيبدأ تشغيل هذا التسجيل من البداية."),
+    PodcastProgressRecordingUnverified("Saved position: {0}. Playback resumes there only if the selected recording matches.", "موضع الاستماع المحفوظ: {0}. يُستأنف التشغيل من هذا الموضع فقط إذا تطابق التسجيل المختار مع التسجيل السابق."),
     MarkPlayed("Mark as played", "تحديد كمستمَع إليها"),
     MarkUnplayed("Mark as unplayed", "تحديد كغير مستمَع إليها"),
     SaveForLater("Save for later", "حفظ لوقت لاحق"),
@@ -338,6 +340,7 @@ enum class TextKey(internal val english: String, internal val arabic: String) {
     DownloadReady("Ready offline", "متاح دون اتصال"),
     DownloadNeedsForeground("Open Veyra to continue this download.", "افتح ڤيرا لمتابعة هذا التنزيل."),
     ForegroundRequired("Open Veyra to continue. Background execution is currently restricted.", "افتح ڤيرا للمتابعة. التشغيل في الخلفية مقيّد حاليًا."),
+    DownloadRecoveryRestartRequired("Download recovery requires restarting Veyra. Quit the app completely, reopen it, then retry.", "تتطلّب استعادة التنزيلات إعادة تشغيل ڤيرا. أغلق التطبيق بالكامل، ثم افتحه مجددًا وأعِد المحاولة."),
     Downloaded("Downloaded", "تم التنزيل"),
     DownloadCancelled("Download cancelled", "أُلغي التنزيل"),
     DownloadRetryAttempt("Retry attempt {0}", "محاولة إعادة التنزيل: {0}"),
@@ -685,7 +688,10 @@ class AppStrings(
         return format(TextKey.ByteSizeValue, numeric, text(units[index]))
     }
 
-    /** Only typed, source-independent failure categories are shown. Never use failure.detail. */
+    /**
+     * Only typed categories and the exact internal recovery-code allowlist choose public copy.
+     * Never display, interpolate, normalize or otherwise interpret arbitrary failure.detail.
+     */
     fun errorFor(failure: AppFailure): String = text(when (failure.code) {
         FailureCode.NETWORK_UNAVAILABLE -> TextKey.ConnectionUnavailable
         FailureCode.OFFLINE_POLICY -> TextKey.OfflinePolicy
@@ -696,7 +702,11 @@ class AppStrings(
         FailureCode.UNSUPPORTED_TRANSPORT -> TextKey.UnsupportedTransport
         FailureCode.UNSUPPORTED_CODEC -> TextKey.UnsupportedCodec
         FailureCode.PERMISSION_DENIED -> TextKey.PermissionDenied
-        FailureCode.BACKGROUND_RESTRICTED -> TextKey.ForegroundRequired
+        FailureCode.BACKGROUND_RESTRICTED -> if (failure.detail == "download_owner_drain_failed_restart_required") {
+            TextKey.DownloadRecoveryRestartRequired
+        } else {
+            TextKey.ForegroundRequired
+        }
         FailureCode.STORAGE_FULL -> TextKey.StorageFull
         FailureCode.STORAGE_IO -> TextKey.StorageError
         FailureCode.CORRUPT_MEDIA -> TextKey.CorruptMedia

@@ -4,9 +4,11 @@ import dev.veyra.model.AppFailure
 import dev.veyra.model.AppSnapshot
 import dev.veyra.model.DownloadRecord
 import dev.veyra.model.DownloadStatus
+import dev.veyra.model.FirstResultKind
 import dev.veyra.model.MediaItem
 import dev.veyra.model.MediaKind
 import dev.veyra.model.MediaProgress
+import dev.veyra.model.OfflineAssetKind
 import dev.veyra.model.PlaybackBinding
 import dev.veyra.model.PodcastShow
 import dev.veyra.model.QueueContext
@@ -52,6 +54,8 @@ data class EpisodeDetailUiState(
 
 enum class PodcastBindingContext { CURRENT, DOWNLOADED, PREVIOUS }
 
+enum class PodcastProgressRecording { MATCHED, CHANGED, UNVERIFIED }
+
 /** Domain IDs stay intact. Selecting/navigating is intentionally not a play command. */
 sealed interface PodcastAction {
     data object FindPodcasts : PodcastAction
@@ -90,20 +94,45 @@ data class PodcastEpisodeUiState(
     val saved: Boolean = false,
     val queued: Boolean = false,
     val offlineOnly: Boolean = false,
+    /** Disclosure can describe currently loaded audio, not necessarily the next Play target. */
     val binding: PlaybackBinding? = null,
     val bindingContext: PodcastBindingContext = PodcastBindingContext.PREVIOUS,
+    val progressBinding: PlaybackBinding? = null,
+    val downloadedBinding: PlaybackBinding? = null,
 ) {
     val listingDurationMs: Long? get() = episode.durationMs?.takeIf { it > 0L }
+    /** Historical listening remains intact even when the next selection is a different recording. */
+    val historicalPositionMs: Long get() = progress?.positionMs?.coerceAtLeast(0L) ?: 0L
+    // PlayEpisode is a fresh Play, not a request to resume the displayed current binding.
+    // The resolver prefers a completed local artifact; without one, a fresh online first-result
+    // search is still unknown. Neither CURRENT nor the newest historical receipt pins that search.
+    val nextPlayBinding: PlaybackBinding? get() {
+        val record = download?.takeIf { downloaded && !it.cleanupPending } ?: return null
+        val asset = record.asset ?: return null
+        return downloadedBinding?.takeIf {
+            record.executionBindingId == it.id && asset.executionBindingId == it.id &&
+                asset.kind == OfflineAssetKind.FILE && !asset.representationId.isNullOrBlank() &&
+                record.representationId == asset.representationId && it.recordingIdFor(episode.id) != null
+        }
+    }
+    val progressRecording: PodcastProgressRecording get() {
+        val historical = progressBinding?.takeIf { it.id == progress?.executionBindingId }
+            ?.recordingIdFor(episode.id) ?: return PodcastProgressRecording.UNVERIFIED
+        val selected = nextPlayBinding?.recordingIdFor(episode.id) ?: return PodcastProgressRecording.UNVERIFIED
+        return if (historical == selected) PodcastProgressRecording.MATCHED else PodcastProgressRecording.CHANGED
+    }
     // RSS duration describes the requested listing, which may differ from the resolved recording.
     // Never use that estimate as a denominator for real listening progress or remaining audio.
-    val progressDurationMs: Long? get() = progress?.durationMs?.takeIf { it > 0L }
-    val positionMs: Long get() = progress?.positionMs?.coerceAtLeast(0L) ?: 0L
+    // Likewise, recording A's measured timeline must never be presented as recording B's.
+    val progressDurationMs: Long? get() = progress?.durationMs
+        ?.takeIf { it > 0L && progressRecording == PodcastProgressRecording.MATCHED }
+    val positionMs: Long get() = historicalPositionMs.takeIf { progressRecording == PodcastProgressRecording.MATCHED } ?: 0L
     val played: Boolean get() = progress?.played == true
     // A status enum alone is not proof of usable local media. The owner must have committed its asset.
     val downloaded: Boolean get() = download?.hasCommittedAssetFor(episode.id) == true
     // A duration estimate or seek to the end is not confirmation that an episode was played.
     // Only the coordinator's confirmed natural-end/manual flag can remove it from Continue.
-    val inProgress: Boolean get() = !played && positionMs > 0L
+    val inProgress: Boolean get() = !played && historicalPositionMs > 0L
     // Online podcast playback is resolved centrally from the complete discovery title to
     // the FIRST kmpYT result. An RSS enclosure is metadata, not our playback endpoint.
     // Eligibility to try resolution is not a promise that a matching/playable result exists.
@@ -111,7 +140,7 @@ data class PodcastEpisodeUiState(
         !episode.source.localAssetId.isNullOrBlank()
     } else episode.title.isNotBlank()
     val canPlay: Boolean get() = downloaded || (!offlineOnly && hasAudioSource)
-    val canResume: Boolean get() = inProgress
+    val canResume: Boolean get() = inProgress && progressRecording == PodcastProgressRecording.MATCHED
     val noLongerInFeed: Boolean get() = show?.let {
         it.lastRefreshEpochMs != null && episode.id !in it.episodeIds
     } ?: false
@@ -122,7 +151,9 @@ fun AppSnapshot.podcastEpisodeUiState(episode: MediaItem, currentBinding: Playba
     val download = downloads.values.firstOrNull { it.mediaId == episode.id }
     val activeBinding = currentBinding?.takeIf { it.mediaId == episode.id }
     val downloadedBinding = download?.takeIf { it.hasCommittedAssetFor(episode.id) }?.asset?.executionBindingId
-        ?.let(playbackBindings::get)?.takeIf { it.mediaId == episode.id }
+        ?.let { id -> playbackBindings[id]?.takeIf { it.id == id && it.mediaId == episode.id } }
+    val progressBinding = progress[episode.id]?.executionBindingId
+        ?.let { id -> playbackBindings[id]?.takeIf { it.id == id && it.mediaId == episode.id } }
     val previousBinding = if (activeBinding == null && downloadedBinding == null) playbackBindings.values
         .asSequence().filter { it.mediaId == episode.id }
         .maxWithOrNull(compareBy<PlaybackBinding> { it.resolvedEpochMs }.thenBy { it.id }) else null
@@ -142,8 +173,18 @@ fun AppSnapshot.podcastEpisodeUiState(episode: MediaItem, currentBinding: Playba
             downloadedBinding != null -> PodcastBindingContext.DOWNLOADED
             else -> PodcastBindingContext.PREVIOUS
         },
+        progressBinding = progressBinding,
+        downloadedBinding = downloadedBinding,
     )
 }
+
+/** Fail closed on absent/malformed receipts; equal receipt IDs or discovery titles are not audio identity. */
+private fun PlaybackBinding.recordingIdFor(mediaId: String): String? = selectedVideoId?.takeIf {
+    this.mediaId == mediaId && id.isNotBlank() && queryTitle.isNotBlank() && selectionOrdinal == 0 &&
+        firstResultKind == FirstResultKind.VIDEO && firstResultId == it && podcastVideoId.matches(it)
+}
+
+private val podcastVideoId = Regex("[A-Za-z0-9_-]{11}")
 
 fun PodcastShowUiState.visibleEpisodes(): List<MediaItem> {
     val downloadedIds = if (options.filter == PodcastEpisodeFilter.DOWNLOADED) snapshot.downloads.values
