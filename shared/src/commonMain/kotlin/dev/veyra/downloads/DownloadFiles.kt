@@ -198,6 +198,43 @@ class DownloadFiles internal constructor(directory: String, val fileSystem: File
         }
     }
 
+    /**
+     * Unknown-schema2 adoption barrier in the EXISTING writer namespace. All four slots are
+     * required even if current parallelism is lower; admission remains held until the exact
+     * one-shot Room command returns. Contention never cancels an unrelated transfer.
+     */
+    internal fun tryPhysicalAdoptionBarrier(values: Collection<String>,
+        cleanup: DownloadLeaseCleanupScope): DownloadFileLease? = storageOperation {
+        initialize()
+        val acquired = mutableListOf<DownloadFileLease>()
+        var handedOff = false
+        try {
+            val names = listOf("slot-admission") + (0 until 4).map { "slot-$it" } +
+                values.map(::lockName).distinct().sorted()
+            for (name in names) {
+                val lease = cleanup.acquire(leaseFactory, ownedPath((lockRoot / name).toString()).toString())
+                    ?: return@storageOperation null
+                acquired += lease
+            }
+            DownloadLeaseCleanup(acquired.asReversed().toList()).also { handedOff = true }
+        } finally {
+            if (!handedOff) cleanup.releaseTemporary(acquired.asReversed().toList())
+        }
+    }
+
+    /**
+     * Called only while holding the SAME generation's OS path lock. Checking transfer.part
+     * alone misses kmpYT journals, checkpoints and empty-but-retained generation directories.
+     * A pre-release legacy root may contain separately locked newer generations; just as in
+     * resetStaging, those are not part of its historical flat directory.
+     */
+    internal fun stagingGenerationAbsent(value: String): Boolean = storageOperation {
+        val directory = stagingPart(value).parent!!
+        if (!fileSystem.exists(directory)) true
+        else if (directory.name.matches(GENERATION_DIRECTORY)) false
+        else fileSystem.list(directory).none { !it.name.matches(GENERATION_DIRECTORY) }
+    }
+
     /** Caller holds this exact generation lease. Never remove a newer attempt's directory. */
     internal fun resetStaging(stagingPath: String) = storageOperation {
         val path = stagingPart(stagingPath).parent!!

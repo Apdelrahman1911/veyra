@@ -1,19 +1,36 @@
 package dev.veyra.app
 
+import dev.veyra.acquisition.AcquisitionCaptureFactory
+import dev.veyra.acquisition.AcquisitionCoordinator
+import dev.veyra.acquisition.DownloadBatchCoordinator
 import dev.veyra.artwork.ArtworkCache
 import dev.veyra.artwork.ArtworkFiles
 import dev.veyra.data.LibraryStore
 import dev.veyra.data.StoreStatus
 import dev.veyra.data.getOrThrow
+import dev.veyra.downloads.DownloadAcquisitionDependencies
 import dev.veyra.downloads.DownloadCoordinator
 import dev.veyra.downloads.DownloadFiles
 import dev.veyra.downloads.DownloadActivation
+import dev.veyra.downloads.DownloadMaterializationEvidence
 import dev.veyra.model.*
 import dev.veyra.playback.*
 import dev.veyra.source.*
 import dev.veyra.source.commons.CommonsSource
+import dev.veyra.source.execution.AcquisitionExecutionContext
+import dev.veyra.source.execution.AcquisitionExecutionGateway
+import dev.veyra.source.execution.AcquisitionGateway
+import dev.veyra.source.execution.AcquisitionInspection
+import dev.veyra.source.execution.AcquisitionPlaybackSource
+import dev.veyra.source.execution.AcquisitionTransferProgress
+import dev.veyra.source.execution.AcquisitionTransferResult
 import dev.veyra.source.execution.AppSourceResolver
+import dev.veyra.source.execution.CollectionContinuation
+import dev.veyra.source.execution.KmpLegacyPreparedDownloadAdapter
 import dev.veyra.source.execution.KmpMediaGateway
+import dev.veyra.source.execution.LegacyPreparedDownloadGateway
+import dev.veyra.source.execution.PreparedAcquisitionDownload
+import dev.veyra.source.execution.SourceCollectionPage
 import dev.veyra.source.network.SafeHttp
 import dev.veyra.source.network.createSafeHttp
 import dev.veyra.source.podcast.PodcastSource
@@ -91,7 +108,11 @@ class AppContainer(
     // Completion includes policy-return failure cleanup, not just the inner request coroutine.
     private val activeAcquisitions = MutableStateFlow<List<CompletableDeferred<Unit>>>(emptyList())
     val store: LibraryStore = platform.store
-    private val executionGateway = object : KmpMediaGateway {
+    private val downloadCoverageAcknowledged = MutableStateFlow(false)
+    private val executionGateway = object : KmpMediaGateway, LegacyPreparedDownloadGateway {
+        // The pinned kmpYT revision has no prepared-transfer API; this adapter is the minimal
+        // lawful bridge over the existing resolve/download primitives (see its contract).
+        private val preparedAdapter = KmpLegacyPreparedDownloadAdapter(this)
         override suspend fun firstResult(completeTitle: String) = online { gateway.firstResult(completeTitle) }
         override suspend fun resolve(binding: PlaybackBinding, capabilities: EngineCapabilities, purpose: ResolvePurpose): ResolvedPlayable {
             // coroutineScope's cancellable return can discard a successful result. Retain the
@@ -128,14 +149,52 @@ class AppContainer(
             platform.prepareMediaRuntime()
             gateway.download(binding, destinationPath, capabilities, representationId, onProgress)
         }
+        override suspend fun prepareDownload(binding: PlaybackBinding, capabilities: EngineCapabilities,
+            requiredRepresentationId: String?) = preparedAdapter.prepareDownload(binding, capabilities, requiredRepresentationId)
+        override suspend fun download(prepared: dev.veyra.source.execution.PreparedLegacyDownload,
+            destinationPath: String, onProgress: suspend (AcquisitionTransferProgress) -> Unit) =
+            preparedAdapter.download(prepared, destinationPath, onProgress)
     }
     val files = DownloadFiles("${platform.dataDirectory}/media")
-    val resolver = AppSourceResolver(store, files, platform.validator, executionGateway, clock)
+    private val materializationEvidence = DownloadMaterializationEvidence(store.transactionOwner)
+    val resolver = AppSourceResolver(store, files, platform.validator, executionGateway, clock, materializationEvidence)
     val playback = PlaybackController(store, platform.engine, resolver, scope, clock)
+    // Typed acquisition execution needs the newer upstream prepare/acquire APIs that are not in
+    // the pinned kmpYT revision. These explicit port seams fail truthfully and grant no success;
+    // existing catalogue MEDIA/download journeys continue through the pinned legacy gateway.
+    private val acquisitionSelection: AcquisitionGateway = UnavailableAcquisitionGateway
+    private val acquisitionExecution: AcquisitionExecutionGateway = UnavailableAcquisitionExecutionGateway
+    private val acquisition = AcquisitionCoordinator(store.acquisition, acquisitionSelection,
+        AcquisitionCaptureFactory(clock), clock, offline = { store.state.value.settings.offlineOnly })
+    private val downloadBatches = DownloadBatchCoordinator(store.acquisition, acquisition, clock)
+    private val acquisitionDependencies = DownloadAcquisitionDependencies(
+        repository = store.acquisition,
+        gateway = acquisitionExecution,
+        validator = platform.localValidator,
+        beforePhysicalDelete = { asset ->
+            (asset.producer as? PhysicalDownloadProducer.Schema2)?.mediaId?.let { mediaId ->
+                playback.releaseForAssetRemoval(mediaId).getOrThrow()
+            }
+            resolver.retainedReaderFailure()?.let { throw VeyraException(it) }
+        },
+        beforePhysicalAdoption = { producer ->
+            playback.releaseForAssetRemoval(producer.mediaId).getOrThrow()
+            resolver.retainedReaderFailure()?.let { throw VeyraException(it) }
+        },
+        requireOwnerAdmission = {
+            if (closed || !downloadCoverageAcknowledged.value) {
+                throw VeyraException(AppFailure(FailureCode.BACKGROUND_RESTRICTED, "download_coverage_unacknowledged"))
+            }
+        },
+        acquisition = acquisition,
+        batches = downloadBatches,
+        materializationEvidence = materializationEvidence,
+    )
     val downloads = DownloadCoordinator(store, files, resolver, executionGateway, platform.validator,
         platform.engine.capabilities, scope, platform.downloadExecution, clock,
         beforePhysicalDelete = { asset -> playback.releaseForAssetRemoval(asset.mediaId).getOrThrow() },
-        networkState = platform.downloadNetworkState)
+        networkState = platform.downloadNetworkState,
+        acquisitionDependencies = acquisitionDependencies)
     /** UI projection only: durable completion is not proof that this process checked the file. */
     val library: StateFlow<AppSnapshot> = downloads.presentation
     private val podcastsSource = PodcastSource(http, nowMs = clock::epochMs)
@@ -247,6 +306,7 @@ class AppContainer(
             // indefinitely. Ready library/playback state is published BEFORE this bounded step.
             withTimeout(10_000L) {
                 platform.ensureDownloadScheduling()
+                downloadCoverageAcknowledged.value = true
                 downloads.start(DownloadActivation.USER_SESSION)
                 // Foreground activation may restore OS-expired work, but preserves user pauses
                 // and future retry deadlines. Native callers await their expiration barrier first.
@@ -255,6 +315,7 @@ class AppContainer(
             mutableDownloadRestriction.value = null
             return true
         } catch (cancelled: CancellationException) {
+            downloadCoverageAcknowledged.value = false
             currentCoroutineContext().ensureActive()
             // Only the bounded child operation/local cancellation is converted to a restriction.
             // Real caller cancellation propagates; it is never a falsely successful activation.
@@ -263,6 +324,7 @@ class AppContainer(
             fail(failure)
             return false
         } catch (error: Exception) {
+            downloadCoverageAcknowledged.value = false
             val failure = failureOf(error)
             mutableDownloadRestriction.value = failure
             fail(failure)
@@ -1027,6 +1089,31 @@ private object AppCleanupOwners {
     fun retain(owner: AppContainer) { retained.update { it + owner } }
     fun release(owner: AppContainer) { retained.update { it - owner } }
     fun contains(owner: AppContainer): Boolean = owner in retained.value
+}
+
+/** Explicit unavailable typed-acquisition seam. Never fabricates a receipt or success. */
+private object UnavailableAcquisitionGateway : AcquisitionGateway {
+    private fun unavailable(): Nothing =
+        throw VeyraException(AppFailure(FailureCode.UNSUPPORTED_SOURCE, "typed_acquisition_upstream_unavailable"))
+    override suspend fun acquire(request: AcquisitionRequest): SourceAcquisitionResult = unavailable()
+    override fun restore(request: AcquisitionRequest, receipt: FirstResultObservation): SourceAcquisitionResult = unavailable()
+    override suspend fun collection(request: AcquisitionRequest, selection: SourceAcquisitionResult.Collection,
+        limits: CollectionLimits): SourceCollectionPage = unavailable()
+    override suspend fun more(continuation: CollectionContinuation): SourceCollectionPage = unavailable()
+    override suspend fun inspect(request: AcquisitionRequest,
+        selection: SourceAcquisitionResult.Single): AcquisitionInspection = unavailable()
+}
+
+/** Typed media execution needs newer upstream prepare/acquire APIs than the pinned kmpYT pin. */
+private object UnavailableAcquisitionExecutionGateway : AcquisitionExecutionGateway {
+    private fun unavailable(): Nothing =
+        throw VeyraException(AppFailure(FailureCode.UNSUPPORTED_SOURCE, "typed_execution_upstream_unavailable"))
+    override suspend fun preparePlayback(context: AcquisitionExecutionContext, capabilities: EngineCapabilities,
+        requiredRepresentationId: String?, inspection: AcquisitionInspection?): AcquisitionPlaybackSource = unavailable()
+    override suspend fun prepareDownload(context: AcquisitionExecutionContext, capabilities: EngineCapabilities,
+        requiredRepresentationId: String?, inspection: AcquisitionInspection?): PreparedAcquisitionDownload = unavailable()
+    override suspend fun download(prepared: PreparedAcquisitionDownload, destinationPath: String,
+        onProgress: suspend (AcquisitionTransferProgress) -> Unit): AcquisitionTransferResult = unavailable()
 }
 
 fun createAppContainer(platform: PlatformServices, parentScope: CoroutineScope): AppContainer = AppContainer(platform, parentScope)

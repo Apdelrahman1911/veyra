@@ -7,8 +7,11 @@ import dev.veyra.downloads.ProcessLifetimeDownloadGate
 import dev.veyra.downloads.alwaysConnectedDownloadNetwork
 import dev.veyra.model.LanguagePreference
 import dev.veyra.model.AppFailure
+import dev.veyra.model.FailureCode
+import dev.veyra.model.VeyraException
 import dev.veyra.playback.AssetValidator
 import dev.veyra.playback.AudioEngine
+import dev.veyra.playback.LocalMediaValidator
 import dev.veyra.source.youtube.YouTubeMediaSource
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -30,6 +33,13 @@ interface PlatformServices {
     val store: LibraryStore
     val engine: AudioEngine
     val validator: AssetValidator
+    /**
+     * Identity-free local decoder/header/duration primitive required by schema3 physical
+     * downloads. Production platform validators implement it over the same native primitive;
+     * a platform that does not is a truthful unavailable capability, never a fabricated success.
+     */
+    val localValidator: LocalMediaValidator get() = validator as? LocalMediaValidator
+        ?: LocalMediaValidator { throw VeyraException(AppFailure(FailureCode.UNSUPPORTED_SOURCE, "local_validator_unavailable")) }
     val youtube: YouTubeMediaSource
     val systemLanguage: LanguagePreference
     val systemDarkTheme: Boolean get() = false

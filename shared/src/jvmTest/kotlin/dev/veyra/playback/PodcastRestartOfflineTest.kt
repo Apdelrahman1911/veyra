@@ -1,5 +1,6 @@
 package dev.veyra.playback
 
+import dev.veyra.downloads.DownloadMaterializationEvidence
 import dev.veyra.data.createPlatformLibraryStore
 import dev.veyra.data.getOrThrow
 import dev.veyra.downloads.DownloadFiles
@@ -73,7 +74,7 @@ class PodcastRestartOfflineTest {
                 val dispatcher = coroutineContext[ContinuationInterceptor] as CoroutineDispatcher
                 val firstEngine = PlaybackTestEngine().apply { autoSeek = false }
                 val first = PlaybackController(store, firstEngine,
-                    AppSourceResolver(store, files, validator, gateway), this, dispatcher = dispatcher)
+                    AppSourceResolver(store, files, validator, gateway, materializationEvidence = DownloadMaterializationEvidence(store.transactionOwner)), this, dispatcher = dispatcher)
                 controller = first
                 first.initialize().getOrThrow()
                 assertEquals(PlaybackPhase.PAUSED, first.state.value.phase)
@@ -111,7 +112,7 @@ class PodcastRestartOfflineTest {
 
                 val secondEngine = PlaybackTestEngine().apply { autoSeek = false }
                 val second = PlaybackController(store, secondEngine,
-                    AppSourceResolver(store, files, validator, gateway), this, dispatcher = dispatcher)
+                    AppSourceResolver(store, files, validator, gateway, materializationEvidence = DownloadMaterializationEvidence(store.transactionOwner)), this, dispatcher = dispatcher)
                 controller = second
                 second.initialize().getOrThrow()
                 assertEquals(PlaybackPhase.PAUSED, second.state.value.phase)
