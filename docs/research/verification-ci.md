@@ -205,6 +205,39 @@ Therefore:
 - [ ] Installability, signing/notarization, background playback, interruptions, routing, keyboard/screen-reader behavior, and physical-device gaps explicitly listed.
 - [ ] Public release assets contain only authorized code/binaries/notices and safe generated fixtures; hashes and signing limitations documented.
 
+## Execution checkpoint — 2026-11-06
+
+These are scoped observations, not a green matrix or release certificate:
+
+- Public kmpYT PR2 head `31300ef8b21cb3cbce3a6e4afe36096f3234a43f`, run
+  `42182306563`: Linux and Intel macOS each executed **443 tests, 4 failures,
+  1 skip**. The four shared failures were `DesktopRuntimeDiagnosticsTest`
+  authored process/stream fixtures incompatible with the stricter actual helper.
+  The isolated fixture-only repair `f0f7fab218323ff3bc9a7728dc22b2cd1f329bd6`
+  subsequently passed actual JVM **4/4** and Node endpoint **22/22** with the
+  matching helper and 125 unchanged input hashes. Evidence:
+  `.work/kmpyt-evidence/diagnostics-f0-first/`. It had not yet been published at
+  this observation; testing it against an older helper is not equivalent.
+- That same public Windows job executed **443 tests, 10 failures, 1 skip**:
+  the four fixture failures, three real Chromium startup failures and three
+  checkpoint cases. The actual Chromium failure reason remains unestablished;
+  safe code `OFFLINE_BROWSER_STARTUP_TIMEOUT` does not prove a specific cause.
+  Later checkpoint edits need their own revision-specific evidence.
+- The PR2 Apple job failed real simulator and device compilation in
+  `IosYouTubeSabrPlaybackAdapter.kt` (`inet_pton`, `ntohs`, and
+  `timeIntervalSince1970` unresolved). Protocol/WebKit steps separately stopped
+  with exit78 before CoreSimulator. Do not inherit main revision `45f7077`'s
+  successful framework-build result into this different source revision.
+- Only the lead-authorized obsolete PR1 duplicate runs `42179433540` and
+  `42179440862` were cancelled, both verified **completed/cancelled**, not merely
+  accepted cancellation requests. Current PR2/native jobs were not cancelled.
+  Read-only job logs/status receipts are under `.work/verification/upstream-ci/`.
+- Veyra's [Android Stage0](../verification/android-stage0.md) has **28/28**
+  authored Python regressions, **10/10** scoped-tooling regressions, and **2/2**
+  separately approved strace/Python immediate-double-fork teardown checks.
+  No Android helper preflight, emulator guest, or instrumented test has run.
+  Review-ready input hashes: `.work/verification/android-stage0-review-inputs.json`.
+
 ## Primary sources
 
 All accessed 2026-11-06. Source pages may change; actual build evidence must record its own dates/tool versions.

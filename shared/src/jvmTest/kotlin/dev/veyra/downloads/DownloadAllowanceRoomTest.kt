@@ -161,13 +161,14 @@ class DownloadAllowanceRoomTest {
         val a = coordinator(first, gateway, gate = gate)
         val id = a.enqueue(item()); a.start(); entered.await()
         coroutineScope {
-            val pause = async { a.pauseForBackground() }
-            unwinding.entered.await()
-            a.resumePending()
             val oldExpiration: suspend () -> Unit = callbacks[0]
-            oldExpiration() // queued callback belongs to the OLD foreground epoch
-            unwinding.release()
-            pause.await()
+            val expiration = async { oldExpiration() }
+            try {
+                unwinding.entered.await()
+                expiration.await() // Inline-safe callbacks only cancel; the independent drain joins separately.
+                a.resumePending()
+                oldExpiration() // queued callback belongs to the OLD foreground epoch
+            } finally { unwinding.release() }
         }
         eventually(first) { it.downloads[id]?.status == DownloadStatus.COMPLETE }
         assertEquals(2, gateway.transfers.size)

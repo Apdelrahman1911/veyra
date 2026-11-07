@@ -39,7 +39,7 @@ class DesktopAudioEngineTest {
         assertTrue(report.contains("\"tlsVerify\":\"yes\""), report)
     }
 
-    @Test fun standaloneValidatorRejectsHtmlAndWrongLengths() = runBlocking {
+    @Test fun standaloneValidatorRejectsHtmlAndWrongLengths(): Unit = runBlocking {
         val config = config()
         val path = config.dataDirectory.resolve("not-audio.mp3")
         Files.writeString(path, "<!doctype html><html>Unavailable</html>")

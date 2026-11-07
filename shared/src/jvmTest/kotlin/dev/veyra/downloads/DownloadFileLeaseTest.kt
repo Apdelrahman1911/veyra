@@ -4,11 +4,15 @@ import dev.veyra.model.FailureCode
 import dev.veyra.model.VeyraException
 import org.junit.Assume.assumeNoException
 import java.io.File
+import java.io.IOException
 import java.nio.channels.FileChannel
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.CancellationException
 import kotlin.test.*
 
 /** A fresh process deliberately knows nothing of the parent's registry: it tests the KERNEL lock. */
@@ -70,6 +74,54 @@ class DownloadFileLeaseTest {
             assertNull(tryAcquireDownloadFileLease(alias.toString()))
             assertFalse(childAcquires(directory, path))
         } finally { lease.close() }
+    }
+
+    @Test fun unknownNativeCloseResultStaysStickyEvenAfterChannelAndKernelLockWereConsumed() {
+        for (fault in listOf<() -> Throwable>(
+            { IOException("Authored private native-close diagnostic") },
+            { CancellationException("Authored native-close cancellation") },
+            { AssertionError("Authored unknown native-close error") },
+        )) fileCase { directory, _ ->
+            val path = directory.resolve("unknown-native-close.lock")
+            val closes = AtomicInteger()
+            val lease = assertNotNull(acquireJvmDownloadFileLease(path.toString()) { channel ->
+                closes.incrementAndGet()
+                channel.close() // The real kernel owner is consumed BEFORE the injected native-port error.
+                throw fault()
+            })
+            val first = assertFailsWith<VeyraException> { lease.close() }
+            assertEquals(FailureCode.STORAGE_IO, first.failure.code)
+            assertEquals("download_lock_release", first.failure.detail)
+            repeat(3) { assertSame(first, assertFailsWith<VeyraException> { lease.close() }) }
+            assertEquals(1, closes.get(), "Never retry a channel whose native close result is unknown")
+            assertNull(tryAcquireDownloadFileLease(path.toString()), "Same-process path reservation stays fail-closed")
+            assertTrue(childAcquires(directory, path), "Kernel state alone must not erase the failed consumption receipt")
+        }
+    }
+
+    @Test fun nativePortFailureBeforeConsumptionNeverRetriesTheStillHeldRealChannel() = fileCase { directory, _ ->
+        val path = directory.resolve("unconsumed-native-close.lock")
+        val channel = AtomicReference<FileChannel>()
+        val closes = AtomicInteger()
+        val lease = assertNotNull(acquireJvmDownloadFileLease(path.toString()) {
+            channel.set(it); closes.incrementAndGet()
+            throw IOException("Authored native-port failure before channel consumption")
+        })
+        try {
+            val first = assertFailsWith<VeyraException> { lease.close() }
+            repeat(3) { assertSame(first, assertFailsWith<VeyraException> { lease.close() }) }
+            assertEquals(1, closes.get())
+            assertTrue(assertNotNull(channel.get()).isOpen)
+            assertFalse(childAcquires(directory, path))
+            assertNull(tryAcquireDownloadFileLease(path.toString()))
+        } finally {
+            // Test-only access to the exact captured real channel prevents a fixture leak.
+            // Production has no such bypass; its native holder/registry remain sticky.
+            channel.get()?.close()
+        }
+        assertFailsWith<VeyraException> { lease.close() }
+        assertEquals(1, closes.get())
+        assertNull(tryAcquireDownloadFileLease(path.toString()))
     }
 
     @Test fun failedMultiLockAcquisitionReleasesItsPartialSetButNeverTheContendedOwner() = fileCase { directory, files ->

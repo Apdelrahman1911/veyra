@@ -24,7 +24,7 @@ for target,source in (('/tmp','.work/tmp'),('/var/lib/xkb','.work/cache/xkb'),('
     if (a.st_dev,a.st_ino)!=(b.st_dev,b.st_ino):
         raise SystemExit('Refusing Xvfb without repository-backed scratch directories')
 PY
-for tool in Xvfb xauth python3; do
+for tool in Xvfb xauth xdpyinfo python3; do
     command -v "$tool" >/dev/null 2>&1 || { printf 'Existing %s required; no system installation will be attempted.\n' "$tool" >&2; exit 1; }
 done
 mkdir -p .work/verification
@@ -36,7 +36,14 @@ with socket.socket() as sock:
 PY
 )"
 export DISPLAY="127.0.0.1:$display_number"
-export XAUTHORITY="$VEYRA_WORK_ROOT/runtime/xauth-$$"
+XAUTHORITY="$(python3 -B - <<'PY'
+import os,tempfile
+descriptor,path=tempfile.mkstemp(prefix='xauth-',dir=os.environ['VEYRA_WORK_ROOT']+'/runtime')
+os.close(descriptor)
+print(path)
+PY
+)"
+export XAUTHORITY
 export LIBGL_ALWAYS_SOFTWARE=1
 export SKIKO_RENDER_API=SOFTWARE
 xvfb_pid=""
@@ -56,6 +63,7 @@ python3 -B - "$DISPLAY" <<'PY' | xauth -q -f "$XAUTHORITY"
 import secrets,sys
 print('add ' + sys.argv[1] + ' MIT-MAGIC-COOKIE-1 ' + secrets.token_hex(16))
 PY
+export VEYRA_DISPLAY_AUTHORITY="$XAUTHORITY"
 Xvfb ":$display_number" -screen 0 1440x1000x24 -auth "$XAUTHORITY" \
     -nolock -nolisten unix -nolisten local -nolisten inet6 -listen tcp \
     -extension MIT-SHM -noreset > .work/verification/xvfb.log 2>&1 &
@@ -76,4 +84,8 @@ for _ in range(100):
 else:
     raise SystemExit('Owned Xvfb did not become ready')
 PY
+# A TCP accept alone does not prove authentication. Re-enter the same scoped
+# environment used by gradle.sh, then make a real authenticated Xlib request.
+# Never log the cookie, disable access control, or use another display.
+"$SCRIPT_DIR/dev.sh" xdpyinfo -display "$DISPLAY" > /dev/null
 "$@"

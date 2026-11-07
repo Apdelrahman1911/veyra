@@ -114,7 +114,11 @@ class DownloadRecoveryRoomTest {
         b.start(); b.remove(id)
         assertTrue(second.flush().getOrThrow().downloads.getValue(id).cleanupPending)
         assertContentEquals(authoredBytes, Files.readAllBytes(Path.of(asset.uri)))
+        assertEquals(clock.epochMs() + 5_000, b.schedulingPlan().nextLocalEpochMs,
+            "A still-live publication lock uses a bounded local recheck, not an empty foreground owner")
         closing.release()
+        a.close() // Prove the old physical writer has drained before advancing the authored clock.
+        clock.advance(5_000)
         eventually(second) { id !in it.downloads }
         assertFalse(Files.exists(Path.of(asset.uri)))
         assertEquals(1, gateway.transfers.size)
@@ -147,12 +151,18 @@ class DownloadRecoveryRoomTest {
             assertEquals(old, failed.downloads[seeded.record.id]?.asset, "Do not lose the prior failed generation reference")
             assertEquals(seeded.intent, failed.downloadFinalizations[seeded.record.id])
             assertTrue(Files.exists(Path.of(seeded.intent.finalPath)))
+            val retryAt = clock.epochMs() + 5_000
+            assertEquals(retryAt, failed.downloads[seeded.record.id]?.nextRetryEpochMs)
             a.resume(seeded.record.id)
             assertTrue(first.flush().getOrThrow().downloads.getValue(seeded.record.id).cleanupPending)
             a.close(); first.close()
             blocked.set(false)
             val reopened = store()
             val b = coordinator(reopened, gateway)
+            b.initializeScheduling()
+            assertEquals(retryAt, b.schedulingPlan().nextLocalEpochMs,
+                "Reopening or a Resume rejected during cleanup cannot erase its durable failure backoff")
+            clock.advance(5_000)
             b.start()
             val cleaned = eventually(reopened) { seeded.record.id !in it.downloads }
             assertTrue(cleaned.downloadAttempts.isEmpty())

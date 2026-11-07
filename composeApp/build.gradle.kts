@@ -1,5 +1,8 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.gradle.api.tasks.testing.Test
+import org.gradle.api.tasks.testing.logging.TestExceptionFormat
+import java.time.Duration
 
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
@@ -17,7 +20,31 @@ val nativeOs = when {
     hostOs.contains("linux") -> "linux"
     else -> error("No verified desktop runtime for $hostOs")
 }
-val nativeArch = if (hostArch in listOf("aarch64", "arm64")) "arm64" else "x64"
+val nativeArch = when (hostArch) {
+    "aarch64", "arm64" -> "arm64"
+    "amd64", "x86_64" -> "x64"
+    else -> error("No verified desktop architecture for $hostArch")
+}
+val nativePlatform = "$nativeOs-$nativeArch"
+val desktopNativeResources = rootProject.layout.projectDirectory.dir(".work/desktop-native/resources/$nativePlatform")
+
+// Production run/distribution tasks prepare matching-host resources before the
+// resource input snapshot and JAR. Plain compilation/tests remain independent
+// of CMake/FFmpeg; a plain desktopJar is not a verified distribution artifact.
+val prepareDesktopNativeResources by tasks.registering(Exec::class) {
+    group = "distribution"
+    description = "Build/verify source-pinned desktop helpers and stage exact classpath resources"
+    workingDir(rootProject.projectDir)
+    commandLine("bash", rootProject.file("scripts/dev.sh").absolutePath, "python3", "-B",
+        rootProject.file("native/bundle.py").absolutePath, "--target", nativePlatform)
+    inputs.files(rootProject.fileTree("native") { exclude("**/__pycache__/**") })
+    inputs.file(rootProject.file("LICENSE"))
+    inputs.property("nativePlatform", nativePlatform)
+    outputs.dir(desktopNativeResources)
+    // Recheck existing build receipts/bytes even when Gradle considers its own
+    // outputs unchanged. The native recipe safely reuses valid FFmpeg output.
+    outputs.upToDateWhen { false }
+}
 
 kotlin {
     androidTarget { compilerOptions { jvmTarget.set(JvmTarget.JVM_17) } }
@@ -62,6 +89,7 @@ kotlin {
             implementation("androidx.test.ext:junit:1.2.1")
         }
         val desktopMain by getting {
+            resources.srcDir(desktopNativeResources)
             dependencies {
                 implementation(compose.desktop.currentOs)
                 implementation(libs.coroutines.swing)
@@ -70,7 +98,14 @@ kotlin {
                 implementation(libs.dbus.native)
                 implementation(libs.commons.compress)
                 implementation(libs.ktor.cio)
-                runtimeOnly("org.openani.mediamp:mediamp-mpv-runtime-$nativeOs-$nativeArch:${libs.versions.mpvRuntime.get()}")
+                implementation(libs.ktor.encoding)
+                // This artifact supplies native resources only. Its published dependency on
+                // the MediaMP Kotlin wrapper would otherwise replace our pinned Compose
+                // runtime/test graph (and Kotlin stdlib) without changing compilation inputs.
+                // Veyra loads raw libmpv through its own explicitly declared JNA adapter.
+                runtimeOnly("org.openani.mediamp:mediamp-mpv-runtime-$nativeOs-$nativeArch:${libs.versions.mpvRuntime.get()}") {
+                    isTransitive = false
+                }
             }
         }
         val desktopTest by getting {
@@ -78,6 +113,60 @@ kotlin {
                 implementation(kotlin("test-junit"))
                 implementation(compose.desktop.uiTestJUnit4)
             }
+        }
+    }
+}
+
+val desktopProductionTasks = setOf(
+    "run", "runRelease", "runDistributable", "runReleaseDistributable",
+    "createDistributable", "createReleaseDistributable",
+    "packageDistributionForCurrentOS", "packageReleaseDistributionForCurrentOS",
+    "packageDeb", "packageReleaseDeb", "packageDmg", "packageReleaseDmg",
+    "packageMsi", "packageReleaseMsi", "packageExe", "packageReleaseExe",
+    "packageRpm", "packageReleaseRpm",
+)
+tasks.matching { it.name in desktopProductionTasks }.configureEach {
+    dependsOn(prepareDesktopNativeResources)
+}
+tasks.matching { it.name == "desktopProcessResources" }.configureEach {
+    mustRunAfter(prepareDesktopNativeResources)
+}
+
+// Compose flattens dependency archives for these tasks. That destroys the
+// identity of the whole-hash-pinned libmpv runtime JAR. Reject the task graph
+// before ANY task executes, including in --dry-run; do not silently skip it.
+val unsupportedDesktopUberJarTasks = setOf(
+    "packageUberJarForCurrentOS", "packageReleaseUberJarForCurrentOS",
+)
+gradle.taskGraph.whenReady {
+    if (allTasks.any { it.project == project && it.name in unsupportedDesktopUberJarTasks }) {
+        throw GradleException("Veyra does not support fat/uber-JAR distributions: they rewrite the verified native-runtime archive. " +
+            "Use createDistributable or a native installer. A plain desktopJar is not a standalone distribution.")
+    }
+}
+
+// Bound each test worker independently of the compiler/Gradle daemon. Keep
+// full result events in the log so a killed daemon cannot erase which method
+// was running or the failure details. A truncated run is never a passing run.
+tasks.withType<Test>().configureEach {
+    maxParallelForks = 1
+    maxHeapSize = "384m"
+    jvmArgs("-XX:+UseSerialGC", "-XX:ActiveProcessorCount=2", "-XX:MaxMetaspaceSize=256m")
+    timeout.set(Duration.ofMinutes(15))
+    testLogging {
+        events("started", "passed", "failed", "skipped")
+        exceptionFormat = TestExceptionFormat.FULL
+        showExceptions = true
+        showCauses = true
+        showStackTraces = true
+        // --info has its own defaults. The lifecycle48 run produced fresh
+        // passing XML but no method events without this explicit level.
+        info {
+            events("started", "passed", "failed", "skipped")
+            exceptionFormat = TestExceptionFormat.FULL
+            showExceptions = true
+            showCauses = true
+            showStackTraces = true
         }
     }
 }

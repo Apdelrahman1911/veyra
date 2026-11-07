@@ -4,12 +4,13 @@
 
 On 2026-11-06 the owner of `Apdelrahman1911/kmpYT` explicitly authorized MIT
 adoption and confirmed licensing authority, subject to checking contributions and
-dependencies. Upstream working commit **`e8754184b37b8c30fa89956908f09cda7f56732e`**
+dependencies. Upstream license commit **`e8754184b37b8c30fa89956908f09cda7f56732e`**
 adds the official MIT file, a source/dependency audit, README notice and Maven POM
-license metadata; there are no runtime-code changes in that commit. It is now
-published in [kmpYT PR #1](https://github.com/Apdelrahman1911/kmpYT/pull/1), stacked
-with separately reviewed repository-scoped CI hygiene (`293f5dfa6ddb8336a9a2a1f924c31431aa8dbf3f`).
-Merge and application final-pin update remain, not owner permission.
+license metadata; there are no runtime-code changes in that commit.
+[kmpYT PR #1](https://github.com/Apdelrahman1911/kmpYT/pull/1) is **merged** on the
+default branch at **`45f7077880c37c20216d767b262bb5757b3010bf`**. The GitHub license
+endpoint independently identifies the official default-branch `LICENSE` as MIT.
+The application final behavioral pin remains a delivery step, not owner permission.
 
 Lead and independent kmpYT reviewer checked:
 - All 15 baseline commits at `533562f781304338f72b27d32cfe5fb7a83dc3a8` are authored
@@ -34,14 +35,21 @@ Evidence is retained under ignored `.work/licensing/`; the publishable upstream
 `THIRD_PARTY_NOTICES.md` carries the audit and references. Independent review found
 no merge-blocking licensing defect. The former unanswered-permission blocker is
 resolved by the owner grant, committed official license and completed baseline
-audit; reviewed merge/final pinning remains a delivery step.
+audit and official merge. Final tested behavioral pinning remains a delivery step.
 
-The public [license/provenance check](https://github.com/Apdelrahman1911/kmpYT/actions/runs/42177267667/job/127758488399)
-passed at that PR head. This is licensing evidence only. Initial JVM checks exposed
-a missing runner FFmpeg prerequisite, and native runtime checks deliberately failed
-before unaudited emulator/simulator launches; they are not labeled passing. CI
-prerequisites are being corrected within the repository boundary. Android library
-compilation/lint separately passed, not instrumentation or Veyra verification.
+The exact merged PR head `2cf2cc68b4e079fb3432a0f2f7b501be3943e5cd` passed its
+[license/provenance check](https://github.com/Apdelrahman1911/kmpYT/actions/runs/42179440862/job/127765886434)
+and Linux JVM check. Android library compilation/lint passed; instrumentation
+failed its explicit preflight before an unaudited emulator launch. Windows
+executed391 tests with3 Chromium failures and1 skip, under diagnosis; Apple jobs
+were queued. **Those native checks were not represented as passing.**
+
+The [lead merge review](https://github.com/Apdelrahman1911/kmpYT/pull/1#issuecomment-6679665116)
+records the independent licensing review and every check limitation. A normal
+head-matched merge used no admin/override; main had no protected status contexts
+or rulesets, and no policy/check was disabled. The separately reviewed CI changes
+remove unauthorized global tool/config/cache writes and retain fail-closed native
+gates. Merging a valid license and safer tooling is not a platform/release approval.
 
 ## GPL-3.0-or-later compatibility
 
@@ -53,8 +61,9 @@ Veyra's GPL terms do not erase dependency notices or their original licenses.
 
 ## Remaining binary-distribution obligations (not kmpYT permission questions)
 
-- Update Veyra's pin to the reviewed/merged licensed revision, and include the
-  corresponding MIT and third-party notices in shipped resources/packages.
+- Use the final reviewed/merged behavioral revision as Veyra's immutable pin. The
+  current development pin already includes the MIT grant; bundled legal resources
+  preserve it verbatim. Revalidate resource/pin hashes after each upstream update.
 - Generate a resolved, per-platform runtime inventory. Exclude test-only JUnit and
   test tools from production packages; preserve all actual copyright/license/NOTICE files.
 - For selected libmpv/FFmpeg/native closures, satisfy their precise GPL/LGPL build

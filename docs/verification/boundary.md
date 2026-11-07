@@ -38,8 +38,43 @@ The non-display probe observed `/`, `/usr`, `/proc`, `/sys`, and `/dev` read-onl
 
 `scripts/with-display.sh` is re-enabled **only through this verified guard**, with scoped authentication/log files and no unauthenticated X server. This establishes the display helper on this Linux host, **not application execution, screenshot verification, audible playback, or GitHub-runner namespace support**. The guard prevents accidental ordinary filesystem writes; it is not a hostile-code sandbox and does not claim to isolate device I/O, network connections, or host-managed services. Those remain separate audit concerns.
 
+### Nested-client authentication correction
+
+The first actual Compose UI run compiled its tests but all 67 UI cases failed
+initialization: the Java client could not authenticate. `with-display.sh` chose
+a per-run cookie, then `gradle.sh` re-sourced `env.sh`, which unconditionally
+replaced `XAUTHORITY` with the empty scoped default. A successful direct
+`xdpyinfo` probe had not exercised that nested environment path. This was an
+authentication plumbing defect, **not evidence of a working app UI**.
+
+The wrapper now creates a fresh private authentication file. Nested scoped
+environments retain it only with the explicit matching namespace context,
+literal loopback display, exact owned runtime parent, no symlink ancestors,
+regular/single-link/current-owner file, private permissions and bounded size.
+Unmarked inherited host authentication is still replaced, and an invalid marked
+context fails closed. After TCP readiness the wrapper runs a real authenticated
+`xdpyinfo` through `dev.sh` before the requested command. No cookie is printed;
+no `-ac`, wildcard authentication, external display or unguarded fallback was
+introduced.
+
+On 2026-11-06, **10/10 scoped-tooling tests passed**, including nested preservation
+and invalid-context regressions. An actual small Java AWT client, run through
+`with-display.sh dev.sh`, created and disposed its window successfully; the
+caller mountinfo hash was unchanged. Evidence:
+`.work/verification/tooling-display-auth-tests.log` and
+`.work/verification/display-auth-preflight.log`. This proves authenticated nested
+Java access on this host, not that the failed Compose suite has subsequently
+passed; that requires its own rerun and rendered review.
+
 ## Pending platform audits
 
+- Android's authored [no-guest Stage 0 runner](android-stage0.md) adds an
+  explicitly requested **empty read-only `/run` mask**, with `/var/run` verified
+  as the same alias. Default display callers retain their original mount check.
+  The runner uses a separate private network namespace, owned5038 ADB plan,
+  pidfd teardown, and tracee exit-kill. Its Python/tracer regressions are not an
+  Android-tool or guest execution: the native preflight still requires lead
+  review and separate approval, and `--run` remains exit78.
 - Actions checkout is pinned to a reviewed version with `set-safe-directory: false`, `persist-credentials: false`, and its submodule credential helper disabled. Public submodule initialization happens separately in a scoped process. Newer checkout versions that write credential config under the host `RUNNER_TEMP` need another containment review before upgrade.
 - Xcode build/derived/result/module-cache paths are owned; CoreSimulator's host-managed service state is a separate unresolved audit and simulator execution is not assumed safe solely because its device set has a custom path.
 - Packaged native audio extraction/decoder tests must use the app's included JRE/native libraries and owned storage. A read-only installed host library is not permission to install a missing one.

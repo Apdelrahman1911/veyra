@@ -3,8 +3,6 @@ package dev.veyra.platform.background
 import android.content.Context
 import android.content.Intent
 import android.os.Build
-import dev.veyra.model.AppFailure
-import dev.veyra.model.FailureCode
 import dev.veyra.model.VeyraException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -24,8 +22,9 @@ class PlaybackForegroundGate(private val context: Context) {
             try {
                 val intent = Intent(context, PlaybackService::class.java).setAction(PlaybackService.ACTION_START)
                 if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent) else context.startService(intent)
-            } catch (_: Exception) {
+            } catch (error: Exception) {
                 waiting = null
+                if (!isPlaybackForegroundRejection(error)) throw error
                 it.completeExceptionally(restricted())
             }
         }
@@ -37,21 +36,21 @@ class PlaybackForegroundGate(private val context: Context) {
     }
 
     internal fun attached(value: PlaybackService) { service = value }
+    internal fun owns(value: PlaybackService): Boolean = service === value
     internal fun started(value: PlaybackService) {
         if (service !== value) return
-        waiting?.complete(Unit)
+        val request = waiting
         waiting = null
-    }
-    internal fun failed(value: PlaybackService) {
-        if (service !== value) return
-        waiting?.completeExceptionally(restricted())
-        waiting = null
+        request?.complete(Unit)
     }
     internal fun detached(value: PlaybackService): Boolean {
         if (service !== value) return false
-        failed(value)
         service = null
+        // Retire identity before resuming a failed waiter; its retry must not reuse this service.
+        val request = waiting
+        waiting = null
+        request?.completeExceptionally(restricted())
         return true
     }
-    private fun restricted() = VeyraException(AppFailure(FailureCode.BACKGROUND_RESTRICTED, "playback_foreground_service"))
+    private fun restricted() = VeyraException(playbackForegroundFailure())
 }

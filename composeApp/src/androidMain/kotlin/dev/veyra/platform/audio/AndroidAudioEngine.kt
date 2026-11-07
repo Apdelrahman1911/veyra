@@ -86,6 +86,7 @@ class AndroidAudioEngine(
     private var preparationRevision = 0L
     private var outputRevision = 0L
     private var serviceLossPending = false
+    private var failedForegroundGeneration: Long? = null
     private var closed = false
     private val resourceClosures = mutableListOf<Deferred<Unit>>()
     private var resourceCleanupFailed = false
@@ -117,6 +118,7 @@ class AndroidAudioEngine(
         var awaitingConfirmation = false
         var pendingFailure: AppFailure? = null
         var pendingOutgoingFailure: AppFailure? = null
+        var pendingServiceFailure: AppFailure? = null
         val pendingInterruptions = mutableListOf<EngineEvent.Interruption>()
     }
 
@@ -151,6 +153,7 @@ class AndroidAudioEngine(
                 if (closed || generation < this.generation || revision != preparationRevision) return@onMain
                 outputRevision++
                 serviceLossPending = false
+                failedForegroundGeneration = null
                 clearRetiring()
                 active?.let(::clearDeck)
                 active = null
@@ -194,7 +197,9 @@ class AndroidAudioEngine(
     override suspend fun pause(generation: Long): Unit = onMain {
         val deck = current(generation) ?: return@onMain
         outputRevision++
-        serviceLossPending = false // The shared owner has consumed the interruption/pause.
+        // Pause may acknowledge an ordinary service-loss interruption, but a queued same-
+        // generation Pause cannot clear a terminal policy failure and let a later Play retry.
+        if (failedForegroundGeneration != generation) serviceLossPending = false
         deck.player.pause()
         staged?.player?.pause()
         cancelStage(CrossfadeCancelReason.INTERRUPTED)
@@ -362,13 +367,14 @@ class AndroidAudioEngine(
         clearDeck(operation.outgoing)
         active = incoming
         this.generation = incoming.generation
+        if (failedForegroundGeneration == generation) failedForegroundGeneration = nextGeneration
         incoming.player.volume = baseGain(incoming)
         focus.transfer(generation, nextGeneration)
         incoming.lastReady = EngineEvent.Ready(nextGeneration, duration(incoming), incoming.player.isCurrentMediaItemSeekable)
         publishState(incoming)
         samplePosition(incoming)
         operation.pendingInterruptions.forEach { emit(it.copy(generation = nextGeneration)) }
-        val failure = operation.pendingFailure
+        val failure = operation.pendingServiceFailure ?: operation.pendingFailure
         if (failure != null) emit(EngineEvent.Error(nextGeneration, failure))
         else if (incoming.ended) emit(EngineEvent.Ended(nextGeneration))
     }
@@ -379,6 +385,7 @@ class AndroidAudioEngine(
         preparationRevision++
         outputRevision++
         serviceLossPending = false
+        failedForegroundGeneration = null
         active?.player?.pause()
         staged?.player?.pause()
         cancelStage(CrossfadeCancelReason.CANCELLED)
@@ -600,9 +607,10 @@ class AndroidAudioEngine(
         }
         emit(EngineEvent.CrossfadeCancelled(origin, incoming.generation, reason))
         operation?.pendingInterruptions?.forEach(::emit)
-        operation?.pendingOutgoingFailure?.let { emit(EngineEvent.Error(origin, it)) }
+        val pendingFailure = operation?.pendingServiceFailure ?: operation?.pendingOutgoingFailure
+        pendingFailure?.let { emit(EngineEvent.Error(origin, it)) }
         if (reportOutgoingEnd && operation?.awaitingConfirmation == true && operation.outgoing.ended &&
-            operation.pendingOutgoingFailure == null) emit(EngineEvent.Ended(origin))
+            pendingFailure == null) emit(EngineEvent.Ended(origin))
         return restoration
     }
     private fun clearRetiring() {
@@ -620,13 +628,20 @@ class AndroidAudioEngine(
         if (fade?.awaitingConfirmation != true) active?.let { it.player.volume = baseGain(it) }
     }
     /** No queued unscoped Pause can accidentally stop playback owned by a successor service. */
-    internal fun foregroundServiceLost() {
+    internal fun foregroundServiceLost(failure: AppFailure? = null) {
         check(Looper.myLooper() == Looper.getMainLooper())
         val origin = active?.takeIf { !closed }?.generation ?: return
         serviceLossPending = true
+        if (failure != null) failedForegroundGeneration = origin
         pauseForInterruption()
         focus.abandon()
-        emitInterruption(EngineEvent.Interruption(origin, InterruptionKind.PERMANENT))
+        if (failure == null) emitInterruption(EngineEvent.Interruption(origin, InterruptionKind.PERMANENT))
+        else {
+            val pending = fade?.takeIf { it.awaitingConfirmation && it.outgoing.generation == origin }
+            // A global allowance failure applies to whichever side the durable handover selects.
+            if (pending != null) pending.pendingServiceFailure = failure
+            else emit(EngineEvent.Error(origin, failure))
+        }
     }
     private fun emitInterruption(event: EngineEvent.Interruption) {
         val pending = fade?.takeIf { it.awaitingConfirmation && it.outgoing.generation == event.generation }
