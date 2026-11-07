@@ -121,12 +121,26 @@ Reachable lifetime owners replace the removed DOWNLOAD resource:
   stages are asserted single-consumption; dependent stages stay withheld until
   the allowance positively closes.
 
+The class now has 37 tests: the 35 original methods (one explicitly renamed as
+above), `podcastStartOverForANonCurrentEpisodeKeepsFreshAdmissionSemantics`, and
+`podcastStartOverWithACompetingQueueActivationDoesNotRestartTheWrongOccurrence`.
+
 ## Method mapping (original → typed seam → retained assertions)
 
-All 35 original method names are preserved. Every original safety claim is kept;
-where the old test described a removed authority (legacy snapshot rows, legacy
-`PlaybackBinding`, DOWNLOAD `PlaybackResource`, synthetic coverage/backoff rows),
-the replacement is explained rather than loosened to "any failure".
+All 35 original methods are preserved. One method is explicitly renamed because
+its external caller no longer exists on the schema-3 path:
+`finalCloseCancelsExternalResolverAndAwaitsItsLateRejectedResourceBeforeClosingDependencies`
+→ `finalCloseCancelsAppOwnedTypedResolveAndAwaitsItsLateRejectedResourceBeforeClosingDependencies`.
+The old external entrypoint was `AppContainer.resolver`; that legacy resolver
+cannot acquire a schema-3 binding (legacy snapshot binding writes are
+intentionally rejected), so it is not the app execution path and the app-owned
+typed controller resolve is the legal current route. The rename is recorded in
+the table below rather than silently changing the claim.
+
+Every original safety claim is kept; where the old test described a removed
+authority (legacy snapshot rows, legacy `PlaybackBinding`, DOWNLOAD
+`PlaybackResource`, synthetic coverage/backoff rows), the replacement is
+explained rather than loosened to "any failure".
 
 | Original method | Typed seam | Retained guarantees |
 |---|---|---|
@@ -134,7 +148,7 @@ the replacement is explained rather than loosened to "any failure".
 | `cancellationAtOnlineScopeReturnDisposesUnhandedGatewayResourceExactlyOnce` | `Play` → typed `preparePlayback` cancelled at the policy/online return | resource closed exactly once, never handed to native; one committed request and one binding, no legacy binding; close does not re-close |
 | `rejectedGatewayResourceIsDrainedAtFinalCloseButEarlierReleaseFailureStaysSanitizedAndSticky` | same, first release throws | failure sanitized (`UNEXPECTED`, no raw cause/text); owner retained and retried exactly once at explicit close; dependencies released once |
 | `persistentlyFailedRejectedResourceRemainsRetriableAfterFinalCloseWithoutRepeatingGlobalClosures` | same, always failing until allow | one retry per explicit close; sticky failure; later success cannot retroactively certify clean shutdown; global closes exactly once |
-| `finalCloseCancelsExternalResolverAndAwaitsItsLateRejectedResourceBeforeClosingDependencies` | app-owned controller resolve job; close awaits policy-return cleanup | close blocked until the late resource is released; no runtime/source/http/Room close early; sanitized sticky failure; one global close set; resolver cancellation observed |
+| `finalCloseCancelsExternalResolverAndAwaitsItsLateRejectedResourceBeforeClosingDependencies` → `finalCloseCancelsAppOwnedTypedResolveAndAwaitsItsLateRejectedResourceBeforeClosingDependencies` (explicit rename) | app-owned typed controller resolve; close awaits policy-return cleanup | close blocked until the late resource is released; no runtime/source/http/Room close early; sanitized sticky failure; one global close set; app-owned resolver cancellation observed. The former external legacy-resolver entrypoint cannot acquire a schema-3 binding and is intentionally no longer the execution path |
 | `offlineToggleCancelsRunningGatewayCoroutineAndClosesLateResultBeforeNativeHandoff` | `Play` + offline policy cancellation | late resource closed once; `OFFLINE_POLICY` state; no native prepare; one query/commit/binding |
 | `handedDownloadResourceFailureRetainsRoomRuntimeClientsAndLifetimeUntilExplicitCloseRetry` | allowance close fails after publication | job COMPLETE and asset retained; transfer/local validation once; dependent clients/Room/lifetime retained; one explicit retry; sticky sanitized failure; no replay |
 | `throwingDownloadAllowanceRetainsDependenciesWithoutReclosingTheAlreadyConsumedResource` | allowance close throws then succeeds | successful earlier validation/transfer never repeated; dependencies retained until positive close; sticky failure |
@@ -148,9 +162,33 @@ the replacement is explained rather than loosened to "any failure".
 | `unknownAndDisconnectedPlatformNetworkPreventNewNetworkClaimsUntilConnected` | typed Download selection + platform network states | UNKNOWN/DISCONNECTED defer the claim: no gate/attempt/transfer; only CONNECTED transfers; no execution query; coverage ACK precedes gate; receipt/binding remain canonical |
 | `coldSchedulingBootstrapPreservesRestorableCollectionQueueAndHistoricalAssetWithoutOpeningAUserSession` | canonical queue/complete+pending jobs + navigation; absent media dir | scheduling init is a read of canonical history; queue position/current occurrence, jobs/asset and collection navigation restore; no native/coverage/network/media/artwork work |
 | `schedulingOnlyPauseCancelAndRemovePersistAcrossRoomReopenWithoutMediaDirectoriesOrNativeMaintenance` | canonical staged jobs + intent commands | pause/cancel/remove intents persist across Room reopen; cleanup stays pending; no native maintenance, media dirs, engine or coverage work; typed retry deadline/count survive user intent (legacy cleared the deadline; removed-authority difference, not a weaker claim) |
-| `uncoveredMusicCollectionPodcastAndResumeTapsRejectAtThePublicBoundaryEvenWithAHeldActorAndCannotReplayAfterCancel` | canonical paused/staged jobs + held actor/coverage | tap rejection is synchronous and not actor-dependent; cancel commits before ACK and cannot replay; cleanup only after ACK; paused intent and claim preserved; no source/download execution |
+| `uncoveredMusicCollectionPodcastAndResumeTapsRejectAtThePublicBoundaryEvenWithAHeldActorAndCannotReplayAfterCancel` | canonical paused/staged jobs + held actor/coverage | tap rejection is synchronous and not actor-dependent; paused status/intent is inspected through the already-published view while the authored Room writer is still held; both Cancel intents are admitted at the public boundary during the hold, then authoritative Room reads/cleanup run after release; no source/download execution; Cancel retains (Remove would be the separate non-retaining contract) |
 | `musicAndPodcastPauseCancelRemoveRemainUsableAfterCoverageFailureButPhysicalCleanupWaitsForExplicitActivation` | canonical complete/staged jobs; coverage failure | local intents persist while restricted; no gate/native work; activation ACKs coverage once and deletes removed assets/cancelled staging; paused work retained; immutable receipts survive; no validation/source calls |
-| `podcastStartOverIsAtomicWithDelayedSeekAndRetainsTheOfflineRecording` | restored offline occurrence + delayed seek + StartOver | same occurrence/binding/local asset at 0 with a new generation; no new query/resolution/transfer; outgoing held seek not lost; a real native zero sample is flushed to the typed occurrence checkpoint/queue; delayed old seek rejected; durable 1,000 ms queue/controller progress after reopen; retained job/asset lineage. Typed progress is asserted through the canonical queue/checkpoint, not the legacy `snapshot.progress` compatibility map |
+| `podcastStartOverIsAtomicWithDelayedSeekAndRetainsTheOfflineRecording` | restored offline occurrence + delayed seek + StartOver | same occurrence/binding/local asset at 0 with a new generation; no new query/resolution/transfer; outgoing held seek not lost; a real native zero sample is flushed to the canonical occurrence checkpoint and catalogue progress; delayed old seek rejected; canonical checkpoint/catalogue progress/queue/controller at 1,000 ms after cold reopen; retained job/asset lineage. Typed progress is asserted through `AcquisitionRepository.playbackView()`, not the legacy `snapshot.progress` compatibility map |
+
+New controls for the repaired path:
+
+- `podcastStartOverForANonCurrentEpisodeKeepsFreshAdmissionSemantics`: a
+  different, non-current episode keeps the established fresh `Play`
+  admission/new request and never reuses the current episode's binding.
+- `podcastStartOverWithACompetingQueueActivationDoesNotRestartTheWrongOccurrence`:
+  after a competing canonical queue activation outside the playback owner, the
+  advisory `currentSelection` can disagree with the authoritative
+  `currentOccurrenceId`. Start Over neither reactivates the competing occurrence
+  nor reuses the stale one; it falls back to fresh admission of the *requested*
+  episode, and the competing occurrence stays historical. A binding/queue CAS
+  failure after dispatch is propagated and never converted into a source
+  fallback. The playback-state flow remains advisory; the authoritative queue
+  and `PlayOccurrence` CAS remain the fence.
+
+The existing screen-facing download/podcast projection is still the legacy
+`library` snapshot (`snapshot.downloads`/`snapshot.progress`); typed physical
+jobs and canonical catalogue progress are not yet projected there. This PR
+deliberately does not claim that UI contract is verified and does not modify the
+separate UI compatibility lane's files. The AppContainer test asserts the
+canonical current-process projection honestly and records that the legacy
+projection is empty for typed jobs, rather than treating emptiness as a passing
+screen Ready state.
 
 ## Narrow production repair (existing-app compatibility)
 
@@ -178,8 +216,6 @@ XML are retained in the run directory. The input-hash helper aborted on the
 before/after input receipt; the helper is fixed for all acceptance runs.
 
 The repair is limited to `composeApp/src/commonMain/kotlin/dev/veyra/app/AppContainer.kt`:
-
-The repair is limited to `composeApp/src/commonMain/kotlin/dev/veyra/app/AppContainer.kt`:
 `restartCurrentPodcast(mediaId)` reactivates the exact CURRENT bound podcast
 occurrence when the current selection is that catalogue episode, using
 `PlaybackCommand.PlayOccurrence(queue revision, occurrence, expected binding,
@@ -188,8 +224,39 @@ It does not capture a request, select by catalogue id, choose a duplicate, mint 
 binding/use, write a separate progress snapshot, or perform source I/O while
 offline. If no appropriate current bound occurrence exists, the established fresh
 `Play` admission is preserved; a stale queue/binding CAS fails truthfully instead
-of silently recapturing a different request. A control test covers the fresh-Play
-fallback for a non-current episode.
+of silently recapturing a different request. Controls cover both the non-current
+episode fallback and a competing queue activation where the advisory selection
+and authoritative current occurrence disagree.
+
+## Review corrections applied
+
+- The held-actor test keeps the authored settings transform/Room writer held
+  while both Cancel intents are admitted at the public boundary; it inspects
+  only the already-published `acquisitionViews.value`, then releases the writer
+  and performs authoritative Room reads and cleanup assertions. The actor latch
+  is a bound, not the fix.
+- `run-full-002`'s cached-read explanation was wrong: `acquisitionView().snapshot`
+  still reads the legacy progress relation. The canonical progress is
+  `AcquisitionRepository.playbackView()`; the test now asserts the exact
+  occurrence checkpoint and catalogue progress at 0 and 1,000 ms, plus cold
+  reopen. `d06b53f`'s commit message is also imprecise: typed execution **does**
+  write `catalog_progress`; only the legacy snapshot map is separate.
+- Input capture now fails closed, records the actual checked-out submodule
+  HEAD/status in addition to the indexed gitlink and `gradle/kmpyt.commit`, and
+  includes owned untracked inputs. `run-focused-001` remains labelled diagnostic
+  with unavailable before/after hashes.
+- The final-close method is explicitly renamed to its app-owned typed scope; the
+  legacy external `AppContainer.resolver` cannot acquire a schema-3 binding and
+  is intentionally not the app execution path.
+- A competing queue-activation control covers stale advisory selection versus the
+  authoritative current occurrence; the competitor is never restarted or
+  relabelled.
+- The three `DesktopRetainedLifetimeTest` failures are not waived: they are an
+  unaccepted Task A blocker owned by a separate isolated test-only lane. PR #5
+  does not modify that file or claim its host/process-lock contract.
+- Screen-facing music/podcast download and progress presentation still reads the
+  legacy snapshot; that UI compatibility work is a separate lane and is not
+  claimed verified here.
 
 ## Verification evidence
 
@@ -199,50 +266,61 @@ with `flock -x`, held to process completion. One test fork, 384 MiB heap/256 MiB
 metaspace, SerialGC, two CPUs, project-local Gradle/home/temp. Runs redirect
 fresh exact-task XML with `-Dveyra.lead.evidence=<unique-dir>`.
 
-The full-class acceptance run is `run-full-003` at code HEAD
-`d06b53fd8659e3d00d8a7d724172b00a2c011f28`:
+The full-class acceptance run is `run-full-004` at code HEAD
+`8411190d61bbe9c8ea462cd7fc5b43c6b3864d5f`:
 
 - `:composeApp:compileKotlinDesktop` and
   `:composeApp:compileTestKotlinDesktop` succeeded in the same invocation;
 - `:composeApp:desktopTest --tests dev.veyra.app.AppContainerIntegrationTest`
-  executed **36 tests, 0 failures, 0 errors, 0 skipped**, exit 0, `BUILD
-  SUCCESSFUL`;
-- log: 14,987 bytes, SHA-256
-  `21f8eaacf4b8fe3d907000ace19811694bf1623208e3c280887464b57b5c9e2c`;
+  executed **37 tests, 0 failures, 0 errors, 0 skipped**, exit 0, `BUILD
+  SUCCESSFUL` (35 original methods, one explicitly renamed, two new controls);
+- log: 15,264 bytes, SHA-256
+  `14c9d6af084af239f7be7a45bf7b0a2450e00115abc95c1daa8fc4680ae440cb`;
 - XML `TEST-dev.veyra.app.AppContainerIntegrationTest.xml` SHA-256
-  `06ee5b940833c447972c5fa7c2027f3f79e834ae38fef1668fe1be3d9cb1ce82`;
-- UTC window 2026-11-07T16:47:45Z..16:49:00Z; clean worktree; before/after input
-  manifests equal (508 entries; test+doc hashes included); pin, gitlink
-  `c0a08090...` and schema `aab30e43...` recorded in `meta.txt`.
+  `7f1e5fc8526b5d8dd3ebca2555649f4e72edb524326f51982c05879fb4dca1da`;
+- UTC window 2026-11-07T17:21:18Z..17:22:33Z; clean worktree; fail-closed
+  before/after input manifests equal (508 files, no untracked inputs); actual
+  checked-out submodule HEAD/status
+  (`c0a08090...`, clean) and indexed gitlink/pin
+  (`c0a08090...`) plus schema `aab30e43...` recorded;
+- `run-android-002` at the same SHA executed both Android compile tasks
+  (`--rerun-tasks`, 52 tasks executed), exit 0, `BUILD SUCCESSFUL`.
 
 | Run | HEAD / tree | Scope | Result |
 |---|---|---|---|
 | `run-focused-001` (red) | `66677e8` + dirty port (pre-repair) | 6 AppContainer methods | 2 failures / 0 errors / 0 skipped, exit 1: verified Start Over red (`OFFLINE_POLICY/acquisition_offline`, `selection=PENDING`, `binding=null`, `media=2`) plus a test-owned held-writer read deadlock (corrected later) |
-| `run-accept-001` | `4b7ff20` | compile, Start Over/control/held-actor, 4 headless classes, Android shared/app compile | 38 tests / 5 failures / 0 errors / 0 skipped, exit 1: two test-logic assertions (fixed in `bb2ffde`/`4d8ab98`) and three **pre-existing parent-baseline** failures in the unmodified legacy `DesktopRetainedLifetimeTest`; Android compile tasks succeeded |
-| `run-full-001` | `4d8ab98` | full AppContainer class | 36 / 1 / 0 / 0, exit 1: cached-snapshot read one tick after a correctly persisted zero checkpoint (fixed in `7b6bd05`) |
-| `run-full-002` | `7b6bd05` | full AppContainer class | 36 / 1 / 0 / 0, exit 1: typed progress asserted through the legacy compatibility map; durable queue/checkpoint read used instead (`d06b53f`) |
-| `run-full-003` | `d06b53f` | full AppContainer class | **36 / 0 / 0 / 0, exit 0** |
-| `run-final-001` | `d06b53f` | three relevant headless lifetime/startup/platform classes + Android shared/app compile | **30 / 0 / 0 / 0, exit 0, BUILD SUCCESSFUL**; `:shared:compileDebugKotlinAndroid` up-to-date, `:composeApp:compileDebugKotlinAndroid` executed; log SHA-256 `38c53e11...`, XMLs 7/18/5 tests, 0 failures; before/after inputs equal |
+| `run-accept-001` | `4b7ff20` | compile, Start Over/held-actor, 4 headless classes, Android shared compile | 38 tests / 5 failures / 0 errors / 0 skipped across five classes, exit 1: AppContainer 3 tests/2 failures (two test-logic assertions fixed later); headless **35 tests/3 failures** (DesktopLifetime 7/0, PlatformOwnership 18/0, StartupJobs 5/0, RetainedLifetime 5/3). `:shared:compileDebugKotlinAndroid` completed; **`:composeApp:compileDebugKotlinAndroid` did not execute** because Gradle stopped at the failing desktop test task |
+| `run-full-001` | `4d8ab98` | full AppContainer class | 36 / 1 / 0 / 0, exit 1: the zero row was durably written in canonical `catalog_progress`; the test read the legacy snapshot instead |
+| `run-full-002` | `7b6bd05` | full AppContainer class | 36 / 1 / 0 / 0, exit 1: `acquisitionView().snapshot` is still the legacy progress relation; canonical `playbackView()` checkpoint/catalogue-progress reads were added at `8411190` |
+| `run-full-003` | `d06b53f` | full AppContainer class (pre-review-correction code) | 36 / 0 / 0 / 0, exit 0; superseded by the review-correction code and not claimed as final |
+| `run-final-001` | `d06b53f` | three headless classes + Android shared/app compile (pre-review-correction code) | 30 / 0 / 0 / 0, exit 0, BUILD SUCCESSFUL; `:composeApp:compileDebugKotlinAndroid` executed; superseded for final acceptance by `run-final-002` |
+| `run-full-004` | `8411190` | full AppContainer class (final corrected code) | **37 / 0 / 0 / 0, exit 0, BUILD SUCCESSFUL**; fail-closed equal inputs, actual submodule clean at `c0a08090...` |
+| `run-final-002` | `8411190` | three relevant headless classes + Android compile tasks | **30 / 0 / 0 / 0, exit 0, BUILD SUCCESSFUL**; headless 7/18/5 all pass; both Android compile tasks reported UP-TO-DATE |
+| `run-android-002` | `8411190` | forced executed Android shared/app compile | **exit 0, BUILD SUCCESSFUL**; both `:shared:compileDebugKotlinAndroid` and `:composeApp:compileDebugKotlinAndroid` **executed** (52 tasks executed, `--rerun-tasks`), fail-closed equal inputs; window 2026-11-07T17:36:30Z..17:39:16Z, log 8,643 bytes SHA-256 `70c10f63fe42ea48321a0c0c0b907efe7bc413555e39866ada179e038faa6f2a` |
 
 `DesktopRetainedLifetimeTest` (5 tests) is unchanged from the parent and still
 authors the removed DOWNLOAD `PlaybackResource`; its three failures
 (`retainedDownloadAllowancePinsHostGraph...`,
 `concurrentAndCancelledCallersShareOneRetainedAttempt...`,
-`cancellationCannotReleaseTheHost...`) are a pre-existing legacy-fixture
-baseline, outside this assignment's exclusive files, and are not caused by the
-Start Over line. The other three relevant headless classes passed at the final
+`cancellationCannotReleaseTheHost...`) are an **unaccepted Task A integration
+blocker**, not waived here. They belong to a separate isolated test-only lane
+that must port that class's host/process-lock guarantees; PR #5 does not own or
+modify that file and does not claim its failures fixed or unrelated to Task A.
+The other three relevant headless classes passed at the final
 code SHA in `run-final-001` (7, 18 and 5 tests, 0 failures, exit 0; window
 2026-11-07T16:57:04Z..16:58:41Z; log 16,205 bytes SHA-256
 `38c53e116dc6c87f60a852ddcee1fe48d99cdda74adfc27276c8bc918cb06352`; Android
-`:shared:compileDebugKotlinAndroid` up-to-date and
-`:composeApp:compileDebugKotlinAndroid` executed in the same invocation). The
-parent's known 50 shared-test failures
+`:shared:compileDebugKotlinAndroid` and
+`:composeApp:compileDebugKotlinAndroid` both reported UP-TO-DATE in that
+invocation; `run-android-002` separately forced actual execution of both tasks
+at the same frozen SHA, exit 0, BUILD SUCCESSFUL). The parent's known 50 shared-test failures
 are the sibling's scope and are not claimed fixed. No iOS/Xcode/native/device,
 audio, signing or distribution proof is claimed; native/source/transfer answers
 are authored fakes over non-audio bytes while Room, SQLite files and OS locks are
 real.
 
-All acceptance runs after the doc correction were code-frozen with
-`git status` clean and equal before/after manifests; the later doc-only update is
-not claimed as a new code execution. The tested code SHA is
-`d06b53f`; its doc-only successor is identified in the PR.
+All acceptance runs after the review corrections were code-frozen with
+`git status` clean and fail-closed equal before/after manifests; the later
+doc-only update is not claimed as a new code execution. The tested code SHA is
+`8411190`; its doc-only successor is identified in the PR. `run-full-003` and
+`run-final-001` remain preserved but describe the pre-review-correction code.
