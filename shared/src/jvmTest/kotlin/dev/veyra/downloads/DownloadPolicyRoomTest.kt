@@ -199,7 +199,31 @@ class DownloadPolicyRoomTest {
             assertEquals(1, inFlight.get(), "Surplus active owners must unwind before releasing the shared test barrier")
             assertFalse(release.released.isCompleted)
             release.release()
-            ids.forEach { id -> complete(first, id, evidenceOwners = listOf(first, second)) }
+            // A real slot-admission race after revocation may take the DOCUMENTED bounded local
+            // recheck (5s,10s,20s,40s,60s). The fixture uses an injected clock, so deterministically
+            // advance exactly that published deadline instead of inflating the wall-clock timeout.
+            ids.forEach { id ->
+                withTimeout(20_000) {
+                    while (first.store.acquisitionView().acquisition.physicalDownloads[id]?.status !=
+                            DownloadStatus.COMPLETE) {
+                        val plans = listOf(first.coordinator.schedulingPlan(), second.coordinator.schedulingPlan())
+                        val next = plans.mapNotNull { it.nextLocalEpochMs }.minOrNull()
+                        val state = first.store.acquisitionView().acquisition
+                        val physicallyBusy = inFlight.get() != 0 || state.physicalDownloads.values.any {
+                            it.leaseOwner != null || it.status in setOf(DownloadStatus.RUNNING, DownloadStatus.RESOLVING,
+                                DownloadStatus.VERIFYING)
+                        }
+                        if (!physicallyBusy && plans.none { it.hasDueWork } && next != null) {
+                            val delta = next - clock.epochMs()
+                            assertTrue(delta > 0 && delta <= 60_000, "A local recheck must be bounded, got $delta")
+                            if (delta >= 5_000) assertTrue(delta in setOf(5_000L, 10_000L, 20_000L, 40_000L, 60_000L),
+                                "A claim refusal may only use the documented bounded recheck, got $delta")
+                            advance(delta)
+                        } else delay(10)
+                    }
+                }
+                complete(first, id, evidenceOwners = listOf(first, second))
+            }
             assertTrue(maximumNewAfterLowering.get() <= 1)
             assertTrue(maximum.get() <= limit)
             assertEquals(7, first.store.acquisitionView().acquisition.physicalDownloads.size)

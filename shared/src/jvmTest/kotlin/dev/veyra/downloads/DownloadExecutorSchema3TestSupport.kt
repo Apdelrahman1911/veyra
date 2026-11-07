@@ -276,7 +276,7 @@ internal class DownloadExecutorSchema3Fixture(
             try { withTimeout(10_000) { owner.coordinator.close() } }
             catch (failure: VeyraException) {
                 assertEquals(assertNotNull(owner.expectedCloseFailure,
-                    "Unexpected teardown failure is not a passing test"), failure.failure)
+                    "Unexpected teardown failure is not a passing test: ${failure.failure}"), failure.failure)
                 assertTrue(owner.coordinator.dependencyReleaseSafeAfterClose, "Retained native/file owner cannot be forgotten")
             }
             assertTrue(owner.coordinator.dependencyReleaseSafeAfterClose)
