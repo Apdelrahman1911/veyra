@@ -468,28 +468,31 @@ class AppContainer(
     }
 
     private fun download(item: MediaItem): Deferred<Boolean> {
-        val selected = current(item)
-        // Freeze the tap's exact displayed catalogue row and, when one exists, the exact typed
-        // playback occurrence/binding. Later playback or navigation changes must not rebase this.
+        // Freeze the ACTUAL displayed catalogue row at the action boundary. Never refresh it from
+        // the store here: a metadata update between tap and admission must not silently replace
+        // the complete title/query the user saw and requested.
+        val tapped = item.copy()
         val typed = playback.state.value.currentSelection?.takeIf {
-            it.catalogMedia?.id == selected.id && it.requestId != null && it.bindingId != null
+            it.catalogMedia?.id == tapped.id && it.requestId != null && it.bindingId != null
         }
-        val legacyBindingId = playback.state.value.executionBinding?.takeIf { it.mediaId == selected.id }?.id
-        val tapped = selected.copy()
+        val legacyBindingId = playback.state.value.executionBinding?.takeIf { it.mediaId == tapped.id }?.id
         return downloadEffect(requiresCoverage = true) {
+            // Removal or a changed source identity is a stale row, rejected before source I/O.
+            // Same-identity metadata edits are not a rebase: the displayed inputs stay frozen.
+            requireTapCurrent(tapped)
             if (typed != null) {
                 downloads.enqueueAccepted(requireNotNull(typed.requestId), requireNotNull(typed.bindingId)) {
                     requireTapCurrent(tapped)
                 }
             } else if (legacyBindingId != null) {
                 // Genuine migrated schema2 playback receipt; no new title query is invented.
-                downloads.enqueue(selected, reuseBindingId = legacyBindingId)
+                downloads.enqueue(tapped, reuseBindingId = legacyBindingId)
             } else {
                 val selectedMedia = selectExistingMedia(tapped)
                 downloads.enqueueAccepted(selectedMedia.first, selectedMedia.second) { requireTapCurrent(tapped) }
             }
-            cacheArtwork(listOf(selected))
-            selected.showId?.let { id -> store.state.value.shows[id]?.let { cacheArtwork(emptyList(), listOf(it)) } }
+            cacheArtwork(listOf(tapped))
+            tapped.showId?.let { id -> store.state.value.shows[id]?.let { cacheArtwork(emptyList(), listOf(it)) } }
         }
     }
 
@@ -501,22 +504,31 @@ class AppContainer(
             current.source.canonicalId != item.source.canonicalId) {
             throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "download_catalog_identity_changed"))
         }
-        // Immutable complete-title capture is committed BEFORE any source selection. The gateway
-        // accepts its actual raw ordinal-zero first entry and never searches the returned title.
-        val captured = acquisition.capture(acquisitionOwner.captures.media(current, view.snapshot).metadata,
+        // Freeze the displayed immutable metadata itself, not the newer catalogue row. The
+        // expected-revision admission is the same-owner transaction check; the complete-title
+        // query is exactly what the user tapped even if an unrelated metadata edit landed.
+        val captured = acquisition.capture(acquisitionOwner.captures.media(item, view.snapshot).metadata,
             expectedCatalogRevision = view.snapshot.revision)
+        if (captured.request.completeTitle != item.title ||
+            (captured.request.metadata as? MediaCapture)?.media?.id != item.id) {
+            throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "download_catalog_capture_required"))
+        }
         val resolved = acquisition.resolve(captured.request.id)
         val accepted = resolved as? AcquisitionResolution.Accepted
             ?: throw VeyraException(AppFailure(FailureCode.RECOVERY_REQUIRED, "download_acquisition_selection_incomplete"))
         val single = accepted.record.outcome as? AcquisitionOutcome.Single
             ?: throw VeyraException(AppFailure(FailureCode.UNSUPPORTED_SOURCE, "download_first_result_not_executable"))
-        if ((accepted.record.request.metadata as? MediaCapture)?.media?.id != current.id) {
+        if ((accepted.record.request.metadata as? MediaCapture)?.media?.id != item.id) {
             throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "download_catalog_capture_required"))
         }
         return accepted.record.request.id to single.bindingId
     }
 
-    /** Synchronous final admission check; the immutable request itself remains unchanged. */
+    /**
+     * Synchronous admission check for the frozen displayed row. Only catalogue identity/removal
+     * invalidates it; a later title/artwork metadata edit must not rebase or cancel the accepted
+     * immutable request, and unrelated navigation/settings writes are irrelevant.
+     */
     private fun requireTapCurrent(item: MediaItem) {
         val current = store.state.value.media[item.id]
         if (current == null || current.kind != item.kind || current.source.provider != item.source.provider ||
