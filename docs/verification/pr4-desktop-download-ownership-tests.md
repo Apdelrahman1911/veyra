@@ -142,7 +142,8 @@ Frozen evidence result:
 
 ## Invariants
 
-- Changed paths vs required parent: exactly the four new test files above.
+- Changed paths in the tested code commit `1f2ab2a` vs required parent: exactly the four new test
+  files above. The subsequent docs-only commit adds only this report; no source bytes change.
 - `git diff --check` for `6759466..1f2ab2a`: exit 0.
 - kmpYT pin: `c0a08090fe7dbd76e20216559b8184ad2cccde63` in both the gitlink and
   `gradle/kmpyt.commit`; actual submodule HEAD equal and clean.
