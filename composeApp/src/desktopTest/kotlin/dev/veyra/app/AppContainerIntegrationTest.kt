@@ -102,13 +102,20 @@ import kotlin.test.*
 class AppContainerIntegrationTest {
     private data class Preparation(val source: ResolvedPlayable, val positionMs: Long, val generation: Long)
     private data class Resolution(val binding: PlaybackBinding, val purpose: ResolvePurpose, val persisted: PlaybackBinding?)
-    private data class Transfer(
+    /**
+     * One actual gateway transfer invocation. [completed] distinguishes a returned transfer from a
+     * held/cancelled/failed invocation; the invocation itself must never disappear from counts.
+     */
+    private class Transfer(
         val binding: PlaybackBinding,
         val destination: String,
         val representationId: String?,
         val persisted: PlaybackBinding?,
         val progress: suspend (YouTubeTransferProgress) -> Unit,
-    )
+    ) {
+        @Volatile var completed = false
+        @Volatile var failure: Throwable? = null
+    }
 
     private class TestClock(private val initialEpochMs: Long = 1_000_000L) : Clock {
         private val now = AtomicLong(initialEpochMs)
@@ -325,7 +332,10 @@ class AppContainerIntegrationTest {
         val queries = ConcurrentLinkedQueue<String>()
         val resolutions = ConcurrentLinkedQueue<Resolution>()
         val transfers = ConcurrentLinkedQueue<Transfer>()
+        /** Actual typed transfer invocations (recorded at entry, before the fake source runs). */
         val typedTransfers = ConcurrentLinkedQueue<Pair<String, String>>()
+        /** Typed transfer invocations that returned a successful result. */
+        val typedCompletions = ConcurrentLinkedQueue<Pair<String, String>>()
         var onFirst: suspend (String) -> KmpFirstResult? = { title ->
             KmpFirstResult(title, FirstResultKind.VIDEO, FIRST, "Selected recording, not publisher metadata",
                 "https://www.youtube.com/watch?v=$FIRST")
@@ -350,7 +360,9 @@ class AppContainerIntegrationTest {
             representationId: String?, onProgress: suspend (YouTubeTransferProgress) -> Unit): YouTubeTransferResult {
             val transfer = Transfer(binding, destinationPath, representationId, store.state.value.playbackBindings[binding.id], onProgress)
             transfers += transfer
-            return onDownload(transfer)
+            val result = try { onDownload(transfer) } catch (failure: Throwable) { transfer.failure = failure; throw failure }
+            transfer.completed = true
+            return result
         }
 
         @Volatile var beforeAcquire: suspend (AcquisitionRequest) -> Unit = { }
@@ -445,28 +457,56 @@ class AppContainerIntegrationTest {
                 "Typed download preparation has no PlaybackResource owner; the authored fake must not drop one"
             }
             resolutions += Resolution(binding, ResolvePurpose.DOWNLOAD, persistedReceipt(context, binding))
-            val representation = AcquisitionRepresentation(requiredRepresentationId ?: plan.representationId ?: "authored-aac",
+            val authored = plan.representationId
+            // A required representation is a real capability fence, not a relabel of the authored
+            // plan. If the fake plan does not provide it, preparation fails before any transfer.
+            if (requiredRepresentationId != null && authored != null && authored != requiredRepresentationId) {
+                throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "authored_download_representation_unavailable"))
+            }
+            val representation = AcquisitionRepresentation(requiredRepresentationId ?: authored ?: "authored-aac",
                 plan.mimeType ?: "audio/mpeg", plan.codecs ?: "mp3", "mp3")
-            return Prepared(context, requiredRepresentationId, representation, binding)
+            return Prepared(this, context, requiredRepresentationId, representation, binding)
         }
 
         private class Prepared(
+            private val issuer: GatewayProbe,
             override val context: AcquisitionExecutionContext,
             override val requiredRepresentationId: String?,
             override val representation: AcquisitionRepresentation,
             val binding: PlaybackBinding,
-        ) : PreparedAcquisitionDownload
+        ) : PreparedAcquisitionDownload {
+            private val consumed = AtomicBoolean()
+            /** Foreign/reused/mismatched capabilities fail before the source callback or any I/O. */
+            fun consume(gateway: GatewayProbe) {
+                if (issuer !== gateway) {
+                    throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "prepared_download_foreign_issuer"))
+                }
+                if (!consumed.compareAndSet(false, true)) {
+                    throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "prepared_download_reused"))
+                }
+                if (requiredRepresentationId != null && representation.representationId != requiredRepresentationId) {
+                    throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "prepared_download_representation_mismatch"))
+                }
+                if (context.binding.id.value != binding.id) {
+                    throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "prepared_download_context_mismatch"))
+                }
+            }
+        }
 
         override suspend fun download(prepared: PreparedAcquisitionDownload, destinationPath: String,
             onProgress: suspend (AcquisitionTransferProgress) -> Unit): AcquisitionTransferResult {
             val owned = prepared as? Prepared ?: throw VeyraException(AppFailure(FailureCode.INVALID_STATE))
+            owned.consume(this)
             val call = Transfer(owned.binding, destinationPath, owned.representation.representationId,
                 persistedReceipt(owned.context, owned.binding)) { progress ->
                 onProgress(AcquisitionTransferProgress(progress.bytesDownloaded, progress.totalBytes, progress.speedBytesPerSecond))
             }
-            val result = onDownload(call)
+            // The invocation boundary is counted before the fake source can block, cancel or fail.
             transfers += call
             typedTransfers += destinationPath to owned.representation.representationId
+            val result = try { onDownload(call) } catch (failure: Throwable) { call.failure = failure; throw failure }
+            call.completed = true
+            typedCompletions += destinationPath to owned.representation.representationId
             return AcquisitionTransferResult(prepared.context, result.bytesWritten,
                 AcquisitionRepresentation(result.representationId, result.mimeType, result.codecs, result.extension))
         }
@@ -515,7 +555,9 @@ class AppContainerIntegrationTest {
             assertEquals(0, platform.runtimePrepareCalls.get())
             assertTrue(gateway.queries.isEmpty())
             assertTrue(gateway.resolutions.isEmpty())
-            assertTrue(gateway.transfers.isEmpty())
+            assertTrue(gateway.transfers.isEmpty(), "No transfer may be invoked before a legal allowance")
+            assertTrue(gateway.typedTransfers.isEmpty(), "No typed transfer may start before a legal allowance")
+            assertTrue(gateway.typedCompletions.isEmpty())
             assertNoNetwork()
         }
         fun assertSchedulingOnly() {
@@ -898,6 +940,7 @@ class AppContainerIntegrationTest {
         val accepted = view.acquisition.requests.values.single { it.state == AcquisitionJobState.COMMITTED }
         val single = assertIs<AcquisitionOutcome.Single>(accepted.outcome)
         assertEquals(item.title, accepted.request.completeTitle)
+        assertEquals(1, view.acquisition.bindings.size, "Exactly the accepted execution binding is committed")
         assertEquals(1, fixture.gateway.resolutions.count { it.purpose == ResolvePurpose.PLAYBACK })
         assertEquals(single.bindingId.value, fixture.gateway.resolutions.single { it.purpose == ResolvePurpose.PLAYBACK }.binding.id)
         assertTrue(view.snapshot.playbackBindings.isEmpty(), "Typed execution does not fabricate a legacy binding row")
@@ -992,6 +1035,7 @@ class AppContainerIntegrationTest {
     @Test fun finalCloseCancelsExternalResolverAndAwaitsItsLateRejectedResourceBeforeClosingDependencies() = checkCase {
         val fixture = newFixture()
         val resolving = CompletableDeferred<Unit>()
+        val resolveCancelled = CompletableDeferred<Unit>()
         val releasing = CompletableDeferred<Unit>()
         val permitRelease = CompletableDeferred<Unit>()
         val resource = Resource { attempt ->
@@ -1006,6 +1050,7 @@ class AppContainerIntegrationTest {
             resolving.complete(Unit)
             try { awaitCancellation() }
             catch (_: CancellationException) {
+                resolveCancelled.complete(Unit)
                 plan(binding).copy(uri = resource.localEndpoint.uri, resource = resource)
             }
         }
@@ -1017,6 +1062,7 @@ class AppContainerIntegrationTest {
             val closing = async { runCatching { fixture.app.close() } }
             try {
                 releasing.await()
+                assertTrue(resolveCancelled.isCompleted, "Final close must cancel the app-owned resolver")
                 assertFalse(closing.isCompleted)
                 assertFalse(resource.closed.isCompleted)
                 assertEquals(0, fixture.platform.runtimeCloseCalls.get())
@@ -1117,6 +1163,8 @@ class AppContainerIntegrationTest {
         assertEquals(original.id, (job.producer as PhysicalDownloadProducer.Typed).subjectId.value)
         assertEquals(binding, fixture.gateway.transfers.single().binding)
         assertEquals(binding, fixture.gateway.transfers.single().persisted)
+        assertTrue(fixture.gateway.transfers.single().completed, "The already-transferred source must have returned")
+        assertEquals(1, fixture.gateway.typedCompletions.size)
         assertEquals(listOf(original.title), fixture.gateway.queries.toList(), "Download must not fresh-search after Play")
         assertEquals(listOf(ResolvePurpose.PLAYBACK, ResolvePurpose.DOWNLOAD), fixture.gateway.resolutions.map { it.purpose })
         assertContentEquals(NON_AUDIO, Files.readAllBytes(Path.of(asset.uri)))
@@ -1208,6 +1256,14 @@ class AppContainerIntegrationTest {
         fixture.app.playback.state.first { it.positionMs == 4_500L }
         fixture.app.playback.dispatch(PlaybackCommand.FlushProgress).getOrThrow()
 
+        // A genuinely offline restart must not depend on a fresh source lookup. The verified owned
+        // materialization stays playable while the policy forbids network resolution.
+        fixture.app.changeSettings { it.copy(offlineOnly = true) }
+        fixture.store.state.first { it.settings.offlineOnly }
+        assertTrue(fixture.app.playback.state.value.isPlaying, "The owned local recording remains usable offline")
+        val currentOccurrence = assertNotNull(fixture.app.playback.state.value.currentSelection?.occurrenceId)
+        assertEquals(selection.bindingId, fixture.app.playback.state.value.currentSelection?.bindingId)
+
         fixture.platform.engine.completeSeeks = false
         fixture.app.playback.dispatch(PlaybackCommand.Seek(6_000)).getOrThrow()
         fixture.app.playback.state.first { it.pendingSeekMs == 6_000L }
@@ -1234,7 +1290,15 @@ class AppContainerIntegrationTest {
         assertTrue(restarted.generation > offline.generation)
         assertEquals(0L, restarted.positionMs)
         assertTrue(restarted.source.isLocal)
+        assertEquals(recording.uri, restarted.source.uri)
         assertEquals(selection.bindingId.value, restarted.source.executionBinding?.id)
+        assertEquals(currentOccurrence, fixture.app.playback.state.value.currentSelection?.occurrenceId,
+            "Start Over must reactivate the exact current occurrence, not admit another one")
+        assertEquals(selection.bindingId, fixture.app.playback.state.value.currentSelection?.bindingId)
+        val canonical = fixture.store.acquisitionView().acquisition
+        assertEquals(1, canonical.requests.size, "Offline restart must reuse the accepted request")
+        assertEquals(1, canonical.bindings.size, "Offline restart must reuse the exact binding")
+        assertEquals(0L, canonical.queues.getValue(QueueContext.PODCAST).positionMs)
         assertEquals(1, fixture.platform.engine.seekRequests.size, "Start Over must not seek the outgoing generation then lose that seek")
         fixture.app.playback.dispatch(PlaybackCommand.FlushProgress).getOrThrow()
         assertEquals(0L, fixture.store.state.value.progress[original.id]?.positionMs)
@@ -1245,6 +1309,9 @@ class AppContainerIntegrationTest {
         assertEquals(selection.bindingId, retainedJob.producer.bindingId)
         assertContentEquals(NON_AUDIO, Files.readAllBytes(Path.of(retained.uri)))
         assertEquals(queries, fixture.gateway.queries.toList(), "Offline restart must not perform a new search")
+        assertTrue(fixture.gateway.resolutions.isEmpty(), "Local restart must not resolve a remote plan")
+        assertTrue(fixture.gateway.transfers.isEmpty(), "Local restart must not transfer or inspect a source")
+        assertTrue(fixture.gateway.typedTransfers.isEmpty())
 
         fixture.platform.engine.completeSeek(pending)
         // Both samples traverse the same fake event channel. Position itself may be
@@ -1260,6 +1327,38 @@ class AppContainerIntegrationTest {
         assertEquals(PlaybackPhase.PAUSED, reopened.app.playback.state.value.phase)
         assertTrue(reopened.platform.engine.preparations.isEmpty())
         reopened.assertNoNetwork()
+        fixture.assertNoNetwork()
+    }
+
+    /**
+     * Control for the narrow Start Over repair: a different (non-current) episode must keep the
+     * established fresh Play admission semantics and may not be silently attached to the current
+     * episode's request/binding.
+     */
+    @Test fun podcastStartOverForANonCurrentEpisodeKeepsFreshAdmissionSemantics() = checkCase {
+        val fixture = newFixture()
+        val current = item(id = "start-over-current-episode", title = "Current episode — الحلقة الحالية")
+        val first = fixture.play(current)
+        val firstBinding = assertNotNull(first.source.executionBinding?.id)
+        val other = item(id = "start-over-other-episode", title = "Other episode — حلقة أخرى")
+        fixture.store.upsertCatalog(listOf(other)).getOrThrow()
+        fixture.app.onPodcastAction(PodcastAction.StartOver(other.id))
+        val restarted = try {
+            withTimeout(15_000) { fixture.platform.engine.prepared.receive() }
+        } catch (timeout: TimeoutCancellationException) {
+            fail("Non-current Start Over did not fresh-admit: phase=${fixture.app.playback.state.value.phase} " +
+                "failure=${fixture.app.playback.state.value.failure} queries=${fixture.gateway.queries}")
+        }
+        fixture.app.playback.state.first { it.currentItem?.id == other.id && it.isPlaying }
+        val otherBinding = assertNotNull(restarted.source.executionBinding?.id)
+        assertNotEquals(firstBinding, otherBinding)
+        assertEquals(other, restarted.source.item)
+        assertEquals(listOf(current.title, other.title), fixture.gateway.queries.toList(),
+            "A non-current Start Over keeps the established fresh-admission semantics")
+        val canonical = fixture.store.acquisitionView().acquisition
+        assertEquals(2, canonical.requests.values.count { it.state == AcquisitionJobState.COMMITTED })
+        assertEquals(2, canonical.bindings.size)
+        assertEquals(other.id, fixture.app.playback.state.value.currentSelection?.catalogMedia?.id)
         fixture.assertNoNetwork()
     }
 
@@ -1369,6 +1468,8 @@ class AppContainerIntegrationTest {
             assertEquals(first.selectedVideoId, state.recordings.getValue(requireNotNull(job.producer.recordingId)).canonicalId)
             assertEquals(first, fixture.gateway.transfers.single().binding)
             assertEquals(first, fixture.gateway.transfers.single().persisted)
+            assertTrue(fixture.gateway.transfers.single().completed)
+            assertEquals(1, fixture.gateway.typedCompletions.size)
             assertEquals(second.id, fixture.app.playback.state.value.currentSelection?.bindingId?.value)
             assertEquals(listOf(original.title, original.title), fixture.gateway.queries.toList())
             assertEquals(first, fixture.gateway.resolutions.single { it.purpose == ResolvePurpose.DOWNLOAD }.binding)
@@ -1415,6 +1516,13 @@ class AppContainerIntegrationTest {
         }
         assertTrue(fixture.store.state.value.downloads.isEmpty(), "Typed physical cleanup is not a legacy row deletion")
         assertEquals(2, fixture.gateway.queries.size, "Play plus the one admitted selection query; removal searches nothing")
+        // The held transfer was actually invoked and then cancelled; a zero completion list alone
+        // would not prove that no source execution started.
+        assertEquals(1, fixture.gateway.transfers.size)
+        assertFalse(fixture.gateway.transfers.single().completed)
+        assertTrue(fixture.gateway.transfers.single().failure is CancellationException)
+        assertEquals(1, fixture.gateway.typedTransfers.size)
+        assertTrue(fixture.gateway.typedCompletions.isEmpty())
         fixture.assertNoNetwork()
     }
 
@@ -1726,6 +1834,11 @@ class AppContainerIntegrationTest {
                 rejectsAtTap { fixture.app.onPodcastAction(PodcastAction.Download(newPodcast.id)) }
                 rejectsAtTap { fixture.app.onMusicAction(MusicUiAction.ResumeDownload(musicJob)) }
                 rejectsAtTap { fixture.app.onPodcastAction(PodcastAction.ResumeDownload(podcastJob)) }
+                // Release the authored synchronous transform before reading Room: the old order
+                // awaited canonical reads inside the writer's own transaction and could only
+                // time out, which is not evidence about the production boundary.
+                permitActor.countDown()
+                fixture.store.state.first { it.settings.skipBackSeconds == 20 }
                 assertEquals(DownloadStatus.PAUSED, fixture.job(musicJob).status)
                 assertEquals(DownloadStatus.PAUSED, fixture.job(podcastJob).status)
                 assertEquals(DownloadBatchIntent.PAUSED, fixture.claim(musicJob).intent)
@@ -1736,7 +1849,6 @@ class AppContainerIntegrationTest {
                 // rejected resume/download cannot wake up on the later successful ACK.
                 fixture.app.onMusicAction(MusicUiAction.CancelDownload(musicJob))
                 fixture.app.onPodcastAction(PodcastAction.CancelDownload(podcastJob))
-                permitActor.countDown()
                 fixture.store.acquisitionViews.first { view ->
                     listOf(musicJob, podcastJob).all { id ->
                         val job = view.acquisition.physicalDownloads[id]
@@ -1994,6 +2106,8 @@ class AppContainerIntegrationTest {
         assertEquals(single.bindingId, job.producer.bindingId)
         assertEquals(selection.bindingId.value, fixture.gateway.transfers.single().binding.id)
         assertEquals(original.title, fixture.gateway.transfers.single().persisted?.queryTitle)
+        assertTrue(fixture.gateway.transfers.single().completed)
+        assertEquals(1, fixture.gateway.typedCompletions.size)
         assertContentEquals(NON_AUDIO, Files.readAllBytes(Path.of(asset.uri)))
         assertTrue(state.assetUses.any {
             it.requestedBindingId == selection.bindingId && it.materializationAssetId == asset.id
@@ -2075,6 +2189,8 @@ class AppContainerIntegrationTest {
         assertEquals(DownloadStatus.COMPLETE, final.physicalDownloads.getValue(future).status)
         assertEquals(futureSelection.bindingId.value, fixture.gateway.transfers.single().binding.id)
         assertEquals(futureItem.title, fixture.gateway.transfers.single().persisted?.queryTitle)
+        assertTrue(fixture.gateway.transfers.single().completed)
+        assertEquals(1, fixture.gateway.typedCompletions.size)
         assertTrue(fixture.gateway.queries.isEmpty(), "Activated typed execution reuses the accepted receipt, never re-searches")
         assertEquals(2, fixture.platform.ensureCoverageCalls.get())
         assertEquals(1, fixture.platform.coverageAcknowledgements.get())
@@ -2135,6 +2251,8 @@ class AppContainerIntegrationTest {
         assertEquals(listOf(original.title), fixture.gateway.queries.toList())
         assertEquals(bindingId.value, fixture.gateway.transfers.single().binding.id)
         assertEquals(original.title, fixture.gateway.transfers.single().persisted?.queryTitle)
+        assertTrue(fixture.gateway.transfers.single().completed)
+        assertEquals(1, fixture.gateway.typedCompletions.size)
         assertEquals(1, fixture.platform.ensureCoverageCalls.get())
         assertEquals(1, fixture.platform.coverageAcknowledgements.get())
         assertTrue(fixture.platform.gateCoverageAcknowledgements.isNotEmpty())
@@ -2177,6 +2295,8 @@ class AppContainerIntegrationTest {
             assertContentEquals(NON_AUDIO, Files.readAllBytes(Path.of(asset.uri)))
             assertEquals(1, allowanceCloses.get())
             assertEquals(1, fixture.gateway.transfers.size, "A cleanup retry may not replay the transfer")
+            assertTrue(fixture.gateway.transfers.single().completed, "The consumed transfer itself must have returned")
+            assertEquals(1, fixture.gateway.typedCompletions.size)
             assertEquals(1, fixture.platform.localValidations.get(), "Successful native validation is not repeated")
             assertFalse(consumed.isCompleted)
             assertEquals(DOWNLOAD_CLEANUP_FAILURE,
@@ -2232,6 +2352,8 @@ class AppContainerIntegrationTest {
             assertEquals(1, allowanceCloses.get())
             assertEquals(1, fixture.platform.localValidations.get(), "The successful earlier native stage must never be repeated")
             assertEquals(1, fixture.gateway.transfers.size)
+            assertTrue(fixture.gateway.transfers.single().completed)
+            assertEquals(1, fixture.gateway.typedCompletions.size)
             val first = assertFailsWith<VeyraException> { fixture.app.close() }
             fixture.expectedCloseFailure = first.failure
             assertEquals(DOWNLOAD_CLEANUP_FAILURE, first.failure)
@@ -2316,6 +2438,8 @@ class AppContainerIntegrationTest {
             assertEquals(listOf(true, true), cleanupActive.toList())
             assertEquals(2, allowanceCloses.get())
             assertEquals(1, fixture.platform.localValidations.get(), "Consumed earlier stages are never repeated")
+            assertTrue(fixture.gateway.transfers.single().completed)
+            assertEquals(1, fixture.gateway.typedCompletions.size)
             fixture.assertDownloadCleanupDependenciesClosedOnce()
             assertEquals(first.failure, assertFailsWith<VeyraException> { fixture.app.close() }.failure)
             assertEquals(2, allowanceCloses.get())
@@ -2401,6 +2525,7 @@ class AppContainerIntegrationTest {
         assertEquals(single.receiptId, accepted.request.let { state.receipts[single.receiptId]?.id })
         assertEquals(listOf(track.title), fixture.gateway.queries.toList(), "Exactly one unchanged complete-title first-result query")
         assertEquals(1, fixture.gateway.typedTransfers.size, "The same accepted recording executes through the existing kmpYT plan/transfer")
+        assertEquals(1, fixture.gateway.typedCompletions.size)
         val asset = state.materializations.getValue(assertNotNull(physical.assetId))
         assertTrue(state.assetUses.any { it.requestedBindingId == single.bindingId && it.materializationAssetId == asset.id })
         assertTrue(Files.exists(Path.of(asset.uri)))
@@ -2457,6 +2582,7 @@ class AppContainerIntegrationTest {
             val job = state.physicalDownloads.values.single { it.status == DownloadStatus.COMPLETE }
             assertEquals(single.bindingId, job.producer.bindingId)
             assertEquals(1, fixture.gateway.typedTransfers.size)
+            assertEquals(1, fixture.gateway.typedCompletions.size)
             assertEquals(changed.title, fixture.store.state.value.media[displayed.id]?.title,
                 "The catalogue may move on; the accepted immutable request does not")
         } finally { release.complete(Unit) }
