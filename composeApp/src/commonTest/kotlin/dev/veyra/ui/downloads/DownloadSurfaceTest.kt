@@ -147,6 +147,15 @@ class DownloadSurfaceTest {
         assertFalse(entry?.ready == true)
         assertTrue(media.id in surface.catalogueMediaIds)
         assertFalse(surface.isDownloaded(media.id))
+
+        val queued = downloadSurface(AppSnapshot(media = mapOf(media.id to media)), presentation(built,
+            states = mapOf(built.job.id to built.job.copy(status = DownloadStatus.QUEUED, bytesDownloaded = 0))))
+        assertEquals(DownloadStatus.QUEUED, queued.forMedia(media.id)?.status)
+
+        val cancelled = downloadSurface(AppSnapshot(media = mapOf(media.id to media)), presentation(built,
+            states = mapOf(built.job.id to built.job.copy(status = DownloadStatus.CANCELLED))))
+        assertEquals(DownloadStatus.CANCELLED, cancelled.entries.single().status,
+            "An invoked job stays represented after cancellation, not only after success")
     }
 
     @Test
