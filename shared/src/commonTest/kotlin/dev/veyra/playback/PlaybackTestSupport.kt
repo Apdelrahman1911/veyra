@@ -4,6 +4,7 @@ import dev.veyra.data.*
 import dev.veyra.model.*
 import dev.veyra.source.ResolvePurpose
 import dev.veyra.source.SourceResolver
+import dev.veyra.source.execution.AcquisitionPlaybackSource
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
@@ -79,7 +80,11 @@ internal class PlaybackTestResolver(private val store: LibraryStore) : SourceRes
 
 /** Manual native clock/overlap fake, not audio evidence. It enforces the retained-owner ACK contract. */
 internal class PlaybackTestEngine : CrossfadeAudioEngine {
-    data class Load(val source: ResolvedPlayable, val startPositionMs: Long, val generation: Long)
+    data class Load(val native: NativePlaybackSource, val startPositionMs: Long, val generation: Long) {
+        /** Existing legacy fixture assertions stay explicit; typed sources have no fake mediaId. */
+        val source: ResolvedPlayable get() = (native as NativePlaybackSource.Legacy).source
+        val acquired: NativePlaybackSource.Acquired? get() = native as? NativePlaybackSource.Acquired
+    }
     data class Fade(val durationMs: Long, val incoming: Long, val outgoing: Long)
     data class Seek(val positionMs: Long, val sequence: Long, val generation: Long)
     override val capabilities = EngineCapabilities(supportsCrossfade = true)
@@ -95,7 +100,10 @@ internal class PlaybackTestEngine : CrossfadeAudioEngine {
     val pauses = mutableListOf<Long>()
     val stops = mutableListOf<Long>()
     val rates = mutableListOf<Pair<Float, Long>>()
-    var activeGeneration = 0L
+    val readerDrains = mutableListOf<Long>()
+    val retired = mutableListOf<Load>()
+    private val failedRetired = mutableSetOf<Load>()
+    var activeGeneration = -1L
     var active: Load? = null
     var staged: Load? = null
     var currentSpeed = 1f
@@ -108,18 +116,33 @@ internal class PlaybackTestEngine : CrossfadeAudioEngine {
     var beforeClose: (suspend () -> Unit)? = null
     var beforeConfirm: (suspend () -> Unit)? = null
     var beforeCancelNext: (suspend () -> Unit)? = null
+    var beforeReaderDrain: (suspend (Long) -> Unit)? = null
+    var readerDrainOverride: ((Long) -> NativeReaderDrainResult)? = null
+    /** Model the native asynchronous-retirement seam, not real decoder/file I/O. */
+    var deferRetiredClosures = false
+    private var everOwnedSource = false
 
-    override suspend fun prepare(source: ResolvedPlayable, startPositionMs: Long, generation: Long) {
+    override suspend fun prepare(source: ResolvedPlayable, startPositionMs: Long, generation: Long) =
+        prepareNative(NativePlaybackSource.Legacy(source), startPositionMs, generation)
+
+    override suspend fun prepare(source: AcquisitionPlaybackSource, selection: PlaybackSelection,
+        startPositionMs: Long, generation: Long) =
+        prepareNative(NativePlaybackSource.Acquired(source, selection), startPositionMs, generation)
+
+    private suspend fun prepareNative(source: NativePlaybackSource, startPositionMs: Long, generation: Long) {
+        everOwnedSource = true
+        val owned = Load(source, startPositionMs, generation)
         var retained = false
         try {
             beforePrepare?.invoke()
+            source.validateSelection()
             if (generation < activeGeneration) return
             closeActive()
             activeGeneration = generation
-            active = Load(source, startPositionMs, generation).also { loads += it }
+            active = owned.also { loads += it }
             retained = true
             if (autoReady) emit(EngineEvent.Ready(generation, source.durationMs, true))
-        } finally { if (!retained) source.resource?.close() }
+        } finally { if (!retained) retire(owned) }
     }
     override suspend fun play(generation: Long) {
         if (generation != activeGeneration) return
@@ -151,10 +174,25 @@ internal class PlaybackTestEngine : CrossfadeAudioEngine {
         activeGeneration = generation
         stops += generation
     }
-    override suspend fun preloadNext(source: ResolvedPlayable, startPositionMs: Long, nextGeneration: Long, generation: Long) {
-        if (generation != activeGeneration) { source.resource?.close(); return }
-        clearStage()
-        staged = Load(source, startPositionMs, nextGeneration).also { preloads += it }
+    override suspend fun preloadNext(source: ResolvedPlayable, startPositionMs: Long, nextGeneration: Long, generation: Long) =
+        preloadNative(NativePlaybackSource.Legacy(source), startPositionMs, nextGeneration, generation)
+
+    override suspend fun preloadNext(source: AcquisitionPlaybackSource, selection: PlaybackSelection,
+        startPositionMs: Long, nextGeneration: Long, generation: Long) =
+        preloadNative(NativePlaybackSource.Acquired(source, selection), startPositionMs, nextGeneration, generation)
+
+    private suspend fun preloadNative(source: NativePlaybackSource, startPositionMs: Long, nextGeneration: Long, generation: Long) {
+        everOwnedSource = true
+        val owned = Load(source, startPositionMs, nextGeneration)
+        var retained = false
+        try {
+            source.validateSelection()
+            require(source.controlsMode == PlaybackControlsMode.MUSIC)
+            if (generation != activeGeneration) return
+            clearStage()
+            staged = owned.also { preloads += it }
+            retained = true
+        } finally { if (!retained) retire(owned) }
     }
     override suspend fun beginCrossfade(durationMs: Long, nextGeneration: Long, generation: Long) {
         if (generation != activeGeneration || staged?.generation != nextGeneration) return
@@ -164,7 +202,7 @@ internal class PlaybackTestEngine : CrossfadeAudioEngine {
     override suspend fun confirmCrossfade(nextGeneration: Long, generation: Long) {
         beforeConfirm?.invoke()
         if (generation != activeGeneration || staged?.generation != nextGeneration) return
-        active?.source?.resource?.close()
+        active?.let { retire(it) }
         active = staged
         staged = null
         activeGeneration = nextGeneration
@@ -176,9 +214,47 @@ internal class PlaybackTestEngine : CrossfadeAudioEngine {
         if (staged?.generation == nextGeneration) clearStage()
         cancellations += generation to nextGeneration
     }
+    override suspend fun awaitRetiredReaders(expectedGeneration: Long): NativeReaderDrainResult {
+        readerDrains += expectedGeneration
+        if (closed) return NativeReaderDrainResult.Unacknowledged(AppFailure(FailureCode.INVALID_STATE, "authored_engine_closed"))
+        if (activeGeneration == -1L && expectedGeneration == 0L && !everOwnedSource && active == null && staged == null &&
+            retired.isEmpty() && failedRetired.isEmpty()) activeGeneration = 0L
+        if (expectedGeneration != activeGeneration) return NativeReaderDrainResult.Superseded
+        beforeReaderDrain?.invoke(expectedGeneration)
+        drainRetiredOwners()
+        currentCoroutineContext().ensureActive()
+        if (closed) return NativeReaderDrainResult.Unacknowledged(AppFailure(FailureCode.INVALID_STATE, "authored_engine_closed"))
+        if (expectedGeneration != activeGeneration) return NativeReaderDrainResult.Superseded
+        readerDrainOverride?.let { return it(expectedGeneration) }
+        return if (failedRetired.isEmpty()) NativeReaderDrainResult.Drained(expectedGeneration)
+            else NativeReaderDrainResult.Unacknowledged(AppFailure(FailureCode.STORAGE_IO, "authored_retired_close_unacknowledged"))
+    }
     override suspend fun close() { closeCalls++; beforeClose?.invoke(); closeActive(); closed = true; eventsChannel.close() }
-    private suspend fun clearStage() { staged?.source?.resource?.close(); staged = null }
-    private suspend fun closeActive() { clearStage(); active?.source?.resource?.close(); active = null }
+    private suspend fun clearStage() {
+        val old = staged
+        staged = null
+        old?.let { retire(it) }
+    }
+    private suspend fun closeActive() {
+        clearStage()
+        val old = active
+        active = null
+        old?.let { retire(it) }
+        drainRetiredOwners()
+        if (failedRetired.isNotEmpty()) throw VeyraException(AppFailure(FailureCode.STORAGE_IO, "authored_retired_close_unacknowledged"))
+    }
+    private suspend fun retire(owner: Load) {
+        if (retired.none { it === owner }) retired += owner
+        if (!deferRetiredClosures) drainRetiredOwner(owner)
+    }
+    private suspend fun drainRetiredOwner(owner: Load) = withContext(NonCancellable) {
+        if (owner in failedRetired) return@withContext
+        try { owner.native.resource?.close(); retired.remove(owner) }
+        catch (_: Throwable) { failedRetired += owner }
+    }
+    private suspend fun drainRetiredOwners() = withContext(NonCancellable) {
+        retired.toList().forEach { drainRetiredOwner(it) }
+    }
     suspend fun emit(event: EngineEvent) { eventsChannel.send(event) }
 }
 

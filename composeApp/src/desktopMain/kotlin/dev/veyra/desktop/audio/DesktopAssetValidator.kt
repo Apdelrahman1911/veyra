@@ -13,7 +13,6 @@ import dev.veyra.playback.LocalMediaValidationInput
 import dev.veyra.playback.LocalMediaValidationReaderRelease
 import dev.veyra.playback.LocalMediaValidationReaderUnacknowledged
 import dev.veyra.playback.LocalMediaValidator
-import dev.veyra.playback.ResolvedPlayable
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
@@ -27,24 +26,18 @@ import kotlinx.coroutines.withTimeoutOrNull
 import java.nio.file.Files
 import java.util.concurrent.ConcurrentHashMap
 
-/**
- * Full silent decoding on a separate native handle. Transfer completion remains the downloader's
- * obligation. The SAME primitive validates legacy catalogue assets and neutral typed recordings.
- *
- * [ValidationReader] retains the ORIGINAL decoder if [MpvAudioDeck.close] does not return
- * successfully. A successful close is this platform adapter's positive destruction receipt; it
- * is not independent descriptor measurement. Callers must still retain their path/gate/slot
- * leases behind [LocalMediaValidationReaderUnacknowledged].
- */
+/** Full silent decoding on a separate handle. Transfer completion remains the downloader's obligation. */
 class DesktopAssetValidator internal constructor(
-    /** Registers the SAME decoder before a later prepare/decoder failure can lose ownership. */
-    private val openDecoder: suspend ((MpvAudioDeck) -> Unit) -> MpvAudioDeck,
+    /** Publishes the SAME decoder before initialization can fail or dispatcher return can cancel. */
+    private val openDecoder: suspend ((DesktopAudioDeck) -> Unit) -> Unit,
 ) : AssetValidator, LocalMediaValidator {
     constructor(runtimeConfig: DesktopRuntimeConfig) : this({ owned ->
-        MpvAudioDeck.createInternal(runtimeConfig.copy(silentTestOutput = true), validation = true).also(owned)
+        MpvAudioDeck.createInternal(runtimeConfig.copy(silentTestOutput = true), validation = true, onOwned = owned)
     })
 
     override suspend fun validate(asset: OfflineAsset): AssetValidation {
+        // Preserve a classified rejection for malformed legacy rows rather than throwing from
+        // the identity-free input's constructor. A negative generation is not a valid receipt.
         if (asset.sizeBytes <= 0) return invalid("offline_byte_count_mismatch")
         if (asset.validatorGeneration < 0) return invalid("offline_validation_generation_mismatch")
         return validateLocal(LocalMediaValidationInput(asset.uri, asset.kind, asset.sizeBytes,
@@ -66,6 +59,7 @@ class DesktopAssetValidator internal constructor(
         try {
             val engine = try {
                 openDecoder(reader::own)
+                reader.decoder()
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) {
                 return@withContext AssetValidation.Invalid(AppFailure(FailureCode.INVALID_STATE, "native_validator_unavailable"))
@@ -85,8 +79,7 @@ class DesktopAssetValidator internal constructor(
                         }
                     }
                     try {
-                        engine.prepare(ResolvedPlayable("local-validation", path.toString(), isLocal = true,
-                            mimeType = input.mimeType, codecs = input.codecs), 0, 1)
+                        engine.prepare(DesktopNativeInput.forLocalValidation(input.copy(uri = path.toString())), 0, 1)
                         completion.await()
                     } finally { collector.cancel() }
                 }
@@ -96,8 +89,9 @@ class DesktopAssetValidator internal constructor(
         } catch (_: Exception) {
             invalid("native_media_validation_failed")
         } finally {
-            // Outside the Invalid/cancellation classification: an unacknowledged native destroy
-            // must reach the caller as the typed retained-reader failure, never a generic error.
+            // Deliberately OUTSIDE the Invalid/cancellation classification above. The caller
+            // must adopt this exact reader and retain its existing path/gate/slot leases when
+            // native destruction is unacknowledged; throwing a generic error is insufficient.
             withContext(NonCancellable) { reader.closeOnce() }
         }
     }
@@ -105,14 +99,16 @@ class DesktopAssetValidator internal constructor(
     private fun invalid(detail: String) = AssetValidation.Invalid(AppFailure(FailureCode.CORRUPT_MEDIA, detail))
 
     private class ValidationReader(private val input: LocalMediaValidationInput) : LocalMediaValidationReaderRelease {
-        private var engine: MpvAudioDeck? = null
+        private var engine: DesktopAudioDeck? = null
         private var closeAttempted = false
         @Volatile private var released = false
 
-        fun own(value: MpvAudioDeck) {
+        fun own(value: DesktopAudioDeck) {
             check(engine == null && !closeAttempted)
             engine = value
         }
+
+        fun decoder(): DesktopAudioDeck = checkNotNull(engine)
 
         override fun isReleased(): Boolean = released // Observation only; never retries destroy.
 
@@ -123,12 +119,13 @@ class DesktopAssetValidator internal constructor(
                 return
             }
             closeAttempted = true
-            // Keep the actual native handle strongly owned even if a noncompliant caller loses
-            // the typed exception. This pin alone is NOT file-release permission.
+            // Keep the actual native handle alive even if a noncompliant legacy caller loses
+            // the typed exception. This pin alone is NOT file-release permission: callers must
+            // retain their exact leases behind the exception's reader barrier as well.
             retainedValidationReaders.add(this)
             try { value.close() }
             catch (_: Throwable) { throw LocalMediaValidationReaderUnacknowledged(input, this) }
-            released = true // MpvAudioDeck.close returns only after its owner thread terminates.
+            released = true // DesktopAudioDeck.close returns only after positive native destroy.
             engine = null
             retainedValidationReaders.remove(this)
         }

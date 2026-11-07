@@ -1,36 +1,24 @@
 package dev.veyra.app
 
 import dev.veyra.acquisition.AcquisitionCaptureFactory
+import dev.veyra.acquisition.AcquisitionResolution
 import dev.veyra.acquisition.AcquisitionCoordinator
 import dev.veyra.acquisition.DownloadBatchCoordinator
 import dev.veyra.artwork.ArtworkCache
 import dev.veyra.artwork.ArtworkFiles
+import dev.veyra.data.CatalogLibraryUndo
 import dev.veyra.data.LibraryStore
 import dev.veyra.data.StoreStatus
 import dev.veyra.data.getOrThrow
-import dev.veyra.downloads.DownloadAcquisitionDependencies
 import dev.veyra.downloads.DownloadCoordinator
 import dev.veyra.downloads.DownloadFiles
 import dev.veyra.downloads.DownloadActivation
-import dev.veyra.downloads.DownloadMaterializationEvidence
 import dev.veyra.model.*
 import dev.veyra.playback.*
 import dev.veyra.source.*
 import dev.veyra.source.commons.CommonsSource
-import dev.veyra.source.execution.AcquisitionExecutionContext
-import dev.veyra.source.execution.AcquisitionExecutionGateway
-import dev.veyra.source.execution.AcquisitionGateway
-import dev.veyra.source.execution.AcquisitionInspection
-import dev.veyra.source.execution.AcquisitionPlaybackSource
-import dev.veyra.source.execution.AcquisitionTransferProgress
-import dev.veyra.source.execution.AcquisitionTransferResult
 import dev.veyra.source.execution.AppSourceResolver
-import dev.veyra.source.execution.CollectionContinuation
-import dev.veyra.source.execution.KmpLegacyPreparedDownloadAdapter
 import dev.veyra.source.execution.KmpMediaGateway
-import dev.veyra.source.execution.LegacyPreparedDownloadGateway
-import dev.veyra.source.execution.PreparedAcquisitionDownload
-import dev.veyra.source.execution.SourceCollectionPage
 import dev.veyra.source.network.SafeHttp
 import dev.veyra.source.network.createSafeHttp
 import dev.veyra.source.podcast.PodcastSource
@@ -60,12 +48,6 @@ data class PodcastDetailStatus(
     val failures: Map<String, AppFailure> = emptyMap(),
     val options: Map<String, PodcastListOptions> = emptyMap(),
 )
-
-private data class LibrarySlice(val playlists: List<Playlist>, val favorites: Set<String>, val saved: Set<String>) {
-    fun restore(snapshot: AppSnapshot) = snapshot.copy(playlists = playlists, favoriteIds = favorites, savedEpisodeIds = saved)
-    companion object { fun of(snapshot: AppSnapshot) = LibrarySlice(snapshot.playlists, snapshot.favoriteIds, snapshot.savedEpisodeIds) }
-}
-private data class LibraryUndo(val before: LibrarySlice, val after: LibrarySlice)
 
 /**
  * One app-lifetime composition root. Screens emit intents; they never construct clients, players,
@@ -109,86 +91,36 @@ class AppContainer(
     private val activeAcquisitions = MutableStateFlow<List<CompletableDeferred<Unit>>>(emptyList())
     val store: LibraryStore = platform.store
     private val downloadCoverageAcknowledged = MutableStateFlow(false)
-    private val executionGateway = object : KmpMediaGateway, LegacyPreparedDownloadGateway {
-        // The pinned kmpYT revision has no prepared-transfer API; this adapter is the minimal
-        // lawful bridge over the existing resolve/download primitives (see its contract).
-        private val preparedAdapter = KmpLegacyPreparedDownloadAdapter(this)
-        override suspend fun firstResult(completeTitle: String) = online { gateway.firstResult(completeTitle) }
-        override suspend fun resolve(binding: PlaybackBinding, capabilities: EngineCapabilities, purpose: ResolvePurpose): ResolvedPlayable {
-            // coroutineScope's cancellable return can discard a successful result. Retain the
-            // resource here until the policy scope hands it to the resolver, not only there.
-            var acquired: ResolvedPlayable? = null
-            val completion = CompletableDeferred<Unit>()
+    private val executionGateway = PolicyMediaGateway(gateway, object : PolicyMediaGatewayHooks {
+        override suspend fun <T> online(block: suspend () -> T): T = this@AppContainer.online(block)
+        override suspend fun prepareMediaRuntime() = platform.prepareMediaRuntime()
+        override fun checkOpen() {
+            if (closed) throw VeyraException(AppFailure(FailureCode.INVALID_STATE))
+        }
+        override fun acquisitionStarted(completion: CompletableDeferred<Unit>) {
             activeAcquisitions.update { it + completion }
-            try {
-                val result = online {
-                    platform.prepareMediaRuntime()
-                    gateway.resolve(binding, capabilities, purpose).also { acquired = it }
-                }
-                if (closed) throw VeyraException(AppFailure(FailureCode.INVALID_STATE))
-                return result
-            } catch (failure: Throwable) {
-                withContext(NonCancellable) {
-                    try { acquired?.resource?.let { releaseRejectedResource(it) } }
-                    catch (releaseFailure: Throwable) {
-                        // Preserve only typed diagnostics; failed ownership is retained below,
-                        // rather than forgotten after attaching an arbitrary native exception.
-                        val sanitized = failureOf(releaseFailure)
-                        failure.addSuppressed(VeyraException(sanitized))
-                        fail(sanitized)
-                    }
-                }
-                throw failure
-            } finally {
-                completion.complete(Unit)
-                activeAcquisitions.update { old -> old.filterNot { it === completion } }
-            }
         }
-        override suspend fun download(binding: PlaybackBinding, destinationPath: String, capabilities: EngineCapabilities,
-            representationId: String?, onProgress: suspend (YouTubeTransferProgress) -> Unit): YouTubeTransferResult = online {
-            platform.prepareMediaRuntime()
-            gateway.download(binding, destinationPath, capabilities, representationId, onProgress)
+        override fun acquisitionFinished(completion: CompletableDeferred<Unit>) {
+            activeAcquisitions.update { old -> old.filterNot { it === completion } }
         }
-        override suspend fun prepareDownload(binding: PlaybackBinding, capabilities: EngineCapabilities,
-            requiredRepresentationId: String?) = preparedAdapter.prepareDownload(binding, capabilities, requiredRepresentationId)
-        override suspend fun download(prepared: dev.veyra.source.execution.PreparedLegacyDownload,
-            destinationPath: String, onProgress: suspend (AcquisitionTransferProgress) -> Unit) =
-            preparedAdapter.download(prepared, destinationPath, onProgress)
-    }
+        override suspend fun releaseRejectedResource(resource: PlaybackResource) =
+            this@AppContainer.releaseRejectedResource(resource)
+        override fun reportRejectedResourceFailure(failure: AppFailure) = this@AppContainer.fail(failure)
+    })
     val files = DownloadFiles("${platform.dataDirectory}/media")
-    private val materializationEvidence = DownloadMaterializationEvidence(store.transactionOwner)
-    val resolver = AppSourceResolver(store, files, platform.validator, executionGateway, clock, materializationEvidence)
-    val playback = PlaybackController(store, platform.engine, resolver, scope, clock)
-    // Typed acquisition execution needs the newer upstream prepare/acquire APIs that are not in
-    // the pinned kmpYT revision. These explicit port seams fail truthfully and grant no success;
-    // existing catalogue MEDIA/download journeys continue through the pinned legacy gateway.
-    private val acquisitionSelection: AcquisitionGateway = UnavailableAcquisitionGateway
-    private val acquisitionExecution: AcquisitionExecutionGateway = UnavailableAcquisitionExecutionGateway
-    private val acquisition = AcquisitionCoordinator(store.acquisition, acquisitionSelection,
-        AcquisitionCaptureFactory(clock), clock, offline = { store.state.value.settings.offlineOnly })
-    private val downloadBatches = DownloadBatchCoordinator(store.acquisition, acquisition, clock)
-    private val acquisitionDependencies = DownloadAcquisitionDependencies(
-        repository = store.acquisition,
-        gateway = acquisitionExecution,
-        validator = platform.localValidator,
-        beforePhysicalDelete = { asset ->
-            (asset.producer as? PhysicalDownloadProducer.Schema2)?.mediaId?.let { mediaId ->
-                playback.releaseForAssetRemoval(mediaId).getOrThrow()
-            }
-            resolver.retainedReaderFailure()?.let { throw VeyraException(it) }
-        },
-        beforePhysicalAdoption = { producer ->
-            playback.releaseForAssetRemoval(producer.mediaId).getOrThrow()
-            resolver.retainedReaderFailure()?.let { throw VeyraException(it) }
-        },
-        requireOwnerAdmission = {
-            if (closed || !downloadCoverageAcknowledged.value) {
-                throw VeyraException(AppFailure(FailureCode.BACKGROUND_RESTRICTED, "download_coverage_unacknowledged"))
-            }
-        },
-        acquisition = acquisition,
-        batches = downloadBatches,
-        materializationEvidence = materializationEvidence,
+    // One same-owner schema3 composition shared by playback, durable downloads and UI actions.
+    private val acquisitionOwner = AppAcquisitionOwner(store, executionGateway, files, platform.localValidator, clock,
+        offline = { closed || store.state.value.settings.offlineOnly })
+    val resolver = AppSourceResolver(store, files, platform.validator, executionGateway, clock,
+        materializationEvidence = acquisitionOwner.materializationEvidence)
+    val playback = PlaybackController(store, platform.engine, resolver, scope, clock,
+        acquisition = acquisitionOwner.playbackServices)
+    private val acquisition = acquisitionOwner.acquisition
+    private val downloadBatches = acquisitionOwner.batches
+    private val acquisitionDependencies = acquisitionOwner.downloadDependencies(
+        beforePhysicalDelete = { asset -> playback.releaseForMaterializationRemoval(asset).getOrThrow() },
+        beforePhysicalAdoption = { producer -> playback.releaseForAssetRemoval(producer.mediaId).getOrThrow() },
+        requireOwnerAdmission = ::requireDownloadOwnerAdmission,
     )
     val downloads = DownloadCoordinator(store, files, resolver, executionGateway, platform.validator,
         platform.engine.capabilities, scope, platform.downloadExecution, clock,
@@ -223,14 +155,17 @@ class AppContainer(
     private val mutableDownloadRestriction = MutableStateFlow<AppFailure?>(
         AppFailure(FailureCode.BACKGROUND_RESTRICTED, "download_activation_required"))
     val downloadRestriction: StateFlow<AppFailure?> = mutableDownloadRestriction.asStateFlow()
-    private val undoLibrary = MutableStateFlow<LibraryUndo?>(null)
+    private val undoLibrary = MutableStateFlow<CatalogLibraryUndo?>(null)
     private val mutableStorageBytes = MutableStateFlow<Long?>(null)
     val storageBytes = mutableStorageBytes.asStateFlow()
-    val musicOptions: StateFlow<MusicUiOptions> = combine(store.state, playback.state, undoLibrary) { snapshot, player, undo ->
+    val musicOptions: StateFlow<MusicUiOptions> = combine(store.state, playback.state, undoLibrary,
+        store.catalogLibraryUndoAvailability) { _, player, undo, availability ->
         MusicUiOptions(
             downloadableProviders = setOf(SourceProvider.YOUTUBE, SourceProvider.RSS, SourceProvider.COMMONS),
             undoableQueueContexts = player.undoableQueueContexts,
-            canUndoLibrary = undo != null && LibrarySlice.of(snapshot) == undo.after,
+            // Advisory presentation only. The actual restore revalidates the complete saved frame
+            // inside the same-owner write transaction.
+            canUndoLibrary = undo != null && availability.accepts(undo),
             // Local import needs a central-library execution contract; never advertise an alternate engine.
             supportsImport = false,
             minSpeed = platform.engine.capabilities.minSpeed,
@@ -338,6 +273,7 @@ class AppContainer(
         mutableInitialization.value = AppInitialization.Loading
         try {
             val snapshot = store.initialize().getOrThrow()
+            acquisitionOwner.initialize()
             withContext(Dispatchers.IO) { files.initialize() }
             artwork.initialize()
             mutableNavigation.value = AppNavigation.restore(snapshot)
@@ -470,6 +406,13 @@ class AppContainer(
         return true
     }
 
+    /** The physical executor's synchronous same-owner admission gate. */
+    private fun requireDownloadOwnerAdmission() {
+        if (closed || !downloadCoverageAcknowledged.value) {
+            throw VeyraException(AppFailure(FailureCode.BACKGROUND_RESTRICTED, "download_coverage_unacknowledged"))
+        }
+    }
+
     /** Transform the latest transactional settings, never save a stale screen's whole settings. */
     fun changeSettings(transform: (AppSettings) -> AppSettings) = submit {
         store.update { it.copy(settings = transform(it.settings)) }.getOrThrow()
@@ -526,12 +469,59 @@ class AppContainer(
 
     private fun download(item: MediaItem): Deferred<Boolean> {
         val selected = current(item)
-        // Capture the recording displayed at the intent, not after later track switches.
-        val bindingId = playback.state.value.executionBinding?.takeIf { it.mediaId == selected.id }?.id
+        // Freeze the tap's exact displayed catalogue row and, when one exists, the exact typed
+        // playback occurrence/binding. Later playback or navigation changes must not rebase this.
+        val typed = playback.state.value.currentSelection?.takeIf {
+            it.catalogMedia?.id == selected.id && it.requestId != null && it.bindingId != null
+        }
+        val legacyBindingId = playback.state.value.executionBinding?.takeIf { it.mediaId == selected.id }?.id
+        val tapped = selected.copy()
         return downloadEffect(requiresCoverage = true) {
-            downloads.enqueue(selected, reuseBindingId = bindingId)
+            if (typed != null) {
+                downloads.enqueueAccepted(requireNotNull(typed.requestId), requireNotNull(typed.bindingId)) {
+                    requireTapCurrent(tapped)
+                }
+            } else if (legacyBindingId != null) {
+                // Genuine migrated schema2 playback receipt; no new title query is invented.
+                downloads.enqueue(selected, reuseBindingId = legacyBindingId)
+            } else {
+                val selectedMedia = selectExistingMedia(tapped)
+                downloads.enqueueAccepted(selectedMedia.first, selectedMedia.second) { requireTapCurrent(tapped) }
+            }
             cacheArtwork(listOf(selected))
             selected.showId?.let { id -> store.state.value.shows[id]?.let { cacheArtwork(emptyList(), listOf(it)) } }
+        }
+    }
+
+    private suspend fun selectExistingMedia(item: MediaItem): Pair<AcquisitionRequestId, ExecutionBindingId> {
+        val view = store.acquisitionView()
+        val current = view.snapshot.media[item.id]
+            ?: throw VeyraException(AppFailure(FailureCode.RECOVERY_REQUIRED, "download_acquisition_selection_required"))
+        if (current.kind != item.kind || current.source.provider != item.source.provider ||
+            current.source.canonicalId != item.source.canonicalId) {
+            throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "download_catalog_identity_changed"))
+        }
+        // Immutable complete-title capture is committed BEFORE any source selection. The gateway
+        // accepts its actual raw ordinal-zero first entry and never searches the returned title.
+        val captured = acquisition.capture(acquisitionOwner.captures.media(current, view.snapshot).metadata,
+            expectedCatalogRevision = view.snapshot.revision)
+        val resolved = acquisition.resolve(captured.request.id)
+        val accepted = resolved as? AcquisitionResolution.Accepted
+            ?: throw VeyraException(AppFailure(FailureCode.RECOVERY_REQUIRED, "download_acquisition_selection_incomplete"))
+        val single = accepted.record.outcome as? AcquisitionOutcome.Single
+            ?: throw VeyraException(AppFailure(FailureCode.UNSUPPORTED_SOURCE, "download_first_result_not_executable"))
+        if ((accepted.record.request.metadata as? MediaCapture)?.media?.id != current.id) {
+            throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "download_catalog_capture_required"))
+        }
+        return accepted.record.request.id to single.bindingId
+    }
+
+    /** Synchronous final admission check; the immutable request itself remains unchanged. */
+    private fun requireTapCurrent(item: MediaItem) {
+        val current = store.state.value.media[item.id]
+        if (current == null || current.kind != item.kind || current.source.provider != item.source.provider ||
+            current.source.canonicalId != item.source.canonicalId) {
+            throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "download_action_stale"))
         }
     }
 
@@ -669,7 +659,9 @@ class AppContainer(
             }) }
             MusicUiAction.UndoLibrary -> {
                 val undo = undoLibrary.value ?: return
-                store.update { old -> require(LibrarySlice.of(old) == undo.after); undo.before.restore(old) }.getOrThrow()
+                // The receipt is opaque and post-COMMIT. It never reconstructs hidden typed
+                // lineage from a projected snapshot and never infers ABA from equal UI values.
+                store.undoCatalogLibrary(undo)
                 undoLibrary.value = null
             }
             is MusicUiAction.Download -> download(action.item)
@@ -763,13 +755,9 @@ class AppContainer(
         ?: throw VeyraException(AppFailure(FailureCode.NOT_FOUND))
 
     private suspend fun editLibrary(transform: (AppSnapshot) -> AppSnapshot) {
-        var undo: LibraryUndo? = null
-        store.update { old -> transform(old).also { next ->
-            val before = LibrarySlice.of(old)
-            val after = LibrarySlice.of(next)
-            if (before != after) undo = LibraryUndo(before, after)
-        } }.getOrThrow()
-        if (undo != null) undoLibrary.value = undo
+        val edit = store.editCatalogLibrary(transform)
+        val undo = edit.undo
+        if (undo != null && store.catalogLibraryUndoAvailability.value.accepts(undo)) undoLibrary.value = undo
     }
 
     private fun source(provider: SourceProvider): MediaSource = when (provider) {
@@ -1048,9 +1036,9 @@ class AppContainer(
             }
             release { drainRejectedResources() }
             val rejectedDrained = rejectedResourceLock.withLock { rejectedResources.isEmpty() }
-            if (!downloads.dependencyReleaseSafeAfterClose || !rejectedDrained) {
+            if (!downloads.dependencyReleaseSafeAfterClose || !playback.dependencyReleaseSafeAfterClose || !rejectedDrained) {
                 // Room, source clients, runtime and the parent lifetime are dependencies of
-                // retained cleanup. Keep the complete graph pinned until an acknowledged drain.
+                // retained cleanup. Failed player/native drain also vetoes dependency release.
                 if (failure == null) failure = AppFailure(FailureCode.BACKGROUND_RESTRICTED,
                     "download_owner_drain_failed_restart_required")
                 closeFailure = failure
@@ -1089,31 +1077,6 @@ private object AppCleanupOwners {
     fun retain(owner: AppContainer) { retained.update { it + owner } }
     fun release(owner: AppContainer) { retained.update { it - owner } }
     fun contains(owner: AppContainer): Boolean = owner in retained.value
-}
-
-/** Explicit unavailable typed-acquisition seam. Never fabricates a receipt or success. */
-private object UnavailableAcquisitionGateway : AcquisitionGateway {
-    private fun unavailable(): Nothing =
-        throw VeyraException(AppFailure(FailureCode.UNSUPPORTED_SOURCE, "typed_acquisition_upstream_unavailable"))
-    override suspend fun acquire(request: AcquisitionRequest): SourceAcquisitionResult = unavailable()
-    override fun restore(request: AcquisitionRequest, receipt: FirstResultObservation): SourceAcquisitionResult = unavailable()
-    override suspend fun collection(request: AcquisitionRequest, selection: SourceAcquisitionResult.Collection,
-        limits: CollectionLimits): SourceCollectionPage = unavailable()
-    override suspend fun more(continuation: CollectionContinuation): SourceCollectionPage = unavailable()
-    override suspend fun inspect(request: AcquisitionRequest,
-        selection: SourceAcquisitionResult.Single): AcquisitionInspection = unavailable()
-}
-
-/** Typed media execution needs newer upstream prepare/acquire APIs than the pinned kmpYT pin. */
-private object UnavailableAcquisitionExecutionGateway : AcquisitionExecutionGateway {
-    private fun unavailable(): Nothing =
-        throw VeyraException(AppFailure(FailureCode.UNSUPPORTED_SOURCE, "typed_execution_upstream_unavailable"))
-    override suspend fun preparePlayback(context: AcquisitionExecutionContext, capabilities: EngineCapabilities,
-        requiredRepresentationId: String?, inspection: AcquisitionInspection?): AcquisitionPlaybackSource = unavailable()
-    override suspend fun prepareDownload(context: AcquisitionExecutionContext, capabilities: EngineCapabilities,
-        requiredRepresentationId: String?, inspection: AcquisitionInspection?): PreparedAcquisitionDownload = unavailable()
-    override suspend fun download(prepared: PreparedAcquisitionDownload, destinationPath: String,
-        onProgress: suspend (AcquisitionTransferProgress) -> Unit): AcquisitionTransferResult = unavailable()
 }
 
 fun createAppContainer(platform: PlatformServices, parentScope: CoroutineScope): AppContainer = AppContainer(platform, parentScope)

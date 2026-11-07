@@ -16,6 +16,17 @@ import dev.veyra.downloads.DownloadIdleDecision
 import dev.veyra.downloads.DownloadNetworkState
 import dev.veyra.model.*
 import dev.veyra.playback.*
+import dev.veyra.source.execution.AcquisitionExecutionContext
+import dev.veyra.source.execution.AcquisitionExecutionGateway
+import dev.veyra.source.execution.AcquisitionGateway
+import dev.veyra.source.execution.AcquisitionInspection
+import dev.veyra.source.execution.AcquisitionPlaybackSource
+import dev.veyra.source.execution.AcquisitionRepresentation
+import dev.veyra.source.execution.AcquisitionTransferProgress
+import dev.veyra.source.execution.AcquisitionTransferResult
+import dev.veyra.source.execution.CollectionContinuation
+import dev.veyra.source.execution.PreparedAcquisitionDownload
+import dev.veyra.source.execution.SourceCollectionPage
 import dev.veyra.source.BrowseKind
 import dev.veyra.source.MediaCollection
 import dev.veyra.source.ResolvePurpose
@@ -96,7 +107,7 @@ class AppContainerIntegrationTest {
     }
 
     /** Synthetic callbacks only: this engine never opens a URL/file or claims native decoding. */
-    private class NativeProbe : AudioEngine {
+    private class NativeProbe(private val store: LibraryStore) : AudioEngine {
         override val capabilities = EngineCapabilities()
         private val callbacks = Channel<EngineEvent>(Channel.UNLIMITED)
         override val events: Flow<EngineEvent> = callbacks.receiveAsFlow()
@@ -124,6 +135,38 @@ class AppContainerIntegrationTest {
             prepared.send(preparation)
             callbacks.send(EngineEvent.Ready(generation, source.durationMs, seekable = true))
         }
+        override suspend fun prepare(source: AcquisitionPlaybackSource, selection: PlaybackSelection,
+            startPositionMs: Long, generation: Long) = lock.withLock {
+            calls += "prepare-typed"
+            if (generation < this.generation) { source.resource?.close(); return@withLock }
+            owned?.close()
+            owned = source.resource
+            this.generation = generation
+            // Test-only observation projection of the typed identity. Production adapters keep
+            // NativePlaybackSource discriminated and never manufacture catalogue IDs.
+            val observed = ResolvedPlayable(
+                mediaId = selection.catalogMedia?.id ?: selection.occurrenceId.value,
+                uri = source.uri,
+                transport = source.transport,
+                mimeType = source.mimeType,
+                codecs = source.codecs,
+                headers = source.headers,
+                expiresAtEpochMs = source.expiresAtEpochMs,
+                durationMs = source.durationMs,
+                seekableHint = source.seekableHint,
+                isLocal = source.isLocal,
+                representationId = source.representationId,
+                item = selection.catalogMedia,
+                executionBinding = selection.binding?.let { typed -> store.state.value.playbackBindings[typed.id.value] },
+                resource = source.resource,
+            )
+            val preparation = Preparation(observed, startPositionMs, generation)
+            preparations += preparation
+            prepared.send(preparation)
+            callbacks.send(EngineEvent.Ready(generation, source.durationMs, seekable = true))
+        }
+        override suspend fun awaitRetiredReaders(expectedGeneration: Long): NativeReaderDrainResult =
+            NativeReaderDrainResult.Drained(expectedGeneration)
         override suspend fun play(generation: Long) = lock.withLock {
             calls += "play"
             if (generation == this.generation) callbacks.send(EngineEvent.StateChanged(generation, EnginePhase.PLAYING, true, rate))
@@ -189,7 +232,7 @@ class AppContainerIntegrationTest {
     private class PlatformProbe(directory: Path) : PlatformServices {
         override val dataDirectory = directory.toString()
         override val store: LibraryStore = createPlatformLibraryStore(directory.resolve("library").toString())
-        override val engine = NativeProbe()
+        override val engine: NativeProbe = NativeProbe(store)
         val validations = ConcurrentLinkedQueue<OfflineAsset>()
         @Volatile var validateAsset: suspend (OfflineAsset) -> AssetValidation = { AssetValidation.Valid(12_345L) }
         override val validator = AssetValidator { asset -> validations += asset; validateAsset(asset) }
@@ -231,7 +274,8 @@ class AppContainerIntegrationTest {
         override suspend fun openExternalUrl(url: String) { externalUrls += url }
     }
 
-    private class GatewayProbe(private val store: LibraryStore) : KmpMediaGateway {
+    private class GatewayProbe(private val store: LibraryStore) :
+        KmpMediaGateway, AcquisitionGateway, AcquisitionExecutionGateway {
         val queries = ConcurrentLinkedQueue<String>()
         val resolutions = ConcurrentLinkedQueue<Resolution>()
         val transfers = ConcurrentLinkedQueue<Transfer>()
@@ -254,6 +298,88 @@ class AppContainerIntegrationTest {
             val transfer = Transfer(binding, destinationPath, representationId, store.state.value.playbackBindings[binding.id], onProgress)
             transfers += transfer
             return onDownload(transfer)
+        }
+
+        override suspend fun acquire(request: AcquisitionRequest): SourceAcquisitionResult {
+            val first = onFirst(request.completeTitle) ?: return SourceAcquisitionResult.Unplayable(request.id, null,
+                AcquisitionProblem(AcquisitionProblemCode.NO_FIRST_RESULT))
+            val entry = SourceEntry(
+                kind = when (first.kind) {
+                    FirstResultKind.VIDEO -> AcquisitionEntryKind.VIDEO
+                    FirstResultKind.CHANNEL -> AcquisitionEntryKind.CHANNEL
+                    FirstResultKind.PLAYLIST -> AcquisitionEntryKind.PLAYLIST
+                    FirstResultKind.UNKNOWN -> null
+                },
+                id = first.id.takeIf { it.isNotBlank() }, title = first.title.takeIf { it.isNotBlank() },
+                publicUrl = first.canonicalUrl, ordinal = 0,
+            )
+            val receipt = FirstResultObservation(request.id, request.completeTitle, entry, first.canonicalUrl)
+            val id = entry.id
+            val title = entry.title
+            val publicUrl = entry.publicUrl
+            return when {
+                first.kind == FirstResultKind.VIDEO && first.failure == null && id != null && title != null &&
+                    publicUrl != null -> SourceAcquisitionResult.Single(request.id, receipt,
+                    SourceDisplayItem(id, title, publicUrl, AcquisitionEntryKind.VIDEO))
+                first.failure?.code == FailureCode.UNSUPPORTED_SOURCE -> SourceAcquisitionResult.Unplayable(request.id, receipt,
+                    AcquisitionProblem(AcquisitionProblemCode.FIRST_RESULT_UNAVAILABLE))
+                first.kind == FirstResultKind.CHANNEL || first.kind == FirstResultKind.PLAYLIST ->
+                    SourceAcquisitionResult.Unplayable(request.id, receipt,
+                        AcquisitionProblem(AcquisitionProblemCode.FIRST_RESULT_UNSUPPORTED))
+                else -> SourceAcquisitionResult.Unplayable(request.id, receipt,
+                    AcquisitionProblem(AcquisitionProblemCode.INVALID_FIRST_RESULT))
+            }
+        }
+
+        override fun restore(request: AcquisitionRequest, receipt: FirstResultObservation): SourceAcquisitionResult {
+            val entry = receipt.entry
+            if (receipt.requestId != request.id || receipt.queryTitle != request.completeTitle || entry.ordinal != 0) {
+                throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "fixture_receipt_mismatch"))
+            }
+            val id = entry.id
+            val title = entry.title
+            val publicUrl = entry.publicUrl
+            return if (entry.kind == AcquisitionEntryKind.VIDEO && entry.issue == null && id != null && title != null &&
+                publicUrl != null) SourceAcquisitionResult.Single(request.id, receipt,
+                SourceDisplayItem(id, title, publicUrl, AcquisitionEntryKind.VIDEO))
+            else SourceAcquisitionResult.Unplayable(request.id, receipt,
+                AcquisitionProblem(AcquisitionProblemCode.FIRST_RESULT_UNSUPPORTED))
+        }
+
+        override suspend fun collection(request: AcquisitionRequest, selection: SourceAcquisitionResult.Collection,
+            limits: CollectionLimits): SourceCollectionPage =
+            throw VeyraException(AppFailure(FailureCode.UNSUPPORTED_SOURCE, "fixture_collection_unsupported"))
+        override suspend fun more(continuation: CollectionContinuation): SourceCollectionPage =
+            throw VeyraException(AppFailure(FailureCode.UNSUPPORTED_SOURCE, "fixture_collection_unsupported"))
+        override suspend fun inspect(request: AcquisitionRequest,
+            selection: SourceAcquisitionResult.Single): AcquisitionInspection = object : AcquisitionInspection {
+            override val selection = selection
+        }
+
+        override suspend fun preparePlayback(context: AcquisitionExecutionContext, capabilities: EngineCapabilities,
+            requiredRepresentationId: String?, inspection: AcquisitionInspection?): AcquisitionPlaybackSource {
+            return AcquisitionPlaybackSource(context, "https://fixture.example.test/non-audio",
+                StreamTransport.PROGRESSIVE, "audio/mp4", "aac", requiredRepresentationId ?: "authored-aac",
+                durationMs = 100_000, seekableHint = true)
+        }
+
+        override suspend fun prepareDownload(context: AcquisitionExecutionContext, capabilities: EngineCapabilities,
+            requiredRepresentationId: String?, inspection: AcquisitionInspection?): PreparedAcquisitionDownload {
+            val representation = AcquisitionRepresentation(requiredRepresentationId ?: "authored-aac", "audio/mp4", "aac", "m4a")
+            return object : PreparedAcquisitionDownload {
+                override val context = context
+                override val requiredRepresentationId = representation.representationId
+                override val representation = representation
+            }
+        }
+
+        override suspend fun download(prepared: PreparedAcquisitionDownload, destinationPath: String,
+            onProgress: suspend (AcquisitionTransferProgress) -> Unit): AcquisitionTransferResult {
+            val bytes = "Veyra authored integration fixture. NOT AUDIO.".encodeToByteArray()
+            Files.createDirectories(Path.of(destinationPath).parent)
+            Files.write(Path.of(destinationPath), bytes)
+            onProgress(AcquisitionTransferProgress(bytes.size.toLong(), bytes.size.toLong()))
+            return AcquisitionTransferResult(prepared.context, bytes.size.toLong(), prepared.representation)
         }
     }
 

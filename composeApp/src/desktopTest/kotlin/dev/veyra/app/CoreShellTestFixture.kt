@@ -32,8 +32,12 @@ import dev.veyra.playback.AssetValidator
 import dev.veyra.playback.AudioEngine
 import dev.veyra.playback.Clock
 import dev.veyra.playback.EngineCapabilities
+import dev.veyra.source.execution.AcquisitionPlaybackSource
 import dev.veyra.playback.EngineEvent
 import dev.veyra.playback.EnginePhase
+import dev.veyra.playback.NativeReaderDrainResult
+import dev.veyra.playback.PlaybackResource
+import dev.veyra.playback.PlaybackSelection
 import dev.veyra.playback.ResolvedPlayable
 import dev.veyra.source.ResolvePurpose
 import dev.veyra.source.execution.KmpFirstResult
@@ -244,7 +248,9 @@ internal class CoreShellFixtureEngine : AudioEngine {
     val seeks = CopyOnWriteArrayList<Seek>()
     @Volatile private var activeGeneration = 0L
     private var source: ResolvedPlayable? = null
+    private var ownedTyped: PlaybackResource? = null
     private var speed = 1f
+    val typedPreparations = CopyOnWriteArrayList<Triple<PlaybackSelection, Long, Long>>()
 
     override suspend fun prepare(source: ResolvedPlayable, startPositionMs: Long, generation: Long) {
         if (generation < activeGeneration) { source.resource?.close(); return }
@@ -254,6 +260,20 @@ internal class CoreShellFixtureEngine : AudioEngine {
         loads += Load(source, startPositionMs, generation)
         channel.send(EngineEvent.Ready(generation, source.durationMs, true))
     }
+
+    override suspend fun prepare(source: AcquisitionPlaybackSource, selection: PlaybackSelection,
+        startPositionMs: Long, generation: Long) {
+        if (generation < activeGeneration) { source.resource?.close(); return }
+        this.source?.resource?.close()
+        this.source = null
+        ownedTyped = source.resource
+        activeGeneration = generation
+        typedPreparations += Triple(selection, startPositionMs, generation)
+        channel.send(EngineEvent.Ready(generation, source.durationMs, true))
+    }
+
+    override suspend fun awaitRetiredReaders(expectedGeneration: Long): NativeReaderDrainResult =
+        NativeReaderDrainResult.Drained(expectedGeneration)
 
     override suspend fun play(generation: Long) {
         if (generation != activeGeneration || source == null) return
@@ -284,5 +304,5 @@ internal class CoreShellFixtureEngine : AudioEngine {
         activeGeneration = generation
     }
 
-    override suspend fun close() { source?.resource?.close(); source = null; channel.close() }
+    override suspend fun close() { source?.resource?.close(); ownedTyped?.close(); ownedTyped = null; source = null; channel.close() }
 }

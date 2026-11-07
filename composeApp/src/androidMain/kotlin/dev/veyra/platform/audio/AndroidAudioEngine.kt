@@ -21,6 +21,7 @@ import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import dev.veyra.model.AppFailure
 import dev.veyra.model.FailureCode
 import dev.veyra.model.MediaKind
+import dev.veyra.model.PlaybackControlsMode
 import dev.veyra.model.StreamTransport
 import dev.veyra.model.VeyraException
 import dev.veyra.playback.CrossfadeAudioEngine
@@ -30,20 +31,26 @@ import dev.veyra.playback.EngineCapabilities
 import dev.veyra.playback.EngineEvent
 import dev.veyra.playback.EnginePhase
 import dev.veyra.playback.InterruptionKind
+import dev.veyra.playback.NativeReaderDrainResult
+import dev.veyra.playback.NativePlaybackSource
+import dev.veyra.playback.PlaybackSelection
 import dev.veyra.playback.ResolvedPlayable
+import dev.veyra.source.execution.AcquisitionPlaybackSource
 import dev.veyra.source.network.PublicUrlPolicy
 import java.io.File
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
-import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.filterNotNull
@@ -54,15 +61,25 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 
+/** Authored fault injection runs before the corresponding real native retirement call. */
+internal enum class AndroidNativeRetirementStep { MUTE, STOP, DETACH }
+internal fun interface AndroidNativeRetirementFault {
+    fun before(generation: Long, step: AndroidNativeRetirementStep)
+}
+
 /**
  * One application transport with two managed native decks for music crossfades.
  * The shared controller is the only queue owner; the staged deck is never a second session.
  * Construct on Main. [beforePlay] establishes the mediaPlayback foreground service before focus.
  */
-class AndroidAudioEngine(
+class AndroidAudioEngine internal constructor(
     context: Context,
-    private val beforePlay: suspend () -> Unit = {},
+    private val beforePlay: suspend () -> Unit,
+    private val retirementFault: AndroidNativeRetirementFault,
 ) : CrossfadeAudioEngine {
+    constructor(context: Context, beforePlay: suspend () -> Unit = {}) :
+        this(context, beforePlay, AndroidNativeRetirementFault { _, _ -> })
+
     private val context = context.applicationContext
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val controls = Channel<EngineEvent>(Channel.UNLIMITED)
@@ -88,15 +105,50 @@ class AndroidAudioEngine(
     private var serviceLossPending = false
     private var failedForegroundGeneration: Long? = null
     private var closed = false
-    private val resourceClosures = mutableListOf<Deferred<Unit>>()
+    // Keep the actual source/deck (and its reader tracker), not just a failed Deferred/Boolean.
+    // Failed records are intentionally retained for this engine's lifetime; barriers never retry
+    // an ambiguous close. Only a positively completed close drops its strong owner reference.
+    private class RetiredOwner(val owner: Any) {
+        val completion = CompletableDeferred<Unit>()
+        var failed = false
+    }
+    private class SourceAdmission(val source: NativePlaybackSource) {
+        val completion = CompletableDeferred<Unit>()
+        var registered = false
+        var resourceAlias: SourceAdmission? = null
+        var retirement: RetiredOwner? = null
+    }
+    private val sourceAdmissions = mutableSetOf<SourceAdmission>()
+    // Main-serialized identity index spans admission, native use and the WHOLE retirement.
+    // Central close alone cannot release an identity while a native/Loader owner is retained.
+    private val sourceResourceOwners = mutableSetOf<SourceAdmission>()
+    private var everOwnedSource = false
+    private val resourceClosures = mutableSetOf<RetiredOwner>()
+    // Identity receipts coalesce simultaneous closes and retain failed actual central resources.
+    // A fresh rejected handoff of the same failed resource must not retry an ambiguous close.
+    private val centralResourceClosures = mutableSetOf<RetiredOwner>()
     private var resourceCleanupFailed = false
+    private val failedNativePlayers = mutableSetOf<ExoPlayer>()
+    // Native retirement failure is different from a central/Loader close failure. A handle with
+    // an ambiguous native operation is never reused or retried, even if another call silenced it.
+    private val quarantinedNativePlayers = mutableSetOf<ExoPlayer>()
+    private var transportSafetyFailed = false
+    private var reportedTransportFailureGeneration: Long? = null
+
+    internal val nativeTransportSafetyFailed: Boolean get() = transportSafetyFailed
+    internal val quarantinedNativePlayerCount: Int get() = quarantinedNativePlayers.size
+
+    internal val retainedFailedReaderOwners: Int get() = resourceClosures.count { it.failed }
+    // Includes nonowning callers awaiting the same retirement; these are not extra readers.
+    internal val pendingReaderClosures: Int get() = resourceClosures.count { !it.completion.isCompleted } +
+        sourceAdmissions.count { it.resourceAlias?.retirement?.completion?.isCompleted == false }
 
     /** Tests only. Application/session commands go through PlaybackController. */
     internal val nativePlayer: ExoPlayer get() = active?.player ?: players.first()
     internal val nativeDeckVolumes: List<Float> get() = players.map { it.volume }
     internal val nativeDecksPlaying: List<Boolean> get() = players.map { it.isPlaying }
 
-    private class Deck(val player: ExoPlayer, val source: ResolvedPlayable, val generation: Long) {
+    private class Deck(val player: ExoPlayer, val source: NativePlaybackSource, val generation: Long) {
         var listener: Player.Listener? = null
         var confirmedSeekSequence = 0L
         var pendingSeekSequence: Long? = null
@@ -126,7 +178,7 @@ class AndroidAudioEngine(
         check(Looper.myLooper() == Looper.getMainLooper()) { "Create the Android audio owner on Main." }
         players = List(2) {
             ExoPlayer.Builder(this.context).build().apply {
-                setAudioAttributes(attributes(MediaKind.MUSIC), false)
+                setAudioAttributes(attributes(PlaybackControlsMode.MUSIC), false)
                 setHandleAudioBecomingNoisy(true)
                 setWakeMode(C.WAKE_MODE_NETWORK)
                 repeatMode = Player.REPEAT_MODE_OFF
@@ -142,14 +194,28 @@ class AndroidAudioEngine(
         }
     }
 
-    override suspend fun prepare(source: ResolvedPlayable, startPositionMs: Long, generation: Long) {
+    override suspend fun prepare(source: ResolvedPlayable, startPositionMs: Long, generation: Long) =
+        prepareNative(NativePlaybackSource.Legacy(source), startPositionMs, generation)
+
+    override suspend fun prepare(source: AcquisitionPlaybackSource, selection: PlaybackSelection, startPositionMs: Long, generation: Long) =
+        prepareNative(NativePlaybackSource.Acquired(source, selection), startPositionMs, generation)
+
+    private suspend fun prepareNative(source: NativePlaybackSource, startPositionMs: Long, generation: Long) {
+        val admission = SourceAdmission(source)
         var handedToDeck = false
         try {
+            registerSourceAdmission(admission)
             onMain {
                 if (closed || generation < this.generation) return@onMain
+                // An alias is not another transfer. Reject before validation, replacement,
+                // stage cancellation or any native mutation can disturb the original owner.
+                checkUniqueResourceOwnership(admission)
+                source.validateSelection()
+                checkTransportSafety()
                 val revision = ++preparationRevision
                 val uri = checkedUri(source)
                 cancelStage(CrossfadeCancelReason.CANCELLED, smooth = true)?.join()
+                checkTransportSafety()
                 if (closed || generation < this.generation || revision != preparationRevision) return@onMain
                 outputRevision++
                 serviceLossPending = false
@@ -157,10 +223,12 @@ class AndroidAudioEngine(
                 clearRetiring()
                 active?.let(::clearDeck)
                 active = null
+                checkTransportSafety()
                 focus.abandon()
                 this.generation = generation
                 positions.value = null
-                val deck = Deck(players.first(), source, generation)
+                val player = availablePlayer() ?: throw VeyraException(readerFailure("native_deck_quarantined"))
+                val deck = Deck(player, source, generation)
                 active = deck
                 handedToDeck = true
                 try {
@@ -170,23 +238,28 @@ class AndroidAudioEngine(
                 } catch (error: Exception) {
                     clearDeck(deck)
                     active = null
+                    checkTransportSafety()
                     throw error
                 }
             }
         } finally {
             // Invocation transfers ownership even if Main dispatch is cancelled before it starts,
             // or a stale generation/invalid source is rejected without constructing a native deck.
-            if (!handedToDeck) withContext(NonCancellable) { source.resource?.close() }
+            finishSourceAdmission(admission, handedToDeck)
         }
     }
 
     override suspend fun play(generation: Long) {
-        val revision = onMain { if (current(generation) == null || serviceLossPending) null else outputRevision } ?: return
+        val revision = onMain {
+            checkTransportSafety()
+            if (current(generation) == null || serviceLossPending) null else outputRevision
+        } ?: return
         beforePlay()
         onMain {
+            checkTransportSafety()
             val deck = current(generation) ?: return@onMain
             if (revision != outputRevision || serviceLossPending) return@onMain
-            when (focus.request(generation, deck.source.item?.kind ?: MediaKind.MUSIC)) {
+            when (focus.request(generation, if (deck.source.controlsMode == PlaybackControlsMode.PODCAST) MediaKind.EPISODE else MediaKind.MUSIC)) {
                 AndroidAudioFocus.Result.GRANTED -> deck.player.play()
                 AndroidAudioFocus.Result.WAITING -> Unit
                 AndroidAudioFocus.Result.DENIED -> throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "audio_focus_denied"))
@@ -204,6 +277,7 @@ class AndroidAudioEngine(
         staged?.player?.pause()
         cancelStage(CrossfadeCancelReason.INTERRUPTED)
         clearRetiring()
+        if (publishTransportFailure()) return@onMain
         deck.player.volume = baseGain(deck)
         focus.paused()
         samplePosition(deck)
@@ -240,15 +314,31 @@ class AndroidAudioEngine(
         publishState(deck)
     }
 
-    override suspend fun preloadNext(source: ResolvedPlayable, startPositionMs: Long, nextGeneration: Long, generation: Long) {
+    override suspend fun preloadNext(source: ResolvedPlayable, startPositionMs: Long, nextGeneration: Long, generation: Long) =
+        preloadNative(NativePlaybackSource.Legacy(source), startPositionMs, nextGeneration, generation)
+
+    override suspend fun preloadNext(source: AcquisitionPlaybackSource, selection: PlaybackSelection, startPositionMs: Long, nextGeneration: Long, generation: Long) =
+        preloadNative(NativePlaybackSource.Acquired(source, selection), startPositionMs, nextGeneration, generation)
+
+    private suspend fun preloadNative(source: NativePlaybackSource, startPositionMs: Long, nextGeneration: Long, generation: Long) {
+        val admission = SourceAdmission(source)
         var handedToDeck = false
         try {
+            registerSourceAdmission(admission)
             onMain {
+                checkTransportSafety()
                 val outgoing = current(generation) ?: return@onMain
                 if (serviceLossPending || !outgoing.player.playWhenReady) return@onMain
                 val revision = outputRevision
-                if (nextGeneration <= generation || source.item?.kind == MediaKind.EPISODE ||
-                    outgoing.source.item?.kind == MediaKind.EPISODE) return@onMain
+                try {
+                    checkUniqueResourceOwnership(admission)
+                    source.validateSelection()
+                } catch (failure: VeyraException) {
+                    emit(EngineEvent.StageFailed(generation, nextGeneration, failure.failure))
+                    return@onMain
+                }
+                if (nextGeneration <= generation || source.controlsMode != PlaybackControlsMode.MUSIC ||
+                    outgoing.source.controlsMode != PlaybackControlsMode.MUSIC) return@onMain
                 if (staged?.generation == nextGeneration) {
                     handedToDeck = staged?.source?.resource === source.resource
                     return@onMain
@@ -260,7 +350,13 @@ class AndroidAudioEngine(
                 cancelStage(CrossfadeCancelReason.CANCELLED, smooth = true)?.join()
                 if (current(generation) !== outgoing || outputRevision != revision || serviceLossPending) return@onMain
                 clearRetiring()
-                val deck = Deck(players.first { it !== outgoing.player }, source, nextGeneration)
+                checkTransportSafety()
+                val player = availablePlayer(outgoing.player)
+                if (player == null) {
+                    emit(EngineEvent.StageFailed(generation, nextGeneration, readerFailure("native_deck_quarantined")))
+                    return@onMain
+                }
+                val deck = Deck(player, source, nextGeneration)
                 staged = deck
                 handedToDeck = true
                 try {
@@ -271,19 +367,25 @@ class AndroidAudioEngine(
                 } catch (_: Exception) {
                     clearDeck(deck)
                     staged = null
+                    if (publishTransportFailure()) return@onMain
                     emit(EngineEvent.StageFailed(generation, nextGeneration,
                         AppFailure(FailureCode.UNSUPPORTED_SOURCE, "native_stage_initialization")))
                 }
             }
         } finally {
-            if (!handedToDeck) withContext(NonCancellable) { source.resource?.close() }
+            finishSourceAdmission(admission, handedToDeck)
         }
     }
 
     override suspend fun beginCrossfade(durationMs: Long, nextGeneration: Long, generation: Long): Unit = onMain {
+        checkTransportSafety()
         val outgoing = current(generation) ?: return@onMain
         val incoming = staged?.takeIf { it.generation == nextGeneration && it.ready && !it.failed } ?: return@onMain
         if (fade != null) return@onMain
+        if (outgoing.source.controlsMode != PlaybackControlsMode.MUSIC || incoming.source.controlsMode != PlaybackControlsMode.MUSIC) {
+            cancelStage(CrossfadeCancelReason.CANCELLED)
+            return@onMain
+        }
         if (durationMs !in 100..30_000 || !outgoing.player.isPlaying || duration(outgoing) == null || duration(incoming) == null) {
             cancelStage(CrossfadeCancelReason.CANCELLED)
             return@onMain
@@ -355,7 +457,7 @@ class AndroidAudioEngine(
         } else if (retiring?.generation == nextGeneration) {
             restoration?.join()
         }
-        finishResourceClosures()
+        finishResourceClosures(reportFailure = false)
     }
 
     override suspend fun confirmCrossfade(nextGeneration: Long, generation: Long): Unit = onMain {
@@ -364,9 +466,12 @@ class AndroidAudioEngine(
         fade = null
         val incoming = operation.incoming
         staged = null
-        clearDeck(operation.outgoing)
+        // The durable controller already selected incoming. Any genuine retirement transport
+        // failure must contain this deck too and be reported against the promoted generation.
         active = incoming
         this.generation = incoming.generation
+        clearDeck(operation.outgoing)
+        if (publishTransportFailure()) return@onMain
         if (failedForegroundGeneration == generation) failedForegroundGeneration = nextGeneration
         incoming.player.volume = baseGain(incoming)
         focus.transfer(generation, nextGeneration)
@@ -379,6 +484,52 @@ class AndroidAudioEngine(
         else if (incoming.ended) emit(EngineEvent.Ended(nextGeneration))
     }
 
+    /** A scoped maintenance fence. It never pauses/replaces a live unrelated deck. */
+    override suspend fun awaitRetiredReaders(expectedGeneration: Long): NativeReaderDrainResult {
+        currentCoroutineContext().ensureActive()
+        val result = onMain<NativeReaderDrainResult> {
+            if (closed) return@onMain NativeReaderDrainResult.Unacknowledged(readerFailure("native_audio_owner_closed"))
+            if (expectedGeneration < 0) return@onMain NativeReaderDrainResult.Superseded
+            if (generation != expectedGeneration) {
+                // Only the never-used initial owner can establish controller epoch zero. Merely
+                // having empty visible decks after a rejected/failed load is NOT this proof.
+                val pristine = generation == -1L && expectedGeneration == 0L && !everOwnedSource &&
+                    active == null && staged == null && fade == null && retiring == null && restoration == null &&
+                    sourceAdmissions.isEmpty() && resourceClosures.isEmpty() && centralResourceClosures.isEmpty() && !resourceCleanupFailed
+                if (!pristine) return@onMain NativeReaderDrainResult.Superseded
+                generation = 0L
+            }
+            if (sourceAdmissions.isNotEmpty()) return@onMain NativeReaderDrainResult.Unacknowledged(
+                readerFailure("native_reader_admission_pending"))
+            // Retiring the gain-restoration deck can enqueue another asynchronous real close.
+            // Await the job AND the resulting registry, including work appended during a wait.
+            val restored = withContext(NonCancellable) {
+                var settled = true
+                while (true) {
+                    val restoring = restoration
+                    restoring?.join()
+                    finishResourceClosures(reportFailure = false)
+                    if (restoration == null) break
+                    if (restoration === restoring && restoring?.isCompleted == true) { settled = false; break }
+                }
+                settled && retiring == null
+            }
+            when {
+                closed -> NativeReaderDrainResult.Unacknowledged(readerFailure("native_audio_owner_closed"))
+                generation != expectedGeneration -> NativeReaderDrainResult.Superseded
+                sourceAdmissions.isNotEmpty() || !restored -> NativeReaderDrainResult.Unacknowledged(
+                    readerFailure("native_retirement_incomplete"))
+                transportSafetyFailed -> NativeReaderDrainResult.Unacknowledged(transportFailure())
+                resourceCleanupFailed || resourceClosures.isNotEmpty() -> NativeReaderDrainResult.Unacknowledged(readerFailure())
+                else -> NativeReaderDrainResult.Drained(expectedGeneration)
+            }
+        }
+        // Even Main-immediate callers cancelled during the NonCancellable physical wait cannot
+        // observe a successful receipt. The independently owned cleanup remains strongly retained.
+        currentCoroutineContext().ensureActive()
+        return result
+    }
+
     override suspend fun stop(generation: Long): Unit = onMain {
         if (closed) { finishResourceClosures(); return@onMain }
         if (generation < this.generation) return@onMain
@@ -386,34 +537,30 @@ class AndroidAudioEngine(
         outputRevision++
         serviceLossPending = false
         failedForegroundGeneration = null
-        active?.player?.pause()
-        staged?.player?.pause()
-        cancelStage(CrossfadeCancelReason.CANCELLED)
-        clearRetiring()
-        active?.let(::clearDeck)
+        retireManagedDecks()
         active = null
         focus.abandon()
         this.generation = generation
         positions.value = null
-        emit(EngineEvent.StateChanged(generation, EnginePhase.IDLE, false))
+        if (!publishTransportFailure()) emit(EngineEvent.StateChanged(generation, EnginePhase.IDLE, false))
         finishResourceClosures()
     }
 
     override suspend fun close(): Unit = onMain {
-        if (closed) { finishResourceClosures(); return@onMain }
+        if (closed) { finishSourceAdmissions(); finishResourceClosures(); return@onMain }
         preparationRevision++
         outputRevision++
-        active?.player?.pause()
-        staged?.player?.pause()
-        cancelStage(CrossfadeCancelReason.CANCELLED)
-        clearRetiring()
-        active?.let(::clearDeck)
+        retireManagedDecks()
         active = null
         closed = true
-        focus.abandon()
-        players.forEach(ExoPlayer::release)
+        try { focus.abandon() } catch (_: Throwable) { resourceCleanupFailed = true }
+        // A failed release is ambiguous: retain that actual player and never retry it implicitly.
+        players.forEach { player ->
+            try { player.release() }
+            catch (_: Throwable) { failedNativePlayers += player; resourceCleanupFailed = true }
+        }
         positions.value = null
-        try { finishResourceClosures() }
+        try { finishSourceAdmissions(); finishResourceClosures() }
         finally { scope.cancel(); controls.close() }
     }
 
@@ -424,13 +571,24 @@ class AndroidAudioEngine(
         player.volume = if (deck === active) baseGain(deck) else 0f
         player.playWhenReady = false
         deck.initialPositionMs = startPositionMs.coerceAtLeast(0)
-        player.setAudioAttributes(attributes(deck.source.item?.kind ?: MediaKind.MUSIC), false)
-        val item = deck.source.item
-        val metadata = MediaMetadata.Builder().setTitle(item?.title).setArtist(item?.artist ?: item?.creator)
-            .setAlbumTitle(item?.album).setMediaType(if (item?.kind == MediaKind.EPISODE)
-                MediaMetadata.MEDIA_TYPE_PODCAST_EPISODE else MediaMetadata.MEDIA_TYPE_MUSIC).build()
-        val media = NativeMediaItem.Builder().setMediaId("veyra:${deck.generation}:${deck.source.mediaId}")
-            .setUri(uri).setMimeType(deck.source.mimeType).setMediaMetadata(metadata).setTag(deck.generation).build()
+        player.setAudioAttributes(attributes(deck.source.controlsMode), false)
+        val display = deck.source.display
+        val metadata = MediaMetadata.Builder().setTitle(display?.title).setArtist(display?.subtitle)
+        // Controls mode is not catalogue identity. In particular a neutral long-form recording
+        // is not a podcast episode, and actual C never borrows A/B's album/artist/artwork.
+        deck.source.catalogMedia?.let { item ->
+            metadata.setMediaType(if (item.kind == MediaKind.EPISODE)
+                MediaMetadata.MEDIA_TYPE_PODCAST_EPISODE else MediaMetadata.MEDIA_TYPE_MUSIC)
+        }
+        (deck.source as? NativePlaybackSource.Legacy)?.source?.takeIf { it.executionBinding == null }?.item?.let {
+            metadata.setAlbumTitle(it.album)
+        }
+        val token = when (val source = deck.source) {
+            is NativePlaybackSource.Legacy -> "veyra:${deck.generation}:${source.source.mediaId}"
+            is NativePlaybackSource.Acquired -> "veyra:occurrence:${source.selection.occurrenceId.value}:${deck.generation}"
+        }
+        val media = NativeMediaItem.Builder().setMediaId(token)
+            .setUri(uri).setMimeType(deck.source.mimeType).setMediaMetadata(metadata.build()).setTag(deck.generation).build()
         // Artwork is deliberately not fetched by either player.
         val http = DefaultHttpDataSource.Factory().setUserAgent("Veyra/1.0")
             .setConnectTimeoutMs(15_000).setReadTimeoutMs(20_000).setAllowCrossProtocolRedirects(false)
@@ -537,12 +695,12 @@ class AndroidAudioEngine(
         emit(EngineEvent.SeekCompleted(deck.generation, sequence, deck.player.currentPosition.coerceAtLeast(0)))
     }
     private fun samplePosition(deck: Deck) {
-        if (deck !== active || closed) return
+        if (deck !== active || !managed(deck)) return
         positions.value = EngineEvent.Position(deck.generation, deck.player.currentPosition.coerceAtLeast(0), duration(deck),
             deck.player.bufferedPosition.takeIf { it >= 0 }, deck.confirmedSeekSequence)
     }
     private fun publishState(deck: Deck) {
-        if (deck !== active || closed || fade?.awaitingConfirmation == true) return
+        if (deck !== active || !managed(deck) || fade?.awaitingConfirmation == true) return
         val player = deck.player
         val phase = when {
             player.playerError != null -> EnginePhase.ERROR
@@ -558,7 +716,8 @@ class AndroidAudioEngine(
     }
 
     private fun completeFade(operation: Fade) {
-        if (fade !== operation || operation.awaitingConfirmation || active !== operation.outgoing || staged !== operation.incoming) return
+        if (transportSafetyFailed || !managed(operation.outgoing) || !managed(operation.incoming) ||
+            fade !== operation || operation.awaitingConfirmation || active !== operation.outgoing || staged !== operation.incoming) return
         operation.awaitingConfirmation = true
         operation.job?.cancel()
         val incoming = operation.incoming
@@ -578,34 +737,52 @@ class AndroidAudioEngine(
         operation?.job?.cancel()
         staged = null
         clearRetiring()
-        val shouldRamp = smooth && outgoing != null && outgoing.player.isPlaying &&
+        val shouldRamp = !transportSafetyFailed && smooth && outgoing != null && outgoing.player.isPlaying &&
             (incoming.player.volume > 0f || outgoing.player.volume < baseGain(outgoing))
         if (shouldRamp) {
             val old = outgoing!!
             retiring = incoming
             val startOut = old.player.volume
             val startIn = incoming.player.volume
-            restoration = scope.launch {
-                val began = SystemClock.elapsedRealtimeNanos()
-                while (retiring === incoming && active === old) {
-                    val t = ((SystemClock.elapsedRealtimeNanos() - began) / 60_000_000.0).toFloat().coerceIn(0f, 1f)
-                    val gains = CrossfadeMix.cancel(startOut, startIn, t)
-                    incoming.player.volume = gains.second
-                    old.player.volume = gains.first
-                    if (t >= 1f) break
-                    delay(10)
-                }
-                if (retiring === incoming) {
-                    retiring = null
-                    clearDeck(incoming)
-                    restoration = null
+            val restoring = scope.launch(start = CoroutineStart.LAZY) {
+                var gainFailed = false
+                try {
+                    val began = SystemClock.elapsedRealtimeNanos()
+                    while (retiring === incoming && active === old && !transportSafetyFailed &&
+                        !incoming.resourceReleased && !old.resourceReleased) {
+                        val t = ((SystemClock.elapsedRealtimeNanos() - began) / 60_000_000.0).toFloat().coerceIn(0f, 1f)
+                        val gains = CrossfadeMix.cancel(startOut, startIn, t)
+                        incoming.player.volume = gains.second
+                        old.player.volume = gains.first
+                        if (t >= 1f) break
+                        delay(10)
+                    }
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Throwable) { gainFailed = true }
+                finally {
+                    if (retiring === incoming) {
+                        retiring = null
+                        restoration = null
+                        clearDeck(incoming)
+                        if (!transportSafetyFailed && active === old && !old.resourceReleased) {
+                            try { old.player.volume = baseGain(old) } catch (_: Throwable) { gainFailed = true }
+                        }
+                    }
+                    if (!publishTransportFailure() && gainFailed && active === old && !old.resourceReleased) {
+                        emit(EngineEvent.Error(old.generation, readerFailure("native_gain_restoration")))
+                    }
                 }
             }
+            restoration = restoring
+            restoring.start()
         } else {
             clearDeck(incoming)
-            outgoing?.player?.volume = outgoing?.let(::baseGain) ?: CrossfadeMix.MUSIC_GAIN
+            if (!transportSafetyFailed && outgoing != null && !outgoing.resourceReleased) {
+                outgoing.player.volume = baseGain(outgoing)
+            }
         }
         emit(EngineEvent.CrossfadeCancelled(origin, incoming.generation, reason))
+        if (publishTransportFailure()) return restoration
         operation?.pendingInterruptions?.forEach(::emit)
         val pendingFailure = operation?.pendingServiceFailure ?: operation?.pendingOutgoingFailure
         pendingFailure?.let { emit(EngineEvent.Error(origin, it)) }
@@ -614,18 +791,23 @@ class AndroidAudioEngine(
         return restoration
     }
     private fun clearRetiring() {
-        restoration?.cancel()
-        restoration = null
-        retiring?.let(::clearDeck)
+        val previous = retiring
         retiring = null
+        val restoring = restoration
+        restoration = null
+        restoring?.cancel()
+        previous?.let(::clearDeck)
     }
     private fun pauseForInterruption() {
+        if (publishTransportFailure()) return
         outputRevision++
         active?.player?.pause()
         staged?.player?.pause()
         clearRetiring()
         if (fade?.awaitingConfirmation != true) cancelStage(CrossfadeCancelReason.INTERRUPTED)
-        if (fade?.awaitingConfirmation != true) active?.let { it.player.volume = baseGain(it) }
+        if (!publishTransportFailure() && fade?.awaitingConfirmation != true) {
+            active?.takeUnless { it.resourceReleased }?.let { it.player.volume = baseGain(it) }
+        }
     }
     /** No queued unscoped Pause can accidentally stop playback owned by a successor service. */
     internal fun foregroundServiceLost(failure: AppFailure? = null) {
@@ -648,61 +830,202 @@ class AndroidAudioEngine(
         if (pending != null) pending.pendingInterruptions += event else emit(event)
     }
     private fun clearDeck(deck: Deck) {
-        if (deck.resourceReleased) return // Never clear a later item reusing this native player.
-        deck.resourceReleased = true
+        if (deck.resourceReleased) return // Never retry a failed retirement or clear a reused player.
+        deck.resourceReleased = true // Reject stale callbacks before touching the native owner.
         deck.dataSources?.retire()
-        val stopped = runCatching {
-            deck.listener?.let(deck.player::removeListener)
-            deck.listener = null
-            deck.player.stop()
-            deck.player.clearMediaItems()
-            deck.player.volume = baseGain(deck)
-            deck.player.createMessage { _, _ -> }.send()
+        var listenerFailed = false
+        try { deck.listener?.let(deck.player::removeListener); deck.listener = null }
+        catch (_: Throwable) { listenerFailed = true }
+        // Muting is best-effort containment, not a positive transport-silence receipt. Retired
+        // volume is NEVER restored; only an unquarantined future Deck can set its own gain.
+        val muted = retirementStep(deck, AndroidNativeRetirementStep.MUTE) { deck.player.volume = 0f }
+        val stopped = retirementStep(deck, AndroidNativeRetirementStep.STOP) { deck.player.stop() }
+        val detached = retirementStep(deck, AndroidNativeRetirementStep.DETACH) { deck.player.clearMediaItems() }
+        val nativeFailed = listenerFailed || !muted || !stopped || !detached
+        if (nativeFailed) quarantinedNativePlayers += deck.player
+        if (!stopped && !detached && !transportSafetyFailed) {
+            transportSafetyFailed = true
+            preparationRevision++
+            outputRevision++
+            // Only genuine native silence uncertainty can affect unrelated live output. This
+            // cannot be triggered by central-resource/Loader close failure in the async action.
+            retireManagedDecks()
+            try { focus.abandon() } catch (_: Throwable) { resourceCleanupFailed = true }
         }
-        val closing = scope.async(start = CoroutineStart.LAZY) {
-            withContext(NonCancellable) {
-                var failed = stopped.isFailure
-                // Closing the central bridge promptly also unblocks pending native HTTP reads.
-                try { deck.source.resource?.close() } catch (_: Exception) { failed = true }
-                try {
-                    val barrier = stopped.getOrNull()
-                    if (barrier != null && !withContext(Dispatchers.IO) { barrier.blockUntilDelivered(5_000) }) failed = true
-                } catch (_: Exception) { failed = true }
-                try {
-                    // The playback-thread message alone does not acknowledge asynchronous Loader
-                    // closure. Observe the real DataSource.close() return before local-file removal.
-                    withTimeout(10_000) { deck.dataSources?.awaitClosed() }
-                } catch (_: Exception) { failed = true }
-                if (failed) throw VeyraException(AppFailure(FailureCode.RECOVERY_REQUIRED, "native_stop_not_acknowledged"))
+        val stoppedMessage = runCatching { deck.player.createMessage { _, _ -> }.send() }
+        startResourceClosure(deck) {
+            var failed = nativeFailed || stoppedMessage.isFailure
+            try { closeCentralResource(deck.source) } catch (_: Throwable) { failed = true }
+            try {
+                val barrier = stoppedMessage.getOrNull()
+                if (barrier != null && !withContext(Dispatchers.IO) { barrier.blockUntilDelivered(5_000) }) failed = true
+            } catch (_: Throwable) { failed = true }
+            try {
+                // The playback-thread message does not ACK asynchronous Loader closure. Observe
+                // real delegate DataSource.close(), including sticky failed actual owners.
+                withTimeout(10_000) { deck.dataSources?.awaitClosed() }
+            } catch (_: Throwable) { failed = true }
+            if (failed) throw VeyraException(readerFailure("native_stop_not_acknowledged"))
+        }
+    }
+
+    private inline fun retirementStep(deck: Deck, step: AndroidNativeRetirementStep, action: () -> Unit): Boolean =
+        try { retirementFault.before(deck.generation, step); action(); true } catch (_: Throwable) { false }
+
+    /** No ramps or gain restoration during shutdown/unsafe-output containment. */
+    private fun retireManagedDecks() {
+        val operation = fade
+        val restoring = restoration
+        val decks = listOfNotNull(active, staged, retiring, operation?.outgoing, operation?.incoming).distinct()
+        fade = null
+        restoration = null
+        staged = null
+        retiring = null
+        operation?.job?.cancel()
+        restoring?.cancel()
+        decks.forEach(::clearDeck)
+    }
+
+    private fun availablePlayer(excluding: ExoPlayer? = null): ExoPlayer? =
+        players.firstOrNull { it !== excluding && it !in quarantinedNativePlayers }
+
+    private fun transportFailure() = readerFailure("native_transport_silence_unacknowledged")
+    private fun checkTransportSafety() {
+        if (transportSafetyFailed) throw VeyraException(transportFailure())
+    }
+    private fun publishTransportFailure(): Boolean {
+        if (!transportSafetyFailed) return false
+        if (!closed && reportedTransportFailureGeneration != generation) {
+            reportedTransportFailureGeneration = generation
+            emit(EngineEvent.Error(generation, transportFailure()))
+        }
+        return true
+    }
+
+    private suspend fun registerSourceAdmission(admission: SourceAdmission) = withContext(NonCancellable) {
+        onMain { registerSourceAdmissionOnMain(admission) }
+    }
+
+    private fun registerSourceAdmissionOnMain(admission: SourceAdmission) {
+        if (admission.registered) return
+        val resource = admission.source.resource
+        admission.resourceAlias = resource?.let { candidate ->
+            sourceResourceOwners.firstOrNull { it.source.resource === candidate }
+        }
+        admission.registered = true
+        everOwnedSource = true
+        sourceAdmissions += admission
+        if (resource != null && admission.resourceAlias == null) sourceResourceOwners += admission
+    }
+
+    private fun checkUniqueResourceOwnership(admission: SourceAdmission) {
+        if (admission.resourceAlias != null) throw VeyraException(
+            AppFailure(FailureCode.INVALID_STATE, "native_playback_resource_already_owned"),
+        )
+    }
+
+    private suspend fun finishSourceAdmission(admission: SourceAdmission, handedToDeck: Boolean) = withContext(NonCancellable) {
+        onMain {
+            try {
+                // A cancelled return from registration still preserves its exact classification.
+                registerSourceAdmissionOnMain(admission)
+                val leader = admission.resourceAlias
+                if (leader != null) {
+                    // No close or retry against a live/pending/failed leader. If its retirement
+                    // already began, preserve the old shared-wait contract without owning it.
+                    leader.retirement?.completion?.await()
+                } else if (!handedToDeck) {
+                    val retired = RetiredOwner(admission.source)
+                    admission.retirement = retired
+                    resourceClosures += retired
+                    // Rejected prepares can arrive after the player scope has closed.
+                    settleResourceClosure(retired) { closeCentralResource(admission.source) }
+                }
+            } finally {
+                sourceAdmissions.remove(admission)
+                admission.completion.complete(Unit)
             }
         }
-        resourceClosures += closing
-        closing.invokeOnCompletion { error ->
-            if (error == null) scope.launch { resourceClosures.remove(closing) }
-        }
-        closing.start()
     }
-    private suspend fun finishResourceClosures() = withContext(NonCancellable) {
-        // Closing a source may itself need a Main-dispatched cancellation callback. Joining here
-        // suspends rather than blocking Main; no arbitrary timeout can claim resources were closed.
-        while (resourceClosures.isNotEmpty()) {
-            val pending = resourceClosures.toList()
-            pending.forEach { closing ->
-                try { closing.await() } catch (_: Throwable) { resourceCleanupFailed = true }
-                resourceClosures.remove(closing)
+
+    private suspend fun finishSourceAdmissions() = withContext(NonCancellable) {
+        while (sourceAdmissions.isNotEmpty()) {
+            sourceAdmissions.toList().forEach { it.completion.await() }
+        }
+    }
+
+    private fun startResourceClosure(owner: Deck, action: suspend () -> Unit) {
+        val retired = RetiredOwner(owner)
+        owner.source.resource?.let { resource ->
+            sourceResourceOwners.firstOrNull { it.source.resource === resource }?.retirement = retired
+        }
+        resourceClosures += retired
+        scope.launch(start = CoroutineStart.UNDISPATCHED) { settleResourceClosure(retired, action) }
+    }
+
+    private suspend fun closeCentralResource(source: NativePlaybackSource) {
+        val resource = source.resource ?: return
+        val existing = centralResourceClosures.firstOrNull { it.owner === resource }
+        if (existing != null) {
+            existing.completion.await()
+            if (existing.failed) throw VeyraException(readerFailure())
+            return
+        }
+        val receipt = RetiredOwner(resource)
+        centralResourceClosures += receipt
+        try { resource.close() }
+        catch (_: Throwable) {
+            receipt.failed = true
+            resourceCleanupFailed = true
+        } finally {
+            // Successful resources need not accumulate for the lifetime of a listening session.
+            // In-flight callers hold their exact receipt; only failed identity receipts persist.
+            if (!receipt.failed) centralResourceClosures.remove(receipt)
+            receipt.completion.complete(Unit)
+        }
+        if (receipt.failed) throw VeyraException(readerFailure())
+    }
+
+    private suspend fun settleResourceClosure(retired: RetiredOwner, action: suspend () -> Unit) = withContext(NonCancellable) {
+        try { action() }
+        catch (_: Throwable) {
+            retired.failed = true
+            resourceCleanupFailed = true
+        } finally {
+            if (!retired.failed) {
+                resourceClosures.remove(retired)
+                // Only the positive WHOLE native/reader retirement relinquishes this claim.
+                sourceResourceOwners.removeAll { it.retirement === retired }
             }
+            // Completion means the attempt settled, not that it succeeded. Failed owners remain
+            // in the registry and are vetoed below; neither a second barrier nor close retries it.
+            retired.completion.complete(Unit)
         }
-        // A later duplicate stop must not turn an unacknowledged cleanup into deletion approval.
-        if (resourceCleanupFailed) throw VeyraException(AppFailure(FailureCode.RECOVERY_REQUIRED, "playback_resource_cleanup"))
     }
-    private fun current(origin: Long) = active?.takeIf { !closed && origin == generation && it.generation == origin }
-    private fun managed(deck: Deck) = !closed && (deck === active || deck === staged)
+
+    private suspend fun finishResourceClosures(reportFailure: Boolean = true) = withContext(NonCancellable) {
+        while (true) {
+            val pending = resourceClosures.filter { !it.completion.isCompleted }
+            if (pending.isEmpty()) break
+            pending.forEach { it.completion.await() }
+        }
+        if (reportFailure) {
+            checkTransportSafety()
+            if (resourceCleanupFailed) throw VeyraException(readerFailure())
+        }
+    }
+
+    private fun readerFailure(detail: String = "playback_resource_cleanup") = AppFailure(FailureCode.RECOVERY_REQUIRED, detail)
+
+    private fun current(origin: Long) = active?.takeIf { managed(it) && origin == generation && it.generation == origin }
+    private fun managed(deck: Deck) = !closed && !deck.resourceReleased && !transportSafetyFailed &&
+        deck.player !in quarantinedNativePlayers && (deck === active || deck === staged)
     private fun duration(deck: Deck) = deck.player.duration.takeIf { it != C.TIME_UNSET && it > 0 }
     private fun emit(event: EngineEvent) { controls.trySend(event) }
     private suspend fun <T> onMain(block: suspend () -> T): T = withContext(Dispatchers.Main.immediate) { block() }
-    private fun baseGain(deck: Deck) = if (deck.source.item?.kind == MediaKind.EPISODE) 1f else CrossfadeMix.MUSIC_GAIN
+    private fun baseGain(deck: Deck) = if (deck.source.controlsMode == PlaybackControlsMode.PODCAST) 1f else CrossfadeMix.MUSIC_GAIN
 
-    private fun checkedUri(source: ResolvedPlayable): Uri {
+    private fun checkedUri(source: NativePlaybackSource): Uri {
         if (source.transport != StreamTransport.PROGRESSIVE) throw VeyraException(AppFailure(FailureCode.UNSUPPORTED_TRANSPORT))
         if (!capabilities.supports(source.transport, source.mimeType, source.codecs)) throw VeyraException(AppFailure(FailureCode.UNSUPPORTED_CODEC))
         val uri = Uri.parse(source.uri)
@@ -733,6 +1056,6 @@ class AndroidAudioEngine(
         }
         return AppFailure(code, "native_audio_${error.errorCode}")
     }
-    private fun attributes(kind: MediaKind) = AudioAttributes.Builder().setUsage(C.USAGE_MEDIA)
-        .setContentType(if (kind == MediaKind.EPISODE) C.AUDIO_CONTENT_TYPE_SPEECH else C.AUDIO_CONTENT_TYPE_MUSIC).build()
+    private fun attributes(mode: PlaybackControlsMode) = AudioAttributes.Builder().setUsage(C.USAGE_MEDIA)
+        .setContentType(if (mode == PlaybackControlsMode.PODCAST) C.AUDIO_CONTENT_TYPE_SPEECH else C.AUDIO_CONTENT_TYPE_MUSIC).build()
 }
