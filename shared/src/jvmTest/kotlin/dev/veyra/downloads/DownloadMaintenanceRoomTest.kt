@@ -333,7 +333,7 @@ class DownloadMaintenanceRoomTest {
         val seeded = prepareFinalizationSchema3(owner)
         owner.validation = { AssetValidation.Valid(31_234) }
         owner.gate.beforeClose = {
-            val expiration: suspend () -> Unit = owner.gate.expirations.last()
+            val expiration: suspend () -> Unit = owner.gate.expirations[owner.gate.expirations.size - 1]
             withContext(NonCancellable) { expiration() }
         }
         owner.denyFinalizationSchema3Acquisition()
