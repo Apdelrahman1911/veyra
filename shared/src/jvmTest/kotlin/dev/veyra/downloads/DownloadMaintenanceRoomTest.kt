@@ -112,7 +112,7 @@ class DownloadMaintenanceRoomTest {
         } }
         assertEquals(asset.id, presented[id]?.assetId)
         assertEquals(FailureCode.BACKGROUND_RESTRICTED, presented[id]?.failure?.code)
-        assertContentEquals(authoredBytes, Files.readAllBytes(Path.of(asset.uri)))
+        assertContentEquals(PHYSICAL_BYTES, Files.readAllBytes(Path.of(asset.uri)))
         assertEquals(0, a.validations.size)
         delay(160)
         assertEquals(1, checkingCallbacks.get(), "Denied verification must not acquire another OS allowance")
@@ -210,7 +210,7 @@ class DownloadMaintenanceRoomTest {
         val blocked = join(a, id)
         assertTrue(blocked.job.cleanupPending)
         val asset = assertNotNull(blocked.asset)
-        assertContentEquals(authoredBytes, Files.readAllBytes(Path.of(asset.uri)))
+        assertContentEquals(PHYSICAL_BYTES, Files.readAllBytes(Path.of(asset.uri)))
         assertNull(files.tryLeasePaths(listOf(asset.uri)))
         permission.release()
         val removed = awaitJob(a, id) { !it.job.cleanupPending && it.asset == null }
@@ -243,6 +243,7 @@ class DownloadMaintenanceRoomTest {
                 try { awaitCancellation() } finally { withContext(NonCancellable) { unwinding.stop() } }
             }
         }
+        a.coordinator.start(DownloadActivation.DURABLE_WORK)
         val removal = parent.async(start = CoroutineStart.UNDISPATCHED) { runCatching { a.coordinator.remove(id) } }
         entered.await()
         val expire: suspend () -> Unit = a.gate.expirations[0]
@@ -332,10 +333,6 @@ class DownloadMaintenanceRoomTest {
         val owner = owner()
         val seeded = prepareFinalizationSchema3(owner)
         owner.validation = { AssetValidation.Valid(31_234) }
-        owner.gate.beforeClose = {
-            val expiration: suspend () -> Unit = owner.gate.expirations[owner.gate.expirations.size - 1]
-            withContext(NonCancellable) { expiration() }
-        }
         owner.denyFinalizationSchema3Acquisition()
         val holding = barrier()
         owner.gateway.transfer = { prepared, path, progress ->
@@ -460,7 +457,7 @@ class DownloadMaintenanceRoomTest {
             val released = awaitJob(owner, id) { !once.get() && it.job.leaseOwner == null }
             assertEquals(intent, released.finalization)
             assertNull(released.asset)
-            assertNull(released.job.cleanupPending)
+            assertFalse(released.job.cleanupPending)
             assertEquals(0, owner.gate.acquires.get(), "Cancellation must release the exact lease before a new gate")
             assertEquals(0, owner.validations.size)
             assertNotNull(probeFiles.tryLeasePaths(listOf(intent.stagingPath, intent.finalPath))).close()

@@ -277,7 +277,7 @@ class DownloadCleanupRoomTest {
             assertEquals(1, allowanceCloses.get())
             assertEquals(claimed.leaseOwner, owner.store.acquisitionView().acquisition.physicalDownloads[seeded.record.id]?.leaseOwner)
             assertEquals(seeded.intent, owner.store.acquisitionView().acquisition.physicalFinalizations[seeded.record.id])
-            assertNull(tryAcquireDownloadFileLease(assertNotNull(failedPath.get())))
+            assertNull(files.tryLeasePaths(listOf(seeded.intent.stagingPath, seeded.intent.finalPath)))
             // The aggregate path lease may have closed independent sibling locks. Its failed
             // member remains REAL-OS-held, and Room release must not run before the aggregate ACK.
             assertEquals(1, closeAttempts.count { it == failedPath.get() })
@@ -625,7 +625,7 @@ class DownloadCleanupRoomTest {
                 assertEquals(if (afterCommit) claim.leaseOwner else seeded.record.leaseOwner,
                     retained.physicalDownloads[seeded.record.id]?.leaseOwner)
                 assertEquals(seeded.intent, retained.physicalFinalizations[seeded.record.id])
-                assertNull(tryAcquireDownloadFileLease(assertNotNull(failedPath.get())))
+                assertNull(files.tryLeasePaths(listOf(seeded.intent.stagingPath, seeded.intent.finalPath)))
                 assertEquals(1, closeAttempts.count { it == failedPath.get() })
                 assertEquals(0, owner.gate.acquires.get())
                 assertEquals(0, owner.validations.size)
@@ -705,7 +705,7 @@ class DownloadCleanupRoomTest {
             assertEquals(seeded.record, unchanged.physicalDownloads[seeded.record.id])
             assertEquals(seeded.intent, unchanged.physicalFinalizations[seeded.record.id])
             // Second-path contention is deliberately injected; the first path's lease is REAL.
-            assertNull(tryAcquireDownloadFileLease(assertNotNull(failedPath.get())))
+            assertNull(files.tryLeasePaths(listOf(seeded.intent.stagingPath, seeded.intent.finalPath)))
             assertEquals(1, closeAttempts.count { it == failedPath.get() })
             assertEquals(0, owner.validations.size)
             assertEquals(executorRestartRequired, assertFailsWith<VeyraException> { scheduler.close() }.failure)

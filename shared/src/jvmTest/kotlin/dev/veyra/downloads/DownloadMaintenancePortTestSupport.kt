@@ -100,15 +100,18 @@ internal fun AcquisitionRepositoryState.maintenanceLease(id: String): Boolean =
     } == true
 
 /**
- * A real maintenance heartbeat/path checkpoint changes only the lease deadline while keeping the
- * same canonical maintenance lease. Used to target ONE repository update, never a broad relabeler.
+ * A real maintenance heartbeat/path checkpoint keeps the same canonical maintenance lease and
+ * the same transfer counters. The test clock is manual, so an unchanged timestamp/value pair is
+ * not evidence against it; the claim row (before is unowned) and the finish row (maintenance
+ * kind cleared) cannot match this shape.
  */
 internal fun maintenanceHeartbeat(before: AcquisitionRepositoryState, after: AcquisitionRepositoryState, id: String): Boolean {
     val previous = before.physicalDownloads[id] ?: return false
     val next = after.physicalDownloads[id] ?: return false
     return previous.maintenanceKind != null && next.maintenanceKind == previous.maintenanceKind &&
         previous.leaseOwner != null && next.leaseOwner == previous.leaseOwner &&
-        (next.leaseExpiresEpochMs ?: 0) > (previous.leaseExpiresEpochMs ?: 0)
+        previous.ownershipGeneration == next.ownershipGeneration &&
+        previous.status == next.status && previous.activeAttemptId == next.activeAttemptId
 }
 
 /** Wait for one exact AppFailure without inventing a scheduler receipt. */
