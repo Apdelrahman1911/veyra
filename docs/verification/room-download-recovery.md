@@ -258,4 +258,24 @@ Correction receipt: `.work/verification/pr4-review-corrections/result.json`, SHA
    before the app suite can be green.
 3. No iOS compilation/Xcode, no emulator/physical device, no live source/auth, no real audio
    output or crossfade, no packaging/distribution, and no performance benchmark was executed in
-   this correction. These remain unverified release gates.
+   this correction. These remain unverified release gates. **Task B** performs the native/platform
+   verification after the lead accepts the Task A integration SHA; physical crossfade and source
+   authentication are separate workstreams, not Task A prerequisites.
+
+## PR #4 second correction (R6–R9)
+
+Accepted launch: provider `opencode`, model `opencode-go/deepseek-v4.1-flash`, variant `max`;
+no independent runtime/backend/variant attestation is exposed. R7 (immutable displayed Download
+metadata), R8 (blocking page failure through typed selection/restore) and the R9 asset-uniqueness
+and prepared-download contracts are implemented and executed. The already-typed EX34 scheduler
+case is fixed. R6 remains incomplete: **50** legacy-fixture shared methods and **21** AppContainer
+composition methods still fail on the old `AppSnapshot.downloads`/`playbackBindings` world and
+need canonical typed-command ports. Exact names, causes, retained assertions, run counts, log
+hashes and remaining platform limits are in
+[pr4-second-correction-mapping.md](pr4-second-correction-mapping.md).
+
+Latest actual runs: full `:shared:jvmTest` **1162 tests / 96 suites / 50 failures / 0 errors /
+0 skipped** (`run-027-full-shared`, exit 1); `AppContainerIntegrationTest` **35 tests / 21
+failures / 0 errors / 0 skipped** (`run-028-app-container`, exit 1); shared+app Android
+production compiles pass (`run-029-android-compile`, exit 0). This PR stays draft and is not
+mergeable or release-ready.
