@@ -1300,6 +1300,10 @@ class AppContainerIntegrationTest {
         assertEquals(1, canonical.bindings.size, "Offline restart must reuse the exact binding")
         assertEquals(0L, canonical.queues.getValue(QueueContext.PODCAST).positionMs)
         assertEquals(1, fixture.platform.engine.seekRequests.size, "Start Over must not seek the outgoing generation then lose that seek")
+        // A typed checkpoint is a native observation, not a requested position. Supply the
+        // restarted generation's first real sample at zero, then flush it durably.
+        fixture.platform.engine.position(0L)
+        fixture.app.playback.state.first { it.positionMs == 0L && it.pendingSeekMs == null }
         fixture.app.playback.dispatch(PlaybackCommand.FlushProgress).getOrThrow()
         assertEquals(0L, fixture.store.state.value.progress[original.id]?.positionMs)
         val retainedJob = fixture.job(jobId)
@@ -1880,7 +1884,9 @@ class AppContainerIntegrationTest {
                 assertTrue(final.acquisition.physicalDownloads.getValue(podcastJob).userPaused)
                 assertEquals(DownloadBatchIntent.CANCELLED, final.acquisition.claims.getValue(fixture.claim(musicJob).id).intent)
                 assertEquals(DownloadBatchIntent.CANCELLED, final.acquisition.claims.getValue(fixture.claim(podcastJob).id).intent)
-                assertFalse(final.acquisition.claims.getValue(fixture.claim(musicJob).id).retainCompletedAsset)
+                // Cancel (not Remove) stops unfinished work but retains any already-completed asset.
+                assertTrue(final.acquisition.claims.getValue(fixture.claim(musicJob).id).retainCompletedAsset)
+                assertTrue(final.acquisition.claims.getValue(fixture.claim(podcastJob).id).retainCompletedAsset)
                 assertTrue(final.acquisition.physicalDownloads.values.all { it.leaseOwner == null })
                 assertTrue(final.acquisition.physicalAttempts.values.all { it.finishedEpochMs != null })
                 assertTrue(final.acquisition.physicalAttempts.values.none { it.status == DownloadAttemptStatus.RUNNING })
