@@ -162,29 +162,29 @@ interface LibraryDao {
     @Upsert suspend fun upsertNavigation(rows: List<NavigationEntity>)
     @Delete suspend fun deleteNavigation(rows: List<NavigationEntity>)
 
-    @Query("UPDATE album_artists SET position = -position - 1")
-    suspend fun stageAlbumArtistsOrder()
+    @Query("UPDATE album_artists SET position = -position - 1 WHERE albumId = :albumId AND artistId IN (:artistIds)")
+    suspend fun stageAlbumArtistsOrder(albumId: String, artistIds: List<String>)
 
-    @Query("UPDATE track_artists SET position = -position - 1")
-    suspend fun stageTrackArtistsOrder()
+    @Query("UPDATE track_artists SET position = -position - 1 WHERE trackId = :trackId AND artistId IN (:artistIds)")
+    suspend fun stageTrackArtistsOrder(trackId: String, artistIds: List<String>)
 
-    @Query("UPDATE album_tracks SET position = -position - 1")
-    suspend fun stageAlbumTracksOrder()
+    @Query("UPDATE album_tracks SET position = -position - 1 WHERE albumId = :albumId AND trackId IN (:trackIds)")
+    suspend fun stageAlbumTracksOrder(albumId: String, trackIds: List<String>)
 
-    @Query("UPDATE podcast_episodes SET position = -position - 1")
-    suspend fun stagePodcastEpisodesOrder()
+    @Query("UPDATE podcast_episodes SET position = -position - 1 WHERE podcastId = :podcastId AND episodeId IN (:episodeIds)")
+    suspend fun stagePodcastEpisodesOrder(podcastId: String, episodeIds: List<String>)
 
-    @Query("UPDATE playlists SET position = -position - 1")
-    suspend fun stagePlaylistsOrder()
+    @Query("UPDATE playlists SET position = -position - 1 WHERE id IN (:ids)")
+    suspend fun stagePlaylistsOrder(ids: List<String>)
 
-    @Query("UPDATE playlist_entries SET position = -position - 1")
-    suspend fun stagePlaylistEntriesOrder()
+    @Query("UPDATE playlist_entries SET position = -position - 1 WHERE id IN (:ids)")
+    suspend fun stagePlaylistEntriesOrder(ids: List<String>)
 
-    @Query("UPDATE queue_entries SET position = -position - 1, originalPosition = -originalPosition - 1")
-    suspend fun stageQueueEntriesOrder()
+    @Query("UPDATE queue_entries SET position = -position - 1, originalPosition = -originalPosition - 1 WHERE id IN (:ids)")
+    suspend fun stageQueueEntriesOrder(ids: List<String>)
 
-    @Query("UPDATE playback_history SET position = -position - 1")
-    suspend fun stageHistoryOrder()
+    @Query("UPDATE playback_history SET position = -position - 1 WHERE id IN (:ids)")
+    suspend fun stageHistoryOrder(ids: List<String>)
 
     @Query("SELECT a.* FROM artists a JOIN track_artists x ON x.artistId = a.id WHERE x.trackId = :trackId ORDER BY x.position")
     suspend fun artistsForTrack(trackId: String): List<ArtistEntity>
