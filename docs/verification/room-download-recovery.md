@@ -177,3 +177,85 @@ Raw logs, fresh XML, the init script and input snapshots stay under the ignored
 `.work/verification/room-download-recovery/` and `.work/evidence/` directories. The full run-021
 XML archive contains 87 suites; run-022 contains the 38 typed suites. No evidence from the
 lead's room-foundations runs or the private 1,126-method run was reused as this run's evidence.
+
+## PR #4 correction checkpoint (2026-11-07, draft)
+
+This section supersedes the earlier status for the correction branch only; the prior run-021/022
+records remain preserved. Accepted launch: provider `opencode`, model
+`opencode-go/deepseek-v4.1-flash`, variant `max`. No independent runtime/backend/variant
+attestation was exposed. Pin remains `c0a08090fe7dbd76e20216559b8184ad2cccde63`.
+
+Production corrections now present:
+
+- **R1:** the canonical occurrence-fenced `PlaybackController`, `PlaybackSelection`,
+  `NativePlaybackSource`, typed `AudioEngine.prepare/preload/awaitRetiredReaders`, and
+  `PlaybackAcquisitionServices` are integrated. `AppContainer` injects the same-owner typed
+  services; Android/iOS/desktop engines implement the typed source/reader contract. The legacy
+  schema-2 playback route remains reachable through the typed actor. Platform engine compilation
+  passed on JVM/Android sources; iOS was source-reviewed only (no Xcode).
+- **R2:** favorites/playlists/Undo now use `editCatalogLibrary`, post-COMMIT
+  `CatalogLibraryUndo`, `undoCatalogLibrary` and advisory `catalogLibraryUndoAvailability`
+  instead of projected equality or raw `LibraryStore.update`. A real AppContainer action test
+  covers favorite, create/rename/add/duplicate/move/remove/delete, Undo across an unrelated
+  same-owner scalar commit, and no hidden-lineage reconstruction.
+- **R3:** fresh AppContainer music/podcast Download now captures the complete catalogue title,
+  performs one raw ordinal-zero first-result selection, persists the accepted request/binding,
+  and calls `enqueueAccepted` before the durable executor runs. The selected tap binding is
+  frozen before later navigation/playback changes. A real-Room AppContainer test covers a fresh
+  Download, exact accepted binding, one complete-title query, one real kmpYT plan/transfer call,
+  owned bytes and removal.
+- **R4/R5:** `KmpLegacyPreparedDownloadAdapter` was removed. `YouTubeKmpMediaGateway` now
+  implements a retained same-client prepared plan for legacy schema-2 and typed downloads, with
+  pre-transfer issuer/capability consumption, exact representation and single renewal budget.
+  Authored gateway tests cover forged capability before getters/I/O, terminal reuse,
+  cancellation, queued expiry/changed key, nullable initial selection and zero DOWNLOAD
+  `PlaybackResource` creation. The previous unexpected-resource path cannot be created by this
+  implementation.
+- **R6 partial:** the 16 resolver methods (plus 13 new controls), the podcast offline restart
+  method, the complete differential/Room recovery/migration/file/process suite set, the 58
+  executor-selected methods and the six retained-finalization methods now run on genuine
+  schema-2 migration or canonical schema-3 commands. Original assertions were retained except
+  where the old assertion itself described a removed authority (for example immutable
+  materialization receipts/uses surviving live-byte deletion, and explicit terminal generation
+  semantics).
+
+Additional production fixes required by the retained typed regressions:
+
+- EX05: a foreground resume during an older allowance unwind no longer lets a late old finish
+  relabel the new host as NEEDS_FOREGROUND; the owner reschedules normally.
+- EX16/H08: an inline maintenance allowance expiration persists the truthful
+  `BACKGROUND_RESTRICTED` diagnostic through the final atomic maintenance command.
+- EX24: cleanup maintenance may advance job ownership generation; schema-2 adoption now rejects
+  only a regression/new claim, while the later adoption CAS still fences.
+- EX34: lowering canonical global parallelism revokes surplus active transfer slots through the
+  normal unwind path, not maintenance.
+- Orphan staging deletion yields while canonical work is pending and does not acquire an
+  execution allowance for a `transfer.part` that never existed.
+
+Actual final runs in this correction worktree:
+
+| Run | Command | Exit | Result | Evidence |
+|---|---|---:|---|---|
+| 011 | full `:shared:jvmTest` | 1 | 1,153 tests / 95 suites, **52 failures, 0 errors, 0 skipped** | `.work/verification/pr4-review-corrections/run-011-full-shared/`; log SHA-256 `bd60af7a0ca2ce1546d3c6fc659785c9a21c9b699d9ef8d2c55c4626f087ed9f` |
+| 012 | `:composeApp:desktopTest --tests dev.veyra.app.AppContainerIntegrationTest` | 1 | 33 tests, **23 failures, 0 errors, 0 skipped** | `run-012-app-container/`; log SHA-256 `1e6b607b4ed701dc61601f65d0ea119a360927ee9a0bf6f6a90d2c257ab9096c` |
+
+Correction receipt: `.work/verification/pr4-review-corrections/result.json`, SHA-256
+`e2f183e0061445f7da9d49497b13526b427c23a4a6eea24f6e262948708e528d`.
+
+### Remaining blockers (PR stays draft)
+
+1. **52 shared failures remain**, all in legacy snapshot/fixture paths that still need
+   assertion-by-assertion conversion: `RoomLibraryStoreTest` 2, `DownloadCleanupRoomTest` 4,
+   `DownloadHashCancellationRoomTest` 3, `DownloadIntegrityRoomTest` 9,
+   `DownloadMaintenanceRoomTest` 8, `DownloadOwnershipRoomTest` 5,
+   `DownloadPolicyRoomTest` 1, `DownloadRecoveryRoomTest` 4, `DownloadSchedulingRoomTest` 15.
+   The typed 450-method set (plus the added typed playback/prepared tests) passes; these are
+   additional old-fixture methods, not weakened typed assertions. Several now fail before their
+   intended assertion while calling `LibraryStore.update` for downloads/bindings/queues.
+2. **23 AppContainer failures remain**, principally tests that seed legacy download/binding/queue
+   snapshots or assert the old snapshot playback projection. The new root Play/Download/R2
+   tests pass, but these legacy composition tests must be ported to canonical typed commands
+   before the app suite can be green.
+3. No iOS compilation/Xcode, no emulator/physical device, no live source/auth, no real audio
+   output or crossfade, no packaging/distribution, and no performance benchmark was executed in
+   this correction. These remain unverified release gates.

@@ -77,3 +77,4 @@ Python41 packaging-source/local-files/mock-process second is independently verif
 
 ## Completion contract
 A passing compilation is not playback. A source URL is not playback. A downloaded byte count is not validated media. A simulator run is not a physical-device test. A screenshot is not a working journey. A green subagent report is not lead verification. External restrictions do not erase essential requirements; continue independent work, preserve resumable state, and leave the Goal incomplete if a required gate cannot be met.
+- **PR #4 correction 2026-11-07:** complete typed playback/selection/native handoff and fresh download compatibility are integrated, with 52 shared and 23 AppContainer legacy-fixture failures remaining. Do not start Task B builds or claim release readiness until those assertion ports and the iOS/native/physical gates complete.
