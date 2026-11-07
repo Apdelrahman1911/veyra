@@ -1,6 +1,6 @@
 # PR #4 scheduling Room ports and native-drain diagnosis
 
-Status: **scoped slice implemented and verified; PR kept draft for lead review/integration.**
+Status: **scoped slice implemented and verified; PR is ready for review/integration.**
 This slice does not claim a green full shared suite, native/iOS/platform execution, playable audio,
 live-source access or release readiness. The parent PR #4 remains draft; the lead owns the combined
 shared-suite run and final integration.
@@ -215,6 +215,6 @@ this report does not relabel a docs revision as a newly executed test revision.
 ## Remote and review
 
 - Remote branch: `t3/pr4-download-scheduling-ports`; PR base `t3/typed-room-download-recovery`.
-- PR: https://github.com/Apdelrahman1911/veyra/pull/6 (draft; lead review/integration only; no
-  merge/watch/workflow dispatch).
+- PR: https://github.com/Apdelrahman1911/veyra/pull/6 (ready for lead review/integration only;
+  this slice was not merged or watched and no workflow was dispatched).
 - No tests deleted/skipped/ignored; no guard weakened; no production/schema/pin/workflow/legal edit.
