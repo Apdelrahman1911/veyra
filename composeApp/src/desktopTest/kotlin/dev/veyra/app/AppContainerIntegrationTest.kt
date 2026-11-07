@@ -1858,6 +1858,14 @@ class AppContainerIntegrationTest {
         val podcastJob = fixture.seedAttemptJob(pausedPodcast, now, "held-actor-paused-podcast-download",
             status = DownloadStatus.PAUSED, attemptStatus = DownloadAttemptStatus.PAUSED,
             intent = DownloadBatchIntent.PAUSED)
+        // Ensure the nonblocking published view used during the held writer is current BEFORE
+        // the authored transaction starts.
+        fixture.store.acquisitionViews.first { view ->
+            listOf(musicJob, podcastJob).all { id ->
+                view.acquisition.physicalDownloads[id]?.let { it.status == DownloadStatus.PAUSED && it.userPaused } == true &&
+                    view.acquisition.claims.values.single { it.physicalJobId == id }.intent == DownloadBatchIntent.PAUSED
+            }
+        }
         fixture.deleteDirectory(directory.resolve("media"))
         fixture.store.upsertCatalog(listOf(newMusic, newPodcast) + members).getOrThrow()
         val coverageEntered = CompletableDeferred<Unit>()
