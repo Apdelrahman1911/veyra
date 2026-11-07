@@ -1306,7 +1306,9 @@ class AppContainerIntegrationTest {
         fixture.platform.engine.position(0L, durationMs = 12_346L)
         fixture.app.playback.state.first { it.positionMs == 0L && it.durationMs == 12_346L }
         fixture.app.playback.dispatch(PlaybackCommand.FlushProgress).getOrThrow()
-        assertEquals(0L, fixture.store.state.value.progress[original.id]?.positionMs)
+        // The synchronous same-owner read is the barrier; the cached snapshot flow may publish
+        // one tick later than the returned FlushProgress command.
+        assertEquals(0L, fixture.store.acquisitionView().snapshot.progress[original.id]?.positionMs)
         val retainedJob = fixture.job(jobId)
         val retained = assertNotNull(fixture.asset(jobId))
         assertEquals(DownloadStatus.COMPLETE, retainedJob.status)
@@ -1325,10 +1327,10 @@ class AppContainerIntegrationTest {
         fixture.platform.engine.position(1_000)
         fixture.app.playback.state.first { it.positionMs == 1_000L && it.pendingSeekMs == null }
         fixture.app.playback.dispatch(PlaybackCommand.FlushProgress).getOrThrow()
-        assertEquals(1_000L, fixture.store.state.value.progress[original.id]?.positionMs)
+        assertEquals(1_000L, fixture.store.acquisitionView().snapshot.progress[original.id]?.positionMs)
         fixture.app.close()
         val reopened = newFixture(clock = fixture.clockRef)
-        assertEquals(1_000L, reopened.store.state.value.progress[original.id]?.positionMs)
+        assertEquals(1_000L, reopened.store.acquisitionView().snapshot.progress[original.id]?.positionMs)
         assertEquals(PlaybackPhase.PAUSED, reopened.app.playback.state.value.phase)
         assertTrue(reopened.platform.engine.preparations.isEmpty())
         reopened.assertNoNetwork()
