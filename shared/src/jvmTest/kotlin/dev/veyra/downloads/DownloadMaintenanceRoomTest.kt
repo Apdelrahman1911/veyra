@@ -362,6 +362,12 @@ class DownloadMaintenanceRoomTest {
         awaitState(owner.store) { it.physicalDownloads[seeded.record.id]?.status == DownloadStatus.COMPLETE && owner.gate.closes.get() >= 1 }
         owner.assertFinalizationSchema3Recovered(seeded)
         val oldExpiration: suspend () -> Unit = owner.gate.expirations[0]
+        faults(owner.store).beforeCommit = { _, next ->
+            val fresh = next.state().physicalDownloads.filterKeys { it != seeded.record.id }
+            if (fresh.isNotEmpty()) owner.events += "fresh-tx:" + fresh.values.joinToString {
+                "${it.status}/${it.representationId}/${it.stagingPath != null}/${it.activeAttemptId != null}"
+            }
+        }
         val accepted = acceptNeutral(owner, "after-recovery", "AFTERRECOV1")
         val id = enqueue(owner, accepted)
         val enteredFresh = withTimeoutOrNull(10_000) { holding.entered.await(); true }
@@ -371,7 +377,9 @@ class DownloadMaintenanceRoomTest {
                 "failure=${pending.job.failure} plan=${a.schedulingPlan()} last=${a.lastFailure.value} " +
                 "pendingWork=${a.hasPendingWork.value} scheduled=${a.schedulingPlan().nextNetworkEpochMs} " +
                 "events=${owner.events.toList()} validations=${owner.validations.size} " +
-                "producer=${pending.job.producer}")
+                "producer=${pending.job.producer} staging=${pending.job.stagingPath} " +
+                "attempts=${pending.attempts.map { it.id + ':' + it.status + ':' + it.stagingPath }} " +
+                "context=${pending.producerContext}")
         }
         val before = owner.store.acquisitionView().acquisition.physicalDownloads.getValue(id)
         oldExpiration()
