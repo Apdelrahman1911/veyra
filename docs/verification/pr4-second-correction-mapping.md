@@ -41,7 +41,7 @@ Files: `composeApp/src/commonMain/kotlin/dev/veyra/app/AppContainer.kt`,
 | A blocked receipt is committed as a durable `AcquisitionOutcome.Unplayable`; no binding/occurrence is executable. | `AcquisitionCoordinatorTest.blockedPageWithAValidFirstReceiptStaysUnplayableAcrossRestoreAndCannotBind` (fake-port `AcquisitionTestRepository`) and `dev.veyra.data.RoomAcquisitionRestoreTest.blockedValidVideoOutcomeSurvivesRealRoomCloseAndReopenWithoutBindingOrSourceWork` (actual Room close/reopen) | Receipt retained; no binding; `boundOccurrence` rejects; repeated resolve does not re-query. The fake-port case is not Room proof; the jvmTest class executes actual Room close/reopen and proves the same persisted Unplayable outcome/problem with no binding/occurrence or source query/inspect. |
 
 Files: `YouTubeAcquisitionGateway.kt`, `YouTubeAcquisitionGatewayTest.kt`,
-`AcquisitionCoordinatorTest.kt`.
+`AcquisitionCoordinatorTest.kt`, `shared/src/jvmTest/kotlin/dev/veyra/data/RoomAcquisitionRestoreTest.kt`.
 
 ## R9 — wrong-reason successes and prepared contracts
 
@@ -49,8 +49,8 @@ Files: `YouTubeAcquisitionGateway.kt`, `YouTubeAcquisitionGatewayTest.kt`,
 
 | Case | Setup | Assertion |
 |---|---|---|
-| Duplicate asset identity | Supported validator on a two-download/one-asset graph; same-owner Room `writerRowsUpdate` remaps the second download to the existing asset AND adds a VALID unrelated legacy favorite (`music-2`) in that same transaction; raw SQL attempts a second row with the same primary key but a distinct URI. | Exact `"Offline asset identities must be unique"` from the transactional validator; exact `UNIQUE constraint failed: offline_assets.id`; the unrelated favorite row is absent after rollback; full graph/revision unchanged; cold reopen equal; one asset row. |
-| Duplicate asset URI | Two distinct asset ids claim the same owned URI AND the same transaction adds a VALID unrelated legacy favorite (`music-2`); raw SQL attempts a second row with a new id and the same URI. | Exact `"Offline asset files must have one owner"`; exact `UNIQUE constraint failed: offline_assets.uri`; the unrelated favorite row is absent after rollback; full graph/revision unchanged; cold reopen equal; no dedup/partial write. |
+| Duplicate asset identity | Supported validator on a two-download/one-asset graph; same-owner Room `writerRowsUpdate` remaps the second download to the existing asset AND adds a VALID unrelated CATALOG saved relation plus its legacy favourite projection (`music-2`) in that same transaction; raw SQL attempts a second row with the same primary key but a distinct URI. | Exact `"Offline asset identities must be unique"` from the transactional validator; exact `UNIQUE constraint failed: offline_assets.id`; the unrelated favorite row is absent after rollback; full graph/revision unchanged; cold reopen equal; one asset row. |
+| Duplicate asset URI | Two distinct asset ids claim the same owned URI AND the same transaction adds a VALID unrelated CATALOG saved relation plus its legacy favourite projection (`music-2`); raw SQL attempts a second row with a new id and the same URI. | Exact `"Offline asset files must have one owner"`; exact `UNIQUE constraint failed: offline_assets.uri`; the unrelated favorite row is absent after rollback; full graph/revision unchanged; cold reopen equal; no dedup/partial write. |
 
 File: `shared/src/jvmTest/kotlin/dev/veyra/data/RoomWriteVerificationTest.kt`.
 
@@ -82,7 +82,9 @@ All fail at `DownloadFixture.seedFinalization/seedComplete/seedPending` (or equi
 legacy snapshot seeding) with `INVALID_STATE`, before their intended assertions:
 
 - `RoomLibraryStoreTest` (2): `downloadUniquenessLeaseAndAttemptFinalizationAreTransactional`,
-  `cleanupIntentBlocksOrdinaryClaimAndSurvivesRestart`.
+  `cleanupIntentBlocksOrdinaryClaimAndSurvivesRestart` — **ported and passing in the scoped
+  successor wave**, see `pr4-room-regression-ports.md`; retained here as the historical failure
+  inventory.
 - `DownloadCleanupRoomTest` (4): `maintenanceClaimFailureBeforeAndAfterCommitKeepsFileAndRoomOwnershipUntilExplicitClose`,
   `maintenanceAllowanceFailureRetainsFinalizationFilesAndRoomClaimThroughIndependentDrain`,
   `partialMaintenancePathAcquisitionFailureRetainsRealFirstLeaseBeforeRoomClaim`,
