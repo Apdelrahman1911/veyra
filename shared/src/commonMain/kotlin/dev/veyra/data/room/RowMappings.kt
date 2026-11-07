@@ -69,7 +69,12 @@ internal suspend fun LibraryDao.readRows(): LibraryRows = LibraryRows(
     navigation = readNavigation(),
 )
 
-internal fun AppSnapshot.toRows(): LibraryRows = LibraryRows(
+/** Physical tables are copied ONLY from the canonical transaction graph, never an AppSnapshot transform. */
+internal fun AppSnapshot.toRows(physicalRows: LibraryRows? = null): LibraryRows {
+    require(physicalRows != null || (downloads.isEmpty() && downloadAttempts.isEmpty() && downloadFinalizations.isEmpty())) {
+        "Schema3 physical commands required"
+    }
+    return LibraryRows(
     meta = StoreMetaEntity(revision = revision, activeContext = activeContext),
     settings = SettingsEntity(
         language = settings.language, theme = settings.theme, textScale = settings.textScale,
@@ -108,28 +113,14 @@ internal fun AppSnapshot.toRows(): LibraryRows = LibraryRows(
     bindings = playbackBindings.values.map { b -> PlaybackBindingEntity(b.id, b.mediaId, b.queryTitle, b.firstResultKind, b.firstResultId, b.firstResultTitle, b.firstResultUrl, b.selectedVideoId, b.resolvedEpochMs, b.selectionOrdinal) },
     progress = progress.map { (id, p) -> MediaProgressEntity(id, p.positionMs, p.durationMs, p.played, p.updatedEpochMs, p.sessionId, p.generation, p.sequence, p.executionBindingId) },
     history = history.mapIndexed { index, h -> HistoryEntity(h.id, h.mediaId, h.startedEpochMs, h.lastPositionMs, h.endedNaturally, h.executionBindingId, index) },
-    assets = downloads.values.mapNotNull { it.asset }.map { a ->
-        OfflineAssetEntity(a.id, a.mediaId, a.uri, a.sizeBytes, a.kind, a.mimeType, a.codecs, a.sha256, a.representationId,
-            a.validatorGeneration, a.completedEpochMs, a.executionBindingId, a.measuredDurationMs)
-    },
-    downloads = downloads.values.map { d -> DownloadEntity(
-        id = d.id, mediaId = d.mediaId, status = d.status, bytesDownloaded = d.bytesDownloaded, totalBytes = d.totalBytes,
-        assetId = d.asset?.id, failure = d.failure, stagingPath = d.stagingPath, representationId = d.representationId,
-        etag = d.etag, lastModified = d.lastModified, validatorGeneration = d.validatorGeneration, updatedEpochMs = d.updatedEpochMs,
-        executionBindingId = d.executionBindingId, attemptCount = d.attemptCount, activeAttemptId = d.activeAttemptId,
-        nextRetryEpochMs = d.nextRetryEpochMs, priority = d.priority, createdEpochMs = d.createdEpochMs, userPaused = d.userPaused,
-        leaseOwner = d.leaseOwner, leaseExpiresEpochMs = d.leaseExpiresEpochMs, lastProgressEpochMs = d.lastProgressEpochMs,
-        automaticRetryCount = d.automaticRetryCount,
-        cleanupPending = d.cleanupPending, removeWhenClean = d.removeWhenClean,
-    ) },
-    attempts = downloadAttempts.values.map { a -> DownloadAttemptEntity(a.id, a.downloadId, a.number, a.status,
-        a.startedEpochMs, a.finishedEpochMs, a.bytesDownloaded, a.totalBytes, a.failure, a.stagingPath, a.representationId,
-        a.executionBindingId, a.etag, a.lastModified, a.validatorGeneration, a.backgroundTaskId) },
-    finalizations = downloadFinalizations.values.map { f -> DownloadFinalizationEntity(f.downloadId, f.mediaId, f.stagingPath,
-        f.finalPath, f.sha256, f.sizeBytes, f.attemptId, f.mediaDurationMs, f.mimeType, f.codecs, f.executionBindingId, f.representationId, f.validatorGeneration) },
+    assets = physicalRows?.assets.orEmpty(),
+    downloads = physicalRows?.downloads.orEmpty(),
+    attempts = physicalRows?.attempts.orEmpty(),
+    finalizations = physicalRows?.finalizations.orEmpty(),
     podcastSpeeds = settings.showSpeeds.map { (id, speed) -> PodcastSpeedEntity(id, speed) },
     navigation = navigation.map { (key, value) -> NavigationEntity(key, value) },
 )
+}
 
 internal fun LibraryRows.toSnapshot(): AppSnapshot {
     val meta = requireNotNull(meta) { "Missing database metadata" }
@@ -156,7 +147,11 @@ internal fun LibraryRows.toSnapshot(): AppSnapshot {
     val albumTracks = albumTracks.groupBy { it.albumId }
     val podcastEpisodes = podcastEpisodes.groupBy { it.podcastId }
     val feedAliases = feedAliases.groupBy { it.podcastId }
-    val assets = assets.associate { a -> a.id to OfflineAsset(a.id, a.mediaId, a.uri, a.sizeBytes, a.kind,
+    // Legacy UI projection is intentionally partial. Neutral/typed jobs never become fake MediaItems.
+    val legacyDownloads = downloads.filter { it.producerOrigin == PhysicalDownloadProducerOrigin.SCHEMA2 }
+    val legacyIds = legacyDownloads.map { it.id }.toSet()
+    val legacyAssetIds = legacyDownloads.mapNotNull { it.assetId }.toSet()
+    val assets = assets.filter { it.id in legacyAssetIds }.associate { a -> a.id to OfflineAsset(a.id, requireNotNull(a.mediaId), a.uri, a.sizeBytes, a.kind,
         a.mimeType, a.codecs, a.sha256, a.representationId, a.validatorGeneration, a.completedEpochMs, a.executionBindingId, a.measuredDurationMs) }
     return AppSnapshot(
         revision = meta.revision,
@@ -194,8 +189,8 @@ internal fun LibraryRows.toSnapshot(): AppSnapshot {
             p.sessionId, p.generation, p.sequence, p.executionBindingId) },
         history = history.sortedBy { it.position }.map { h -> PlaybackHistoryEntry(h.id, h.mediaId, h.startedEpochMs,
             h.lastPositionMs, h.endedNaturally, h.executionBindingId) },
-        downloads = downloads.associate { d -> d.id to DownloadRecord(
-            id = d.id, mediaId = d.mediaId, status = d.status, bytesDownloaded = d.bytesDownloaded, totalBytes = d.totalBytes,
+        downloads = legacyDownloads.associate { d -> d.id to DownloadRecord(
+            id = d.id, mediaId = requireNotNull(d.mediaId), status = d.status, bytesDownloaded = d.bytesDownloaded, totalBytes = d.totalBytes,
             asset = d.assetId?.let { assets.getValue(it) }, failure = d.failure, stagingPath = d.stagingPath, representationId = d.representationId,
             etag = d.etag, lastModified = d.lastModified, validatorGeneration = d.validatorGeneration, updatedEpochMs = d.updatedEpochMs,
             executionBindingId = d.executionBindingId, attemptCount = d.attemptCount, activeAttemptId = d.activeAttemptId,
@@ -204,10 +199,10 @@ internal fun LibraryRows.toSnapshot(): AppSnapshot {
             automaticRetryCount = d.automaticRetryCount,
             cleanupPending = d.cleanupPending, removeWhenClean = d.removeWhenClean,
         ) },
-        downloadAttempts = attempts.associate { a -> a.id to DownloadAttempt(a.id, a.downloadId, a.number, a.status,
+        downloadAttempts = attempts.filter { it.downloadId in legacyIds }.associate { a -> a.id to DownloadAttempt(a.id, a.downloadId, a.number, a.status,
             a.startedEpochMs, a.finishedEpochMs, a.bytesDownloaded, a.totalBytes, a.failure, a.stagingPath, a.representationId,
             a.executionBindingId, a.etag, a.lastModified, a.validatorGeneration, a.backgroundTaskId) },
-        downloadFinalizations = finalizations.associate { f -> f.downloadId to DownloadFinalization(f.downloadId, f.mediaId,
+        downloadFinalizations = finalizations.filter { it.downloadId in legacyIds }.associate { f -> f.downloadId to DownloadFinalization(f.downloadId, requireNotNull(f.mediaId),
             f.stagingPath, f.finalPath, f.sha256, f.sizeBytes, f.attemptId, f.mediaDurationMs, f.mimeType, f.codecs, f.executionBindingId, f.representationId, f.validatorGeneration) },
         settings = AppSettings(settings.language, settings.theme, settings.textScale, settings.offlineOnly, settings.speed,
             settings.skipBackSeconds, settings.skipForwardSeconds, podcastSpeeds.associate { it.podcastId to it.speed },

@@ -4,6 +4,7 @@ import dev.veyra.data.LibraryStore
 import dev.veyra.data.getOrThrow
 import dev.veyra.data.withRetainedLocalArtwork
 import dev.veyra.model.*
+import dev.veyra.source.SourceReaderOwner
 import dev.veyra.source.SourceResolver
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
@@ -226,6 +227,13 @@ class PlaybackController(
                         closingFailure = combineCloseFailures(closingFailure, finishNativeClose())
                         cleanupJob.join()
                         closingFailure = combineCloseFailures(closingFailure, cleanupCompletion.await())
+                        // The source resolver may still strongly own an unacknowledged native
+                        // validation/playback reader. Only a positive original release may drop
+                        // the dependency graph; closeReaders() also reports a retained failure.
+                        try { (resolver as? SourceReaderOwner)?.retainedReaderFailure()?.let { closingFailure = combineCloseFailures(closingFailure, VeyraException(it)) } }
+                        catch (error: Throwable) { closingFailure = combineCloseFailures(closingFailure, closeFailureOf(error, "Source reader receipt failed")) }
+                        try { (resolver as? SourceReaderOwner)?.closeReaders() }
+                        catch (error: Throwable) { closingFailure = combineCloseFailures(closingFailure, closeFailureOf(error, "Source reader cleanup failed")) }
                         closeCompletion.complete(closingFailure)
                     }
                     failure = closeCompletion.await()
@@ -588,7 +596,9 @@ class PlaybackController(
             try {
                 val cleaned = CompletableDeferred<AppFailure?>()
                 resourceCleanup.send(ResourceCleanup.Fence(cleaned))
-                val failure = cleaned.await() ?: nativeReleaseFailure
+                val readerFailure = try { (resolver as? SourceReaderOwner)?.retainedReaderFailure() }
+                    catch (error: Exception) { failureOf(error) }
+                val failure = cleaned.await() ?: nativeReleaseFailure ?: readerFailure
                 result.complete(when {
                     token != mutableState.value.generation -> releaseSuperseded()
                     failure != null -> PlaybackResult.Failure(failure)

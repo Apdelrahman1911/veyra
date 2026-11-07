@@ -15,7 +15,7 @@ internal class RoomLibraryPersistence private constructor(
     private val recoveryFactory: ((String) -> VeyraDatabase)?,
     private val files: RoomDatabaseFiles?,
     initialDatabase: VeyraDatabase?,
-) : LibraryPersistence {
+) : LibraryPersistence, AcquisitionPersistence {
     constructor(database: VeyraDatabase) : this(null, null, null, database)
     constructor(factory: (String) -> VeyraDatabase, files: RoomDatabaseFiles) :
         this({ factory(files.databasePath.toString()) }, factory, files, null)
@@ -26,28 +26,30 @@ internal class RoomLibraryPersistence private constructor(
 
     override suspend fun open(): OpenedLibrary {
         check(!closed)
-        if (opened) return OpenedLibrary(read())
+        if (opened) return readAcquisitionGraph().let { OpenedLibrary(it.snapshot(), acquisitionGraph = it) }
         files?.prepareForOpen()
         val db = database ?: requireNotNull(factory).invoke().also { database = it }
         try {
-            val snapshot = db.useWriterConnection { connection ->
-                // Room's WAL default is NORMAL. FULL is deliberate for acknowledged local changes.
+            val graph = db.useWriterConnection { connection ->
                 connection.execSQL("PRAGMA synchronous = FULL")
                 connection.immediateTransaction {
-                    val dao = db.libraryDao()
-                    val rows = dao.readRows()
-                    if (rows.meta == null) {
-                        check(rows == LibraryRows()) { "Partial database seed; refusing to erase orphaned data" }
-                        val empty = AppSnapshot()
-                        dao.writeDifference(rows, empty.toRows())
-                        verifyWrittenSnapshot(dao, empty)
-                        empty
-                    } else rows.toSnapshot().also(::validateLibrarySnapshot)
+                    val before = db.readCompleteGraph()
+                    if (before.library.meta == null) {
+                        check(before.library == LibraryRows() && before.rows == AcquisitionRows()) {
+                            "Partial database seed; refusing to erase orphaned data"
+                        }
+                        val library = AppSnapshot().toRows()
+                        val seeded = AcquisitionGraph(library, seedAcquisitionRows(library))
+                        seeded.validateCompleteGraph()
+                        db.libraryDao().writeDifference(before.library, seeded.library)
+                        db.acquisitionDao().writeAcquisitionDifference(before.rows, seeded.rows)
+                        db.verifyWrittenGraph(seeded)
+                    } else before.also { it.validateCompleteGraph() }
                 }
             }
             files?.markInitialized()
             opened = true
-            return OpenedLibrary(snapshot)
+            return OpenedLibrary(graph.snapshot(), acquisitionGraph = graph)
         } catch (error: Exception) {
             try { db.close() } catch (closeError: Exception) { error.addSuppressed(closeError) }
             finally { database = null; opened = false }
@@ -55,33 +57,48 @@ internal class RoomLibraryPersistence private constructor(
         }
     }
 
-    override suspend fun read(): AppSnapshot {
+    override suspend fun read(): AppSnapshot = readAcquisitionGraph().snapshot()
+
+    override suspend fun readAcquisitionGraph(): AcquisitionGraph {
         val db = requireOpen()
         return db.useReaderConnection { connection ->
-            connection.deferredTransaction { db.libraryDao().readRows().toSnapshot().also(::validateLibrarySnapshot) }
+            connection.deferredTransaction { db.readCompleteGraph().also { it.validateCompleteGraph() } }
         }
     }
 
-    override suspend fun transact(expectedRevision: Long?, transform: (AppSnapshot) -> AppSnapshot): AppSnapshot {
+    /** Compatibility catalogue/settings edits use the exact same schema3 transaction path. */
+    override suspend fun transact(expectedRevision: Long?, transform: (AppSnapshot) -> AppSnapshot): AppSnapshot =
+        transactAcquisition { before ->
+            if (expectedRevision != null && before.revision != expectedRevision) {
+                throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "Stale database revision"))
+            }
+            AcquisitionMutation(before.applyCatalogSnapshot(transform(before.snapshot()))) { it.snapshot() }
+        }.value
+
+    override suspend fun <T> transactAcquisition(
+        transform: (AcquisitionGraph) -> AcquisitionMutation<T>,
+    ): AcquisitionTransactionResult<T> {
         val db = requireOpen()
         return db.useWriterConnection { connection ->
             connection.execSQL("PRAGMA synchronous = FULL")
             connection.immediateTransaction {
-                val dao = db.libraryDao()
-                val before = dao.readRows()
-                val previous = before.toSnapshot().also(::validateLibrarySnapshot)
-                if (expectedRevision != null && previous.revision != expectedRevision) {
-                    throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "Stale database revision"))
+                val before = db.readCompleteGraph().also { it.validateCompleteGraph() }
+                val mutation = transform(before)
+                require(mutation.graph.revision == before.revision) { "Only the transaction owner advances revision" }
+                val actual = if (before.sameRelations(mutation.graph)) before else {
+                    require(before.revision < Long.MAX_VALUE)
+                    val intended = mutation.graph.withRevision(before.revision + 1)
+                    intended.validateCompleteGraph()
+                    validateAcquisitionTransition(before, intended)
+                    // All related FK edges are deferred. Every changed raw relation is included
+                    // in readback; neither an ignored upsert nor a trigger can bless a false result.
+                    db.libraryDao().writeDifference(before.library, intended.library)
+                    db.acquisitionDao().writeAcquisitionDifference(before.rows, intended.rows)
+                    db.verifyWrittenGraph(intended)
                 }
-                val proposed = transform(previous)
-                if (proposed == previous) return@immediateTransaction previous
-                require(previous.revision < Long.MAX_VALUE)
-                val next = proposed.copy(schemaVersion = AppSnapshot.CURRENT_SCHEMA, revision = previous.revision + 1)
-                validateLibraryTransition(previous, next)
-                dao.writeDifference(before, next.toRows())
-                verifyWrittenSnapshot(dao, next)
-                // Immediate transaction commit also checks all deferred foreign-key constraints.
-                next
+                // Computed from the actual re-read graph. Returning from immediateTransaction
+                // still must successfully commit (including all deferred FK constraints).
+                AcquisitionTransactionResult(actual, mutation.result(actual))
             }
         }
     }
@@ -119,7 +136,7 @@ internal class RoomLibraryPersistence private constructor(
             val candidate = requireNotNull(recoveryFactory).invoke(stage.toString())
             try {
                 candidate.useReaderConnection { connection ->
-                    connection.deferredTransaction { candidate.libraryDao().readRows().toSnapshot().also(::validateLibrarySnapshot) }
+                    connection.deferredTransaction { candidate.readCompleteGraph().validateCompleteGraph() }
                 }
             } finally { candidate.close() }
             files.installRecovery(stage)
@@ -150,11 +167,22 @@ internal class RoomLibraryPersistence private constructor(
         return requireNotNull(database)
     }
 
-    private suspend fun verifyWrittenSnapshot(dao: LibraryDao, expected: AppSnapshot) {
-        // Room @Upsert may absorb a uniqueness conflict and update zero rows. Triggers can also
-        // ignore writes without throwing. Never publish a revision/graph that SQLite did not store.
-        // This readback remains inside the same IMMEDIATE transaction, before its commit.
-        val actual = dao.readRows().toSnapshot().also(::validateLibrarySnapshot)
-        check(actual == expected) { "Relational write did not match the intended snapshot" }
+    private suspend fun VeyraDatabase.readCompleteGraph(): AcquisitionGraph =
+        AcquisitionGraph(libraryDao().readRows(), acquisitionDao().readAcquisitionRows())
+
+    private suspend fun VeyraDatabase.verifyWrittenGraph(expected: AcquisitionGraph): AcquisitionGraph {
+        val actual = readCompleteGraph().also { it.validateCompleteGraph() }
+        check(actual.sameRelations(expected)) { "Relational write did not match the complete intended graph" }
+        check(actual.snapshot() == expected.snapshot() && actual.state() == expected.state() &&
+            actual.releaseCatalogState() == expected.releaseCatalogState()) {
+            "Relational write projection did not match the intended revision"
+        }
+        return actual
     }
+}
+
+private fun AcquisitionGraph.validateCompleteGraph() {
+    snapshot()
+    state()
+    releaseCatalogState()
 }
