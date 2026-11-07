@@ -144,9 +144,8 @@ delegation packet, and the packet itself matched
 `1d41eec893d2e550c037fae307f2242220d48291efa2cac1567e96db3da75c41`. After the test-only
 edit, 505/506 tracked inputs remain byte-identical; only
 `composeApp/.../AppContainerIntegrationTest.kt` changed
-(SHA-256 `c3ccd61466206e5b3256c58628844e8637b3542d3ac123b96d9e286fea3d214f`). The new
-verification doc is also part of the source freeze
-(`01b98d849559498d590cb0f284eb382c77983c9e01ce67bef75a4a4ff79b657f`, docs-only).
+(SHA-256 `c3ccd61466206e5b3256c58628844e8637b3542d3ac123b96d9e286fea3d214f`). This
+verification doc is docs-only and was not part of the compiled/tested source closure.
 
 All Gradle runs acquired the shared ports-wave lock
 `/root/projects/Veyra/.work/verification/pr4-ports-wave-20261107/gradle.lock`, used the
@@ -172,3 +171,14 @@ the lead, not a claimed fix.
 The parent's 50 shared-test baseline is unchanged and was not rerun or claimed fixed. No
 iOS/Xcode/native/device/live-source proof is claimed; native/source/transfer answers are
 authored fakes over non-audio bytes while Room/files/OS locks are real.
+
+## Publication note
+
+The delegated remote name `t3/pr4-app-composition-ports` was already occupied by another
+active writer (PR #5, which also changes production `AppContainer.kt`). This branch did not
+rebase, force-push, reset or modify it. The independently verified test-only commit was
+published as `t3/pr4-app-composition-ports-5f39449a` and draft PR
+https://github.com/Apdelrahman1911/veyra/pull/7, based on the same parent
+`t3/typed-room-download-recovery` `6759466`. The lead must reconcile the two attempts; this
+branch intentionally retains the red Start Over regression instead of making the
+production fix.
