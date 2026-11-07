@@ -1,7 +1,7 @@
 package dev.veyra.downloads
 
-import dev.veyra.acquisition.AcquisitionTransferProgress
-import dev.veyra.acquisition.AcquisitionTransferResult
+import dev.veyra.source.execution.AcquisitionTransferProgress
+import dev.veyra.source.execution.AcquisitionTransferResult
 import dev.veyra.data.LibraryPersistence
 import dev.veyra.data.getOrThrow
 import dev.veyra.model.*
@@ -332,7 +332,10 @@ class DownloadMaintenanceRoomTest {
         val owner = owner()
         val seeded = prepareFinalizationSchema3(owner)
         owner.validation = { AssetValidation.Valid(31_234) }
-        owner.gate.beforeClose = { withContext(NonCancellable) { owner.gate.expirations.last().invoke() } }
+        owner.gate.beforeClose = {
+            val expiration: suspend () -> Unit = owner.gate.expirations.last()
+            withContext(NonCancellable) { expiration() }
+        }
         owner.denyFinalizationSchema3Acquisition()
         val holding = barrier()
         owner.gateway.transfer = { prepared, path, progress ->

@@ -70,6 +70,16 @@ internal suspend fun join(owner: DownloadAcquisitionRoomOwner, id: String): Phys
     return kotlin.test.assertNotNull(owner.repository.physicalDownload(id))
 }
 
+internal suspend fun DownloadAcquisitionRoomFixture.awaitJob(owner: DownloadAcquisitionRoomOwner, id: String,
+    predicate: (PhysicalDownloadJoin) -> Boolean): PhysicalDownloadJoin = withTimeout(15_000) {
+    var value = join(owner, id)
+    while (!predicate(value)) {
+        kotlinx.coroutines.delay(10)
+        value = join(owner, id)
+    }
+    value
+}
+
 /**
  * The same sticky-owner contract as the legacy helper, expressed through canonical physical state
  * and the coordinator's actual drain/idle/resume receipts. It never retries a failed cleanup.
