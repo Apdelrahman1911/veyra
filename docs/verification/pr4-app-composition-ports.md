@@ -11,7 +11,10 @@ variant `max`. No independent runtime/backend/variant attestation is exposed.
 The kmpYT pin (`c0a08090fe7dbd76e20216559b8184ad2cccde63`) and schema-3 export
 (`aab30e43a35a431a25a7ecbb7ebccefd849811f688957054304b02d3caf6d367`) are
 unchanged. This is a test-and-narrow-compatibility change; no schema, dependency,
-pin, workflow or native/platform implementation was changed.
+pin, workflow or native/platform implementation was changed. The R12
+continuation used the same accepted model settings and changed only desktop test
+source, this verification document and ignored `.work` evidence; the absence of
+independent backend/runtime/variant attestation still applies.
 
 ## Starting state and imported candidate
 
@@ -68,7 +71,24 @@ real `AppContainer` root. Native playback/validation and source transfer answers
 remain explicit authored fakes over NON-AUDIO bytes; Room, SQLite files, OS
 leases and the app root are real. No test writes `AppSnapshot.downloads`,
 `AppSnapshot.playbackBindings`, `AppSnapshot.queues` or `AppSnapshot.progress` on
-a schema-3 store.
+a schema-3 store. Historical `playback_bindings` rows exist only as real rows
+created in the exported schema-2 fixture before the production migration; no
+schema-3 legacy binding is fabricated.
+
+`AppContainerSchema2Fixture` creates `library/veyra.db` from the actual exported
+`shared/schemas/dev.veyra.data.room.VeyraDatabase/2.json`: every exported table,
+index and `setupQueries` entry is executed after literal `${TABLE_NAME}`
+substitution, `PRAGMA user_version` is set to 2, and only authored baseline rows
+exist (both queue contexts, store meta, settings, one COMMONS catalog media,
+one track, one ordinal-zero VIDEO binding). It creates no offline asset,
+download, attempt, finalization, claim, queue occurrence, canonical occurrence
+or local media file. Room then opens that file through the production
+`LibraryStore`/`AppContainer`, so `MIGRATION_2_3` genuinely runs. The current
+catalog title intentionally differs from the historical binding query; raw
+schema-2 `media`/`tracks`/`playback_bindings`/`queue_contexts` scalars and the
+canonical `SCHEMA2_EXECUTABLE` binding/`FirstResultReceipt.Schema2` are asserted
+after migration and after cold reopen. This is not `MigrationTestHelper` (its
+dependency is only in shared test source) and not a raw schema-3 seed.
 
 Canonical historical inputs are prepared by the owned test-only helpers
 (`Fixture.seedSelection` / `seedQueue` / `seedJob` / `seedAttemptJob` /
@@ -121,21 +141,30 @@ Reachable lifetime owners replace the removed DOWNLOAD resource:
   stages are asserted single-consumption; dependent stages stay withheld until
   the allowance positively closes.
 
-The class now has 37 tests: the 35 original methods (one explicitly renamed as
-above), `podcastStartOverForANonCurrentEpisodeKeepsFreshAdmissionSemantics`, and
-`podcastStartOverWithACompetingQueueActivationDoesNotRestartTheWrongOccurrence`.
+The class now has 39 authored test methods: the 37 previously listed (35
+original methods, one explicitly renamed, and the two Start Over controls) plus
+the two external historical-receipt controls added for R12:
+`finalCloseCancelsExternalResolverAndAwaitsItsLateRejectedResourceBeforeClosingDependencies`
+and
+`offlineToggleCancelsExternalHistoricalResolverAndClosesLateResultBeforeNativeHandoff`.
+The exact executed count is taken from the fresh XML, never from an authored
+literal.
 
 ## Method mapping (original → typed seam → retained assertions)
 
-All 35 original methods are preserved. One method is explicitly renamed because
-its external caller no longer exists on the schema-3 path:
+All 35 original methods are preserved. One method is explicitly labelled
+app-owned because its caller is the controller:
 `finalCloseCancelsExternalResolverAndAwaitsItsLateRejectedResourceBeforeClosingDependencies`
 → `finalCloseCancelsAppOwnedTypedResolveAndAwaitsItsLateRejectedResourceBeforeClosingDependencies`.
-The old external entrypoint was `AppContainer.resolver`; that legacy resolver
-cannot acquire a schema-3 binding (legacy snapshot binding writes are
-intentionally rejected), so it is not the app execution path and the app-owned
-typed controller resolve is the legal current route. The rename is recorded in
-the table below rather than silently changing the claim.
+That label does **not** mean the external historical route disappeared. A NEW
+fresh legacy acquisition after schema 3 is intentionally guarded (the snapshot
+binding write is rejected), but `AppSourceResolver.resolveWithBinding(...,
+reuseBindingId)` rejoins a preserved schema-2 VIDEO receipt without a new
+first-result query or legacy binding write. Migration 2→3 preserves those
+bindings as `SCHEMA2_EXECUTABLE`/`FirstResultReceipt.Schema2`, and
+`AppContainer.resolver` is still public. R12 therefore restores the original
+external-coroutine condition as a separate, real migrated-history control
+rather than treating "new legacy writes are forbidden" as sufficient.
 
 Every original safety claim is kept; where the old test described a removed
 authority (legacy snapshot rows, legacy `PlaybackBinding`, DOWNLOAD
@@ -148,7 +177,9 @@ explained rather than loosened to "any failure".
 | `cancellationAtOnlineScopeReturnDisposesUnhandedGatewayResourceExactlyOnce` | `Play` → typed `preparePlayback` cancelled at the policy/online return | resource closed exactly once, never handed to native; one committed request and one binding, no legacy binding; close does not re-close |
 | `rejectedGatewayResourceIsDrainedAtFinalCloseButEarlierReleaseFailureStaysSanitizedAndSticky` | same, first release throws | failure sanitized (`UNEXPECTED`, no raw cause/text); owner retained and retried exactly once at explicit close; dependencies released once |
 | `persistentlyFailedRejectedResourceRemainsRetriableAfterFinalCloseWithoutRepeatingGlobalClosures` | same, always failing until allow | one retry per explicit close; sticky failure; later success cannot retroactively certify clean shutdown; global closes exactly once |
-| `finalCloseCancelsExternalResolverAndAwaitsItsLateRejectedResourceBeforeClosingDependencies` → `finalCloseCancelsAppOwnedTypedResolveAndAwaitsItsLateRejectedResourceBeforeClosingDependencies` (explicit rename) | app-owned typed controller resolve; close awaits policy-return cleanup | close blocked until the late resource is released; no runtime/source/http/Room close early; sanitized sticky failure; one global close set; app-owned resolver cancellation observed. The former external legacy-resolver entrypoint cannot acquire a schema-3 binding and is intentionally no longer the execution path |
+| `finalCloseCancelsExternalResolverAndAwaitsItsLateRejectedResourceBeforeClosingDependencies` → `finalCloseCancelsAppOwnedTypedResolveAndAwaitsItsLateRejectedResourceBeforeClosingDependencies` (explicit rename) | app-owned typed controller resolve; close awaits policy-return cleanup | close blocked until the late resource is released; no runtime/source/http/Room close early; sanitized sticky failure; one global close set; app-owned resolver cancellation observed. This is the honest app-owned control; the preserved schema-2 external caller is restored separately below |
+| `finalCloseCancelsExternalResolverAndAwaitsItsLateRejectedResourceBeforeClosingDependencies` (R12 restored control) | real migrated schema-2 VIDEO receipt through public `AppSourceResolver.resolveWithBinding(..., reuseBindingId)` from a coroutine outside appLifetime/playback/effects | no fresh first-result query, request/capture, receipt/binding write or native handoff; close's real online closed observer cancels the external caller; first rejected-resource release is held and fails once; shutdown cannot finish and Room/runtime/youtube/HTTP stay open; explicit close retries the retained resource exactly once; sticky `UNEXPECTED` has no raw diagnostic/cause; one global dependency-close set; historical scalars/receipt remain exact |
+| `offlineToggleCancelsExternalHistoricalResolverAndClosesLateResultBeforeNativeHandoff` (R12 external control) | same migrated schema-2 historical receipt and external caller; app `offlineOnly` policy change cancels it | late returned resource closes exactly once before native handoff; zero fresh query/request/receipt/transfer/native/validator work; app stays `Ready` and dependencies remain open (distinct from app close); binding/media scalars unchanged; cold reopen preserves the exact `SCHEMA2_EXECUTABLE` receipt without recapture |
 | `offlineToggleCancelsRunningGatewayCoroutineAndClosesLateResultBeforeNativeHandoff` | `Play` + offline policy cancellation | late resource closed once; `OFFLINE_POLICY` state; no native prepare; one query/commit/binding |
 | `handedDownloadResourceFailureRetainsRoomRuntimeClientsAndLifetimeUntilExplicitCloseRetry` | allowance close fails after publication | job COMPLETE and asset retained; transfer/local validation once; dependent clients/Room/lifetime retained; one explicit retry; sticky sanitized failure; no replay |
 | `throwingDownloadAllowanceRetainsDependenciesWithoutReclosingTheAlreadyConsumedResource` | allowance close throws then succeeds | successful earlier validation/transfer never repeated; dependencies retained until positive close; sticky failure |
@@ -180,6 +211,28 @@ New controls for the repaired path:
   failure after dispatch is propagated and never converted into a source
   fallback. The playback-state flow remains advisory; the authoritative queue
   and `PlayOccurrence` CAS remain the fence.
+- `finalCloseCancelsExternalResolverAndAwaitsItsLateRejectedResourceBeforeClosingDependencies`:
+  R12 control. Real exported-schema-2 → production-schema-3 AppContainer opens
+  one authored COMMONS catalog row, one track and one historical VIDEO binding
+  (ordinal 0, canonical locator, full historical query, no completed/offline
+  asset or download). The public resolver is called with the exact
+  `reuseBindingId` from a coroutine external to appLifetime/playback/effects.
+  The gateway holds, catches the real close-driven cancellation and returns an
+  authored late resource; its first release is held and fails once. While
+  blocked, `AppContainer.close` cannot complete, Room stays usable/Ready, and
+  runtime/youtube/HTTP are not closed; the native engine receives no prepare.
+  Releasing the hold makes explicit close drain the retained owner, retry once,
+  retain the sanitized sticky `UNEXPECTED` failure without a cause/raw text, and
+  close each dependency exactly once. No fresh query/request/capture/receipt/
+  binding/transfer is created.
+- `offlineToggleCancelsExternalHistoricalResolverAndClosesLateResultBeforeNativeHandoff`:
+  R12 control. The same real migrated receipt is resolved from an external
+  caller; changing `offlineOnly` cancels the live policy operation through the
+  real offline observer. The late resource closes once before any native
+  handoff; the app remains Ready and Room/runtime/youtube/HTTP remain open,
+  distinguishing policy cancellation from app shutdown. Query count stays zero,
+  the historical binding survives unchanged, and a cold reopen preserves the
+  same `SCHEMA2_EXECUTABLE` receipt without new work.
 
 The existing screen-facing download/podcast projection is still the legacy
 `library` snapshot (`snapshot.downloads`/`snapshot.progress`); typed physical
@@ -245,9 +298,21 @@ and authoritative current occurrence disagree.
   HEAD/status in addition to the indexed gitlink and `gradle/kmpyt.commit`, and
   includes owned untracked inputs. `run-focused-001` remains labelled diagnostic
   with unavailable before/after hashes.
-- The final-close method is explicitly renamed to its app-owned typed scope; the
-  legacy external `AppContainer.resolver` cannot acquire a schema-3 binding and
-  is intentionally not the app execution path.
+- The typed final-close method is explicitly labelled to its app-owned scope.
+  It is not a substitute for the external historical-receipt contract: a NEW
+  fresh legacy acquisition cannot write a schema-3 binding, but the public
+  resolver's `reuseBindingId` route still executes a preserved schema-2 VIDEO
+  receipt. The original external condition is restored as its own real
+  migrated-history control.
+- R12 correction: the 37-test class retained many safety assertions but had
+  moved the original external-coroutine shutdown case to the controller-owned
+  typed route. The two new controls exercise the reachable historical route:
+  exact exported-schema-2 → production-schema-3 migration, authored gateway
+  answers, external caller cancellation by the real closed/offline observers,
+  held late-resource release, explicit retained-resource retry, sticky
+  sanitized failure, exact dependency ordering, and a cold reopen that proves
+  no recapture/new work. No production code was changed for R12; this closes a
+  test-coverage gap, not an observed production leak.
 - A competing queue-activation control covers stale advisory selection versus the
   authoritative current occurrence; the competitor is never restarted or
   relabelled.
@@ -266,8 +331,9 @@ with `flock -x`, held to process completion. One test fork, 384 MiB heap/256 MiB
 metaspace, SerialGC, two CPUs, project-local Gradle/home/temp. Runs redirect
 fresh exact-task XML with `-Dveyra.lead.evidence=<unique-dir>`.
 
-The full-class acceptance run is `run-full-004` at code HEAD
-`8411190d61bbe9c8ea462cd7fc5b43c6b3864d5f`:
+The previous 37-test full-class acceptance run is `run-full-004` at code HEAD
+`8411190d61bbe9c8ea462cd7fc5b43c6b3864d5f`; it remains historical evidence
+for the pre-R12 code and is not relabelled as the R12 acceptance:
 
 - `:composeApp:compileKotlinDesktop` and
   `:composeApp:compileTestKotlinDesktop` succeeded in the same invocation;
@@ -286,6 +352,44 @@ The full-class acceptance run is `run-full-004` at code HEAD
 - `run-android-002` at the same SHA executed both Android compile tasks
   (`--rerun-tasks`, 52 tasks executed), exit 0, `BUILD SUCCESSFUL`.
 
+### R12 clean-tree acceptance (`49a4eec`)
+
+`run-accept-clean-001` ran at clean code HEAD
+`49a4eecaa910bfd55f16bf6da716b3c472cf6b28` with the shared lock held for the
+full process (`--offline`, `--rerun-tasks`, task-owned init). The tracked tree
+was clean and there were no untracked non-ignored inputs.
+
+- `:composeApp:compileKotlinDesktop` and
+  `:composeApp:compileTestKotlinDesktop` actually executed (not UP-TO-DATE) in
+  the same invocation;
+- `:composeApp:desktopTest` with four `--tests` filters executed **69 tests,
+  0 failures, 0 errors, 0 skipped**, exit 0, `BUILD SUCCESSFUL`, 23 executed
+  tasks:
+  - `AppContainerIntegrationTest`: **39** methods (all 37 prior methods plus
+    the two R12 controls);
+  - `DesktopLifetimeTest` 7; `DesktopPlatformServicesOwnershipTest` 18;
+    `DesktopStartupJobsTest` 5;
+- UTC window 2026-11-07T20:09:45Z..20:13:21Z; log 27,699 bytes SHA-256
+  `6c6ea1f77a959678eff85b36e0f616c0e4e42d05c7d5ef80c9f47368a773bccd`;
+- XML SHA-256:
+  - `TEST-dev.veyra.app.AppContainerIntegrationTest.xml`
+    `36cc57e8d7c56d5146bceac8734c4cea250489e2b0fc14b827743d0a9d92f094`;
+  - `TEST-dev.veyra.desktop.DesktopLifetimeTest.xml`
+    `c248551192e6691b6e35d49b875da9841f77d27ac3d09f4fc608f0f372472f11`;
+  - `TEST-dev.veyra.desktop.DesktopPlatformServicesOwnershipTest.xml`
+    `2180e1ffc46fb41de83cd5b0bf1f5b801f8cbb7ce2743dbbb6b6484bbc6baee7`;
+  - `TEST-dev.veyra.desktop.DesktopStartupJobsTest.xml`
+    `9ce7723a77217032013b8b0b3c3bf2fe08d20b54485c1b185570fed2c7db0c9f`;
+- fail-closed before/after manifests equal: 509 file entries (508 regular
+  tracked files plus the kmpYT gitlink), no untracked inputs; actual
+  checked-out submodule HEAD/status `c0a08090...`/clean; indexed gitlink and
+  `gradle/kmpyt.commit` `c0a08090...`; schema export `aab30e43...` unchanged;
+- focused pre-commit `run-focused-002` executed the two R12 methods 2/0/0/0,
+  exit 0; `compile-002` compiled the desktop test source, exit 0.
+  `run-full-001` and `run-headless-001` at the same code SHA were run while this
+  document was locally modified; they passed but are explicitly superseded by
+  the clean run and are not the final clean-tree receipt.
+
 | Run | HEAD / tree | Scope | Result |
 |---|---|---|---|
 | `run-focused-001` (red) | `66677e8` + dirty port (pre-repair) | 6 AppContainer methods | 2 failures / 0 errors / 0 skipped, exit 1: verified Start Over red (`OFFLINE_POLICY/acquisition_offline`, `selection=PENDING`, `binding=null`, `media=2`) plus a test-owned held-writer read deadlock (corrected later) |
@@ -294,9 +398,13 @@ The full-class acceptance run is `run-full-004` at code HEAD
 | `run-full-002` | `7b6bd05` | full AppContainer class | 36 / 1 / 0 / 0, exit 1: `acquisitionView().snapshot` is still the legacy progress relation; canonical `playbackView()` checkpoint/catalogue-progress reads were added at `8411190` |
 | `run-full-003` | `d06b53f` | full AppContainer class (pre-review-correction code) | 36 / 0 / 0 / 0, exit 0; superseded by the review-correction code and not claimed as final |
 | `run-final-001` | `d06b53f` | three headless classes + Android shared/app compile (pre-review-correction code) | 30 / 0 / 0 / 0, exit 0, BUILD SUCCESSFUL; `:composeApp:compileDebugKotlinAndroid` executed; superseded for final acceptance by `run-final-002` |
-| `run-full-004` | `8411190` | full AppContainer class (final corrected code) | **37 / 0 / 0 / 0, exit 0, BUILD SUCCESSFUL**; fail-closed equal inputs, actual submodule clean at `c0a08090...` |
-| `run-final-002` | `8411190` | three relevant headless classes + Android compile tasks | **30 / 0 / 0 / 0, exit 0, BUILD SUCCESSFUL**; headless 7/18/5 all pass; both Android compile tasks reported UP-TO-DATE |
-| `run-android-002` | `8411190` | forced executed Android shared/app compile | **exit 0, BUILD SUCCESSFUL**; both `:shared:compileDebugKotlinAndroid` and `:composeApp:compileDebugKotlinAndroid` **executed** (52 tasks executed, `--rerun-tasks`), fail-closed equal inputs; window 2026-11-07T17:36:30Z..17:39:16Z, log 8,643 bytes SHA-256 `70c10f63fe42ea48321a0c0c0b907efe7bc413555e39866ada179e038faa6f2a` |
+| `run-full-004` | `8411190` | full AppContainer class (previous 37-test corrected code; historical) | **37 / 0 / 0 / 0, exit 0, BUILD SUCCESSFUL**; fail-closed equal inputs, actual submodule clean at `c0a08090...` |
+| `run-final-002` | `8411190` | three relevant headless classes + Android compile tasks (historical) | **30 / 0 / 0 / 0, exit 0, BUILD SUCCESSFUL**; headless 7/18/5 all pass; both Android compile tasks reported UP-TO-DATE |
+| `run-android-002` | `8411190` | forced executed Android shared/app compile (historical) | **exit 0, BUILD SUCCESSFUL**; both `:shared:compileDebugKotlinAndroid` and `:composeApp:compileDebugKotlinAndroid` **executed** (52 tasks executed, `--rerun-tasks`), fail-closed equal inputs; window 2026-11-07T17:36:30Z..17:39:16Z, log 8,643 bytes SHA-256 `70c10f63fe42ea48321a0c0c0b907efe7bc413555e39866ada179e038faa6f2a` |
+| `compile-002` | `462d7ab` + same working source | desktop test compilation before the code commit | exit 0, BUILD SUCCESSFUL; same two-file source content later committed as `49a4eec`; before/after inputs equal |
+| `run-focused-002` | `462d7ab` + same working source | the two R12 external historical-receipt methods | **2 / 0 / 0 / 0**, exit 0, BUILD SUCCESSFUL; XML SHA-256 `e5d0f6de8686ab69faaccde161a2e844637462739da6aff628115e8d3ebc85e0`, log 5,502 bytes SHA-256 `a5f6b855161429402c6dac768335a293441b3744b41adbb5e89d4da4b9dca43c` |
+| `run-full-001` / `run-headless-001` | `49a4eec` + uncommitted doc | 39 AppContainer / 30 headless | 39/0/0/0 and 30/0/0/0, exit 0; retained, but accompanied by an uncommitted documentation edit and **superseded** by `run-accept-clean-001` |
+| `run-accept-clean-001` | `49a4eec` (clean tree) | forced desktop main/test compilation + 39 AppContainer + 30 headless methods | **69 / 0 / 0 / 0, exit 0, BUILD SUCCESSFUL**; compile tasks executed; fail-closed equal inputs, clean submodule/pin/schema; log and XML hashes above |
 
 `DesktopRetainedLifetimeTest` (5 tests) is unchanged from the parent and still
 authors the removed DOWNLOAD `PlaybackResource`; its three failures
@@ -306,21 +414,27 @@ authors the removed DOWNLOAD `PlaybackResource`; its three failures
 blocker**, not waived here. They belong to a separate isolated test-only lane
 that must port that class's host/process-lock guarantees; PR #5 does not own or
 modify that file and does not claim its failures fixed or unrelated to Task A.
-The other three relevant headless classes passed at the final
-code SHA in `run-final-001` (7, 18 and 5 tests, 0 failures, exit 0; window
-2026-11-07T16:57:04Z..16:58:41Z; log 16,205 bytes SHA-256
-`38c53e116dc6c87f60a852ddcee1fe48d99cdda74adfc27276c8bc918cb06352`; Android
-`:shared:compileDebugKotlinAndroid` and
-`:composeApp:compileDebugKotlinAndroid` both reported UP-TO-DATE in that
-invocation; `run-android-002` separately forced actual execution of both tasks
-at the same frozen SHA, exit 0, BUILD SUCCESSFUL). The parent's known 50 shared-test failures
-are the sibling's scope and are not claimed fixed. No iOS/Xcode/native/device,
-audio, signing or distribution proof is claimed; native/source/transfer answers
-are authored fakes over non-audio bytes while Room, SQLite files and OS locks are
-real.
+`run-final-001` is historical pre-review-correction evidence at `d06b53f`: it
+also ran the three headless classes (7, 18 and 5 tests, 0 failures, exit 0;
+window 2026-11-07T16:57:04Z..16:58:41Z; log 16,205 bytes SHA-256
+`38c53e116dc6c87f60a852ddcee1fe48d99cdda74adfc27276c8bc918cb06352`), and in
+that invocation the Android shared/app compile tasks **executed**, not
+UP-TO-DATE. For that earlier `8411190` correction sequence, the headless run is
+`run-final-002`: 30/0/0/0, exit 0, BUILD SUCCESSFUL, with both Android compile
+tasks reported UP-TO-DATE; `run-android-002` separately forced actual execution
+of both tasks at the same frozen SHA, exit 0, BUILD SUCCESSFUL. The two runs are
+preserved with their actual labels and are not relabelled. The parent's known 50
+shared-test failures are the sibling's scope and are not claimed fixed. No
+iOS/Xcode/native/device, audio, signing or distribution proof is claimed;
+native/source/transfer answers are authored fakes over non-audio bytes while
+Room, SQLite files and OS locks are real.
 
-All acceptance runs after the review corrections were code-frozen with
-`git status` clean and fail-closed equal before/after manifests; the later
-doc-only update is not claimed as a new code execution. The tested code SHA is
-`8411190`; its doc-only successor is identified in the PR. `run-full-003` and
-`run-final-001` remain preserved but describe the pre-review-correction code.
+The final clean acceptance run for this R12 correction
+(`run-accept-clean-001`) was code-frozen at `49a4eec` with an empty
+`git status` and fail-closed equal before/after manifests; its desktop main and
+test compilation tasks actually executed. A later doc-only successor updates
+this document and the PR description and is not claimed as a new code
+execution; code files remain byte-identical to `49a4eec`. The tested code SHA
+for the two R12 controls is therefore `49a4eec`. The `8411190` runs above remain
+the preserved prior 37-test evidence, and `run-full-003`/`run-final-001` remain
+preserved pre-review-correction history.
