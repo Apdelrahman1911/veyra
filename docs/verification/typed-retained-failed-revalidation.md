@@ -52,11 +52,13 @@ guaranteed; the contract is the bounded acquire/close protocol rather than the s
 asset failure removal caller loses the ownership race; it does not treat another owner's active
 deletion as its own success. The inherited real-Room
 `missingCompletedFileIsNeverReadyAndExplicitRetryRetainsItsRecording` method (the actual 0.655 s
-full2 assertion) and the full shared suite are green after this change.
+full2 assertion) is green in clean focused execution after this change.
 
 The gate-expiry catch path still acknowledges a durably accepted removal intent while cleanup is
 retained for host retry. That is the existing `cleanupExpiration...` contract and is explicitly
-held for lead adjudication rather than changed to an untested indefinite wait.
+held for lead adjudication rather than changed to an untested indefinite wait. The clean full run
+below retains one unrelated `DownloadPolicyRoomTest` scheduler-slot assertion (`expected 1, was 0`);
+no full-shared-green claim is made.
 
 ### F5 — stale accepted-owner finalizer classification (corrected)
 
@@ -65,8 +67,8 @@ owner epoch is revoked, the current job producer/ownership generation differs, t
 gone, the exact admitted claim set changed, or a retained cleanup/failed-file removal is
 explicitly superseded. Active owners with unchanged producer, generation and claims still latch
 `INVALID_STATE / download_checkpoint_stale`; the transfer-finalizer stale oracle remains green.
-The focused fake-owner test proves both sides; the inherited real ownership class and full suite
-are green.
+The focused fake-owner test proves both sides; the inherited real ownership class is green in
+isolation. The clean full run's remaining policy-slot assertion is reported separately below.
 
 ### F6 — evidence statement correction
 
@@ -92,15 +94,22 @@ The frozen PR17 evidence is retained unchanged. The corrected record is:
 The correction topic has new, separate evidence under
 `.work/verification/pr17-review-corrections/attempts/`:
 
-- `final-focused-3`: 30 tests / 5 suites / 0 failures/errors/skips at correction head
-  `fd0be85` (F1/F2/F8 Room cases, F3/F5 physical cases, all 13 maintenance methods and the
-  inherited integrity and stale-transfer oracles), exit 0, before/after manifests equal.
-- `ownership-final-1`: 11/11 `DownloadOwnershipRoomTest` methods, exit 0.
-- `full-shared-4`: **1,181 tests / 100 suites / 0 failures / 0 errors / 0 skips**, exit 0,
-  before/after tracked-input manifests equal, fresh XML; log SHA-256
-  `49c1f43880cc4dc1ec1ff392d21c1460061ffc0ff7816056104af28209b89d12`.
+- `clean-final-focused` at correction head `fe8ec66`: **30 tests / 5 suites / 0
+  failures/errors/skips**, exit 0, before/after tracked-input manifests equal. This covers the
+  F1/F2/F8 Room cases, F3/F5 physical cases, all 13 maintenance methods and the inherited
+  integrity/stale-transfer oracles.
+- `ownership-final-1`: 11/11 `DownloadOwnershipRoomTest` methods, exit 0 (earlier correction
+  source).
+- `full-shared-4`: 1,181 tests / 100 suites / 0 failures / 0 errors / 0 skips, but it ran with
+  final F4/F5 source bytes uncommitted while HEAD was `fd0be85`; it is retained as a non-clean
+  observation, not clean-source acceptance evidence.
+- `full-shared-5` at clean `fe8ec66`: 1,181 tests / 100 suites / **1 failure / 0 errors /
+  0 skips**, exit 1. The failure was
+  `DownloadPolicyRoomTest.twoRealRoomSchedulersRespectOneTwoAndFourGlobalSlotsAndLoweredLimit`
+  (`expected <1> but was <0>`), preserved without calling it a flake. No full-shared-green claim
+  is made for clean final source.
 - `full-shared-3` (earlier correction source) retained one `DownloadRecoveryRoomTest` 15s
-  timeout before the final narrow F4/F5 adjustments; it is preserved, not used as green proof.
+  timeout before the final narrow F4/F5 adjustments; preserved but not green proof.
 
 ### F7 — UI dependency (core owner)
 
@@ -161,5 +170,6 @@ New focused tests:
 
 Authored non-audio bytes and fake decoder/transfer/source seams; real Room/files/OS leases only.
 No live source, network transfer, native audio, device/emulator, package, signing, workflow or
-benchmark operation. The full-shared green result covers correction head `fd0be85`; the F4
-gate-expiry acknowledgment contract remains an explicit adjudication item.
+benchmark operation. Clean final focused `fe8ec66` is 30/30 green; the clean full run retains one
+policy-slot assertion, so no full-shared-green claim is made. The F4 gate-expiry acknowledgment
+and F3 bounded acquire/close remain explicit adjudication items.
