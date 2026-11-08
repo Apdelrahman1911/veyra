@@ -61,10 +61,17 @@ import androidx.compose.ui.unit.dp
 import dev.veyra.model.AppFailure
 import dev.veyra.model.AppSettings
 import dev.veyra.model.AppSnapshot
+import dev.veyra.model.DownloadStatus
+import dev.veyra.model.ExecutionOccurrenceId
+import dev.veyra.model.ExecutionQueue
 import dev.veyra.model.FailureCode
+import dev.veyra.model.FirstResultReceipt
 import dev.veyra.model.LanguagePreference
+import dev.veyra.model.OccurrenceSelectionState
 import dev.veyra.model.QueueContext
+import dev.veyra.model.RepeatMode
 import dev.veyra.model.ThemeMode
+import dev.veyra.playback.PlaybackSelection
 import dev.veyra.ui.design.AppStrings
 import dev.veyra.ui.design.TextKey
 import dev.veyra.ui.music.LibrarySection
@@ -120,7 +127,8 @@ class CoreShellFlowsTest {
 
     @Test fun queueInspectionDoesNotActivateAudioAndExplicitOccurrenceSelectionUsesTheSinglePlayer() {
         val app = show()
-        val savedMusic = app.store.state.value.queue(QueueContext.MUSIC)
+        val savedMusic = canonicalQueue(app, QueueContext.MUSIC)
+        assertEquals(2L, savedMusic.editRevision, "Seed uses exactly one replace admission and one queue edit")
         assertFalse(app.container.playback.state.value.desiredPlaying)
         assertTrue(app.engine.loads.isEmpty())
 
@@ -129,7 +137,7 @@ class CoreShellFlowsTest {
         ui.onNodeWithTag("view-queue-PODCAST").performClick()
         await { app.container.navigation.value.viewedQueue == QueueContext.PODCAST }
         assertEquals(QueueContext.MUSIC, app.container.playback.state.value.activeContext)
-        assertEquals(savedMusic, app.store.state.value.queue(QueueContext.MUSIC))
+        assertEquals(savedMusic, canonicalQueue(app, QueueContext.MUSIC))
         assertTrue(app.engine.loads.isEmpty())
         assertTrue(app.gateway.queries.isEmpty())
         ui.onNode(hasText(music.title) and hasAnyAncestor(hasTestTag("mini-player")), useUnmergedTree = true).assertIsDisplayed()
@@ -138,9 +146,9 @@ class CoreShellFlowsTest {
         ui.onNodeWithTag("queue-play-episode-now").performClick()
         await { app.container.playback.state.value.currentEntryId == "episode-now" && app.container.playback.state.value.isPlaying }
         assertEquals(QueueContext.PODCAST, app.store.state.value.activeContext)
-        assertEquals(savedMusic, app.store.state.value.queue(QueueContext.MUSIC))
+        assertEquals(savedMusic, canonicalQueue(app, QueueContext.MUSIC))
         assertEquals(listOf(episode.title), app.gateway.queries.toList())
-        assertEquals(episode.id, app.engine.loads.single().source.mediaId)
+        assertEquals(episode.id, app.engine.loads.single().mediaId)
 
         ui.onNodeWithTag("mini-open-player").performClick()
         await { app.container.navigation.value.playerOpen }
@@ -154,37 +162,44 @@ class CoreShellFlowsTest {
 
     @Test fun occurrenceReorderDisablesShuffleAndConfirmedClearUndoRestoresOnlyUpcomingEdits() {
         val app = show()
-        val podcastQueue = app.store.state.value.queue(QueueContext.PODCAST)
+        val podcastQueue = canonicalQueue(app, QueueContext.PODCAST)
         ui.onNodeWithTag("mini-queue").performClick()
         await { app.container.navigation.value.queueOpen }
         queueScrollTo("queue-up-music-copy")
         ui.onNodeWithTag("queue-up-music-copy").performClick()
-        await { app.store.state.value.queue(QueueContext.MUSIC).entries.map { it.id } == listOf("music-now", "music-copy", "music-next") }
-        val reordered = app.store.state.value.queue(QueueContext.MUSIC)
+        await { canonicalQueue(app, QueueContext.MUSIC).displayedOrder.map { it.value } ==
+            listOf("music-now", "music-copy", "music-next") }
+        val reordered = canonicalQueue(app, QueueContext.MUSIC)
+        assertEquals(3L, reordered.editRevision)
         assertFalse(reordered.shuffle)
-        assertEquals("music-now", reordered.currentEntryId)
+        assertEquals("music-now", reordered.currentOccurrenceId?.value)
         assertEquals(17_000L, reordered.positionMs)
-        assertEquals(podcastQueue, app.store.state.value.queue(QueueContext.PODCAST))
+        assertEquals(podcastQueue, canonicalQueue(app, QueueContext.PODCAST))
 
         queueScrollTo("clear-upcoming")
         ui.onNodeWithTag("clear-upcoming").performClick()
-        assertEquals(reordered, app.store.state.value.queue(QueueContext.MUSIC), "Merely showing confirmation is non-destructive")
+        assertEquals(queueFacts(reordered), queueFacts(canonicalQueue(app, QueueContext.MUSIC)),
+            "Merely showing confirmation is non-destructive")
         ui.onNodeWithTag("confirm-action").performClick()
-        await { app.store.state.value.queue(QueueContext.MUSIC).entries.map { it.id } == listOf("music-now") }
-        assertEquals("music-now", app.store.state.value.queue(QueueContext.MUSIC).currentEntryId)
-        assertEquals(17_000L, app.store.state.value.queue(QueueContext.MUSIC).positionMs)
+        await { canonicalQueue(app, QueueContext.MUSIC).displayedOrder.map { it.value } == listOf("music-now") }
+        assertEquals("music-now", canonicalQueue(app, QueueContext.MUSIC).currentOccurrenceId?.value)
+        assertEquals(17_000L, canonicalQueue(app, QueueContext.MUSIC).positionMs)
         queueScrollTo("undo-queue")
         ui.onNodeWithTag("undo-queue").performClick()
-        await { app.store.state.value.queue(QueueContext.MUSIC) == reordered }
-        assertEquals(podcastQueue, app.store.state.value.queue(QueueContext.PODCAST))
+        await { queueFacts(canonicalQueue(app, QueueContext.MUSIC)) == queueFacts(reordered) }
+        assertEquals(podcastQueue, canonicalQueue(app, QueueContext.PODCAST))
         assertTrue(app.engine.loads.isEmpty(), "Editing future occurrences must not start audio")
         capture("fixture-shell-en-light-occurrence-queue")
     }
 
     @Test fun detailsFavoritesAndDuplicatePlaylistMembershipAreConnectedButDoNotPlayOrDeleteDownloads() {
         val app = show(CoreShellTestFixture.snapshot(navigation = AppNavigation(destination = AppDestination.LIBRARY)))
-        val queues = app.store.state.value.queues
-        val downloads = app.store.state.value.downloads
+        val canonical = app.store.acquisitionViews.value.acquisition
+        val queues = canonical.queues
+        val downloads = canonical.physicalDownloads
+        val paused = downloads.getValue("ui-fixture-paused-download")
+        assertEquals(DownloadStatus.PAUSED, paused.status)
+        assertTrue(paused.userPaused)
         ui.onNodeWithContentDescription(english.format(TextKey.MoreActionsFor, music.title)).performClick()
         ui.onNodeWithText(english.text(TextKey.Details)).performClick()
         await { app.container.navigation.value.detail == AppDetail(DetailKind.TRACK, music.id) }
@@ -218,8 +233,12 @@ class CoreShellFlowsTest {
 
         ui.onNodeWithText(english.text(TextKey.UndoLibraryEdit)).performScrollTo().performClick()
         await { app.store.state.value.playlists.single() == duplicated }
-        assertEquals(queues, app.store.state.value.queues)
-        assertEquals(downloads, app.store.state.value.downloads)
+        val after = app.store.acquisitionViews.value.acquisition
+        assertEquals(queues, after.queues)
+        assertEquals(downloads, after.physicalDownloads)
+        val pausedAfter = after.physicalDownloads.getValue("ui-fixture-paused-download")
+        assertEquals(DownloadStatus.PAUSED, pausedAfter.status)
+        assertTrue(pausedAfter.userPaused)
         assertTrue(app.engine.loads.isEmpty())
         assertTrue(app.gateway.queries.isEmpty())
     }
@@ -228,21 +247,24 @@ class CoreShellFlowsTest {
         val navigation = AppNavigation(destination = AppDestination.LIBRARY,
             details = listOf(AppDetail(DetailKind.PLAYLIST, playlist.id)), viewedQueue = QueueContext.PODCAST)
         val app = show(CoreShellTestFixture.snapshot(navigation = navigation))
-        val original = app.store.state.value.queue(QueueContext.MUSIC)
-        val podcast = app.store.state.value.queue(QueueContext.PODCAST)
+        val original = canonicalQueue(app, QueueContext.MUSIC)
+        val podcast = canonicalQueue(app, QueueContext.PODCAST)
         ui.onNodeWithText(english.text(TextKey.Shuffle)).performClick()
-        assertEquals(original, app.store.state.value.queue(QueueContext.MUSIC))
+        assertEquals(queueFacts(original), queueFacts(canonicalQueue(app, QueueContext.MUSIC)))
         assertTrue(app.gateway.queries.isEmpty())
         ui.onNodeWithTag("confirm-action").performClick()
-        await { app.container.playback.state.value.isPlaying && app.store.state.value.queue(QueueContext.MUSIC).entries.size == 2 }
-        assertTrue(app.store.state.value.queue(QueueContext.MUSIC).shuffle)
-        assertEquals(listOf(music.id, music.id), app.store.state.value.queue(QueueContext.MUSIC).entries.map { it.mediaId })
+        await { app.container.playback.state.value.isPlaying &&
+            canonicalQueue(app, QueueContext.MUSIC).displayedOrder.size == 2 }
+        assertTrue(canonicalQueue(app, QueueContext.MUSIC).shuffle)
+        assertEquals(listOf(music.id, music.id),
+            canonicalQueue(app, QueueContext.MUSIC).displayedOrder.map { occurrenceMediaId(app, it) })
         assertEquals(listOf(music.title), app.gateway.queries.toList())
 
         ui.onNodeWithText(english.text(TextKey.UndoQueueEdit)).performScrollTo().performClick()
-        await { app.store.state.value.queue(QueueContext.MUSIC).entries.map { it.id } == original.entries.map { it.id } }
-        assertEquals(original, app.store.state.value.queue(QueueContext.MUSIC))
-        assertEquals(podcast, app.store.state.value.queue(QueueContext.PODCAST))
+        await { canonicalQueue(app, QueueContext.MUSIC).displayedOrder.map { it.value } ==
+            original.displayedOrder.map { it.value } }
+        assertEquals(queueFacts(original), queueFacts(canonicalQueue(app, QueueContext.MUSIC)))
+        assertEquals(podcast, canonicalQueue(app, QueueContext.PODCAST))
         assertFalse(QueueContext.MUSIC in app.container.playback.state.value.undoableQueueContexts)
     }
 
@@ -341,7 +363,7 @@ class CoreShellFlowsTest {
     @Test fun queueContextNavigationKeepsTheClickedChipFocusedWithoutStartingPlayback() {
         val app = show()
         val beforePlayback = app.container.playback.state.value
-        val savedQueues = app.store.state.value.queues
+        val savedQueues = app.store.acquisitionViews.value.acquisition.queues
         assertFalse(beforePlayback.isPlaying)
         assertFalse(beforePlayback.desiredPlaying)
 
@@ -351,10 +373,11 @@ class CoreShellFlowsTest {
             assertFalse(after.desiredPlaying, "No deferred Play intent may be hidden behind a paused engine")
             assertEquals(beforePlayback.activeContext, after.activeContext)
             assertEquals(beforePlayback.currentEntryId, after.currentEntryId)
+            assertEquals(selectionIdentity(beforePlayback.currentSelection), selectionIdentity(after.currentSelection))
             assertEquals(beforePlayback.executionBinding, after.executionBinding)
             assertEquals(beforePlayback.generation, after.generation)
             assertEquals(beforePlayback.positionMs, after.positionMs)
-            assertEquals(savedQueues, app.store.state.value.queues)
+            assertEquals(savedQueues, app.store.acquisitionViews.value.acquisition.queues)
             assertTrue(app.engine.loads.isEmpty(), "Queue inspection must not prepare an audio source")
             assertTrue(app.engine.plays.isEmpty(), "A chip's Space must not become background Play/Pause")
             assertTrue(app.engine.pauses.isEmpty())
@@ -463,6 +486,7 @@ class CoreShellFlowsTest {
                 val after = app.container.playback.state.value
                 assertEquals(prepared.activeContext, after.activeContext)
                 assertEquals(prepared.currentEntryId, after.currentEntryId)
+                assertEquals(selectionIdentity(prepared.currentSelection), selectionIdentity(after.currentSelection))
                 assertEquals(prepared.executionBinding, after.executionBinding)
                 assertEquals(prepared.generation, after.generation)
                 assertEquals(loads, app.engine.loads.toList(), "Focus transfer cannot prepare a second source/owner")
@@ -688,15 +712,18 @@ class CoreShellFlowsTest {
         val longTitle = "Authored requested recording — " + "عنوان كامل طويل للاختبار ".repeat(5) + "requested end"
         val longResolved = "A different authored first-result recording — " + "بيانات تسجيل مختلفة ".repeat(5) + "resolved end"
         val item = music.copy(title = longTitle, creator = "A deliberately long authored creator credit ".repeat(5))
-        val receipt = CoreShellTestFixture.musicReceipt.copy(queryTitle = longTitle, firstResultTitle = longResolved)
-        val initial = CoreShellTestFixture.snapshot().let { it.copy(
-            media = it.media + (item.id to item), playbackBindings = mapOf(receipt.id to receipt)) }
-        val app = show(initial)
+        val initial = CoreShellTestFixture.snapshot().let { it.copy(media = it.media + (item.id to item)) }
+        val app = show(initial, typedTitles = CoreShellTypedTitles(
+            resolvedTitles = mapOf(longTitle to longResolved)))
         ui.onNodeWithTag("mini-open-player").performClick()
         await { app.container.navigation.value.playerOpen }
-        assertEquals(receipt, app.container.playback.state.value.executionBinding)
+        val selected = app.container.playback.state.value.currentSelection
+        val selectedReceipt = selected?.receipt as? FirstResultReceipt.Observed
+        assertEquals(longTitle, selected?.request?.completeTitle)
+        assertEquals(longResolved, selectedReceipt?.observation?.entry?.title)
+        assertEquals("music-now", selected?.occurrenceId?.value)
         val essential = listOf("close-player", "player-seek", "player-previous", "player-toggle", "player-next")
-        val savedQueues = app.store.state.value.queues
+        val savedQueues = app.store.acquisitionViews.value.acquisition.queues
         val savedPlayback = app.container.playback.state.value
 
         fun assertInitialIdentity(strings: AppStrings, maxLines: Int, direction: LayoutDirection, fontScale: Float) {
@@ -744,8 +771,8 @@ class CoreShellFlowsTest {
                 }
             }
             preview("player-title", item.title)
-            val resolved = strings.format(TextKey.ResolvedTitleValue, receipt.firstResultTitle)
-            preview("player-resolved-title", resolved, resolved.indexOf(receipt.firstResultTitle))
+            val resolved = strings.format(TextKey.ResolvedTitleValue, longResolved)
+            preview("player-resolved-title", resolved, resolved.indexOf(longResolved))
             val listing = ui.onNodeWithTag("player-title").getUnclippedBoundsInRoot()
             val resolution = ui.onNodeWithTag("player-resolved-title").getUnclippedBoundsInRoot()
             assertTrue(listing.bottom <= resolution.top, "Keep the listing and resolved recording distinct")
@@ -772,7 +799,7 @@ class CoreShellFlowsTest {
         capture("fixture-player-ar-dark-320x760-font200-long-metadata-resized")
 
         ui.onNodeWithText(strings.text(TextKey.ShowMore)).performScrollTo().performClick()
-        listOf(receipt.queryTitle, receipt.firstResultTitle).forEach { title ->
+        listOf(longTitle, longResolved).forEach { title ->
             val node = ui.onNode(hasText(title) and hasAnyAncestor(hasTestTag("playback-provenance")), useUnmergedTree = true)
             node.performScrollTo().assertIsDisplayed().assertTextEquals(title)
             val layouts = mutableListOf<TextLayoutResult>()
@@ -794,7 +821,9 @@ class CoreShellFlowsTest {
         essential.forEach(::assertFullyVisible)
         val afterReading = app.container.playback.state.value
         assertEquals("music-now", afterReading.currentEntryId)
-        assertEquals(savedQueues, app.store.state.value.queues, "Layout and disclosure preserve both saved queues")
+        assertEquals(savedQueues, app.store.acquisitionViews.value.acquisition.queues,
+            "Layout and disclosure preserve both saved queues")
+        assertEquals(selectionIdentity(savedPlayback.currentSelection), selectionIdentity(afterReading.currentSelection))
         assertEquals(savedPlayback.executionBinding, afterReading.executionBinding)
         assertEquals(savedPlayback.activeContext, afterReading.activeContext)
         assertEquals(savedPlayback.positionMs, afterReading.positionMs)
@@ -803,8 +832,40 @@ class CoreShellFlowsTest {
         capture("fixture-player-ar-dark-320x760-font200-long-provenance-expanded")
     }
 
-    private fun show(initial: AppSnapshot = CoreShellTestFixture.snapshot(), width: Dp = 960.dp, height: Dp = 720.dp): CoreShellTestFixture {
-        val app = runBlocking { withTimeout(20_000L) { CoreShellTestFixture.create(initial) } }
+    @Test fun freshTypedLibraryPlayUsesTheCanonicalOccurrenceAndRendersInTheQueuePanel() {
+        val second = CoreShellTestFixture.second
+        val app = show(CoreShellTestFixture.snapshot(navigation = AppNavigation(destination = AppDestination.LIBRARY)))
+        libraryScrollTo("play-${second.id}")
+        ui.onNodeWithTag("play-${second.id}").assertIsDisplayed().performClick()
+        await {
+            val playback = app.container.playback.state.value
+            playback.currentSelection?.catalogMedia?.id == second.id &&
+                playback.currentSelection?.selectionState == OccurrenceSelectionState.BOUND &&
+                playback.isPlaying
+        }
+        val queue = canonicalQueue(app, QueueContext.MUSIC)
+        val occurrence = queue.displayedOrder.single()
+        assertEquals(4L, queue.editRevision,
+            "Fresh Play uses the replace admission and its explicit activation queue edit")
+        assertEquals(listOf(second.title), app.gateway.queries.toList())
+        assertEquals(1, app.gateway.prepareInvocations.get())
+        assertEquals(1, app.gateway.prepareCompletions.get())
+        assertEquals(0, app.gateway.prepareFailures.get())
+        assertEquals(0, app.gateway.prepareCancellations.get())
+        assertEquals(second.id, app.engine.loads.single().mediaId)
+        assertTrue(app.store.state.value.queues.getValue(QueueContext.MUSIC).entries.isEmpty(),
+            "Canonical occurrences must not be copied into the legacy queue projection")
+        assertTrue(app.store.state.value.playbackBindings.isEmpty())
+        ui.onNodeWithTag("mini-queue").performClick()
+        await { app.container.navigation.value.queueOpen }
+        queueScrollTo("queue-entry-${occurrence.value}")
+        ui.onNodeWithTag("queue-entry-${occurrence.value}").assertIsDisplayed()
+        capture("fixture-shell-en-light-fresh-typed-queue")
+    }
+
+    private fun show(initial: AppSnapshot = CoreShellTestFixture.snapshot(), width: Dp = 960.dp, height: Dp = 720.dp,
+        typedTitles: CoreShellTypedTitles = CoreShellTypedTitles()): CoreShellTestFixture {
+        val app = runBlocking { withTimeout(20_000L) { CoreShellTestFixture.create(initial, typedTitles) } }
         fixture = app
         viewport = DpSize(width, height)
         ui.setContent {
@@ -817,6 +878,48 @@ class CoreShellFlowsTest {
         assertViewport(width, height)
         return app
     }
+
+    private fun canonicalQueue(app: CoreShellTestFixture, context: QueueContext): ExecutionQueue =
+        app.store.acquisitionViews.value.acquisition.queues.getValue(context)
+
+    private fun occurrenceMediaId(app: CoreShellTestFixture, occurrenceId: ExecutionOccurrenceId): String? =
+        PlaybackSelection.project(app.store.acquisitionViews.value, occurrenceId).catalogMedia?.id
+
+    private data class QueueFacts(
+        val displayedOrder: List<String>,
+        val originalOrder: List<String>,
+        val currentOccurrenceId: String?,
+        val positionMs: Long,
+        val speed: Float,
+        val shuffle: Boolean,
+        val repeat: RepeatMode,
+    )
+
+    private fun queueFacts(queue: ExecutionQueue) = QueueFacts(
+        displayedOrder = queue.displayedOrder.map { it.value },
+        originalOrder = queue.originalOrder.map { it.value },
+        currentOccurrenceId = queue.currentOccurrenceId?.value,
+        positionMs = queue.positionMs,
+        speed = queue.speed,
+        shuffle = queue.shuffle,
+        repeat = queue.repeat,
+    )
+
+    private data class SelectionIdentity(
+        val occurrenceId: String?,
+        val bindingId: String?,
+        val subjectId: String?,
+        val requestId: String?,
+        val receiptId: String?,
+    )
+
+    private fun selectionIdentity(selection: PlaybackSelection?) = SelectionIdentity(
+        occurrenceId = selection?.occurrenceId?.value,
+        bindingId = selection?.bindingId?.value,
+        subjectId = selection?.subjectId?.value,
+        requestId = selection?.requestId?.value,
+        receiptId = selection?.receiptId?.value,
+    )
 
     private fun resize(width: Dp, height: Dp) {
         ui.runOnIdle { viewport = DpSize(width, height) }

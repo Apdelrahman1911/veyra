@@ -162,7 +162,7 @@ fun VeyraApp(container: AppContainer, modifier: Modifier = Modifier) {
                                                         isLoading = detail.id in podcastDetails.refreshing && snapshot.shows[detail.id]?.lastRefreshEpochMs == null,
                                                         isRefreshing = detail.id in podcastDetails.refreshing,
                                                         failure = podcastDetails.failures[detail.id]), container::onPodcastAction)
-                                                    DetailKind.PLAYLIST -> PlaylistDetailScreen(snapshot, detail.id, container::onMusicAction, options = options)
+                                                    DetailKind.PLAYLIST -> PlaylistDetailScreen(snapshot, detail.id, container::onMusicAction, options = options, playback = displayPlayer)
                                                     DetailKind.COLLECTION -> detail.collection?.let { collection ->
                                                         val state = collections[detail.id] ?: CollectionUiState(collection)
                                                         CollectionDetailScreen(snapshot, state.copy(page = state.page.withArtwork(snapshot)),
@@ -196,7 +196,7 @@ fun VeyraApp(container: AppContainer, modifier: Modifier = Modifier) {
                                         }
                                     }
                                 }
-                                if (!navigation.playerOpen && displayPlayer.currentItem != null) {
+                                if (!navigation.playerOpen && displayPlayer.hasCurrent) {
                                     MiniPlayer(snapshot, displayPlayer, container::onMusicAction, options = options,
                                         compactHeight = shortWindow)
                                 }

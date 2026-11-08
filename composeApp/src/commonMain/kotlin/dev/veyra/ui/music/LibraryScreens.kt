@@ -45,6 +45,7 @@ import dev.veyra.model.MediaKind
 import dev.veyra.model.Playlist
 import dev.veyra.model.QueueContext
 import dev.veyra.model.SourceProvider
+import dev.veyra.playback.PlaybackState
 import dev.veyra.ui.design.EmptyState
 import dev.veyra.ui.design.LocalStrings
 import dev.veyra.ui.design.MetadataText
@@ -175,6 +176,7 @@ fun PlaylistDetailScreen(
     onAction: (MusicUiAction) -> Unit,
     modifier: Modifier = Modifier,
     options: MusicUiOptions = MusicUiOptions(),
+    playback: PlaybackState? = null,
 ) {
     val strings = LocalStrings.current
     val playlist = snapshot.playlists.firstOrNull { it.id == playlistId }
@@ -189,8 +191,12 @@ fun PlaylistDetailScreen(
     val availableItems = playlist.entries.mapNotNull { snapshot.media[it.mediaId] }.filter { it.kind == MediaKind.MUSIC }
     val shown = playlist.entries.withIndex().filter { (_, entry) -> snapshot.media[entry.mediaId]?.let { matchesMediaQuery(it, query) } ?: query.isBlank() }
     fun play(shuffle: Boolean) {
-        val queue = snapshot.queue(QueueContext.MUSIC)
-        if (pendingOccurrenceIds(queue.entries.map { it.id }, queue.currentEntryId).isNotEmpty()) replaceShuffle = shuffle
+        // The canonical upcoming occurrences are the authority whenever the owner published them.
+        // The legacy snapshot queue is a compatibility fallback for standalone callers only.
+        val hasUpcoming = playback?.hasUpcomingOccurrence(QueueContext.MUSIC, snapshot)
+            ?: pendingOccurrenceIds(snapshot.queue(QueueContext.MUSIC).entries.map { it.id },
+                snapshot.queue(QueueContext.MUSIC).currentEntryId).isNotEmpty()
+        if (hasUpcoming) replaceShuffle = shuffle
         else onAction(MusicUiAction.PlayCollection(availableItems, shuffle))
     }
     LazyColumn(modifier.fillMaxSize().testTag("playlist-detail"), contentPadding = PaddingValues(bottom = 24.dp)) {
