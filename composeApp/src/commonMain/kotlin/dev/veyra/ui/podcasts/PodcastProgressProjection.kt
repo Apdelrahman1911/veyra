@@ -53,6 +53,9 @@ data class PodcastProgressView(
 
     fun recordingState(mediaId: String): PodcastProgressRecording {
         val progress = episodes[mediaId] ?: return PodcastProgressRecording.UNVERIFIED
+        // Schema2 fallback is compared through its genuine downloaded/next-play receipts in the
+        // UI, never against the unrelated canonical current occurrence.
+        if (progress.source != PodcastProgressSource.CANONICAL) return PodcastProgressRecording.UNVERIFIED
         val expected = expectedRecording(mediaId) ?: return PodcastProgressRecording.UNVERIFIED
         val actual = progress.recordingId?.takeIf { progress.bindingValid } ?: return PodcastProgressRecording.UNVERIFIED
         return if (actual == expected) PodcastProgressRecording.MATCHED else PodcastProgressRecording.CHANGED

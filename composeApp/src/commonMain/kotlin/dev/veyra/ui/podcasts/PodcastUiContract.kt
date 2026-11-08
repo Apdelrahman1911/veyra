@@ -83,6 +83,8 @@ sealed interface PodcastAction {
     data class SetFollowed(val showId: String, val followed: Boolean) : PodcastAction
     data class SetShowListOptions(val showId: String, val options: PodcastListOptions) : PodcastAction
     data class PlayEpisode(val mediaId: String) : PodcastAction
+    /** Explicit exact saved-R1 episode action; owner revalidates all identity/readiness fences. */
+    data class PlaySavedEpisode(val mediaId: String, val bindingId: String) : PodcastAction
     data class StartOver(val mediaId: String) : PodcastAction
     data class SetPlayed(val mediaId: String, val played: Boolean) : PodcastAction
     data class SetSaved(val mediaId: String, val saved: Boolean) : PodcastAction
@@ -91,6 +93,8 @@ sealed interface PodcastAction {
     data object OpenQueue : PodcastAction
     data class Download(val mediaId: String) : PodcastAction
     data class PauseDownload(val downloadId: String) : PodcastAction
+    /** Explicit local validation of retained FAILED bytes under the exact persisted binding. */
+    data class ValidateRetainedDownload(val downloadId: String, val bindingId: String) : PodcastAction
     data class ResumeDownload(val downloadId: String) : PodcastAction
     data class CancelDownload(val downloadId: String) : PodcastAction
     data class RemoveDownload(val downloadId: String) : PodcastAction
@@ -119,10 +123,15 @@ data class PodcastEpisodeUiState(
 ) {
     val listingDurationMs: Long? get() = episode.durationMs?.takeIf { it > 0L }
     val canonicalProgress: PodcastEpisodeProgress? get() = progressView?.forEpisode(episode.id)
+        ?.takeIf { it.source == PodcastProgressSource.CANONICAL }
     /** Historical listening remains intact even when the next selection is a different recording. */
     val historicalPositionMs: Long get() = canonicalProgress?.positionMs ?: progress?.positionMs?.coerceAtLeast(0L) ?: 0L
     /** The one row the existing download controls operate, by its actual physical job id. */
     val activeDownload: DownloadSurfaceEntry? get() = typedDownload ?: download?.toDownloadSurfaceEntry()
+    /** Exact typed catalogue R1 from a currently verified ready row; never a legacy receipt. */
+    val savedPlayBindingId: String? get() = typedDownload
+        ?.takeIf { it.ready && it.origin == DownloadSurfaceOrigin.TYPED_CATALOGUE }
+        ?.bindingId?.takeIf { it.isNotBlank() }
     // PlayEpisode is a fresh Play, not a request to resume the displayed current binding.
     // The resolver prefers a completed local artifact; without one, a fresh online first-result
     // search is still unknown. Neither CURRENT nor the newest historical receipt pins that search.

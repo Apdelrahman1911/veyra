@@ -159,7 +159,10 @@ private fun typedEntries(presentation: DownloadAcquisitionPresentation,
                 projected.status in setOf(DownloadStatus.VERIFYING, DownloadStatus.NEEDS_FOREGROUND),
             hasOwnedBytes = asset != null,
             cleanupPending = projected.cleanupPending,
-            bindingId = verified?.bindingId?.takeIf { mediaId != null },
+            // Persisted exact producer binding is visible for catalogue rows even when this
+            // process has not verified readiness (for example a retained FAILED row); it is not
+            // an AssetUse/readiness grant. Neutral source rows never expose a binding.
+            bindingId = (verified?.bindingId ?: producer.bindingId?.value)?.takeIf { mediaId != null },
             measuredDurationMs = asset?.measuredDurationMs,
             assetId = asset?.id?.value,
             assetSizeBytes = asset?.sizeBytes,

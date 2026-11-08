@@ -9,6 +9,8 @@ import dev.veyra.artwork.ArtworkFiles
 import dev.veyra.data.CatalogLibraryUndo
 import dev.veyra.data.LibraryStore
 import dev.veyra.data.PlaybackAcquisitionView
+import dev.veyra.data.QueueAdmissionOperation
+import dev.veyra.data.executionContext
 import dev.veyra.data.StoreStatus
 import dev.veyra.data.getOrThrow
 import dev.veyra.downloads.DownloadCoordinator
@@ -27,6 +29,8 @@ import dev.veyra.source.youtube.YouTubeKmpMediaGateway
 import dev.veyra.source.youtube.YouTubeTransferProgress
 import dev.veyra.source.youtube.YouTubeTransferResult
 import dev.veyra.ui.design.TextKey
+import dev.veyra.ui.downloads.DownloadSurfaceOrigin
+import dev.veyra.ui.downloads.downloadSurface
 import dev.veyra.ui.music.*
 import dev.veyra.ui.podcasts.*
 import kotlinx.coroutines.*
@@ -481,6 +485,111 @@ class AppContainer(
         cacheArtwork(selected)
     }
 
+    /**
+     * Explicit local validation of a retained FAILED physical job. The exact job id and binding
+     * come from the paired persisted download projection; the coordinator still rechecks the
+     * claim/asset/host/offline/native fences. The returned AssetUse is not a playback grant.
+     */
+    private suspend fun validateRetainedDownload(downloadId: String, bindingIdValue: String) {
+        val presentation = downloads.acquisitionPresentation.value
+        val view = presentation.view
+        val state = view.acquisition
+        if (view.snapshot.revision != state.libraryRevision) {
+            throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "retained_validation_view_stale"))
+        }
+        val entry = downloadSurface(view.snapshot, presentation).entries.singleOrNull { it.id == downloadId }
+            ?: throw VeyraException(AppFailure(FailureCode.NOT_FOUND))
+        val bindingId = ExecutionBindingId(bindingIdValue)
+        val mediaId = entry.mediaId?.takeIf { it.isNotBlank() }
+        if (entry.origin != DownloadSurfaceOrigin.TYPED_CATALOGUE || entry.status != DownloadStatus.FAILED ||
+            !entry.hasOwnedBytes || entry.cleanupPending || entry.ready || mediaId == null ||
+            entry.bindingId != bindingId.value) {
+            throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "retained_validation_evidence_mismatch"))
+        }
+        val execution = try {
+            state.executionContext(bindingId)
+        } catch (failure: VeyraException) {
+            throw failure
+        } catch (_: Exception) {
+            throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "saved_recording_identity_missing"))
+        }
+        val captured = (execution.request.metadata as? MediaCapture)?.media
+        val subject = execution.subject as? ExecutableSubject.CatalogMedia
+        if (captured?.id != mediaId || subject?.mediaId != mediaId ||
+            execution.binding.subjectId != subject.id || execution.binding.recordingId == null) {
+            throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "retained_validation_identity_mismatch"))
+        }
+        // The shared owner's API performs the owned hash/native validation and atomic exact-use
+        // finish. Its return is deliberately not consumed as playback/native authority.
+        downloads.validateRetainedAssetUse(downloadId, bindingId)
+    }
+
+    /**
+     * Explicit saved-R1 play. The UI supplies only the visible media identity and the exact
+     * binding ID from a ready download row. All authority is revalidated here against one paired
+     * canonical download view: the binding's subject/request/receipt/recording must name this
+     * media, an exact R1 AssetUse must exist, and the same current-process verified state must
+     * still be ready. A fresh Play/R2 is never substituted; stale readiness fails closed.
+     */
+    private suspend fun playSaved(item: MediaItem, bindingIdValue: String) {
+        val media = store.state.value.media[item.id]
+            ?: throw VeyraException(AppFailure(FailureCode.NOT_FOUND))
+        val bindingId = ExecutionBindingId(bindingIdValue)
+        val presentation = downloads.acquisitionPresentation.value
+        val view = presentation.view
+        val state = view.acquisition
+        if (view.snapshot.revision != state.libraryRevision) {
+            throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "saved_recording_view_stale"))
+        }
+        val execution = try {
+            state.executionContext(bindingId)
+        } catch (failure: VeyraException) {
+            throw failure
+        } catch (_: Exception) {
+            throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "saved_recording_identity_missing"))
+        }
+        val captured = (execution.request.metadata as? MediaCapture)?.media
+            ?: throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "saved_recording_not_catalogue"))
+        val subject = execution.subject as? ExecutableSubject.CatalogMedia
+            ?: throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "saved_recording_subject_mismatch"))
+        if (captured.id != media.id || captured.kind != media.kind ||
+            subject.mediaId != media.id || execution.binding.subjectId != subject.id ||
+            execution.binding.origin != ExecutionBindingOrigin.TYPED || execution.binding.recordingId == null) {
+            throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "saved_recording_identity_mismatch"))
+        }
+        if (!acquisitionOwner.hasVerifiedLocal(view, presentation.states, bindingId)) {
+            throw VeyraException(AppFailure(
+                if (view.snapshot.settings.offlineOnly) FailureCode.OFFLINE_POLICY else FailureCode.INVALID_STATE,
+                "saved_recording_not_verified"))
+        }
+        val mode = if (media.kind == MediaKind.EPISODE) PlaybackControlsMode.PODCAST else PlaybackControlsMode.MUSIC
+        val context = if (mode == PlaybackControlsMode.PODCAST) QueueContext.PODCAST else QueueContext.MUSIC
+        val queue = state.queues[context]
+            ?: throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "saved_recording_queue_missing"))
+        val existing = queue.displayedOrder.asSequence()
+            .mapNotNull(state.occurrences::get)
+            .firstOrNull { occurrence ->
+                occurrence.controlsMode == mode && (
+                    occurrence.bindingId == bindingId ||
+                        (occurrence.bindingId == null && occurrence.requestId == execution.request.id &&
+                            occurrence.selectionState == OccurrenceSelectionState.PENDING)
+                    )
+            }
+        if (existing != null) {
+            command(PlaybackCommand.PlayOccurrence(context, queue.editRevision, existing.id,
+                expectedBindingId = existing.bindingId?.let { bindingId }))
+        } else {
+            // A new occurrence for the SAME accepted request/outcome; resolution attaches R1,
+            // never a new title capture. One atomic queue admission+activation, no arbitrary ID.
+            val prepared = acquisitionOwner.admissions.single(execution.request, mode,
+                expectedCatalogRevision = view.snapshot.revision)
+            command(PlaybackCommand.AdmitAcquisition(prepared, context, queue.editRevision,
+                QueueAdmissionOperation.REPLACE, activate = true,
+                startOccurrenceId = prepared.occurrences.single().id))
+        }
+        cacheArtwork(listOf(media))
+    }
+
     private fun download(item: MediaItem): Deferred<Boolean> {
         // Freeze the ACTUAL displayed catalogue row at the action boundary. Never refresh it from
         // the store here: a metadata update between tap and admission must not silently replace
@@ -626,6 +735,8 @@ class AppContainer(
             MusicUiAction.LoadMoreCollection -> mutableNavigation.value.detail?.collection?.let { loadCollection(it, true) }
             MusicUiAction.ImportAudio -> fail(AppFailure(FailureCode.UNSUPPORTED_SOURCE))
             is MusicUiAction.Play -> play(listOf(action.item))
+            is MusicUiAction.PlaySaved -> playSaved(action.item, action.bindingId)
+            is MusicUiAction.ValidateRetainedDownload -> validateRetainedDownload(action.downloadId, action.bindingId)
             is MusicUiAction.PlayCollection -> play(action.items, action.shuffle)
             is MusicUiAction.EnqueueCollection -> {
                 require(action.items.isNotEmpty())
@@ -784,6 +895,8 @@ class AppContainer(
                 mutablePodcastDetails.update { it.copy(options = it.options + (action.showId to action.options)) }
             }
             is PodcastAction.PlayEpisode -> play(listOf(episode(action.mediaId)))
+            is PodcastAction.PlaySavedEpisode -> playSaved(episode(action.mediaId), action.bindingId)
+            is PodcastAction.ValidateRetainedDownload -> validateRetainedDownload(action.downloadId, action.bindingId)
             is PodcastAction.StartOver -> if (!restartCurrentPodcast(action.mediaId)) {
                 play(listOf(episode(action.mediaId)), startFromBeginning = true)
             }

@@ -56,6 +56,7 @@ import dev.veyra.ui.design.VeyraIconButton
 import dev.veyra.ui.design.VeyraIcons
 import dev.veyra.ui.design.VeyraSpacing
 import dev.veyra.ui.downloads.DownloadSurfaceEntry
+import dev.veyra.ui.downloads.DownloadSurfaceOrigin
 import dev.veyra.ui.downloads.toDownloadSurfaceEntry
 import dev.veyra.ui.music.PlaybackProvenanceCard
 import dev.veyra.ui.music.PlaybackProvenanceContext
@@ -69,6 +70,9 @@ fun PodcastEpisodeRow(
     showPublisher: Boolean = true,
 ) {
     val strings = LocalStrings.current
+    val savedBinding = state.savedPlayBindingId
+    val play = if (savedBinding != null) PodcastAction.PlaySavedEpisode(state.episode.id, savedBinding)
+    else PodcastAction.PlayEpisode(state.episode.id)
     Card(
         onClick = { onAction(PodcastAction.OpenEpisode(state.episode.id)) },
         modifier = modifier.fillMaxWidth().testTag("podcast-episode-${state.episode.id}"),
@@ -122,7 +126,7 @@ fun PodcastEpisodeRow(
             }
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 TextButton(
-                    onClick = { onAction(PodcastAction.PlayEpisode(state.episode.id)) },
+                    onClick = { onAction(play) },
                     enabled = state.canPlay,
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
                     modifier = Modifier.weight(1f).heightIn(min = 48.dp)
@@ -347,9 +351,12 @@ fun PodcastEpisodeMenu(
 @Composable
 internal fun PodcastEpisodeControls(state: PodcastEpisodeUiState, onAction: (PodcastAction) -> Unit) {
     val strings = LocalStrings.current
+    val savedBinding = state.savedPlayBindingId
+    val play = if (savedBinding != null) PodcastAction.PlaySavedEpisode(state.episode.id, savedBinding)
+    else PodcastAction.PlayEpisode(state.episode.id)
     var confirmStartOver by remember(state.episode.id) { mutableStateOf(false) }
     FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Button(onClick = { onAction(PodcastAction.PlayEpisode(state.episode.id)) }, enabled = state.canPlay,
+        Button(onClick = { onAction(play) }, enabled = state.canPlay,
             modifier = Modifier.podcastActionTarget().testTag("podcast-detail-play").semantics {
                 contentDescription = strings.format(TextKey.PlayItem, state.episode.title)
                 if (state.canResume) stateDescription = strings.format(TextKey.ResumeAt, strings.spokenDuration(state.positionMs))
@@ -563,8 +570,16 @@ internal fun podcastDownloadAction(state: PodcastEpisodeUiState): PodcastDownloa
             PodcastDownloadAction(TextKey.CancelDownload, PodcastAction.CancelDownload(download.id))
         DownloadStatus.PAUSED, DownloadStatus.NEEDS_FOREGROUND ->
             PodcastDownloadAction(TextKey.ResumeDownload, PodcastAction.ResumeDownload(download.id), enabled = !state.offlineOnly)
-        DownloadStatus.FAILED ->
-            PodcastDownloadAction(TextKey.Retry, PodcastAction.ResumeDownload(download.id), enabled = !state.offlineOnly)
+        DownloadStatus.FAILED -> {
+            val retained = download.hasOwnedBytes && !download.cleanupPending && download.origin != DownloadSurfaceOrigin.LEGACY
+            if (retained) {
+                val binding = download.bindingId?.takeIf { download.origin == DownloadSurfaceOrigin.TYPED_CATALOGUE }
+                if (binding != null) PodcastDownloadAction(TextKey.ValidateDownload,
+                    PodcastAction.ValidateRetainedDownload(download.id, binding))
+                else PodcastDownloadAction(TextKey.RetainedValidationUnavailable, action = null, enabled = false)
+            } else PodcastDownloadAction(TextKey.Retry, PodcastAction.ResumeDownload(download.id),
+                enabled = !state.offlineOnly)
+        }
         DownloadStatus.CANCELLED, DownloadStatus.COMPLETE -> newDownload()
     }
 }

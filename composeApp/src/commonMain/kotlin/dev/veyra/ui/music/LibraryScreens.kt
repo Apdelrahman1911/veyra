@@ -282,6 +282,9 @@ private fun DownloadsContent(snapshot: AppSnapshot, onAction: (MusicUiAction) ->
 private fun DownloadRow(entry: DownloadSurfaceEntry, snapshot: AppSnapshot, onAction: (MusicUiAction) -> Unit, options: MusicUiOptions) {
     val strings = LocalStrings.current
     val item = entry.mediaId?.let(snapshot.media::get)
+    val savedBinding = entry.bindingId?.takeIf {
+        entry.ready && entry.origin == DownloadSurfaceOrigin.TYPED_CATALOGUE && it.isNotBlank()
+    }
     var remove by remember(entry.id) { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp).testTag("download-${entry.id}"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (item != null) MetadataText(item.title, Modifier.fillMaxWidth(), style = MaterialTheme.typography.titleMedium, maxLines = 3, overflow = TextOverflow.Ellipsis)
@@ -310,18 +313,44 @@ private fun DownloadRow(entry: DownloadSurfaceEntry, snapshot: AppSnapshot, onAc
         entry.failure?.let { Text(strings.errorFor(it), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (entry.ready || entry.checking) {
-                if (item != null && entry.ready) Button({ onAction(MusicUiAction.Play(item)) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.Play)) }
+                if (item != null && entry.ready) Button(
+                    {
+                        onAction(if (savedBinding != null) MusicUiAction.PlaySaved(item, savedBinding)
+                        else MusicUiAction.Play(item))
+                    },
+                    modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.Play)) }
                 OutlinedButton({ remove = true }, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.RemoveDownload)) }
             } else {
+                val retainedFailure = entry.status == DownloadStatus.FAILED && entry.hasOwnedBytes &&
+                    !entry.cleanupPending && entry.origin != DownloadSurfaceOrigin.LEGACY
                 when (entry.status) {
                     DownloadStatus.RUNNING, DownloadStatus.QUEUED, DownloadStatus.RESOLVING -> TextButton({ onAction(MusicUiAction.PauseDownload(entry.id)) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.PauseDownload)) }
-                    DownloadStatus.PAUSED, DownloadStatus.WAITING_NETWORK, DownloadStatus.NEEDS_FOREGROUND, DownloadStatus.FAILED -> TextButton({ onAction(MusicUiAction.ResumeDownload(entry.id)) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(if (entry.status == DownloadStatus.FAILED) TextKey.Retry else TextKey.ResumeDownload)) }
+                    DownloadStatus.PAUSED, DownloadStatus.WAITING_NETWORK, DownloadStatus.NEEDS_FOREGROUND -> TextButton({ onAction(MusicUiAction.ResumeDownload(entry.id)) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.ResumeDownload)) }
+                    DownloadStatus.FAILED -> if (retainedFailure) {
+                        val binding = entry.bindingId?.takeIf {
+                            entry.origin == DownloadSurfaceOrigin.TYPED_CATALOGUE
+                        }
+                        if (binding != null) TextButton(
+                            { onAction(MusicUiAction.ValidateRetainedDownload(entry.id, binding)) },
+                            modifier = Modifier.heightIn(min = 48.dp).testTag("validate-${entry.id}"),
+                        ) { Text(strings.text(TextKey.ValidateDownload)) }
+                        else Text(
+                            strings.text(TextKey.RetainedValidationUnavailable),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.testTag("validate-unavailable-${entry.id}"),
+                        )
+                    } else TextButton({ onAction(MusicUiAction.ResumeDownload(entry.id)) }, modifier = Modifier.heightIn(min = 48.dp).testTag("retry-${entry.id}")) { Text(strings.text(TextKey.Retry)) }
                     // Only a real catalogue item can start a new catalogue acquisition. A neutral
                     // source-only row retains its own pause/resume/cancel/remove actions.
                     DownloadStatus.CANCELLED, DownloadStatus.COMPLETE -> if (item != null && item.source.provider in options.downloadableProviders) TextButton({ onAction(MusicUiAction.Download(item)) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.Retry)) }
                     DownloadStatus.VERIFYING -> Unit
                 }
-                if (entry.status !in setOf(DownloadStatus.CANCELLED, DownloadStatus.COMPLETE)) TextButton({ onAction(MusicUiAction.CancelDownload(entry.id)) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.CancelDownload)) }
+                if (retainedFailure) {
+                    OutlinedButton({ remove = true }, modifier = Modifier.heightIn(min = 48.dp).testTag("remove-retained-${entry.id}")) { Text(strings.text(TextKey.RemoveDownload)) }
+                } else if (entry.status !in setOf(DownloadStatus.CANCELLED, DownloadStatus.COMPLETE)) {
+                    TextButton({ onAction(MusicUiAction.CancelDownload(entry.id)) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.CancelDownload)) }
+                }
             }
         }
         HorizontalDivider()

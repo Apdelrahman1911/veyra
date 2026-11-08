@@ -108,6 +108,12 @@ internal fun DownloadRecord?.isRecheckingAsset(): Boolean = this != null && asse
     status in setOf(DownloadStatus.VERIFYING, DownloadStatus.NEEDS_FOREGROUND)
 internal fun MusicUiOptions.downloadSurface(snapshot: AppSnapshot): DownloadSurface =
     downloads ?: legacyDownloadSurface(snapshot)
+
+/** Exact typed catalogue R1 from a currently verified ready row; never a title/media lookup. */
+internal fun DownloadSurface?.savedCatalogueBinding(mediaId: String): String? =
+    this?.readyEntryFor(mediaId)
+        ?.takeIf { it.origin == DownloadSurfaceOrigin.TYPED_CATALOGUE && it.ready }
+        ?.bindingId?.takeIf { it.isNotBlank() }
 internal fun DownloadSurfaceEntry.statusText(strings: AppStrings): String = when {
     status == DownloadStatus.COMPLETE && !ready && origin != DownloadSurfaceOrigin.TYPED_SOURCE ->
         strings.text(TextKey.FileUnavailable)
@@ -131,13 +137,17 @@ fun MusicMediaRow(
     val surface = options.downloadSurface(snapshot)
     val download = surface.forMedia(item.id)
     val ready = surface.isDownloaded(item.id)
+    val savedBinding = surface.savedCatalogueBinding(item.id)
     val unavailable = options.unavailableItems[item.id]
     Surface(modifier = modifier.fillMaxWidth().testTag("media-row-${item.id}"), color = if (isCurrent) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.heightIn(min = 72.dp)) {
                 Artwork(item.artworkUrl, item.title, Modifier.size(48.dp), offlineOnly = snapshot.settings.offlineOnly, localPath = item.localArtworkPath)
                 TextButton(
-                    onClick = { onAction(MusicUiAction.Play(item)) },
+                    onClick = {
+                        onAction(if (savedBinding != null) MusicUiAction.PlaySaved(item, savedBinding)
+                        else MusicUiAction.Play(item))
+                    },
                     modifier = Modifier.weight(1f).heightIn(min = 56.dp).testTag("play-${item.id}"),
                     // Multiline metadata must not inherit a pill clip at its corner lines.
                     shape = RectangleShape,
@@ -199,13 +209,31 @@ internal fun MediaActionsMenu(
                     modifier = Modifier.testTag("menu-download-status-${item.id}"), enabled = false)
                 DropdownMenuItem(text = { Text(strings.text(TextKey.RemoveDownload)) }, onClick = { menu = false; removeDownload = true })
             } else if (download != null && download.status !in setOf(DownloadStatus.CANCELLED, DownloadStatus.COMPLETE)) {
+                val retainedFailure = download.status == DownloadStatus.FAILED && download.hasOwnedBytes &&
+                    !download.cleanupPending && download.origin != DownloadSurfaceOrigin.LEGACY
                 when (download.status) {
                     DownloadStatus.QUEUED, DownloadStatus.RESOLVING, DownloadStatus.RUNNING -> DropdownMenuItem(text = { Text(strings.text(TextKey.PauseDownload)) }, onClick = { dispatch(MusicUiAction.PauseDownload(download.id)) })
-                    DownloadStatus.PAUSED, DownloadStatus.WAITING_NETWORK, DownloadStatus.NEEDS_FOREGROUND, DownloadStatus.FAILED -> DropdownMenuItem(text = { Text(strings.text(if (download.status == DownloadStatus.FAILED) TextKey.Retry else TextKey.ResumeDownload)) }, onClick = { dispatch(MusicUiAction.ResumeDownload(download.id)) })
+                    DownloadStatus.PAUSED, DownloadStatus.WAITING_NETWORK, DownloadStatus.NEEDS_FOREGROUND -> DropdownMenuItem(text = { Text(strings.text(TextKey.ResumeDownload)) }, onClick = { dispatch(MusicUiAction.ResumeDownload(download.id)) })
+                    DownloadStatus.FAILED -> if (retainedFailure) {
+                        val binding = download.bindingId?.takeIf {
+                            download.origin == DownloadSurfaceOrigin.TYPED_CATALOGUE
+                        }
+                        if (binding != null) DropdownMenuItem(
+                            text = { Text(strings.text(TextKey.ValidateDownload)) },
+                            onClick = { dispatch(MusicUiAction.ValidateRetainedDownload(download.id, binding)) },
+                            modifier = Modifier.testTag("menu-validate-${item.id}"),
+                        ) else DropdownMenuItem(
+                            text = { Text(strings.text(TextKey.RetainedValidationUnavailable)) },
+                            onClick = {}, enabled = false,
+                            modifier = Modifier.testTag("menu-validate-unavailable-${item.id}"),
+                        )
+                        DropdownMenuItem(text = { Text(strings.text(TextKey.RemoveDownload)) },
+                            onClick = { menu = false; removeDownload = true })
+                    } else DropdownMenuItem(text = { Text(strings.text(TextKey.Retry)) }, onClick = { dispatch(MusicUiAction.ResumeDownload(download.id)) })
                     DownloadStatus.VERIFYING -> DropdownMenuItem(text = { Text(strings.text(TextKey.DownloadVerifying)) }, onClick = {}, enabled = false)
                     DownloadStatus.COMPLETE, DownloadStatus.CANCELLED -> Unit
                 }
-                DropdownMenuItem(text = { Text(strings.text(TextKey.CancelDownload)) }, onClick = { dispatch(MusicUiAction.CancelDownload(download.id)) })
+                if (!retainedFailure) DropdownMenuItem(text = { Text(strings.text(TextKey.CancelDownload)) }, onClick = { dispatch(MusicUiAction.CancelDownload(download.id)) })
             } else if (item.source.provider in options.downloadableProviders) {
                 DropdownMenuItem(text = { Text(strings.text(TextKey.Download)) }, onClick = { dispatch(MusicUiAction.Download(item)) })
             }

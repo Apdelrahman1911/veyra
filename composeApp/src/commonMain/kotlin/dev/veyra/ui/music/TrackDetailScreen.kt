@@ -53,6 +53,7 @@ import dev.veyra.ui.design.MetadataText
 import dev.veyra.ui.design.TextKey
 import dev.veyra.ui.design.VeyraIcons
 import dev.veyra.ui.downloads.DownloadSurface
+import dev.veyra.ui.downloads.DownloadSurfaceOrigin
 import dev.veyra.ui.downloads.DownloadSurfaceEntry
 import dev.veyra.ui.downloads.legacyDownloadSurface
 
@@ -90,6 +91,7 @@ fun TrackDetailScreen(
                     val presentation = trackDetailPresentation(item, snapshot, playback, options.downloads)
                     val ready = presentation.ready
                     val current = presentation.isCurrent
+                    val savedBinding = options.downloads?.savedCatalogueBinding(item.id)
                     val failure = options.unavailableItems[item.id] ?: playback.failure.takeIf { current }
                     item(key = "hero") { TrackHero(item, snapshot) }
                     if (snapshot.settings.offlineOnly) item(key = "offline") {
@@ -108,7 +110,13 @@ fun TrackDetailScreen(
                                 else -> TextKey.Play
                             }
                             Button(
-                                { onAction(if (current) MusicUiAction.TogglePlayPause else MusicUiAction.Play(item)) },
+                                {
+                                    onAction(when {
+                                        current -> MusicUiAction.TogglePlayPause
+                                        savedBinding != null -> MusicUiAction.PlaySaved(item, savedBinding)
+                                        else -> MusicUiAction.Play(item)
+                                    })
+                                },
                                 enabled = current || ready || !snapshot.settings.offlineOnly,
                                 modifier = Modifier.heightIn(min = 48.dp).testTag("track-play"),
                             ) { Text(strings.text(playLabel)) }
@@ -219,6 +227,9 @@ private fun TrackDownloadSection(item: MediaItem, record: DownloadSurfaceEntry?,
     val strings = LocalStrings.current
     val ready = record?.ready == true
     val rechecking = record?.checking == true
+    val retainedFailure = record?.let {
+        it.status == DownloadStatus.FAILED && it.hasOwnedBytes && !it.cleanupPending && it.origin != DownloadSurfaceOrigin.LEGACY
+    } == true
     val supported = item.source.provider in options.downloadableProviders
     var remove by remember(record?.id) { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().testTag("track-download"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -244,12 +255,23 @@ private fun TrackDownloadSection(item: MediaItem, record: DownloadSurfaceEntry?,
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             if (!rechecking) when (record?.status) {
                 DownloadStatus.QUEUED, DownloadStatus.RESOLVING, DownloadStatus.RUNNING -> TextButton({ onAction(MusicUiAction.PauseDownload(record.id)) }, modifier = Modifier.heightIn(min = 48.dp).testTag("track-download-pause")) { Text(strings.text(TextKey.PauseDownload)) }
-                DownloadStatus.PAUSED, DownloadStatus.WAITING_NETWORK, DownloadStatus.NEEDS_FOREGROUND, DownloadStatus.FAILED -> TextButton({ onAction(MusicUiAction.ResumeDownload(record.id)) }, enabled = supported && !offline, modifier = Modifier.heightIn(min = 48.dp).testTag("track-download-resume")) { Text(strings.text(if (record.status == DownloadStatus.FAILED) TextKey.Retry else TextKey.ResumeDownload)) }
+                DownloadStatus.PAUSED, DownloadStatus.WAITING_NETWORK, DownloadStatus.NEEDS_FOREGROUND -> TextButton({ onAction(MusicUiAction.ResumeDownload(record.id)) }, enabled = supported && !offline, modifier = Modifier.heightIn(min = 48.dp).testTag("track-download-resume")) { Text(strings.text(TextKey.ResumeDownload)) }
+                DownloadStatus.FAILED -> if (retainedFailure) {
+                    val binding = record.bindingId?.takeIf {
+                        record.origin == DownloadSurfaceOrigin.TYPED_CATALOGUE
+                    }
+                    if (binding != null) TextButton(
+                        { onAction(MusicUiAction.ValidateRetainedDownload(record.id, binding)) },
+                        modifier = Modifier.heightIn(min = 48.dp).testTag("track-download-validate"),
+                    ) { Text(strings.text(TextKey.ValidateDownload)) }
+                    else Text(strings.text(TextKey.RetainedValidationUnavailable), style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("track-download-validate-unavailable"))
+                } else TextButton({ onAction(MusicUiAction.ResumeDownload(record.id)) }, enabled = supported && !offline, modifier = Modifier.heightIn(min = 48.dp).testTag("track-download-retry")) { Text(strings.text(TextKey.Retry)) }
                 DownloadStatus.VERIFYING -> Unit
                 DownloadStatus.COMPLETE, DownloadStatus.CANCELLED, null -> if (!ready && supported) OutlinedButton({ onAction(MusicUiAction.Download(item)) }, enabled = !offline, modifier = Modifier.heightIn(min = 48.dp).testTag("track-download-start")) { Text(strings.text(if (record == null) TextKey.Download else TextKey.Retry)) }
             }
-            if (record != null && !rechecking && record.status !in setOf(DownloadStatus.COMPLETE, DownloadStatus.CANCELLED)) TextButton({ onAction(MusicUiAction.CancelDownload(record.id)) }, modifier = Modifier.heightIn(min = 48.dp).testTag("track-download-cancel")) { Text(strings.text(TextKey.CancelDownload)) }
-            if (record?.status == DownloadStatus.COMPLETE || rechecking) TextButton({ remove = true }, modifier = Modifier.heightIn(min = 48.dp).testTag("track-download-remove")) { Text(strings.text(TextKey.RemoveDownload)) }
+            if (record != null && !rechecking && !retainedFailure && record.status !in setOf(DownloadStatus.COMPLETE, DownloadStatus.CANCELLED)) TextButton({ onAction(MusicUiAction.CancelDownload(record.id)) }, modifier = Modifier.heightIn(min = 48.dp).testTag("track-download-cancel")) { Text(strings.text(TextKey.CancelDownload)) }
+            if (record?.status == DownloadStatus.COMPLETE || rechecking || retainedFailure) TextButton({ remove = true }, modifier = Modifier.heightIn(min = 48.dp).testTag("track-download-remove")) { Text(strings.text(TextKey.RemoveDownload)) }
         }
         if (!supported && !ready) Text(strings.text(TextKey.SourceRightsRequired), style = MaterialTheme.typography.bodySmall)
     }
