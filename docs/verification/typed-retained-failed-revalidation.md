@@ -198,7 +198,12 @@ adjudications applied:
   inherited healthy-external-writer intent-only case; this is retained and reported, not labelled
   completed for every external-writer scenario.
 - **F5 snapshot.** Job and claims for stale-supersession classification are read from one
-  `repository.state` snapshot.
+  `repository.state` snapshot. A late stale finalizer is benign only with exact evidence: the same
+  producer/ownership generation is terminally `CANCELLED`, `cleanupPending` is false, and every
+  remaining claim for that job is `CANCELLED`. That covers a foreign cancellation completing
+  cleanup before the original execution finalizer loses its durable finish race. The same stale
+  settlement remains fatal when that exact generation is still active (`cleanupPending` true,
+  `QUEUED`/non-cancelled job, unchanged claims); the pre-existing active-stale assertions remain.
 - **Policy measurement.** `DownloadPolicyRoomTest.twoRealRoomSchedulersRespectOneTwoAndFourGlobalSlotsAndLoweredLimit`
   has only the publication synchronization repaired: awaiting `inFlight == limit` now also
   requires the published `maximum >= limit`; the original `assertEquals(limit, maximum)` and all

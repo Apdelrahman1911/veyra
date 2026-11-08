@@ -1625,8 +1625,19 @@ internal class DownloadPhysicalRuntime(
             val superseded = cleanup.epoch.revoked || currentJob == null ||
                 currentJob.ownershipGeneration != cleanup.epoch.physicalOwnershipGeneration ||
                 currentJob.producer != cleanup.epoch.producer || claimsChanged
+            // A late execution finalizer may lose the durable finish race to the foreign
+            // cancellation that already completed cleanup. Exact proof that THIS generation is
+            // terminally cancelled with no cleanup pending and only CANCELLED claims: the stale
+            // write was rejected, nothing is left to drain, so it is not an unknown checkpoint.
+            // The same identity left active/non-cancelled (or with pending cleanup) stays fatal.
+            val terminalCancelled = currentJob != null &&
+                currentJob.status == DownloadStatus.CANCELLED && !currentJob.cleanupPending &&
+                currentJob.producer == cleanup.epoch.producer &&
+                currentJob.ownershipGeneration == cleanup.epoch.physicalOwnershipGeneration &&
+                currentClaims.all { it.intent == DownloadBatchIntent.CANCELLED } &&
+                (claimsChanged || cleanup.expectedClaims.isEmpty())
             val benignStale = cleanup.acceptedDurableOwner && durable == AcquisitionDownloadDurableSettlement.Stale &&
-                (cleanup.maintenanceKind != null && superseded ||
+                (cleanup.maintenanceKind != null && superseded || terminalCancelled ||
                     currentJob?.cleanupPending == true && (cleanup.epoch.revoked || claimsChanged ||
                         currentJob?.ownershipGeneration != cleanup.epoch.physicalOwnershipGeneration) ||
                     cleanup.epoch.revoked && currentJob?.status == DownloadStatus.CANCELLED)
