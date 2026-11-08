@@ -1893,6 +1893,9 @@ class PlaybackController(
             require(queue.editRevision == command.expectedQueueRevision && command.occurrenceId in queue.displayedOrder)
             val old = mutableState.value
             val selection = PlaybackSelection.project(view.library, command.occurrenceId)
+            if (command.expectedBindingId != null && selection.bindingId != command.expectedBindingId) {
+                invalid("playback_binding_changed")
+            }
             if (command.localOnly) {
                 services.resolver.requireExactLocalAuthority(selection.bindingId ?: invalid("saved_local_binding_missing"))
             }

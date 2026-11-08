@@ -99,14 +99,22 @@ class PodcastProgressAppJourneyTest {
                         it.isPlaying && it.activeContext == QueueContext.MUSIC
                     }
                 }
+                val progressView = requireNotNull(fixture.container.podcastProgress.value)
+                val row = fixture.container.store.state.value.podcastEpisodeUiState(episode, progressView = progressView)
+                assertTrue(row.resumeActionable, "cross-context state must expose exact Resume: " +
+                    "current=${progressView.currentEpisodeId}/${progressView.currentRecordingId} " +
+                    "occ=${progressView.currentOccurrenceId} bind=${progressView.currentBindingId} " +
+                    "rev=${progressView.queueRevision} can=${row.canResume} target=${row.resumeOccurrenceId}/${row.resumeBindingId}")
                 val beforeLoads = fixture.engine.loads.size
                 val beforeQueries = fixture.gateway.queries.toList()
                 fixture.container.onPodcastAction(PodcastAction.OpenEpisode(episode.id))
                 withTimeout(20_000L) { fixture.container.navigation.first { it.detail?.kind == DetailKind.EPISODE } }
                 compose.onNodeWithTag("podcast-episode-detail").performScrollToNode(hasTestTag("podcast-detail-play"))
                 compose.onNodeWithTag("podcast-detail-play").assertIsDisplayed().performClick()
-                withTimeout(20_000L) { while (fixture.engine.loads.size <= beforeLoads) delay(20) }
-                val resumed = fixture.engine.loads.last()
+                withTimeout(20_000L) {
+                    while (fixture.engine.loads.drop(beforeLoads).none { it.startPositionMs == 45_000L }) delay(20)
+                }
+                val resumed = fixture.engine.loads.drop(beforeLoads).last()
                 assertEquals(45_000L, resumed.startPositionMs)
                 val state = fixture.container.playback.state.value
                 assertEquals(QueueContext.PODCAST, state.activeContext)

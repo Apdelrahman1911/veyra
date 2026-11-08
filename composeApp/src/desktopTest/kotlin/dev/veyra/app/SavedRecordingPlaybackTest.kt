@@ -16,6 +16,7 @@ import dev.veyra.model.ExecutionBindingId
 import dev.veyra.model.LanguagePreference
 import dev.veyra.model.MediaItem
 import dev.veyra.model.MediaKind
+import dev.veyra.model.OccurrenceSelectionState
 import dev.veyra.model.PodcastShow
 import dev.veyra.model.QueueContext
 import dev.veyra.model.SourceProvider
@@ -54,6 +55,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
@@ -65,6 +67,7 @@ import kotlinx.coroutines.withTimeout
 import kotlin.test.Test
 import kotlin.test.assertFailsWith
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -230,7 +233,10 @@ class SavedRecordingPlaybackTest {
                 val release = CompletableDeferred<Unit>()
                 fixture.playbackHooks.beforeActivate = { entered.complete(Unit); release.await() }
                 try {
-                    fixture.app.onMusicAction(MusicUiAction.PlaySaved(item, binding.value))
+                    val dispatched = async {
+                        fixture.app.playback.dispatch(PlaybackCommand.ResumeOccurrence(QueueContext.MUSIC,
+                            queue.editRevision, occurrence.id, binding, localOnly = true))
+                    }
                     withTimeout(20_000L) { entered.await() }
                     // Deterministic post-preflight/pre-Activate loss: change only the exact durable
                     // claim, not the queue or a native owner. The actor then commits Activate/
@@ -240,15 +246,22 @@ class SavedRecordingPlaybackTest {
                         expectedOwnershipGeneration = job.ownershipGeneration, claimId = claim.id,
                         expectedClaimGeneration = claim.generation, expectedOwnerIntentRevision = claim.ownerIntentRevision,
                         intent = DownloadBatchIntent.CANCELLED, retainCompletedAsset = false,
-                        nowEpochMs = claim.updatedEpochMs + 1,
+                        nowEpochMs = maxOf(job.updatedEpochMs, claim.updatedEpochMs) + 1,
                     ))
                     release.complete(Unit)
+                    // The actor may positively ACK the activation before the asynchronous
+                    // local-only resolver reports loss; the durable queue/checkpoint commit is
+                    // intentionally not rolled back. Observe the exact post-ACK failure instead.
+                    dispatched.await()
                     val failure = withTimeout(20_000L) {
-                        fixture.app.notice.first { it?.failure != null }?.failure
+                        fixture.app.playback.state.first { it.failure != null }.failure
                     }
                     assertNotNull(failure)
                     assertEquals(FailureCode.INVALID_STATE, failure.code)
-                    assertEquals("saved_local_authority_lost", failure.detail)
+                    // Revoking the exact claim at this boundary starts its cleanup reservation;
+                    // the post-admission local-only resolver observes that pending removal before
+                    // any native/online work. This is the actual accepted non-atomic outcome.
+                    assertEquals("offline_asset_removal_pending", failure.detail)
                     val after = fixture.store.acquisitionView().acquisition
                     assertTrue(after.queues.getValue(QueueContext.MUSIC).editRevision > queue.editRevision,
                         "The accepted non-atomic boundary may commit the queue activation")
@@ -268,7 +281,7 @@ class SavedRecordingPlaybackTest {
     }
 
     @Test
-    fun legacyDownloadedPodcastResumeUsesExactQueuedOccurrenceAt45sAndFailsClosedWithoutOne() = runBlocking {
+    fun migratedLegacyPodcastOccurrenceRemainsUnboundAndExposesNoResumeAction() = runBlocking {
         withTimeout(180_000L) {
             val directory = TypedDownloadPresentationSupport.workDirectory()
             val historical = AppContainerSchema2Fixture.seedPodcast(directory)
@@ -279,34 +292,24 @@ class SavedRecordingPlaybackTest {
                 val progress = assertNotNull(podcastProgressView(view))
                 val queue = view.acquisition.queues.getValue(QueueContext.PODCAST)
                 val occurrence = assertNotNull(queue.currentOccurrenceId?.let(view.acquisition.occurrences::get))
-                assertEquals(historical.binding.id, occurrence.bindingId?.value)
+                // The real schema-2 migration deliberately leaves queued history unbound. No
+                // production command may invent the historical binding for that occurrence.
+                assertEquals(OccurrenceSelectionState.LEGACY_UNBOUND, occurrence.selectionState)
+                assertNull(occurrence.bindingId)
+                assertTrue(progress.queuedTargets[historical.item.id].isNullOrEmpty())
                 val ui = fixture.store.state.value.podcastEpisodeUiState(historical.item, progressView = progress)
-                assertTrue(ui.resumeActionable)
-                assertEquals(historical.binding.id, ui.resumeBindingId)
-                assertEquals(occurrence.id.value, ui.resumeOccurrenceId)
-                assertEquals(queue.editRevision, ui.resumeQueueRevision)
-                val beforeGateway = fixture.gatewayCounts
+                assertFalse(ui.resumeActionable)
+                assertNull(ui.resumeBindingId)
+                assertNull(ui.resumeOccurrenceId)
                 val beforeLoads = fixture.engine.legacyLoads.size
-                fixture.app.onPodcastAction(PodcastAction.ResumeEpisode(historical.item.id, ui.resumeBindingId,
-                    ui.resumeOccurrenceId, ui.resumeQueueRevision))
-                withTimeout(20_000L) { while (fixture.engine.legacyLoads.size <= beforeLoads) delay(20) }
-                val load = fixture.engine.legacyLoads.single()
-                assertEquals(45_000L, load.startPositionMs)
-                val state = fixture.app.playback.state.value
-                assertEquals(QueueContext.PODCAST, state.activeContext)
-                assertEquals(historical.binding.id, state.currentSelection?.bindingId?.value)
-                assertEquals(occurrence.id, state.currentSelection?.occurrenceId)
-                assertEquals(beforeGateway, fixture.gatewayCounts,
-                    "Exact legacy local resume must not resolve or transfer online")
-
-                val loadsAfter = fixture.engine.legacyLoads.size
                 fixture.app.onPodcastAction(PodcastAction.ResumeEpisode(historical.item.id, historical.binding.id,
-                    "missing-legacy-occurrence", queue.editRevision))
+                    occurrence.id.value, queue.editRevision))
                 val failure = withTimeout(20_000L) { fixture.app.notice.first { it?.failure != null }?.failure }
                 assertNotNull(failure)
                 assertEquals(FailureCode.INVALID_STATE, failure.code)
                 assertEquals("resume_target_unavailable", failure.detail)
-                assertEquals(loadsAfter, fixture.engine.legacyLoads.size)
+                assertEquals(beforeLoads, fixture.engine.legacyLoads.size)
+                assertEquals(0, fixture.gatewayCounts.preparations)
             } finally {
                 fixture.close()
             }
