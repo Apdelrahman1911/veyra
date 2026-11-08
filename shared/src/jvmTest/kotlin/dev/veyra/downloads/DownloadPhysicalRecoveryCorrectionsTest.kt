@@ -15,7 +15,8 @@ class DownloadPhysicalRecoveryCorrectionsTest {
         val baseAcquires = gate.acquires.get()
         val baseCloses = gate.closes.get()
         val holder = arrayOfNulls<Job>(1)
-        gate.beforeAcquire = { holder[0]?.cancel(CancellationException("authored cancellation at allowance boundary")) }
+        var requested = 0
+        gate.beforeAcquire = { requested++; holder[0]?.cancel(CancellationException("authored cancellation at allowance boundary")) }
         supervisorScope {
             val pending = async(start = CoroutineStart.LAZY) {
                 runCatching { runtime.validateStandaloneAssetUse(PhysicalRuntimeFixture.JOB, contextR2.binding.id) }
@@ -26,6 +27,7 @@ class DownloadPhysicalRecoveryCorrectionsTest {
         }
         assertEquals(baseAcquires + 1, gate.acquires.get())
         assertEquals(baseCloses + 1, gate.closes.get(), "The acquired allowance is closed by the maintenance finally")
+        assertEquals(1, requested, "Exactly the fake host-side-effect request was made and released")
         assertEquals(0, leases.open.get())
         assertTrue(runtime.epochs.allLocalOwnersConsumed())
         assertNull(runtime.drainCheckpointFailure())
@@ -46,6 +48,8 @@ class DownloadPhysicalRecoveryCorrectionsTest {
         runtime.attemptCleanup(cleanup, report = false)
         assertNull(runtime.drainCheckpointFailure(), "A revoked owner's stale finalizer is not an unknown checkpoint")
 
+        repository.state.value = repository.state.value.copy(physicalDownloads = mapOf(
+            PhysicalRuntimeFixture.JOB to currentJob().copy(cleanupPending = true)))
         val active = runtime.epochs.begin(PhysicalRuntimeFixture.JOB, producer(contextR1), 1, null, null, null)
         val activeCleanup = DownloadPhysicalCleanup(runtime, active, emptyList(), acceptedDurableOwner = true,
             maintenanceKind = PhysicalDownloadMaintenanceKind.CLEANUP) {
@@ -56,5 +60,8 @@ class DownloadPhysicalRecoveryCorrectionsTest {
         runtime.epochs.finishAdmission(active)
         runtime.attemptCleanup(activeCleanup, report = false)
         assertEquals(FailureCode.INVALID_STATE, assertNotNull(runtime.drainCheckpointFailure()).code)
+        assertIs<DownloadCleanupObservation.Failed>(runtime.cleanupObservation(PhysicalRuntimeFixture.JOB))
+        assertEquals(FailureCode.INVALID_STATE, assertNotNull(runtime.awaitRemovalOutcome(PhysicalRuntimeFixture.JOB)).code,
+            "A consumed stale owner returns a bounded removal failure instead of waiting for a missing owner")
     }
 }

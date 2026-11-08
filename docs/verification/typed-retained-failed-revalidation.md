@@ -173,3 +173,38 @@ No live source, network transfer, native audio, device/emulator, package, signin
 benchmark operation. Clean final focused `fe8ec66` is 30/30 green; the clean full run retains one
 policy-slot assertion, so no full-shared-green claim is made. The F4 gate-expiry acknowledgment
 and F3 bounded acquire/close remain explicit adjudication items.
+
+## PR20 final recovery successor
+
+This successor topic starts from frozen PR20 `761323c` and preserves its raw evidence. Lead
+adjudications applied:
+
+- **F2 current-availability.** A genuine local `File` or `Native` negative withholds current
+  shared usability and preserves the exact actual failure code; it does not claim physical
+  corruption or that every historical request failed. `UNSUPPORTED_CODEC` remains
+  `UNSUPPORTED_CODEC`, never rewritten to `CORRUPT_MEDIA`; immutable R1 receipt/use/bytes survive,
+  current Ready is withheld, and exact explicit revalidation restores only the requested use.
+  Binding-local stale-member rejection leaves healthy siblings alone. `DECISIONS.md` records this
+  precise contract.
+- **F3 bounded Android host request.** The no-orphan acquire/close protocol is accepted; the
+  acquire may transiently install coverage/enqueue foreground work in the Android gate before the
+  cancellation is observed. This is documented as a bounded host-request limitation, not a
+  side-effect-free claim. The fake deterministic case records the request and exact close.
+- **F4 removal observation.** Removal now reads a coherent durable job/cleanup observation rather
+  than waiting indefinitely for a consumed registry owner. A consumed/failed Stale observation
+  returns a bounded `BACKGROUND_RESTRICTED`/exact recovery failure; a successful foreground retry
+  can complete and return normally. The gate-expiry catch waits for the actual durable cleanup
+  outcome when the caller remains active. The general public `remove(Unit)` contract still has the
+  inherited healthy-external-writer intent-only case; this is retained and reported, not labelled
+  completed for every external-writer scenario.
+- **F5 snapshot.** Job and claims for stale-supersession classification are read from one
+  `repository.state` snapshot.
+- **Policy measurement.** `DownloadPolicyRoomTest.twoRealRoomSchedulersRespectOneTwoAndFourGlobalSlotsAndLoweredLimit`
+  has only the publication synchronization repaired: awaiting `inFlight == limit` now also
+  requires the published `maximum >= limit`; the original `assertEquals(limit, maximum)` and all
+  1/2/4/lowered-limit assertions remain. No oracle was removed or weakened.
+- **F7** remains a core/UI handoff; no UI path is edited here.
+
+New successor evidence uses `.work/verification/pr20-final-recovery-corrections/attempts/` with
+actual argv/before/XML seal/after/drain captured inside the vps-build gate and project-lock
+lifetime. Frozen PR20 evidence remains immutable.

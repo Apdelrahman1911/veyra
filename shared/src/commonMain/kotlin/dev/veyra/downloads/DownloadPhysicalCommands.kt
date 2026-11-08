@@ -201,19 +201,7 @@ internal class DownloadPhysicalCommands(
                     val state = host.state()
                     if (state.suspended || state.failure != null)
                         fail(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")
-                    val owner = runtime.cleanupOwner(id)
-                        ?: (if (state.started) runtime.awaitCleanupOwner(id) else null)
-                        ?: fail(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")
-                    when (val ownerResult = owner.completion.await()) {
-                        is AcquisitionDownloadDurableSettlement.Confirmed -> {
-                            if (repository.physicalDownload(id)?.job?.cleanupPending == true)
-                                fail(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")
-                        }
-                        is AcquisitionDownloadDurableSettlement.Unconfirmed -> throw VeyraException(ownerResult.failure)
-                        AcquisitionDownloadDurableSettlement.Stale ->
-                            fail(FailureCode.RECOVERY_REQUIRED, "download_checkpoint_stale")
-                        null -> fail(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")
-                    }
+                    awaitRemoval(id)
                 }
                 when (val durable = runtime.epochs.durableSettlement(settled)) {
                     is AcquisitionDownloadDurableSettlement.Unconfirmed -> throw VeyraException(durable.failure)
@@ -223,10 +211,25 @@ internal class DownloadPhysicalCommands(
             }
         } catch (error: CancellationException) {
             // A gate expiration cancels the maintenance child after the removal intent was
-            // durably accepted. If the caller itself is still active, the retained cleanup owner
-            // and foreground retry own the physical deletion; do not report a caller failure.
+            // durably accepted. If the caller itself is still active, observe the exact durable
+            // cleanup outcome; a future foreground retry may complete the actual deletion.
             if (pending == null || !currentCoroutineContext().isActive) throw error
+            if (repository.physicalDownload(id)?.job?.cleanupPending == true) awaitRemoval(id)
         } finally { host.signalWork() }
+    }
+
+    /** Bounded truthful removal observation; never waits for an already-consumed owner. */
+    private suspend fun awaitRemoval(id: String) {
+        host.state().failure?.let { throw VeyraException(it) }
+        when (val observation = runtime.cleanupObservation(id)) {
+            is DownloadCleanupObservation.Failed -> throw VeyraException(observation.failure)
+            DownloadCleanupObservation.Completed,
+            DownloadCleanupObservation.InProgress,
+            null -> Unit
+        }
+        runtime.awaitRemovalOutcome(id)?.let { throw VeyraException(it) }
+        if (repository.physicalDownload(id)?.job?.cleanupPending == true)
+            fail(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")
     }
 
     private suspend fun admitAcceptedLocked(requestId: AcquisitionRequestId, requiredBindingId: ExecutionBindingId): String {
