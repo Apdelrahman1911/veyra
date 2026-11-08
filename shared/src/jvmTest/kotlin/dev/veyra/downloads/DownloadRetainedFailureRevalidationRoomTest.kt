@@ -293,6 +293,47 @@ class DownloadRetainedFailureRevalidationRoomTest {
         assertTrue(recovered.assetUses.any { it.requestedBindingId == binding })
     }
 
+    @Test fun unsupportedNativeR2NegativeWithholdsSharedUseButPreservesR1HistoryAndRecovers() = acquisitionDownloadRoomCase {
+        val owner = owner()
+        val batch = enrollOriginUseBatch(owner, count = 2)
+        val initial = owner.store.acquisitionView().acquisition
+        val job = initial.physicalDownloads.values.single()
+        val second = batch.members.single { it.requiredBindingId != job.producer.bindingId }
+        owner.coordinator.start(DownloadActivation.DURABLE_WORK)
+        val published = awaitOriginUsePublication(owner, job.id).acquisition
+        owner.coordinator.start(DownloadActivation.USER_SESSION)
+        val originUse = assertOnlyOriginUse(published, job.id)
+        val asset = published.materializations.getValue(assertNotNull(published.physicalDownloads.getValue(job.id).assetId))
+        owner.validation = { AssetValidation.Invalid(AppFailure(FailureCode.UNSUPPORTED_CODEC, "authored_native_unavailable")) }
+        val rejected = assertIs<AcquisitionDownloadAssetCheck.Unavailable>(owner.adapter.validateMemberAsset(
+            batch.id, second.position, batch.intentRevision, asset.id))
+        assertEquals(FailureCode.UNSUPPORTED_CODEC, rejected.failure.code)
+        idle(owner)
+        val failed = owner.store.acquisitionView().acquisition
+        val failedJob = failed.physicalDownloads.getValue(job.id)
+        assertEquals(DownloadStatus.FAILED, failedJob.status)
+        assertEquals(FailureCode.UNSUPPORTED_CODEC, failedJob.failure?.code)
+        assertEquals(originUse, failed.assetUses.single { it.requestedBindingId == job.producer.bindingId })
+        assertEquals(published.materializations, failed.materializations)
+        assertEquals(published.materializationReceipts, failed.materializationReceipts)
+        assertEquals(DownloadBatchMemberState.FAILED, failed.batches.getValue(batch.id).members.single {
+            it.requiredBindingId == job.producer.bindingId
+        }.state)
+        owner.validation = { AssetValidation.Valid(733) }
+        val use = owner.coordinator.validateRetainedMemberAssetUse(batch.id, second.position,
+            batch.intentRevision, assertNotNull(second.requiredBindingId))
+        assertEquals(second.requiredBindingId, use.requestedBindingId)
+        val recovered = owner.store.acquisitionView().acquisition
+        assertEquals(DownloadStatus.COMPLETE, recovered.physicalDownloads.getValue(job.id).status)
+        assertEquals(originUse, recovered.assetUses.single { it.requestedBindingId == job.producer.bindingId })
+        assertEquals(DownloadBatchMemberState.AVAILABLE, recovered.batches.getValue(batch.id).members.single {
+            it.requiredBindingId == job.producer.bindingId
+        }.state)
+        assertEquals(DownloadBatchMemberState.AVAILABLE, recovered.batches.getValue(batch.id).members.single {
+            it.requiredBindingId == second.requiredBindingId
+        }.state)
+    }
+
     @Test fun directBatchRetainedFinishCannotCrossBindAnotherMember() = acquisitionDownloadRoomCase {
         val owner = owner()
         val batch = enrollOriginUseBatch(owner, count = 2)

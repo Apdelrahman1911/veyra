@@ -7,7 +7,9 @@ import dev.veyra.playback.*
 import dev.veyra.source.execution.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -128,14 +130,31 @@ internal class DownloadPhysicalCleanup(
 ) : DownloadCleanupOwner(newEntityId("download-physical-cleanup")) {
     var durableAttempted = false
     var durableResult: AcquisitionDownloadDurableSettlement? = null
-    /** Exact settlement for a caller waiting on a scheduler-owned failed-file cleanup. */
-    val completion = kotlinx.coroutines.CompletableDeferred<AcquisitionDownloadDurableSettlement?>()
 }
 
 internal class DownloadPhysicalCleanupStep(
     val close: suspend () -> Unit,
     /** A temporary compensation ALREADY failed; initial unwind may not retry that stage. */
     val explicitRetryOnly: Boolean = false,
+)
+
+/** Coherent removal observation independent of a registry owner that may already be consumed. */
+internal sealed interface DownloadCleanupObservation {
+    data object InProgress : DownloadCleanupObservation
+    data object Completed : DownloadCleanupObservation
+    data class Failed(val failure: AppFailure) : DownloadCleanupObservation
+}
+
+/** Observation is generation-scoped so a previous removal cannot settle a newer one. */
+private data class GeneratedCleanupObservation(
+    val ownershipGeneration: Long,
+    val observation: DownloadCleanupObservation,
+)
+
+private data class DownloadRemovalSnapshot(
+    val pending: Boolean,
+    val observation: DownloadCleanupObservation?,
+    val ownerPresent: Boolean,
 )
 
 /**
@@ -175,6 +194,7 @@ internal class DownloadPhysicalRuntime(
     // Neither value resets: a later finalizer cannot re-arm delivery after the first drain.
     private val firstUnknownCheckpointFailure = MutableStateFlow<Throwable?>(null)
     private val unknownCheckpointFailureDelivered = MutableStateFlow(false)
+    private val cleanupObservations = MutableStateFlow<Map<String, GeneratedCleanupObservation>>(emptyMap())
 
     init {
         require(libraryOwner.transactionOwner === repository.transactionOwner) { "Downloads require the same Room transaction owner" }
@@ -989,9 +1009,14 @@ internal class DownloadPhysicalRuntime(
         val relevant = before.scheduleRecord()
         if (kind != PhysicalDownloadMaintenanceKind.CLEANUP && DownloadPhysicalClaimRules.backgroundBlocked(before.job) ||
             before.job.livePhysicalLease(clock.epochMs()) ||
-            !explicitLocalRevalidation && (before.job.nextRetryEpochMs ?: 0) > clock.epochMs() ||
+            // An accepted removal intent owns cleanup regardless of a local validation recheck
+            // deadline; waiting for that deadline would leave the removal forever pending.
+            kind != PhysicalDownloadMaintenanceKind.CLEANUP &&
+                !explicitLocalRevalidation && (before.job.nextRetryEpochMs ?: 0) > clock.epochMs() ||
             !explicitLocalRevalidation &&
-                (physicalClaimDeferredUntil(relevant, kind.physicalClaimKind(), claimDeferrals.value) ?: 0) > clock.epochMs()) return null
+                (physicalClaimDeferredUntil(relevant, kind.physicalClaimKind(), claimDeferrals.value) ?: 0) > clock.epochMs()) {
+            return null
+        }
         val intent = before.finalization
         // Explicit validate may recheck an already-checked exact asset for a new R2; it never
         // bypasses host/lease/coverage/claim/cleanup gates, only the local recheck deadline.
@@ -1015,6 +1040,11 @@ internal class DownloadPhysicalRuntime(
         var lease: DownloadFileLease? = null
         var handedOff = false
         var acceptedDurableOwner = false
+        // A Committed claim may reveal a newer exact fence/claim set than the pre-read snapshot.
+        // Rollback must settle THAT committed identity; using the pre-claim identity leaves the
+        // canonical maintenance lease live forever and blocks every later cleanup pass.
+        var rollbackFence = proposedFence
+        var rollbackClaims = before.claims
         try {
             val paths = maintenancePaths(before, kind)
             lease = files.tryLeasePaths(paths, partial) ?: return null
@@ -1026,6 +1056,8 @@ internal class DownloadPhysicalRuntime(
             }
             if (claimed !is PhysicalDownloadCommit.Committed) return null
             acceptedDurableOwner = true
+            rollbackFence = claimed.value.fence
+            rollbackClaims = claimed.value.physical.claims
             if (claimed.value.fence != proposedFence || maintenancePaths(claimed.value.physical, kind) != paths ||
                 expectedOwner != null && claimed.value.physical.claims.toSet() != expectedOwner.claims.toSet())
                 fail(FailureCode.RECOVERY_REQUIRED, "download_maintenance_join_changed")
@@ -1040,11 +1072,16 @@ internal class DownloadPhysicalRuntime(
         } finally {
             if (!handedOff) withContext(NonCancellable) {
                 rollback(epoch, partial, listOfNotNull(lease), acceptedDurableOwner) {
-                    settle { repository.finishPhysicalDownloadMaintenance(FinishPhysicalDownloadMaintenance(proposedFence,
-                        kind, before.claims, false, null, clock.epochMs())) }
+                    settle { repository.finishPhysicalDownloadMaintenance(FinishPhysicalDownloadMaintenance(rollbackFence,
+                        kind, rollbackClaims, false, null, clock.epochMs())) }
                 }
                 epochs.finishAdmission(epoch)
-                deferClaim(id, kind.physicalClaimKind())
+                // A committed cleanup claim/rollback already made durable progress and released
+                // its exact lease. Re-deferring it behind a virtual/real recheck deadline can
+                // leave an accepted removal pending forever; let the scheduler retry promptly.
+                if (kind == PhysicalDownloadMaintenanceKind.CLEANUP && acceptedDurableOwner)
+                    clearClaimDeferrals(id, kind.physicalClaimKind())
+                else deferClaim(id, kind.physicalClaimKind())
             }
         }
     }
@@ -1190,19 +1227,47 @@ internal class DownloadPhysicalRuntime(
 
     internal fun clearPhysicalClaimDeferrals(id: String) = clearClaimDeferrals(id)
 
-    /** Exact retained cleanup owner, never a "latest owner" guess. */
+    internal fun cleanupObservation(id: String): DownloadCleanupObservation? =
+        cleanupObservations.value[id]?.observation
     internal fun cleanupOwner(id: String): DownloadPhysicalCleanup? =
         host.cleanupRegistry.owners.value.values.filterIsInstance<DownloadPhysicalCleanup>()
-            .filter { it.epoch.downloadId == id }.singleOrNull()
+            .singleOrNull { it.epoch.downloadId == id }
 
-    /** Wait for the scheduler's exact cleanup owner after a caller lost its own claim race. */
-    internal suspend fun awaitCleanupOwner(id: String): DownloadPhysicalCleanup? {
-        cleanupOwner(id)?.let { return it }
-        val state = host.cleanupRegistry.owners.first { current ->
-            current.values.any { it is DownloadPhysicalCleanup && it.epoch.downloadId == id }
+    /**
+     * Bounded observation of a removal whose cleanup may be owned by the scheduler. A present
+     * owner or a terminal pending/observation transition settles it; otherwise the caller fails
+     * within a fixed grace instead of waiting indefinitely for a missing owner. The grace covers
+     * the real handoff between a failed execution finalizer and the scheduler's cleanup claim.
+     */
+    internal suspend fun awaitRemovalOutcome(id: String): AppFailure? {
+        val pending = repository.state.map { state ->
+            val job = state.physicalDownloads[id]
+            (job?.cleanupPending == true) to job?.ownershipGeneration
         }
-        return state.values.filterIsInstance<DownloadPhysicalCleanup>()
-            .filter { it.epoch.downloadId == id }.singleOrNull()
+        val ownerPresent = host.cleanupRegistry.owners.map { owners ->
+            owners.values.any { it is DownloadPhysicalCleanup && it.epoch.downloadId == id }
+        }
+        val observed = combine(pending, cleanupObservations, ownerPresent) { current, observations, hasOwner ->
+            val (isPending, generation) = current
+            val observation = observations[id]?.let { stored ->
+                // A terminal observation from an older removal generation cannot settle this one.
+                if (generation == null || stored.ownershipGeneration >= generation) stored.observation else null
+            }
+            DownloadRemovalSnapshot(isPending, observation, hasOwner)
+        }
+        val initial = withTimeoutOrNull(REMOVAL_OWNER_GRACE_MS) {
+            observed.first { !it.pending || it.ownerPresent || it.observation is DownloadCleanupObservation.Failed }
+        } ?: return AppFailure(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")
+        if (!initial.pending) return null
+        if (!initial.ownerPresent)
+            return (initial.observation as? DownloadCleanupObservation.Failed)?.failure
+                ?: AppFailure(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")
+        // An owner is actually doing the removal; wait for its durable pending/observation
+        // settlement rather than for an owner registry that is legitimately consumed afterwards.
+        val settled = observed.first { !it.pending || !it.ownerPresent }
+        if (!settled.pending) return null
+        return (settled.observation as? DownloadCleanupObservation.Failed)?.failure
+            ?: AppFailure(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")
     }
 
     private fun AcquisitionDownloadMemberKey.expectation(claimId: DownloadClaimId?) = BatchDownloadMemberExpectation(
@@ -1561,11 +1626,16 @@ internal class DownloadPhysicalRuntime(
     internal suspend fun attemptCleanup(cleanup: DownloadPhysicalCleanup, retryFailed: Boolean = false, report: Boolean = true) {
         cleanup.lock.withLock {
             if (cleanup.failed.value && !retryFailed) return@withLock
+            cleanupObservations.update { it + (cleanup.epoch.downloadId to GeneratedCleanupObservation(
+                cleanup.epoch.physicalOwnershipGeneration, DownloadCleanupObservation.InProgress)) }
             try {
                 while (cleanup.nextStep < cleanup.physicalSteps.size) {
                     val step = cleanup.physicalSteps[cleanup.nextStep]
                     if (step.explicitRetryOnly && !retryFailed) {
                         cleanup.failed.value = true
+                        cleanupObservations.update { it + (cleanup.epoch.downloadId to GeneratedCleanupObservation(
+                            cleanup.epoch.physicalOwnershipGeneration, DownloadCleanupObservation.Failed(
+                                AppFailure(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")))) }
                         return@withLock
                     }
                     step.close()
@@ -1573,6 +1643,9 @@ internal class DownloadPhysicalRuntime(
                 }
             } catch (_: Throwable) {
                 cleanup.failed.value = true
+                cleanupObservations.update { it + (cleanup.epoch.downloadId to GeneratedCleanupObservation(
+                    cleanup.epoch.physicalOwnershipGeneration, DownloadCleanupObservation.Failed(
+                        AppFailure(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")))) }
                 return@withLock
             }
             // Room failure is NOT positive durable settlement, but no physical stage remains
@@ -1595,16 +1668,29 @@ internal class DownloadPhysicalRuntime(
             // A stale finalizer from a revoked/superseded owner is not an unknown checkpoint.
             // Its physical stages already ran under the retained cleanup owner; the current
             // physical generation can proceed with its own cleanup/retry or retained settlement.
-            val currentJob = repository.state.value.physicalDownloads[cleanup.epoch.downloadId]
-            val currentClaims = repository.state.value.claims.values.filter {
+            val stateSnapshot = repository.state.value
+            val currentJob = stateSnapshot.physicalDownloads[cleanup.epoch.downloadId]
+            val currentClaims = stateSnapshot.claims.values.filter {
                 it.physicalJobId == cleanup.epoch.downloadId
             }.toSet()
             val claimsChanged = cleanup.expectedClaims.isNotEmpty() && currentClaims != cleanup.expectedClaims.toSet()
             val superseded = cleanup.epoch.revoked || currentJob == null ||
                 currentJob.ownershipGeneration != cleanup.epoch.physicalOwnershipGeneration ||
                 currentJob.producer != cleanup.epoch.producer || claimsChanged
+            // A late execution/rollback finalizer may lose the durable finish race to the foreign
+            // cancellation that already owns or completed cleanup (possibly through a newer
+            // maintenance generation). Exact proof that THIS producer is terminally cancelled:
+            // the current row is CANCELLED at this or a newer generation and every surviving claim
+            // is CANCELLED. The stale write was rejected, nothing active remains, so it is not an
+            // unknown checkpoint. An unchanged/non-cancelled generation or an ACTIVE claim stays
+            // fatal.
+            val cancelledSuperseded = currentJob != null &&
+                currentJob.status == DownloadStatus.CANCELLED &&
+                currentJob.producer == cleanup.epoch.producer &&
+                currentJob.ownershipGeneration >= cleanup.epoch.physicalOwnershipGeneration &&
+                (currentClaims.isEmpty() || currentClaims.all { it.intent == DownloadBatchIntent.CANCELLED })
             val benignStale = cleanup.acceptedDurableOwner && durable == AcquisitionDownloadDurableSettlement.Stale &&
-                (cleanup.maintenanceKind != null && superseded ||
+                (cleanup.maintenanceKind != null && superseded || cancelledSuperseded ||
                     currentJob?.cleanupPending == true && (cleanup.epoch.revoked || claimsChanged ||
                         currentJob?.ownershipGeneration != cleanup.epoch.physicalOwnershipGeneration) ||
                     cleanup.epoch.revoked && currentJob?.status == DownloadStatus.CANCELLED)
@@ -1620,12 +1706,18 @@ internal class DownloadPhysicalRuntime(
             }
             if (!cleanup.acceptedDurableOwner && durable is AcquisitionDownloadDurableSettlement.Unconfirmed)
                 host.publishFailure(durable.failure)
-            if (!cleanup.completion.isCompleted) {
-                val result = durable ?: if (cleanup.failed.value)
-                    AcquisitionDownloadDurableSettlement.Unconfirmed(AppFailure(FailureCode.BACKGROUND_RESTRICTED,
-                        "download_owner_drain_unconfirmed")) else null
-                result?.let { cleanup.completion.complete(it) }
+            val observation = when {
+                currentJob?.cleanupPending == false -> DownloadCleanupObservation.Completed
+                durable is AcquisitionDownloadDurableSettlement.Unconfirmed -> DownloadCleanupObservation.Failed(durable.failure)
+                durable is AcquisitionDownloadDurableSettlement.Stale -> DownloadCleanupObservation.Failed(
+                    if (benignStale) AppFailure(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")
+                    else AppFailure(FailureCode.INVALID_STATE, "download_checkpoint_stale"))
+                cleanup.failed.value || durable == null -> DownloadCleanupObservation.Failed(
+                    AppFailure(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed"))
+                else -> DownloadCleanupObservation.InProgress
             }
+            cleanupObservations.update { it + (cleanup.epoch.downloadId to GeneratedCleanupObservation(
+                cleanup.epoch.physicalOwnershipGeneration, observation)) }
             // Publish the diagnostic BEFORE consuming the owner; no later empty registry loses it.
             epochs.consumedFinalizer(cleanup.epoch, cleanup.token, cleanup)
             host.cleanupRegistry.remove(cleanup)
@@ -1801,6 +1893,8 @@ internal class DownloadPhysicalRuntime(
     private fun fail(code: FailureCode, detail: String): Nothing = throw VeyraException(AppFailure(code, detail))
     private companion object {
         const val LOCAL_RECHECK_MS = 5_000L
+        /** Bounded real handoff allowance for a scheduler-owned removal; never an unbounded wait. */
+        const val REMOVAL_OWNER_GRACE_MS = 5_000L
         val RETRYABLE = setOf(FailureCode.NETWORK_UNAVAILABLE, FailureCode.RATE_LIMITED)
         val STOP_DEMANDS = setOf(DownloadClaimDemand.PAUSE_AND_RETAIN, DownloadClaimDemand.CANCEL_UNFINISHED_KEEP_COMPLETE,
             DownloadClaimDemand.REMOVE_CANDIDATE)

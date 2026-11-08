@@ -173,3 +173,73 @@ No live source, network transfer, native audio, device/emulator, package, signin
 benchmark operation. Clean final focused `fe8ec66` is 30/30 green; the clean full run retains one
 policy-slot assertion, so no full-shared-green claim is made. The F4 gate-expiry acknowledgment
 and F3 bounded acquire/close remain explicit adjudication items.
+
+## PR20 final recovery successor
+
+This successor topic starts from frozen PR20 `761323c` and preserves its raw evidence. Lead
+adjudications applied:
+
+- **F2 current-availability.** A genuine local `File` or `Native` negative withholds current
+  shared usability and preserves the exact actual failure code; it does not claim physical
+  corruption or that every historical request failed. `UNSUPPORTED_CODEC` remains
+  `UNSUPPORTED_CODEC`, never rewritten to `CORRUPT_MEDIA`; immutable R1 receipt/use/bytes survive,
+  current Ready is withheld, and exact explicit revalidation restores only the requested use.
+  Binding-local stale-member rejection leaves healthy siblings alone. `DECISIONS.md` records this
+  precise contract.
+- **F3 bounded Android host request.** The no-orphan acquire/close protocol is accepted; the
+  acquire may transiently install coverage/enqueue foreground work in the Android gate before the
+  cancellation is observed. This is documented as a bounded host-request limitation, not a
+  side-effect-free claim. The fake deterministic case records the request and exact close.
+- **F4 removal observation.** Removal now reads a coherent durable job/cleanup observation rather
+  than waiting indefinitely for a consumed registry owner. When the scheduler owns the cleanup,
+  the caller waits up to 5 s of real handoff time for an actual cleanup owner or a terminal
+  pending/observation transition, then fails bounded; once an owner is present, its durable
+  pending/observation settlement is awaited. Observations are generation-scoped, so a previous
+  removal can never settle a newer one. Explicit cleanup is not blocked by a local validation
+  recheck deadline; a committed maintenance claim whose post-read identity/paths changed rolls
+  back with the exact committed fence/claims and is not re-deferred, avoiding an orphaned
+  maintenance lease. A consumed/failed Stale observation returns a bounded
+  `BACKGROUND_RESTRICTED`/exact recovery failure; a successful foreground retry can complete and
+  return normally. The gate-expiry catch uses the same bounded observation when the caller remains
+  active. The general public `remove(Unit)` contract still has the inherited healthy-external-writer
+  intent-only case; this is retained and reported, not labelled completed for every external-writer
+  scenario.
+- **F5 snapshot.** Job and claims for stale-supersession classification are read from one
+  `repository.state` snapshot. A late execution/rollback stale finalizer is benign only with exact
+  evidence: the same producer is terminally `CANCELLED` at this or a newer ownership generation,
+  and every surviving claim for that job is `CANCELLED` (or no claim survives). This covers a
+  foreign cancellation owning or completing cleanup before the original finalizer loses the
+  durable finish race, including a maintenance generation advance and a rollback finalizer that
+  admitted no claim set. The same stale settlement remains fatal when the exact generation is
+  still active or non-cancelled (`QUEUED`/running, pending work, `ACTIVE` claims); the pre-existing
+  active-stale assertions remain.
+- **Policy measurement.** `DownloadPolicyRoomTest.twoRealRoomSchedulersRespectOneTwoAndFourGlobalSlotsAndLoweredLimit`
+  has only the publication synchronization repaired: awaiting `inFlight == limit` now also
+  requires the published `maximum >= limit`; the original `assertEquals(limit, maximum)` and all
+  1/2/4/lowered-limit assertions remain. No oracle was removed or weakened.
+- **F7** remains a core/UI handoff; no UI path is edited here.
+
+New successor evidence uses `.work/verification/pr20-final-recovery-corrections/attempts/` with
+actual argv/before/XML seal/after/drain captured inside the vps-build gate and project-lock
+lifetime. Frozen PR20 evidence remains immutable.
+
+### Final successor source evidence
+
+Tested source commit `88505eff4b432b5bbfc4f264fd0bcb2dfaf2ce52` (this section is a docs-only
+successor, mirroring the frozen PR20 pattern):
+
+- `final-focused-gated-8`: **51 tests / 6 suites / 0 failures / 0 errors / 0 skips**, exit 0.
+- `final-full-gated-6`: **1,183 tests / 100 suites / 0 failures / 0 errors / 0 skips**, exit 0.
+- `final-full-gated-7` confirmation: **1,183 tests / 100 suites / 0 failures / 0 errors /
+  0 skips**, exit 0.
+
+Each attempt under `.work/verification/pr20-final-recovery-corrections/attempts/` retains the
+in-gate `command.argv` (inner argv, `scripts/gradle.sh --offline`, max workers 1 and the exact
+bounded JVM argument), `before.json`, `before.inputs.sha256`, `after.json`,
+`after.inputs.sha256`, `inputs.equal.txt`, `xml.sha256`, `attempt.sha256`, and drain files.
+Tracked-input manifests are equal and the final drain shows no owned Java/Kotlin process.
+
+Earlier failures are preserved rather than backfilled: `full-shared-gated-2` failed one
+ownership teardown; `full-diag-5` timed out one removal test; diagnostic attempts exposed and
+drove the maintenance-lease and cleanup-deadline fixes above. They are not acceptance evidence.
+Frozen PR20's `full-shared-5` remains 1,181/100 with one policy-slot failure and is not rewritten.
