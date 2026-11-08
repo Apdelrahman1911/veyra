@@ -234,10 +234,9 @@ schema3 `aab30e43a35a431a25a7ecbb7ebccefd849811f688957054304b02d3caf6d367`. `/pr
 and `lslocks` record the actual outer vps-build holder PID/start ticks for the same
 device:inode; the harness did not re-acquire the lock. Drain scans report zero owned matches.
 
-- `final2-compile-1`: exit 0; actually executed `:kmpYT:kmpyt:compileKotlinJvm`
-  (UP-TO-DATE for the existing pin), `:shared:compileKotlinJvm` and
-  `:shared:compileTestKotlinJvm` under `--rerun-tasks`; `run.log` SHA-256
-  `b63175913adc3b2d65fe29158a0a962a23a2b238ca4001022641f9d0b70106d7`, attempt seal
+- `final2-compile-1`: exit 0; actually executed `:kmpYT:kmpyt:compileKotlinJvm`,
+  `:shared:compileKotlinJvm` and `:shared:compileTestKotlinJvm` under `--rerun-tasks`; `run.log`
+  SHA-256 `b63175913adc3b2d65fe29158a0a962a23a2b238ca4001022641f9d0b70106d7`, attempt seal
   `f606a694c089fa6cff035b09e14e4cdd957a5a61e5910067f2a3f466bd1f09c1`.
 - `final2-focused-1`: exit 0; 118 tests / 11 suites / 0 failures / 0 errors / 0 skipped; includes
   both new focused test classes, the real interrupted-retry integration case, the cold-host
