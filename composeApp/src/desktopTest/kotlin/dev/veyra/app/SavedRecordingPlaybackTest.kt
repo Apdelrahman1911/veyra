@@ -211,15 +211,15 @@ class SavedRecordingPlaybackTest {
                 // Make the saved occurrence genuinely non-current so the tested Activate path runs.
                 fixture.app.onMusicAction(MusicUiAction.Enqueue(item, playNext = false))
                 withTimeout(20_000L) {
-                    fixture.store.acquisitionView().acquisition.queues.getValue(QueueContext.MUSIC)
-                        .displayedOrder.size == initialQueue.displayedOrder.size + 1
+                    while (fixture.store.acquisitionView().acquisition.queues.getValue(QueueContext.MUSIC)
+                            .displayedOrder.size != initialQueue.displayedOrder.size + 1) delay(20)
                 }
                 val nextQueue = fixture.store.acquisitionView().acquisition.queues.getValue(QueueContext.MUSIC)
                 val nextOccurrence = nextQueue.displayedOrder.first { it != occurrence.id }
                 fixture.app.onMusicAction(MusicUiAction.PlayQueueEntry(QueueContext.MUSIC, nextOccurrence.value))
                 withTimeout(20_000L) {
-                    fixture.store.acquisitionView().acquisition.queues.getValue(QueueContext.MUSIC)
-                        .currentOccurrenceId == nextOccurrence
+                    while (fixture.store.acquisitionView().acquisition.queues.getValue(QueueContext.MUSIC)
+                            .currentOccurrenceId != nextOccurrence) delay(20)
                 }
                 val before = fixture.store.acquisitionView()
                 val queue = before.acquisition.queues.getValue(QueueContext.MUSIC)
