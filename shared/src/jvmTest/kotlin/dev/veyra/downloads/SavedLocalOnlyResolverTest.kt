@@ -114,9 +114,9 @@ class SavedLocalOnlyResolverTest {
         )
         owner.store.transactAcquisition { graph ->
             val withAsset = graph.withAsset(secondAsset).withJob(secondJob).withClaim(claim)
-            AcquisitionMutation(withAsset.copy(rows = withAsset.rows.copy(
-                assetUseRows = withAsset.rows.assetUseRows + AssetUseEntity(
-                    bindingId.value, secondAsset.id.value, 1, asset.completedEpochMs + 1))))) { Unit }
+            val use = AssetUseEntity(bindingId.value, secondAsset.id.value, 1, asset.completedEpochMs + 1)
+            val nextRows = withAsset.rows.copy(assetUseRows = withAsset.rows.assetUseRows + use)
+            AcquisitionMutation(withAsset.copy(rows = nextRows)) { Unit }
         }
     }
 }
