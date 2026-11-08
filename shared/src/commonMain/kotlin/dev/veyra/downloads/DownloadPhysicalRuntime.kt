@@ -1272,12 +1272,12 @@ internal class DownloadPhysicalRuntime(
             return AppFailure(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")
         // An owner is actually doing the removal; wait for its durable pending/observation
         // settlement rather than for an owner registry that is legitimately consumed afterwards.
-        // A terminal Failed observation settles immediately even if its owner stays registered,
-        // except in the active-caller/cancelled-child path where a controlled foreground retry
-        // may replace a transient cancelled-owner failure.
+        // A terminal Failed observation settles immediately even if its owner stays registered.
+        // A consumed owner with cleanup still pending is not terminal: the scheduler may have
+        // already handed the exact deletion to a newer owner. Wait within the same bound for
+        // either durable completion or a terminal failure.
         val settled = withTimeoutOrNull(removalOwnerGraceMs) {
-            observed.first { !it.pending || !it.ownerPresent ||
-                failedIsTerminal && it.observation is DownloadCleanupObservation.Failed }
+            observed.first { !it.pending || failedIsTerminal && it.observation is DownloadCleanupObservation.Failed }
         } ?: return AppFailure(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")
         if (failedIsTerminal) (settled.observation as? DownloadCleanupObservation.Failed)?.let { return it.failure }
         if (!settled.pending) return null

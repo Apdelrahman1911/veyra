@@ -20,8 +20,16 @@ acceptance is claimed. Frozen PR4/PR17/PR20/PR22/PR23 refs stay unchanged.
   intent, assets, reservations and locks;
 - a detached observation epoch with null durable settlement is never interpreted as completion;
 - caller cancellation still propagates. An active caller whose child cleanup was cancelled may
-  observe a controlled foreground retry; a transient cancelled-owner failure does not become a
-  false success, and the original `cleanupExpiration...` success-after-resume contract remains.
+  observe a controlled foreground retry. Once an owner has been observed, later owner-registry
+  disappearance is not terminal: the observation waits within the same bounded per-phase handoff
+  for durable `cleanupPending=false` or a terminal failure, so a transient cancelled-owner failure
+  does not become false success. The original `cleanupExpiration...` success-after-resume contract
+  remains. The bound is at most two `removalOwnerGraceMs` phases (5 s each), not an inflated
+  timeout;
+- schema2 adoption, which is a destructive replacement, uses the actual-cleanup wait before
+  requiring the legacy generation cleared. It uses terminal-failure semantics and the same
+  per-phase bound; a cold/suspended/closing host reports `BACKGROUND_RESTRICTED`
+  (`download_owner_drain_unconfirmed`) while preserving intent, bytes, journal and locks.
 
 Shared-asset sibling claims are unchanged; removal never deletes bytes still retained by a
 demanding sibling.
@@ -37,6 +45,42 @@ demanding sibling.
 | `DownloadRetainedFailureRevalidationRoomTest.removalImmediatelyAfterRetainedFailureIgnoresFutureLocalRecheckDeadline` (new) | The old suite always advanced 5 s before removal. | `remove` completes actual deletion with a future `nextRetryEpochMs` and **no clock advance**; receipt/use history remains. |
 | `DownloadRecoveryRoomTest.removeWhileHostSuspendedFailsTruthfullyAndSucceedsAfterForegroundResume` (new) | No host-held case. | Suspended-host removal fails truthfully, retains asset/intent; foreground resume then performs actual deletion. |
 | `DownloadRecoveryRoomTest.removeOfActiveStagingWaitsForWriterUnwindAndDeletesOnlyTheActualStagingGeneration` (new) | No no-asset staging completion case. | Active staging writer is joined; `remove` returns only after the staging path is deleted and the attempt/history projection settles. |
+
+## Causal correction after frozen 04b1d07
+
+The captured focused red `cleanupExpirationRetainsAllReferencesThroughNoncancellableUnwindAndOldEpochCallback`
+failed in `final-focused-1` at `0.648 s`, below either five-second wait. The cause is the
+**settled** `awaitRemovalOutcome` predicate treating `!ownerPresent` as terminal after the first
+cleanup owner had been legitimately consumed. The first owner's finalizer removed itself while
+`cleanupPending` was still true; the controlled foreground retry had not yet cleared it. The
+initial owner-presence phase, generation scoping, terminal `Failed` behavior, final authoritative
+asset/staging/finalization/reservation/lease check, caller cancellation propagation and truthful
+missing-owner timeout are preserved.
+
+The correction removes only the `!ownerPresent` clause from the settled predicate. The observation
+now succeeds only on `cleanupPending=false`, returns a terminal `Failed` immediately when that is
+authoritative for the normal path, and otherwise reports the existing bounded
+`BACKGROUND_RESTRICTED`. The dirty 15-second `maxOf` experiment is reverted; it did not alter that
+predicate and its smoke green was timing perturbation, not causal proof. The documented bound is at
+most two `removalOwnerGraceMs` phases (5 s each), and tests inject the grace parameter rather than
+inflating production timeouts.
+
+Deterministic evidence:
+
+- `shared/src/jvmTest/kotlin/dev/veyra/downloads/DownloadRemovalObservationCorrectionsTest.kt`:
+  starts the observation with an owner present, consumes that owner while `cleanupPending` remains,
+  asserts the observer is still waiting, then clears the durable pending flag and asserts success.
+  A normal-removal variant covers the same consumed-owner rule; a missing-owner interrupted case
+  uses a 40 ms injected grace and proves bounded truthful failure with preserved intent.
+- `shared/src/jvmTest/kotlin/dev/veyra/downloads/DownloadRemovalInterruptedRetryRoomTest.kt`:
+  real Room/files/OS-lock integration. The first cleanup owner is cancelled; after its
+  noncancellable unwind is consumed the removal must still be in flight, and a second retry owner
+  is held in a `beforeDelete` barrier while bytes and the path lease are still present. Releasing it
+  yields the original normal success, exact two releases/closes, stale-callback protection and
+  dependency-release assertions.
+- The pre-fix `final-focused-1` red remains a distinct historical observation; its `gate.log` seal
+  mismatch is retained and it is not presented as fully sealed. No synthetic red was manufactured
+  after the fix.
 
 ## P2 — authoritative Room cleanup claim
 
@@ -63,15 +107,48 @@ its claim, and asserts:
 
 ## P4 — observation cases
 
-- A missing-owner case uses a short bounded test clock and proves `BACKGROUND_RESTRICTED` within the
-  handoff, preserving intent.
+- `DownloadRemovalObservationCorrectionsTest` deterministically covers owner-present →
+  owner-consumed-while-pending → still-waiting → real durable cleanup success for both the normal
+  and interrupted paths.
+- A missing-owner interrupted case uses a 40 ms injected grace and proves `BACKGROUND_RESTRICTED`
+  within the bound, preserving intent and generation.
 - A terminal `Failed` owner remains registered but the observation settles immediately instead of
   waiting for owner removal.
-- The consumed-Stale case remains from the previous correction.
+- `DownloadRemovalInterruptedRetryRoomTest` adds the real integration second-retry barrier:
+  removal is still pending after the first owner is consumed, remains pending while the second
+  owner holds the actual delete, then succeeds only after the bytes are deleted. The original
+  `cleanupExpiration...` expiration/native-unwind/old-callback/lease/dependency assertions remain
+  unchanged.
 - Healthy external-writer, host-held no-false-success, and controlled foreground-resume cases are
   real Room/coordinator tests above.
 - Successful cleanup with a live owner and the `cleanupExpiration...` foreground retry remain
   unchanged.
+
+### Schema2 adoption cleanup wait
+
+`adoptSchema2` now waits for actual retired-generation cleanup when durable `cleanupPending`
+survives the inline cleanup attempt, instead of requiring `requireClearedSchema2` immediately:
+
+- the exact request/binding/media validation remains before destructive intent;
+- the wait is outside all admission locks and before the reader drain/adoption commit;
+- `requireIntentCurrent`, exact producer/claim/generation checks, the reader/path barrier, no
+  title lookup and the one-shot adoption command remain authoritative;
+- a cold, suspended, closing or draining host returns `BACKGROUND_RESTRICTED`
+  (`download_owner_drain_unconfirmed`) with intent, journal, bytes and locks preserved; the legacy
+  `RECOVERY_REQUIRED`/`download_legacy_cleanup_required` code is no longer returned for this
+  host-held path;
+- the adoption wait uses terminal-failure semantics and at most two `removalOwnerGraceMs` phases,
+  unlike the interrupted-removal transient-failure tolerance. It does not claim the same policy or
+  duration.
+
+`DownloadSchema2AdoptionRoomTest.adoptionOnColdHostPreservesPendingCleanupInsteadOfAdoptingDestructively`
+is the real-Room cold-host case: the failed removal intent and bytes remain, adoption refuses
+truthfully without an adoption row, activated cleanup deletes the generation, and the explicit
+retry then adopts with the exact request/binding. The existing
+`theRetiredGenerationLockRemainsRequiredAfterTheReaderCallbackAndPriorCleanup` reader-integrity
+case remains unchanged. A deterministic scheduler-owned adoption wait is a residual test gap: the
+scheduler cleanup path itself is covered by `retiredPathCleanup`, but the adoption-specific race
+would need a new test seam; no such seam was added in this scoped correction.
 
 ## P8 — UNSUPPORTED_CODEC evidence
 
@@ -100,6 +177,12 @@ New evidence root: `.work/verification/pr23-removal-contract-corrections/`.
 - Final sequence is committed-source executed compile (`--rerun-tasks`), then focused regressions,
   then one clean full shared suite at the same commit. No source touching is used to force
   execution.
+- Historical red/observation evidence is retained without backfilling: `final-focused-1` at
+  `04b1d07` contains the original 113 tests / 9 suites / 1 failure (`cleanupExpiration...`,
+  0.648 s). Its `run.log`/XML are internally consistent, but its `gate.log` does not match the
+  hash sealed in that attempt's `attempt.sha256`. The mismatch is deliberately left unchanged and
+  that attempt is not described as fully sealed. Clean `04b1d07` compile exit 0 and full
+  1,189/100/0 are distinct observations; the dirty 113/0 smoke is not final acceptance.
 
 ## Attempt inventory
 
@@ -123,6 +206,15 @@ New correction attempts:
 - `full-smoke-2`: 1,189 / 100 / 0, retained pre-final.
 - `harness-smoke-v2*`: harness-only diagnostics; the accepted harness variant and final evidence
   are recorded separately after the final committed-source gates.
+- `observation-fix-1`: focused compile stop; the new test used `async` without a scope. Retained.
+- `observation-fix-2`: 20 tests / 3 suites / 1 red before the settled-owner correction was complete;
+  retained.
+- `removal-debug-*`, `observation-debug-*`: failure-only diagnostic attempts used to isolate the
+  observation branch; not acceptance evidence.
+- `adoption-test-1` through `adoption-test-6`: adoption-branch diagnostics (teardown race and
+  ordering), retained; they are not acceptance evidence.
+- `removal-final-smoke-1`: 26 tests / 4 suites / 0 failures for the observation, integration,
+  adoption and maintenance classes; pre-final only.
 
 Final executed compile/focused/full results are recorded by the docs-only successor commit with
 the exact tested source SHA. No historical evidence was backfilled.

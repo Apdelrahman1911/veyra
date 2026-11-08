@@ -136,6 +136,15 @@ internal class DownloadPhysicalCommands(
                 AcquisitionDownloadDurableSettlement.Stale -> fail(FailureCode.RECOVERY_REQUIRED, "download_checkpoint_stale")
                 else -> Unit // No-resource observation still had the positive canonical intent CAS above.
             }
+            // Adoption is destructive replacement, not an intent-only operation. If the inline
+            // claim lost a transient race or an external scheduler owns cleanup, wait for the
+            // actual physical deletion before requiring a cleared legacy generation.
+            if (repository.physicalDownload(id)?.job?.cleanupPending == true) {
+                val state = host.state()
+                if (!state.started || state.closed || state.suspended || state.drainsInFlight != 0 || state.failure != null)
+                    fail(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")
+                awaitRemoval(id)
+            }
             val drained = host.commands.withLock {
                 requireAdmission()
                 requireIntentCurrent()
