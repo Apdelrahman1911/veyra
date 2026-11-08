@@ -91,11 +91,11 @@ Evidence root (ignored, task-owned):
 `/root/.t3/worktrees/Veyra/t3-100c62d1/.work/verification/pr14-podcast-progress`.
 
 - `result.json` SHA-256:
-  `e1ddc81cf5bc50c5ac6fbb54d4942506e7c4f2dfaeadeb30588faadd036eb5fe`
+  `f6a917946f49fde9638a45c1ad1eac5e0134780bd13c9d7736ba7b96b350b2ee`
 - `inputs-before.json` / `inputs-after.json` (both 519 tracked files) SHA-256:
   `0275dd0998a4b6203c75fd5a951be3b339524fe6ff0246dadadd6bc7481c53ef`
 - Complete evidence manifest SHA-256:
-  `85fd6a56f891515377404cd159be57e457eca52f9b105f2b2984c79dfa4670b0` (55 files)
+  `fa9fc9f16dfd1d20ca2b3c0f28520b4ceb301b0460dda8ce74ebb803b2bd5d39` (59 files)
 - Drain SHA-256: `f8a53dda822482c937d46158dfc7e7b7f2a52ddc3b84c55f3f95cf146049f5bb`;
   no owned JVM/Gradle/test process remained.
 - Genuine red: `run-002-red` preserves the actual AppContainer/Room/controller failure
@@ -103,8 +103,11 @@ Evidence root (ignored, task-owned):
   `0dc6b552ec0b03253c9e3482ecd5753b6b178e82dbc8bf54bd54f5ac98bc6dd9`). The test failed because
   the existing podcast row did not consume canonical `MarkPlayed`; `run-001-red` preserves an
   earlier test-compilation typo (0 tests, no source defect claim).
-- Final green run: `run-011-final`, 10 suites/80 tests/0 failures/errors/skips, log SHA-256
+- Final focused run: `run-011-final`, 10 suites/80 tests/0 failures/errors/skips, log SHA-256
   `d5a45ec01686a175d98a398676cc665956204924bb913c63f4f9021659b50f33`.
+- Additional selected AppContainer podcast lifecycle cases: `run-013-app-podcast`, 5 tests/0
+  failures/errors/skips, log SHA-256
+  `1bf95c54dd6f11fae7821bca0e489ecf95bbcefd65c1c4bcefa5063db96b4d89`.
 - Final compile: `run-010-compile` (`:composeApp:compileKotlinDesktop
   :composeApp:compileTestKotlinDesktop`) exit 0.
 - Android compile: `run-012-android-compile` (`:shared:compileDebugKotlinAndroid
