@@ -4,9 +4,11 @@ import dev.veyra.acquisition.AcquisitionDownloadDurableSettlement
 import dev.veyra.data.*
 import dev.veyra.model.*
 import dev.veyra.playback.Clock
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
@@ -194,6 +196,11 @@ internal class DownloadPhysicalCommands(
                     else -> Unit // A detached idle epoch has no finalizer; the intent CAS above is positive.
                 }
             }
+        } catch (error: CancellationException) {
+            // A gate expiration cancels the maintenance child after the removal intent was
+            // durably accepted. If the caller itself is still active, the retained cleanup owner
+            // and foreground retry own the physical deletion; do not report a caller failure.
+            if (pending == null || !currentCoroutineContext().isActive) throw error
         } finally { host.signalWork() }
     }
 

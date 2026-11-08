@@ -111,7 +111,8 @@ internal fun AcquisitionGraph.applyClaimMaintenance(command: ClaimPhysicalDownlo
                     (claim.intent != DownloadBatchIntent.CANCELLED || claim.retainCompletedAsset)
             })
     }
-    if (!eligible || job.status == DownloadStatus.NEEDS_FOREGROUND || job.failure?.code == FailureCode.BACKGROUND_RESTRICTED ||
+    if (!eligible || command.kind != PhysicalDownloadMaintenanceKind.CLEANUP &&
+        (job.status == DownloadStatus.NEEDS_FOREGROUND || job.failure?.code == FailureCode.BACKGROUND_RESTRICTED) ||
         job.maintenanceKind == PhysicalDownloadMaintenanceKind.CLEANUP && command.kind != PhysicalDownloadMaintenanceKind.CLEANUP) return physicalStale()
     val changed = job.copy(ownershipGeneration = job.ownershipGeneration + 1, leaseOwner = command.owner,
         leaseExpiresEpochMs = command.nowEpochMs + command.leaseDurationMs, maintenanceKind = command.kind,

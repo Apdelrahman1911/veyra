@@ -825,7 +825,7 @@ internal class DownloadPhysicalRuntime(
     private suspend fun finishMaintenance(run: DownloadPhysicalRun, failure: AppFailure?): AcquisitionDownloadDurableSettlement {
         run.published?.let { return AcquisitionDownloadDurableSettlement.Confirmed(it.libraryRevision) }
         val kind = requireNotNull(run.kind)
-        val physicalFailure = failure?.takeUnless {
+        val rawPhysicalFailure = failure?.takeUnless {
             kind == PhysicalDownloadMaintenanceKind.VALIDATE && it.code == FailureCode.INVALID_STATE
         }
         return host.commands.withLock {
@@ -833,9 +833,16 @@ internal class DownloadPhysicalRuntime(
             if (current == null || !sameMaintenanceFence(current, run))
                 return@withLock AcquisitionDownloadDurableSettlement.Stale
             val priorStatus = run.current.job.status
+            // A late host-failure finalizer from an older foreground generation must not suspend
+            // the already-resumed host. Keep the actual local result (if any) instead.
+            val staleHostFailure = kind == PhysicalDownloadMaintenanceKind.VALIDATE &&
+                failure?.code == FailureCode.BACKGROUND_RESTRICTED &&
+                host.state().generation != run.hostGeneration && !host.state().suspended
+            val physicalFailure = if (staleHostFailure) null else rawPhysicalFailure
             val hostBlocked = run.hostFinishStatus.value == DownloadStatus.NEEDS_FOREGROUND &&
                 host.state().generation == run.hostGeneration ||
-                host.state().suspended && !host.state().closed || failure?.code == FailureCode.BACKGROUND_RESTRICTED
+                host.state().suspended && !host.state().closed ||
+                failure?.code == FailureCode.BACKGROUND_RESTRICTED && !staleHostFailure
             // A host-only restriction must not overwrite an already-retained local failure with
             // NEEDS_FOREGROUND (which used to reconcile to a dead QUEUED state). An actual
             // hash/native negative remains the durable failure.
@@ -847,7 +854,7 @@ internal class DownloadPhysicalRuntime(
                 run.hostFinishStatus.value == DownloadStatus.NEEDS_FOREGROUND &&
                     host.state().generation == run.hostGeneration -> DownloadStatus.NEEDS_FOREGROUND
                 host.state().suspended && !host.state().closed ||
-                    failure?.code == FailureCode.BACKGROUND_RESTRICTED -> DownloadStatus.NEEDS_FOREGROUND
+                    failure?.code == FailureCode.BACKGROUND_RESTRICTED && !staleHostFailure -> DownloadStatus.NEEDS_FOREGROUND
                 // Rejection of this exact R2/claim does not corrupt the shared R1 file.
                 kind == PhysicalDownloadMaintenanceKind.VALIDATE && physicalFailure != null -> DownloadStatus.FAILED
                 else -> null
@@ -925,7 +932,8 @@ internal class DownloadPhysicalRuntime(
         if (expectedOwner != null && !sameClaimOwner(before, expectedOwner)) return null
         if (explicitLocalRevalidation && (kind != PhysicalDownloadMaintenanceKind.VALIDATE || requestedBindingId == null)) return null
         val relevant = before.scheduleRecord()
-        if (DownloadPhysicalClaimRules.backgroundBlocked(before.job) || before.job.livePhysicalLease(clock.epochMs()) ||
+        if (kind != PhysicalDownloadMaintenanceKind.CLEANUP && DownloadPhysicalClaimRules.backgroundBlocked(before.job) ||
+            before.job.livePhysicalLease(clock.epochMs()) ||
             !explicitLocalRevalidation && (before.job.nextRetryEpochMs ?: 0) > clock.epochMs() ||
             !explicitLocalRevalidation &&
                 (physicalClaimDeferredUntil(relevant, kind.physicalClaimKind(), claimDeferrals.value) ?: 0) > clock.epochMs()) return null
