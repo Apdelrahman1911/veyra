@@ -139,13 +139,14 @@ tracked-input manifests were compared and were equal for every completed Gradle 
   classes; one `DownloadOwnershipRoomTest` timeout. That method passed alone and in its class
   after the same source, so this is retained as non-reproducible scheduling timing, not a green
   claim for the full batch.
-- `green-full-shared-1` (merge parent) and `green-full-shared-2` (current `1c91140`): each
-  1,177 tests / 99 suites / 0 errors / 0 skips, but one different single-test 15s timeout
-  (`DownloadRecoveryRoomTest.failedReturn...` and `DownloadIntegrityRoomTest.missingCompleted...`
-  respectively). Both methods passed alone and in their classes. No full-shared-green result is
-  claimed. An experimental cleanup-waiter addition was rejected after `green-full-shared-3`
-  exposed 12 timing failures; it was reverted before the current commit and is preserved only as
-  failed evidence.
+- `green-full-shared-1` (merge parent), `green-full-shared-2` (production `1c91140`) and
+  `green-full-shared-4` (final docs head `fa14e1f`): each 1,177 tests / 99 suites / 0 errors /
+  0 skips, but one different single-test failure (two 15s recovery/integrity timeouts and one
+  `DownloadOwnershipRoomTest` teardown `download_checkpoint_stale`). Each affected method passed
+  alone and in its class under the same source. No full-shared-green result is claimed. An
+  experimental cleanup-waiter addition was rejected after `green-full-shared-3` exposed 12 timing
+  failures; it was reverted before the current production head and is preserved only as failed
+  evidence.
 
 The focused API, exact R2/R1 use behavior, Retry rejection, blocked-host/offline, cancellation,
 stale-claim, foreground-return and cleanup-close cases are covered by real Room/commands/runtime
