@@ -164,16 +164,6 @@ class AcquisitionPlaybackResolver(
         return verified.single()
     }
 
-    /** Testable selection policy for the defensive ambiguous/corrupt-graph branch. */
-    internal fun <T> selectVerifiedCandidates(candidates: List<T>, verify: (T) -> Boolean): List<T> =
-        candidates.filter(verify)
-
-    internal fun savedLocalAuthorityFailure(verifiedCount: Int): String? = when (verifiedCount) {
-        1 -> null
-        0 -> "saved_local_authority_lost"
-        else -> "saved_local_asset_ambiguous"
-    }
-
     /** Synchronous coherent final guard for the ordered native worker; never a Room write. */
     fun requireAdmissible(prepared: AcquisitionPlaybackPreparation) {
         checkOpen()
@@ -272,4 +262,14 @@ class AcquisitionPlaybackResolver(
     }
 
     private fun fail(code: FailureCode, detail: String): Nothing = throw VeyraException(AppFailure(code, detail))
+}
+
+/** Testable selection policy for the defensive ambiguous/corrupt-graph branch. */
+internal fun <T> selectVerifiedCandidates(candidates: List<T>, verify: (T) -> Boolean): List<T> =
+    candidates.filter(verify)
+
+internal fun savedLocalAuthorityFailure(verifiedCount: Int): String? = when (verifiedCount) {
+    1 -> null
+    0 -> "saved_local_authority_lost"
+    else -> "saved_local_asset_ambiguous"
 }
