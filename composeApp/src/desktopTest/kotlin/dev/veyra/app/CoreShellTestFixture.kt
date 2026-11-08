@@ -145,7 +145,8 @@ internal class CoreShellTestFixture private constructor(
         )
 
         suspend fun create(initial: AppSnapshot = snapshot(),
-            typedTitles: CoreShellTypedTitles = CoreShellTypedTitles()): CoreShellTestFixture {
+            typedTitles: CoreShellTypedTitles = CoreShellTypedTitles(),
+            neutral: Boolean = false): CoreShellTestFixture {
             require(initial.downloads.isEmpty() && initial.downloadAttempts.isEmpty() &&
                 initial.downloadFinalizations.isEmpty() && initial.playbackBindings.isEmpty() &&
                 initial.progress.isEmpty() && initial.history.isEmpty() &&
@@ -169,7 +170,7 @@ internal class CoreShellTestFixture private constructor(
                 }
                 store.editCatalogLibrary { old -> old.copy(favoriteIds = favorites,
                     savedEpisodeIds = initial.savedEpisodeIds, playlists = playlists) }
-                val seed = CoreShellTypedFixtureSeed.seed(store, typedTitles, coreShellClock)
+                val seed = CoreShellTypedFixtureSeed.seed(store, typedTitles, coreShellClock, neutral)
                 val created = CoreShellTestFixture(directory, store, typedTitles = typedTitles, seed = seed)
                 fixture = created
                 created.container.initialize()

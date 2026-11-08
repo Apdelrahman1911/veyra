@@ -48,6 +48,7 @@ internal data class CoreShellTypedTitles(
         CoreShellTestFixture.music.title -> "AAAAAAAAAAA"
         CoreShellTestFixture.second.title -> "BBBBBBBBBBB"
         CoreShellTestFixture.episode.title -> "CCCCCCCCCCC"
+        CoreShellTestFixture.show.title -> "EEEEEEEEEEE"
         else -> "DDDDDDDDDDD"
     }
 
@@ -55,6 +56,7 @@ internal data class CoreShellTypedTitles(
         CoreShellTestFixture.music.title -> "Authored resolved music — not live audio"
         CoreShellTestFixture.second.title -> "Authored resolved second — not live audio"
         CoreShellTestFixture.episode.title -> "Authored resolved episode — not live audio"
+        CoreShellTestFixture.show.title -> "Authored neutral source recording — not live audio"
         else -> "Authored resolved recording — not live audio"
     }
 
@@ -76,7 +78,8 @@ internal object CoreShellTypedFixtureSeed {
     const val PAUSED_DOWNLOAD_ID = "ui-fixture-paused-download"
     private const val PAUSED_CLAIM_ID = "ui-fixture-paused-claim"
 
-    suspend fun seed(store: LibraryStore, titles: CoreShellTypedTitles, clock: Clock): CoreShellSeedState {
+    suspend fun seed(store: LibraryStore, titles: CoreShellTypedTitles, clock: Clock,
+        neutral: Boolean = false): CoreShellSeedState {
         val seedGateway = CoreShellFixtureGateway(titles, recordQueries = false)
         val captures = AcquisitionCaptureFactory(clock)
         val coordinator = AcquisitionCoordinator(store.acquisition, seedGateway, captures, clock, offline = { false })
@@ -176,6 +179,40 @@ internal object CoreShellTypedFixtureSeed {
         editQueue(QueueContext.PODCAST, listOf(podcastOccurrence.id), podcastOccurrence.id, 25_000L, 1f,
             shuffle = false, repeat = RepeatMode.OFF)
 
+        // Optional authored neutral source recording. It is still a real captured/resolved/attached
+        // production occurrence: a non-catalogue SHOW request receives an authored first result,
+        // is appended and selected. No MediaItem, binding or receipt is fabricated in the seed.
+        val neutralOccurrenceId = if (neutral) {
+            val showRequest = captures.show(CoreShellTestFixture.show)
+            store.acquisition.capture(CaptureAcquisition(showRequest))
+            val beforeAppend = store.acquisitionView().acquisition.queues.getValue(QueueContext.PODCAST)
+            val occurrence = occurrence("neutral-now", showRequest, PlaybackControlsMode.PODCAST)
+            store.acquisition.admitQueue(QueueAcquisitionAdmission(
+                context = QueueContext.PODCAST,
+                expectedQueueRevision = beforeAppend.editRevision,
+                expectedCatalogRevision = null,
+                operation = QueueAdmissionOperation.APPEND,
+                requests = listOf(showRequest),
+                scope = null,
+                occurrences = listOf(occurrence),
+                outgoingCheckpoint = null,
+            ))
+            val resolved = coordinator.resolve(showRequest.id) as? AcquisitionResolution.Accepted
+                ?: error("Authored neutral source recording was not accepted")
+            val single = resolved.record.outcome as? AcquisitionOutcome.Single
+                ?: error("Authored neutral source recording did not produce a Single")
+            val afterAppend = store.acquisitionView().acquisition.queues.getValue(QueueContext.PODCAST)
+            check(store.acquisition.attachOccurrence(AttachAcquisitionOccurrence(
+                OccurrenceAttachmentExpectation(occurrence.id, showRequest.id, QueueContext.PODCAST,
+                    afterAppend.editRevision),
+            ))) { "Authored neutral occurrence could not be attached" }
+            val attached = store.acquisitionView().acquisition.queues.getValue(QueueContext.PODCAST)
+            editQueue(QueueContext.PODCAST, attached.displayedOrder, occurrence.id, 0L, 1f,
+                shuffle = false, repeat = RepeatMode.OFF)
+            bindingIds[occurrence.id.value] = single.bindingId
+            occurrence.id
+        } else null
+
         // A real scheduling-only physical job/claim paused by the canonical intent command. It has no
         // transfer, lease, staging path, asset or fabricated historical observation.
         val musicBinding = bindingIds.getValue("music-now")
@@ -213,7 +250,8 @@ internal object CoreShellTypedFixtureSeed {
         return CoreShellSeedState(
             pausedDownloadId = PAUSED_DOWNLOAD_ID,
             bindingIds = bindingIds.toMap(),
-            occurrenceIds = (musicOccurrences.map { it.id.value } + podcastOccurrence.id.value)
+            occurrenceIds = (musicOccurrences.map { it.id.value } + podcastOccurrence.id.value +
+                listOfNotNull(neutralOccurrenceId?.value))
                 .associateWith { ExecutionOccurrenceId(it) },
         )
     }
@@ -265,7 +303,7 @@ internal class CoreShellFixtureGateway(
 
     override suspend fun acquire(request: AcquisitionRequest): SourceAcquisitionResult {
         noteQuery(request.completeTitle)
-        if (request.metadata !is MediaCapture) return SourceAcquisitionResult.Unplayable(
+        if (request.metadata !is MediaCapture && request.metadata !is ShowCapture) return SourceAcquisitionResult.Unplayable(
             request.id, null, AcquisitionProblem(AcquisitionProblemCode.INVALID_REQUEST))
         val id = titles.recordingId(request.completeTitle)
         val resolved = titles.resolvedTitle(request.completeTitle)
@@ -311,7 +349,7 @@ internal class CoreShellFixtureGateway(
         prepareInvocations.incrementAndGet()
         try {
             currentCoroutineContext().ensureActive()
-            if (context.request.metadata !is MediaCapture) throw VeyraException(
+            if (context.request.metadata !is MediaCapture && context.request.metadata !is ShowCapture) throw VeyraException(
                 AppFailure(FailureCode.UNSUPPORTED_SOURCE, "fixture_media_playback_only"))
             val id = titles.recordingId(context.request.completeTitle)
             val resolved = titles.resolvedTitle(context.request.completeTitle)

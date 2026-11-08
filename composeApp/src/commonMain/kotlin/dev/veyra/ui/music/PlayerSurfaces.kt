@@ -25,7 +25,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -61,11 +60,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.veyra.model.AppSnapshot
-import dev.veyra.model.MediaItem
-import dev.veyra.model.MediaKind
+import dev.veyra.model.PlaybackControlsMode
 import dev.veyra.model.QueueContext
-import dev.veyra.model.QueueEntry
-import dev.veyra.model.QueueSnapshot
 import dev.veyra.model.RepeatMode
 import dev.veyra.playback.PlaybackPhase
 import dev.veyra.playback.PlaybackState
@@ -93,8 +89,9 @@ fun MiniPlayer(
     options: MusicUiOptions = MusicUiOptions(),
     compactHeight: Boolean = false,
 ) {
-    val item = playback.currentItem ?: return
-    val binding = playback.executionBinding?.takeIf { it.mediaId == item.id }
+    // The owner-selected occurrence is the identity. A neutral source recording has no
+    // MediaItem and must still reach the same player surfaces.
+    val identity = playback.surfaceIdentity(snapshot) ?: return
     val strings = LocalStrings.current
     // Short panes reserve room for the actual screen, not a second multi-line detail view.
     // Both identities remain visible here and complete through the OpenPlayer action.
@@ -110,12 +107,12 @@ fun MiniPlayer(
                     // Multiline metadata must not inherit a pill clip at its corner lines.
                     shape = RectangleShape,
                 ) {
-                    Artwork(item.artworkUrl, item.title, Modifier.size(44.dp), offlineOnly = snapshot.settings.offlineOnly, localPath = item.localArtworkPath)
+                    Artwork(identity.artworkUrl, identity.title.orEmpty(), Modifier.size(44.dp), offlineOnly = snapshot.settings.offlineOnly, localPath = identity.localArtworkPath)
                     Column(Modifier.weight(1f).padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        MetadataText(item.title, Modifier.fillMaxWidth(), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface, maxLines = metadataLines, overflow = TextOverflow.Ellipsis)
-                        if (binding != null) {
-                            Text(strings.format(TextKey.ResolvedTitleValue, binding.firstResultTitle), Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = metadataLines, overflow = TextOverflow.Ellipsis)
-                        } else if (item.creator.isNotBlank()) MetadataText(item.creator, Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        MetadataText(identity.title ?: strings.text(TextKey.InformationUnavailable), Modifier.fillMaxWidth(), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface, maxLines = metadataLines, overflow = TextOverflow.Ellipsis)
+                        if (identity.resolvedTitle != null) {
+                            Text(strings.format(TextKey.ResolvedTitleValue, identity.resolvedTitle), Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = metadataLines, overflow = TextOverflow.Ellipsis)
+                        } else if (!identity.creator.isNullOrBlank()) MetadataText(identity.creator!!, Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         if (playback.crossfade?.phase == CrossfadePhase.OVERLAPPING) Text(strings.text(TextKey.CrossfadeActive), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                         if (playback.isBuffering || playback.failure != null) Text(
                             playback.failure?.let(strings::errorFor) ?: strings.text(playbackStatus(playback)),
@@ -145,7 +142,7 @@ fun MiniPlayer(
             }
         }
     }
-    if (timerDialog) SleepTimerDialog(item, playback, onAction, onDismiss = { timerDialog = false })
+    if (timerDialog) SleepTimerDialog(identity, playback, onAction, onDismiss = { timerDialog = false })
 }
 
 /** Layout adapts to its pane, rather than assuming a desktop window or a portrait phone. */
@@ -158,7 +155,7 @@ fun FullPlayer(
     options: MusicUiOptions = MusicUiOptions(),
 ) {
     val strings = LocalStrings.current
-    val item = playback.currentItem
+    val identity = playback.surfaceIdentity(snapshot)
     var timerDialog by remember { mutableStateOf(false) }
     var speedDialog by remember(playback.currentEntryId) { mutableStateOf(false) }
     Surface(modifier.fillMaxSize().testTag("full-player"), color = MaterialTheme.colorScheme.surface) {
@@ -167,7 +164,7 @@ fun FullPlayer(
                 Text(strings.text(TextKey.NowPlaying), Modifier.weight(1f).padding(horizontal = 8.dp).semantics { heading() }, style = MaterialTheme.typography.titleLarge)
                 ActionIcon(VeyraIcons.Close, strings.text(TextKey.ClosePlayer), { onAction(MusicUiAction.ClosePlayer) }, Modifier.testTag("close-player"))
             }
-            if (item == null) {
+            if (identity == null) {
                 EmptyState(strings.text(TextKey.NothingPlaying), strings.text(TextKey.NothingPlayingDescription), strings.text(TextKey.Search), { onAction(MusicUiAction.OpenSearch(SearchKind.ALL)) }, Modifier.fillMaxWidth())
             } else {
                 BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
@@ -184,15 +181,15 @@ fun FullPlayer(
                     ) {
                         if (split) Row(Modifier.widthIn(max = 1_120.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(32.dp)) {
                             Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                                Artwork(item.artworkUrl, item.title, Modifier.widthIn(max = 400.dp).fillMaxWidth().aspectRatio(1f), offlineOnly = snapshot.settings.offlineOnly, localPath = item.localArtworkPath)
+                                Artwork(identity.artworkUrl, identity.title.orEmpty(), Modifier.widthIn(max = 400.dp).fillMaxWidth().aspectRatio(1f), offlineOnly = snapshot.settings.offlineOnly, localPath = identity.localArtworkPath)
                             }
-                            PlayerDetails(item, snapshot, playback, onAction, options, { timerDialog = true }, { speedDialog = true }, Modifier.weight(1f))
+                            PlayerDetails(identity, snapshot, playback, onAction, options, { timerDialog = true }, { speedDialog = true }, Modifier.weight(1f))
                         } else {
                             if (!compactIdentity) {
-                                Artwork(item.artworkUrl, item.title, Modifier.size(224.dp), offlineOnly = snapshot.settings.offlineOnly, localPath = item.localArtworkPath)
+                                Artwork(identity.artworkUrl, identity.title.orEmpty(), Modifier.size(224.dp), offlineOnly = snapshot.settings.offlineOnly, localPath = identity.localArtworkPath)
                                 Spacer(Modifier.height(16.dp))
                             }
-                            PlayerDetails(item, snapshot, playback, onAction, options, { timerDialog = true }, { speedDialog = true },
+                            PlayerDetails(identity, snapshot, playback, onAction, options, { timerDialog = true }, { speedDialog = true },
                                 Modifier.widthIn(max = 560.dp).fillMaxWidth(), compactIdentityLines = if (compactIdentity) identityLines else null)
                         }
                     }
@@ -200,18 +197,18 @@ fun FullPlayer(
                 HorizontalDivider()
                 // Essential pause/seek/skip never sit below an arbitrarily long receipt or
                 // creator name. Resizing and reading details must not hide the active transport.
-                PlayerTransport(item, snapshot, playback, onAction)
+                PlayerTransport(identity, snapshot, playback, onAction)
             }
         }
     }
-    if (timerDialog && item != null) SleepTimerDialog(item, playback, onAction, onDismiss = { timerDialog = false })
-    if (speedDialog && item?.kind == MediaKind.EPISODE) SpeedDialog(item, snapshot, playback, options, onAction, onDismiss = { speedDialog = false })
+    if (timerDialog && identity != null) SleepTimerDialog(identity, playback, onAction, onDismiss = { timerDialog = false })
+    if (speedDialog && identity?.controlsMode == PlaybackControlsMode.PODCAST) SpeedDialog(identity, snapshot, playback, options, onAction, onDismiss = { speedDialog = false })
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun PlayerDetails(
-    item: MediaItem,
+    identity: PlaybackSurfaceIdentity,
     snapshot: AppSnapshot,
     playback: PlaybackState,
     onAction: (MusicUiAction) -> Unit,
@@ -222,60 +219,68 @@ private fun PlayerDetails(
     compactIdentityLines: Int? = null,
 ) {
     val strings = LocalStrings.current
-    val isEpisode = item.kind == MediaKind.EPISODE
+    val podcast = identity.controlsMode == PlaybackControlsMode.PODCAST
     val compactIdentity = compactIdentityLines != null
-    val binding = playback.executionBinding?.takeIf { it.mediaId == item.id }
+    val catalogItem = identity.catalogItem
+    val title = identity.title ?: strings.text(TextKey.InformationUnavailable)
     Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        if (!compactIdentity) Text(strings.format(TextKey.OriginalMetadataSource, providerName(item.source.provider)), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-        MetadataText(item.title, Modifier.fillMaxWidth().testTag("player-title"), style = MaterialTheme.typography.headlineSmall,
+        if (!compactIdentity) identity.listingProvider?.let { provider ->
+            Text(strings.format(TextKey.OriginalMetadataSource, providerName(provider)), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+        }
+        MetadataText(title, Modifier.fillMaxWidth().testTag("player-title"), style = MaterialTheme.typography.headlineSmall,
             maxLines = compactIdentityLines ?: 3, overflow = TextOverflow.Ellipsis)
         if (compactIdentity) {
             // This preview describes only the current owner's receipt, never a latest library
             // lookup. Full immutable query/result titles remain in the disclosure below.
-            binding?.let { receipt ->
-                Text(strings.format(TextKey.ResolvedTitleValue, receipt.firstResultTitle),
+            identity.resolvedTitle?.let { resolved ->
+                Text(strings.format(TextKey.ResolvedTitleValue, resolved),
                     Modifier.fillMaxWidth().testTag("player-resolved-title"), style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = compactIdentityLines ?: 1,
                     overflow = TextOverflow.Ellipsis)
             }
-            Text(strings.format(TextKey.OriginalMetadataSource, providerName(item.source.provider)), Modifier.fillMaxWidth(),
-                style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+            identity.listingProvider?.let { provider ->
+                Text(strings.format(TextKey.OriginalMetadataSource, providerName(provider)), Modifier.fillMaxWidth(),
+                    style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+            }
         }
-        if (item.creator.isNotBlank()) MetadataText(item.creator, Modifier.fillMaxWidth(), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        identity.creator?.takeIf { it.isNotBlank() }?.let { creator ->
+            MetadataText(creator, Modifier.fillMaxWidth(), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(strings.text(playbackStatus(playback)), Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite }, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            ActionIcon(savedIcon(item, snapshot.isSaved(item)), strings.text(savedActionLabel(item, snapshot.isSaved(item))), { onAction(MusicUiAction.ToggleFavorite(item)) }, Modifier.testTag("player-save"), isSelected = snapshot.isSaved(item))
-            MediaActionsMenu(item, snapshot, onAction, options = options)
+            if (catalogItem != null) {
+                ActionIcon(savedIcon(catalogItem, snapshot.isSaved(catalogItem)), strings.text(savedActionLabel(catalogItem, snapshot.isSaved(catalogItem))), { onAction(MusicUiAction.ToggleFavorite(catalogItem)) }, Modifier.testTag("player-save"), isSelected = snapshot.isSaved(catalogItem))
+                MediaActionsMenu(catalogItem, snapshot, onAction, options = options)
+            }
         }
         playback.failure?.let { failure ->
             ErrorState(strings.errorFor(failure), onRetry = { onAction(MusicUiAction.TogglePlayPause) }, modifier = Modifier.fillMaxWidth().testTag("player-error").semantics { liveRegion = LiveRegionMode.Polite })
         }
-        PlaybackProvenanceCard(item, playback.executionBinding)
-        if (isEpisode) {
+        PlaybackProvenanceCard(view = identity.provenance)
+        val facts = playback.activeQueueFacts(snapshot)
+        if (podcast) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 OutlinedButton(openSpeed, modifier = Modifier.heightIn(min = 48.dp).testTag("player-speed"), enabled = availableSpeeds(options.minSpeed, options.maxSpeed).isNotEmpty()) {
                     Text(strings.format(TextKey.SpeedValue, strings.localizeDigits(speedText(playback.effectiveSpeed))))
                 }
-                TextButton({ onAction(MusicUiAction.Next) }, enabled = hasNext(playback.queue), modifier = Modifier.heightIn(min = 48.dp).testTag("player-next-episode")) { Text(strings.text(TextKey.NextEpisode)) }
+                TextButton({ onAction(MusicUiAction.Next) }, enabled = playback.hasNextOccurrence(snapshot), modifier = Modifier.heightIn(min = 48.dp).testTag("player-next-episode")) { Text(strings.text(TextKey.NextEpisode)) }
             }
         } else {
-            val shuffle = playback.queue.shuffle
-            val repeat = playback.queue.repeat
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 OutlinedButton(
-                    { onAction(MusicUiAction.SetShuffle(!shuffle)) },
-                    modifier = Modifier.heightIn(min = 48.dp).testTag("player-shuffle").semantics { selected = shuffle },
+                    { onAction(MusicUiAction.SetShuffle(!facts.shuffle)) },
+                    modifier = Modifier.heightIn(min = 48.dp).testTag("player-shuffle").semantics { selected = facts.shuffle },
                 ) {
                     Icon(VeyraIcons.Shuffle, null, Modifier.size(20.dp).padding(end = 4.dp))
-                    Text(strings.text(if (shuffle) TextKey.ShuffleOn else TextKey.ShuffleOff))
+                    Text(strings.text(if (facts.shuffle) TextKey.ShuffleOn else TextKey.ShuffleOff))
                 }
                 OutlinedButton(
-                    { onAction(MusicUiAction.SetRepeat(nextRepeatMode(repeat))) },
-                    modifier = Modifier.heightIn(min = 48.dp).testTag("player-repeat").semantics { selected = repeat != RepeatMode.OFF },
+                    { onAction(MusicUiAction.SetRepeat(nextRepeatMode(facts.repeat))) },
+                    modifier = Modifier.heightIn(min = 48.dp).testTag("player-repeat").semantics { selected = facts.repeat != RepeatMode.OFF },
                 ) {
                     Icon(VeyraIcons.Repeat, null, Modifier.size(20.dp).padding(end = 4.dp))
                     // Text states all three modes, so repeat-one never relies on colour or a tiny dot.
-                    Text(strings.text(repeatLabel(repeat)))
+                    Text(strings.text(repeatLabel(facts.repeat)))
                 }
             }
         }
@@ -296,20 +301,20 @@ private fun PlayerDetails(
 }
 
 @Composable
-private fun PlayerTransport(item: MediaItem, snapshot: AppSnapshot, playback: PlaybackState, onAction: (MusicUiAction) -> Unit) {
+private fun PlayerTransport(identity: PlaybackSurfaceIdentity, snapshot: AppSnapshot, playback: PlaybackState, onAction: (MusicUiAction) -> Unit) {
     val strings = LocalStrings.current
-    val isEpisode = item.kind == MediaKind.EPISODE
+    val podcast = identity.controlsMode == PlaybackControlsMode.PODCAST
     Surface(Modifier.fillMaxWidth().testTag("player-transport"), color = MaterialTheme.colorScheme.surfaceContainerLow) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Column(Modifier.widthIn(max = 640.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 PlayerSeek(playback, onAction)
                 MediaDirection {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically) {
-                        if (isEpisode) SkipButton(-snapshot.settings.skipBackSeconds.toLong() * 1_000L, strings.format(TextKey.SkipBackSeconds, strings.number(snapshot.settings.skipBackSeconds.toLong())), VeyraIcons.SkipBack, playback, onAction, "player-skip-back")
+                        if (podcast) SkipButton(-snapshot.settings.skipBackSeconds.toLong() * 1_000L, strings.format(TextKey.SkipBackSeconds, strings.number(snapshot.settings.skipBackSeconds.toLong())), VeyraIcons.SkipBack, playback, onAction, "player-skip-back")
                         else ActionIcon(VeyraIcons.Previous, strings.text(TextKey.Previous), { onAction(MusicUiAction.Previous) }, Modifier.testTag("player-previous"))
                         PlayPauseButton(playback, onAction, Modifier.size(64.dp).testTag("player-toggle"), prominent = true)
-                        if (isEpisode) SkipButton(snapshot.settings.skipForwardSeconds.toLong() * 1_000L, strings.format(TextKey.SkipForwardSeconds, strings.number(snapshot.settings.skipForwardSeconds.toLong())), VeyraIcons.SkipForward, playback, onAction, "player-skip-forward")
-                        else ActionIcon(VeyraIcons.Next, strings.text(TextKey.Next), { onAction(MusicUiAction.Next) }, Modifier.testTag("player-next"), enabled = hasNext(playback.queue))
+                        if (podcast) SkipButton(snapshot.settings.skipForwardSeconds.toLong() * 1_000L, strings.format(TextKey.SkipForwardSeconds, strings.number(snapshot.settings.skipForwardSeconds.toLong())), VeyraIcons.SkipForward, playback, onAction, "player-skip-forward")
+                        else ActionIcon(VeyraIcons.Next, strings.text(TextKey.Next), { onAction(MusicUiAction.Next) }, Modifier.testTag("player-next"), enabled = playback.hasNextOccurrence(snapshot))
                     }
                 }
             }
@@ -327,15 +332,21 @@ private fun CrossfadeStatus(crossfade: CrossfadeState) {
     }
     Column(Modifier.fillMaxWidth().testTag("player-crossfade"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(strings.text(label), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-        // Incoming identity is discovery/selection metadata, not a claim that title-search
-        // resolved a matching recording. A neutral typed recording has no catalogue MediaItem.
-        val incoming = crossfade.incomingItem
-        val incomingTitle = incoming?.title ?: crossfade.incomingSelection?.primaryDisplay?.title
-        incomingTitle?.let { Text(strings.format(TextKey.RequestedTitleValue, it), style = MaterialTheme.typography.bodySmall) }
-        if (incoming != null) {
-            crossfade.incomingExecutionBinding?.takeIf { it.mediaId == incoming.id }?.let { binding ->
-                PlaybackProvenanceCard(incoming, binding, compact = true, context = PlaybackProvenanceContext.INCOMING)
+        // Incoming identity is the exact silent-deck selection. Requested A, captured B and
+        // executed C stay labelled as themselves; a neutral recording has no catalogue item.
+        val incoming = crossfade.incomingView()
+        incoming?.title?.let { title ->
+            val key = when (incoming.identity) {
+                IncomingIdentity.EXECUTED_RESULT -> TextKey.ResolvedTitleValue
+                IncomingIdentity.OBSERVED_MEMBER -> TextKey.CapturedMemberTitleValue
+                IncomingIdentity.REQUESTED -> TextKey.RequestedTitleValue
             }
+            Text(strings.format(key, title), style = MaterialTheme.typography.bodySmall)
+        }
+        // The disclosure appears only for an exact receipt. A pending request is still described
+        // by its requested/captured/executed label above, and no legacy row is borrowed.
+        incoming?.provenance?.let { view ->
+            PlaybackProvenanceCard(view = view, compact = true, context = PlaybackProvenanceContext.INCOMING)
         }
         if (crossfade.phase == CrossfadePhase.OVERLAPPING) MediaDirection {
             val progress = crossfade.fraction.takeIf { it.isFinite() }?.coerceIn(0f, 1f) ?: 0f
@@ -431,11 +442,12 @@ private fun TimerStatus(timer: SleepTimerState, onOpen: () -> Unit, onCancel: ()
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun SleepTimerDialog(item: MediaItem, playback: PlaybackState, onAction: (MusicUiAction) -> Unit, onDismiss: () -> Unit) {
+private fun SleepTimerDialog(identity: PlaybackSurfaceIdentity, playback: PlaybackState, onAction: (MusicUiAction) -> Unit, onDismiss: () -> Unit) {
     val strings = LocalStrings.current
     var minutes by remember { mutableStateOf("30") }
-    var endOfEpisode by remember(item.id) { mutableStateOf(false) }
+    var endOfEpisode by remember(identity.key) { mutableStateOf(false) }
     val validMinutes = validatedTimerMinutes(minutes)
+    val podcast = identity.controlsMode == PlaybackControlsMode.PODCAST
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(strings.text(TextKey.SleepTimer)) },
@@ -457,14 +469,14 @@ private fun SleepTimerDialog(item: MediaItem, playback: PlaybackState, onAction:
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth().testTag("sleep-minutes"),
                 )
-                if (item.kind == MediaKind.EPISODE) FilterChip(endOfEpisode, { endOfEpisode = true }, { Text(strings.text(TextKey.EndOfEpisode)) }, modifier = Modifier.heightIn(min = 48.dp).testTag("sleep-episode-end"))
+                if (podcast) FilterChip(endOfEpisode, { endOfEpisode = true }, { Text(strings.text(TextKey.EndOfEpisode)) }, modifier = Modifier.heightIn(min = 48.dp).testTag("sleep-episode-end"))
                 if (playback.sleepTimer != null) TextButton({ onAction(MusicUiAction.ClearSleepTimer); onDismiss() }, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.CancelTimer)) }
             }
         },
         confirmButton = {
             TextButton(
                 {
-                    if (endOfEpisode && item.kind == MediaKind.EPISODE) onAction(MusicUiAction.SleepAtEpisodeEnd)
+                    if (endOfEpisode && podcast) onAction(MusicUiAction.SleepAtEpisodeEnd)
                     else validMinutes?.let { onAction(MusicUiAction.SetSleepMinutes(it)) }
                     onDismiss()
                 },
@@ -478,11 +490,12 @@ private fun SleepTimerDialog(item: MediaItem, playback: PlaybackState, onAction:
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun SpeedDialog(item: MediaItem, snapshot: AppSnapshot, playback: PlaybackState, options: MusicUiOptions, onAction: (MusicUiAction) -> Unit, onDismiss: () -> Unit) {
+private fun SpeedDialog(identity: PlaybackSurfaceIdentity, snapshot: AppSnapshot, playback: PlaybackState, options: MusicUiOptions, onAction: (MusicUiAction) -> Unit, onDismiss: () -> Unit) {
     val strings = LocalStrings.current
     val supported = availableSpeeds(options.minSpeed, options.maxSpeed)
-    var speed by remember(item.id) { mutableStateOf(playback.speed) }
-    var forThisShow by remember(item.id) { mutableStateOf(item.showId != null && item.showId in snapshot.settings.showSpeeds) }
+    val showId = identity.catalogItem?.showId
+    var speed by remember(identity.key) { mutableStateOf(playback.speed) }
+    var forThisShow by remember(identity.key) { mutableStateOf(showId != null && showId in snapshot.settings.showSpeeds) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(strings.text(TextKey.PlaybackSpeed)) },
@@ -493,7 +506,7 @@ private fun SpeedDialog(item: MediaItem, snapshot: AppSnapshot, playback: Playba
                         FilterChip(speed == rate, { speed = rate }, { Text(strings.format(TextKey.SpeedValue, strings.localizeDigits(speedText(rate)))) }, modifier = Modifier.heightIn(min = 48.dp).testTag("speed-$rate"))
                     }
                 }
-                if (item.showId != null) {
+                if (showId != null) {
                     Text(strings.text(TextKey.SpeedScope), style = MaterialTheme.typography.labelLarge)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         FilterChip(forThisShow, { forThisShow = true }, { Text(strings.text(TextKey.ThisShow)) }, modifier = Modifier.heightIn(min = 48.dp))
@@ -520,11 +533,8 @@ fun QueuePanel(
     options: MusicUiOptions = MusicUiOptions(),
 ) {
     val strings = LocalStrings.current
-    val queue = if (playback.initialized) playback.queues[viewedContext] ?: snapshot.queue(viewedContext) else snapshot.queue(viewedContext)
-    val pending = remember(queue.entries, queue.currentEntryId) {
-        val pendingIds = pendingOccurrenceIds(queue.entries.map { it.id }, queue.currentEntryId).toSet()
-        queue.entries.filter { it.id in pendingIds }
-    }
+    val surface = playback.queueSurface(viewedContext, snapshot)
+    val pending = surface.upcoming
     var clear by remember(viewedContext) { mutableStateOf(false) }
     LazyColumn(modifier.fillMaxSize().testTag("queue-panel"), contentPadding = PaddingValues(bottom = 24.dp)) {
         item {
@@ -535,14 +545,13 @@ fun QueuePanel(
                 }
             }
             Text(strings.format(TextKey.ViewingQueue, strings.text(queueLabel(viewedContext))), Modifier.padding(horizontal = 20.dp, vertical = 4.dp), style = MaterialTheme.typography.bodyMedium)
-            if (playback.currentItem != null) Text(strings.format(TextKey.ActiveQueue, strings.text(queueLabel(playback.activeContext))), Modifier.padding(horizontal = 20.dp, vertical = 4.dp).testTag("active-queue-label"), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+            if (playback.hasCurrent) Text(strings.format(TextKey.ActiveQueue, strings.text(queueLabel(playback.activeContext))), Modifier.padding(horizontal = 20.dp, vertical = 4.dp).testTag("active-queue-label"), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
         }
-        queue.currentEntry?.let { current ->
-            item(key = "queue-current-${current.id}") {
+        surface.current?.let { current ->
+            item(key = "queue-current-${current.entryId}") {
                 SectionTitle(strings.text(TextKey.CurrentItem))
-                val audible = viewedContext == playback.activeContext && current.id == playback.currentEntryId
-                val currentItem = if (audible) playback.currentItem ?: snapshot.media[current.mediaId] else snapshot.media[current.mediaId]
-                QueueOccurrence(current, currentItem, snapshot, viewedContext, onAction, options, audible, isCurrent = true)
+                val audible = viewedContext == playback.activeContext && current.entryId == playback.currentEntryId
+                QueueOccurrence(current, snapshot, viewedContext, onAction, options, audible, isCurrent = true)
             }
         }
         item {
@@ -551,26 +560,25 @@ fun QueuePanel(
                 TextButton({ clear = true }, enabled = pending.isNotEmpty(), modifier = Modifier.heightIn(min = 48.dp).testTag("clear-upcoming")) { Text(strings.text(TextKey.ClearUpcoming)) }
                 if (viewedContext in options.undoableQueueContexts) TextButton({ onAction(MusicUiAction.UndoQueue(viewedContext)) }, modifier = Modifier.heightIn(min = 48.dp).testTag("undo-queue")) { Text(strings.text(TextKey.UndoQueueEdit)) }
             }
-            if (queue.shuffle && pending.size > 1) Text(strings.text(TextKey.ReorderTurnsOffShuffle), Modifier.padding(horizontal = 20.dp, vertical = 8.dp).testTag("queue-reorder-warning"), style = MaterialTheme.typography.bodyMedium)
+            if (surface.shuffle && pending.size > 1) Text(strings.text(TextKey.ReorderTurnsOffShuffle), Modifier.padding(horizontal = 20.dp, vertical = 8.dp).testTag("queue-reorder-warning"), style = MaterialTheme.typography.bodyMedium)
         }
         if (pending.isEmpty()) item {
             EmptyState(strings.text(TextKey.QueueEmpty), strings.text(TextKey.QueueEmptyDescription), strings.text(if (viewedContext == QueueContext.PODCAST) TextKey.FindPodcasts else TextKey.SearchMusic), { onAction(MusicUiAction.OpenSearch(if (viewedContext == QueueContext.PODCAST) SearchKind.PODCASTS else SearchKind.MUSIC)) }, Modifier.padding(horizontal = 20.dp))
         }
-        itemsIndexed(pending, key = { _, entry -> entry.id }) { index, entry ->
+        itemsIndexed(pending, key = { _, row -> row.entryId }) { index, row ->
             Column(Modifier.fillMaxWidth()) {
-                val item = snapshot.media[entry.mediaId]
-                QueueOccurrence(entry, item, snapshot, viewedContext, onAction, options, audible = false)
-                val title = item?.title ?: strings.text(TextKey.InformationUnavailable)
+                QueueOccurrence(row, snapshot, viewedContext, onAction, options, audible = false)
+                val title = row.title ?: strings.text(TextKey.InformationUnavailable)
                 FlowRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.End) {
                     ActionIcon(VeyraIcons.ArrowUp, strings.format(TextKey.MoveEntryUp, title), {
-                        val toIndex = queue.entries.indexOfFirst { it.id == pending[index - 1].id }
-                        onAction(MusicUiAction.MoveQueueEntry(viewedContext, entry.id, toIndex))
-                    }, Modifier.testTag("queue-up-${entry.id}"), enabled = index > 0, stateLabel = if (queue.shuffle) strings.text(TextKey.ReorderTurnsOffShuffle) else null)
+                        val toIndex = surface.displayedIds.indexOf(pending[index - 1].entryId)
+                        if (toIndex >= 0) onAction(MusicUiAction.MoveQueueEntry(viewedContext, row.entryId, toIndex))
+                    }, Modifier.testTag("queue-up-${row.entryId}"), enabled = index > 0, stateLabel = if (surface.shuffle) strings.text(TextKey.ReorderTurnsOffShuffle) else null)
                     ActionIcon(VeyraIcons.ArrowDown, strings.format(TextKey.MoveEntryDown, title), {
-                        val toIndex = queue.entries.indexOfFirst { it.id == pending[index + 1].id }
-                        onAction(MusicUiAction.MoveQueueEntry(viewedContext, entry.id, toIndex))
-                    }, Modifier.testTag("queue-down-${entry.id}"), enabled = index < pending.lastIndex, stateLabel = if (queue.shuffle) strings.text(TextKey.ReorderTurnsOffShuffle) else null)
-                    ActionIcon(VeyraIcons.Delete, strings.text(TextKey.RemoveFromQueue), { onAction(MusicUiAction.RemoveQueueEntry(viewedContext, entry.id)) }, Modifier.testTag("queue-remove-${entry.id}"))
+                        val toIndex = surface.displayedIds.indexOf(pending[index + 1].entryId)
+                        if (toIndex >= 0) onAction(MusicUiAction.MoveQueueEntry(viewedContext, row.entryId, toIndex))
+                    }, Modifier.testTag("queue-down-${row.entryId}"), enabled = index < pending.lastIndex, stateLabel = if (surface.shuffle) strings.text(TextKey.ReorderTurnsOffShuffle) else null)
+                    ActionIcon(VeyraIcons.Delete, strings.text(TextKey.RemoveFromQueue), { onAction(MusicUiAction.RemoveQueueEntry(viewedContext, row.entryId)) }, Modifier.testTag("queue-remove-${row.entryId}"))
                 }
                 HorizontalDivider()
             }
@@ -580,22 +588,31 @@ fun QueuePanel(
 }
 
 @Composable
-private fun QueueOccurrence(entry: QueueEntry, item: MediaItem?, snapshot: AppSnapshot, context: QueueContext, onAction: (MusicUiAction) -> Unit, options: MusicUiOptions, audible: Boolean, isCurrent: Boolean = false) {
+private fun QueueOccurrence(row: QueueItemRow, snapshot: AppSnapshot, context: QueueContext, onAction: (MusicUiAction) -> Unit, options: MusicUiOptions, audible: Boolean, isCurrent: Boolean = false) {
     val strings = LocalStrings.current
-    Surface(color = if (audible) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth().testTag("queue-entry-${entry.id}").semantics { selected = isCurrent }) {
+    Surface(color = if (audible) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth().testTag("queue-entry-${row.entryId}").semantics { selected = isCurrent }) {
         Column {
-            TextButton({ onAction(MusicUiAction.PlayQueueEntry(context, entry.id)) }, enabled = item != null, modifier = Modifier.fillMaxWidth().heightIn(min = 72.dp).testTag("queue-play-${entry.id}"), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp)) {
-                Artwork(item?.artworkUrl, item?.title.orEmpty(), Modifier.size(48.dp), offlineOnly = snapshot.settings.offlineOnly, localPath = item?.localArtworkPath)
+            TextButton({ onAction(MusicUiAction.PlayQueueEntry(context, row.entryId)) }, enabled = row.playable, modifier = Modifier.fillMaxWidth().heightIn(min = 72.dp).testTag("queue-play-${row.entryId}"), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp)) {
+                Artwork(row.artworkUrl, row.title.orEmpty(), Modifier.size(48.dp), offlineOnly = snapshot.settings.offlineOnly, localPath = row.localArtworkPath)
                 Column(Modifier.weight(1f).padding(start = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    if (item != null) {
-                        MetadataText(item.title, Modifier.fillMaxWidth(), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface, maxLines = 3, overflow = TextOverflow.Ellipsis)
-                        if (item.creator.isNotBlank()) MetadataText(item.creator, Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(providerName(item.source.provider), style = MaterialTheme.typography.labelSmall)
-                    } else Text(strings.text(TextKey.FileUnavailable), color = MaterialTheme.colorScheme.error)
+                    if (row.title != null) {
+                        MetadataText(row.title, Modifier.fillMaxWidth(), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                        row.creator?.let { creator ->
+                            MetadataText(creator, Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        row.listingProvider?.let { provider -> Text(providerName(provider), style = MaterialTheme.typography.labelSmall) }
+                    } else Text(strings.text(TextKey.InformationUnavailable), color = MaterialTheme.colorScheme.error)
+                    when (row.status) {
+                        QueueRowStatus.PENDING_RESOLUTION -> Text(strings.text(TextKey.ResolvingTitle), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        QueueRowStatus.UNAVAILABLE -> Text(strings.text(TextKey.QueueEntryUnavailable), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                        QueueRowStatus.MISSING_MEDIA -> Text(strings.text(TextKey.FileUnavailable), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                        QueueRowStatus.MISSING_SELECTION -> Text(strings.text(TextKey.InformationUnavailable), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                        QueueRowStatus.READY -> Unit
+                    }
                 }
                 Icon(if (audible) VeyraIcons.Listen else VeyraIcons.Play, if (audible) strings.text(TextKey.CurrentItem) else strings.text(TextKey.Play), Modifier.size(20.dp))
             }
-            item?.let { options.unavailableItems[it.id] }?.let { failure ->
+            row.mediaId?.let { options.unavailableItems[it] }?.let { failure ->
                 Text(strings.errorFor(failure), Modifier.padding(horizontal = 20.dp, vertical = 4.dp), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             }
         }
@@ -604,7 +621,6 @@ private fun QueueOccurrence(entry: QueueEntry, item: MediaItem?, snapshot: AppSn
 
 private fun queueLabel(context: QueueContext): TextKey = if (context == QueueContext.MUSIC) TextKey.MusicQueue else TextKey.PodcastQueue
 private fun repeatLabel(mode: RepeatMode): TextKey = when (mode) { RepeatMode.OFF -> TextKey.RepeatOff; RepeatMode.ALL -> TextKey.RepeatAll; RepeatMode.ONE -> TextKey.RepeatOne }
-private fun hasNext(queue: QueueSnapshot): Boolean = queue.currentIndex < queue.entries.lastIndex || queue.repeat == RepeatMode.ALL && queue.entries.isNotEmpty()
 private fun speedText(rate: Float): String = rate.toString().removeSuffix(".0")
 private fun playbackStatus(playback: PlaybackState): TextKey = when (playback.phase) {
     PlaybackPhase.IDLE -> TextKey.NothingPlaying
