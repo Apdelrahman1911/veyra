@@ -80,6 +80,11 @@ internal class DownloadPhysicalCommands(
         // asset-backed job to QUEUED, which neither transfer nor local validation can admit.
         if (before.job.assetId != null && before.job.status == DownloadStatus.FAILED)
             fail(FailureCode.RECOVERY_REQUIRED, "download_retained_local_validation_required")
+        // A completed-check host hold is cleared only by resumePending(), the real foreground
+        // announcement. Ordinary Resume must not spend the network Retry lane's retry flag as a
+        // foreground authority and silently erase the durable marker.
+        if (before.job.assetId != null && before.job.status == DownloadStatus.NEEDS_FOREGROUND)
+            fail(FailureCode.RECOVERY_REQUIRED, "download_foreground_announcement_required")
         requireAdmission()
         updateIntentLocked(before, DownloadBatchIntent.ACTIVE, retain = true, retry = true)
         changed(id)
@@ -190,6 +195,26 @@ internal class DownloadPhysicalCommands(
                 val settled = cleaned ?: pending.epoch
                 if (cleaned == null && !stopped || cleaned != null && !runtime.epochs.drain(cleaned))
                     fail(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")
+                if (discard && cleaned == null && stopped && pending.join.asset != null &&
+                    pending.join.job.failure != null &&
+                    repository.physicalDownload(id)?.job?.cleanupPending == true) {
+                    val state = host.state()
+                    if (state.suspended || state.failure != null)
+                        fail(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")
+                    val owner = runtime.cleanupOwner(id)
+                        ?: (if (state.started) runtime.awaitCleanupOwner(id) else null)
+                        ?: fail(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")
+                    when (val ownerResult = owner.completion.await()) {
+                        is AcquisitionDownloadDurableSettlement.Confirmed -> {
+                            if (repository.physicalDownload(id)?.job?.cleanupPending == true)
+                                fail(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")
+                        }
+                        is AcquisitionDownloadDurableSettlement.Unconfirmed -> throw VeyraException(ownerResult.failure)
+                        AcquisitionDownloadDurableSettlement.Stale ->
+                            fail(FailureCode.RECOVERY_REQUIRED, "download_checkpoint_stale")
+                        null -> fail(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")
+                    }
+                }
                 when (val durable = runtime.epochs.durableSettlement(settled)) {
                     is AcquisitionDownloadDurableSettlement.Unconfirmed -> throw VeyraException(durable.failure)
                     AcquisitionDownloadDurableSettlement.Stale -> fail(FailureCode.RECOVERY_REQUIRED, "download_checkpoint_stale")

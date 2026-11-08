@@ -440,6 +440,16 @@ class DownloadCoordinator(
     suspend fun validateRetainedAssetUse(id: String, requiredBindingId: ExecutionBindingId): AssetUse =
         requirePhysicalRuntime().validateRetainedAssetUse(id, requiredBindingId)
 
+    /**
+     * Repeated-origin batch form. Use this when two observed members request the same immutable
+     * binding: the caller supplies the exact batch/member/revision instead of the runtime choosing
+     * a claim by binding alone.
+     */
+    suspend fun validateRetainedMemberAssetUse(batchId: DownloadBatchId, memberPosition: Int,
+        expectedIntentRevision: Long, requiredBindingId: ExecutionBindingId): AssetUse =
+        requirePhysicalRuntime().validateRetainedMemberAssetUse(batchId, memberPosition,
+            expectedIntentRevision, requiredBindingId)
+
     /** An explicit playback receipt pins Play -> Download; an existing different selection is not silently replaced. */
     suspend fun enqueue(item: MediaItem, reuseBindingId: String? = null): String =
         physicalRuntime?.userCommands?.enqueueKnownCatalog(item, reuseBindingId) ?: commands.withLock {
