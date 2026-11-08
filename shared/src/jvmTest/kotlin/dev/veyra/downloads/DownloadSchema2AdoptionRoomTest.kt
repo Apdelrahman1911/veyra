@@ -230,6 +230,51 @@ class DownloadSchema2AdoptionRoomTest {
         assertEquals(1, owner.selector.requests.size)
     }
 
+    @Test fun adoptionOnColdHostPreservesPendingCleanupInsteadOfAdoptingDestructively() = acquisitionDownloadRoomCase {
+        val seed = seedSchema2(withBinding = false)
+        val owner = owner()
+        owner.coordinator.initializeScheduling()
+        val selected = freshSelection(owner, seed)
+        offline(owner)
+        // Cold acceptance records REMOVE_CANDIDATE but cannot prove physical cleanup yet.
+        val refused = assertFailsWith<VeyraException> { owner.coordinator.remove(seed.jobId) }
+        assertEquals(FailureCode.BACKGROUND_RESTRICTED, refused.failure.code)
+        val pending = owner.store.acquisitionView().acquisition
+        assertTrue(pending.physicalDownloads.getValue(seed.jobId).cleanupPending)
+        assertTrue(Files.exists(seed.part))
+        val adoptionFailure = assertFailsWith<VeyraException> {
+            owner.coordinator.adoptSchema2(seed.jobId, selected.request.id, selected.singleBinding()) { }
+        }
+        assertEquals(FailureCode.BACKGROUND_RESTRICTED, adoptionFailure.failure.code)
+        assertEquals("download_owner_drain_unconfirmed", adoptionFailure.failure.detail)
+        val preserved = owner.store.acquisitionView().acquisition
+        assertIs<PhysicalDownloadProducer.Schema2>(preserved.physicalDownloads.getValue(seed.jobId).producer)
+        assertEquals(DownloadBatchIntent.CANCELLED, preserved.claims.values.single().intent)
+        assertTrue(preserved.physicalDownloads.getValue(seed.jobId).cleanupPending)
+        assertTrue(Files.exists(seed.part))
+        assertTrue(Files.exists(seed.journal))
+        assertNoAdoptions()
+        assertTrue(owner.gateway.preparations.isEmpty())
+        // The activated scheduler completes the real cleanup before the explicit adoption retry.
+        owner.coordinator.start(DownloadActivation.DURABLE_WORK)
+        awaitState(owner.store) { state ->
+            state.physicalDownloads.getValue(seed.jobId).let { !it.cleanupPending }
+        }
+        idle(owner)
+        assertEquals(seed.jobId, owner.coordinator.adoptSchema2(seed.jobId, selected.request.id,
+            selected.singleBinding()) { })
+        val adopted = owner.store.acquisitionView().acquisition
+        assertEquals(selected.singleBinding(), adopted.physicalDownloads.getValue(seed.jobId).producer.bindingId)
+        assertFalse(Files.exists(seed.part))
+        withSql(databasePath) { db ->
+            assertEquals(1L, db.longValue("SELECT count(*) FROM download_producer_adoptions"))
+        }
+        assertEquals(0, leases.open.get())
+        idle(owner)
+        owner.coordinator.close()
+        assertTrue(owner.coordinator.dependencyReleaseSafeAfterClose)
+    }
+
     private fun retiredPathCleanup(withBinding: Boolean) = acquisitionDownloadRoomCase {
         val seed = seedSchema2(withBinding)
         val owner = owner()
@@ -283,7 +328,10 @@ class DownloadSchema2AdoptionRoomTest {
 
     private suspend fun DownloadAcquisitionRoomFixture.cleanUnknown(owner: DownloadAcquisitionRoomOwner, seed: Schema2Seed) {
         offline(owner)
-        owner.coordinator.remove(seed.jobId) // Scheduling-only: accept REMOVE_CANDIDATE, do not activate native work.
+        // The cold host cannot prove physical cleanup; removal must report a truthful restriction
+        // while retaining the accepted REMOVE_CANDIDATE intent for the activated cleanup below.
+        val refused = assertFailsWith<VeyraException> { owner.coordinator.remove(seed.jobId) }
+        assertEquals(FailureCode.BACKGROUND_RESTRICTED, refused.failure.code)
         val queued = owner.store.acquisitionView().acquisition
         val job = queued.physicalDownloads.getValue(seed.jobId)
         assertTrue(job.cleanupPending, "Canonical REMOVE_CANDIDATE must account for a finished attempt's path even without a job stagingPath")

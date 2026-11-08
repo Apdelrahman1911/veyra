@@ -217,7 +217,8 @@ class DownloadSchedulingRoomTest {
         a.network.value = DownloadNetworkState.DISCONNECTED
         a.coordinator.initializeScheduling()
         a.coordinator.cancel(cancelId)
-        a.coordinator.remove(removeId)
+        val refusedRemoval = assertFailsWith<VeyraException> { a.coordinator.remove(removeId) }
+        assertEquals(FailureCode.BACKGROUND_RESTRICTED, refusedRemoval.failure.code)
         assertTrue(join(a, cancelId).job.cleanupPending)
         assertTrue(join(a, removeId).job.removeWhenClean)
         assertTrue(Files.exists(Path.of(part)))

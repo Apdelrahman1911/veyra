@@ -293,6 +293,35 @@ class DownloadRetainedFailureRevalidationRoomTest {
         assertTrue(recovered.assetUses.any { it.requestedBindingId == binding })
     }
 
+    @Test fun removalImmediatelyAfterRetainedFailureIgnoresFutureLocalRecheckDeadline() = acquisitionDownloadRoomCase {
+        val owner = owner()
+        val accepted = acceptNeutral(owner)
+        val binding = assertIs<AcquisitionOutcome.Single>(accepted.outcome).bindingId
+        val id = enqueue(owner, accepted)
+        owner.coordinator.start(DownloadActivation.USER_SESSION)
+        awaitOriginUsePublication(owner, id)
+        owner.validation = { AssetValidation.Invalid(AppFailure(FailureCode.CORRUPT_MEDIA, "authored_retained_negative")) }
+        assertFailsWith<VeyraException> { owner.coordinator.validateStandaloneAssetUse(id, binding) }
+        idle(owner)
+        val failed = owner.store.acquisitionView().acquisition
+        val failedJob = failed.physicalDownloads.getValue(id)
+        val asset = failed.materializations.getValue(assertNotNull(failedJob.assetId))
+        assertTrue(assertNotNull(failedJob.nextRetryEpochMs) > clock.epochMs(),
+            "The local recheck deadline is genuinely in the future")
+        val bytes = Files.readAllBytes(Path.of(asset.uri))
+        assertTrue(bytes.isNotEmpty())
+        // No clock.advance(): removal must not be blocked by the local validation deadline.
+        owner.coordinator.remove(id)
+        val removed = awaitJob(owner, id) { !it.job.cleanupPending && it.asset == null }
+        assertEquals(DownloadStatus.CANCELLED, removed.job.status)
+        assertFalse(Files.exists(Path.of(asset.uri)))
+        assertEquals(asset.receipt(), owner.store.acquisitionView().acquisition.materializationReceipts[asset.id])
+        assertTrue(owner.store.acquisitionView().acquisition.assetUses.any {
+            it.materializationAssetId == asset.id && it.requestedBindingId == binding
+        }, "Immutable receipt/use survives live-byte removal")
+        owner.legacy.assertUnused()
+    }
+
     @Test fun unsupportedNativeR2NegativeWithholdsSharedUseButPreservesR1HistoryAndRecovers() = acquisitionDownloadRoomCase {
         val owner = owner()
         val batch = enrollOriginUseBatch(owner, count = 2)
@@ -316,9 +345,14 @@ class DownloadRetainedFailureRevalidationRoomTest {
         assertEquals(originUse, failed.assetUses.single { it.requestedBindingId == job.producer.bindingId })
         assertEquals(published.materializations, failed.materializations)
         assertEquals(published.materializationReceipts, failed.materializationReceipts)
-        assertEquals(DownloadBatchMemberState.FAILED, failed.batches.getValue(batch.id).members.single {
+        val failedOrigin = failed.batches.getValue(batch.id).members.single {
             it.requiredBindingId == job.producer.bindingId
-        }.state)
+        }
+        assertEquals(DownloadBatchMemberState.FAILED, failedOrigin.state)
+        assertEquals(FailureCode.UNSUPPORTED_CODEC, failedOrigin.failure?.code,
+            "The origin member exposes the exact unsupported native failure")
+        assertContentEquals(PHYSICAL_BYTES, Files.readAllBytes(Path.of(asset.uri)),
+            "An unsupported decoder result is not proof that the retained bytes were destroyed")
         owner.validation = { AssetValidation.Valid(733) }
         val use = owner.coordinator.validateRetainedMemberAssetUse(batch.id, second.position,
             batch.intentRevision, assertNotNull(second.requiredBindingId))

@@ -176,6 +176,7 @@ internal class DownloadPhysicalRuntime(
     private val leaseDurationMs: Long,
     private val heartbeatMs: Long,
     internal val host: DownloadPhysicalHost,
+    private val removalOwnerGraceMs: Long = REMOVAL_OWNER_GRACE_MS,
 ) : AcquisitionDownloadExecutor {
     internal val repository = dependencies.repository
     override val transactionOwner: LibraryTransactionOwner get() = repository.transactionOwner
@@ -199,6 +200,7 @@ internal class DownloadPhysicalRuntime(
     init {
         require(libraryOwner.transactionOwner === repository.transactionOwner) { "Downloads require the same Room transaction owner" }
         require(leaseDurationMs in 1_000..600_000 && heartbeatMs in 1 until leaseDurationMs)
+        require(removalOwnerGraceMs > 0)
     }
 
     internal fun candidates(): List<String> = repository.state.value.physicalDownloads.values
@@ -1059,8 +1061,13 @@ internal class DownloadPhysicalRuntime(
             rollbackFence = claimed.value.fence
             rollbackClaims = claimed.value.physical.claims
             if (claimed.value.fence != proposedFence || maintenancePaths(claimed.value.physical, kind) != paths ||
-                expectedOwner != null && claimed.value.physical.claims.toSet() != expectedOwner.claims.toSet())
+                expectedOwner != null && claimed.value.physical.claims.toSet() != expectedOwner.claims.toSet()) {
+                // A concurrent exact-generation path/claim change is a retryable claim race, not a
+                // host failure. The finally below settles the ACTUAL returned fence/claims so the
+                // committed maintenance lease cannot be stranded; a later pass may clean again.
+                if (kind == PhysicalDownloadMaintenanceKind.CLEANUP) return null
                 fail(FailureCode.RECOVERY_REQUIRED, "download_maintenance_join_changed")
+            }
             if (kind == PhysicalDownloadMaintenanceKind.CLEANUP) {
                 val reservation = claimed.value.physical.cleanupReservation
                     ?: fail(FailureCode.RECOVERY_REQUIRED, "download_cleanup_not_reserved")
@@ -1239,7 +1246,7 @@ internal class DownloadPhysicalRuntime(
      * within a fixed grace instead of waiting indefinitely for a missing owner. The grace covers
      * the real handoff between a failed execution finalizer and the scheduler's cleanup claim.
      */
-    internal suspend fun awaitRemovalOutcome(id: String): AppFailure? {
+    internal suspend fun awaitRemovalOutcome(id: String, failedIsTerminal: Boolean = true): AppFailure? {
         val pending = repository.state.map { state ->
             val job = state.physicalDownloads[id]
             (job?.cleanupPending == true) to job?.ownershipGeneration
@@ -1255,19 +1262,26 @@ internal class DownloadPhysicalRuntime(
             }
             DownloadRemovalSnapshot(isPending, observation, hasOwner)
         }
-        val initial = withTimeoutOrNull(REMOVAL_OWNER_GRACE_MS) {
-            observed.first { !it.pending || it.ownerPresent || it.observation is DownloadCleanupObservation.Failed }
+        val initial = withTimeoutOrNull(removalOwnerGraceMs) {
+            observed.first { !it.pending || it.ownerPresent ||
+                failedIsTerminal && it.observation is DownloadCleanupObservation.Failed }
         } ?: return AppFailure(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")
+        if (failedIsTerminal) (initial.observation as? DownloadCleanupObservation.Failed)?.let { return it.failure }
         if (!initial.pending) return null
         if (!initial.ownerPresent)
-            return (initial.observation as? DownloadCleanupObservation.Failed)?.failure
-                ?: AppFailure(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")
+            return AppFailure(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")
         // An owner is actually doing the removal; wait for its durable pending/observation
         // settlement rather than for an owner registry that is legitimately consumed afterwards.
-        val settled = observed.first { !it.pending || !it.ownerPresent }
+        // A terminal Failed observation settles immediately even if its owner stays registered.
+        // A consumed owner with cleanup still pending is not terminal: the scheduler may have
+        // already handed the exact deletion to a newer owner. Wait within the same bound for
+        // either durable completion or a terminal failure.
+        val settled = withTimeoutOrNull(removalOwnerGraceMs) {
+            observed.first { !it.pending || failedIsTerminal && it.observation is DownloadCleanupObservation.Failed }
+        } ?: return AppFailure(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")
+        if (failedIsTerminal) (settled.observation as? DownloadCleanupObservation.Failed)?.let { return it.failure }
         if (!settled.pending) return null
-        return (settled.observation as? DownloadCleanupObservation.Failed)?.failure
-            ?: AppFailure(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")
+        return AppFailure(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")
     }
 
     private fun AcquisitionDownloadMemberKey.expectation(claimId: DownloadClaimId?) = BatchDownloadMemberExpectation(

@@ -110,6 +110,51 @@ class DownloadPhysicalRecoveryCorrectionsTest {
             "An unchanged active generation must not launder a stale finalizer")
     }
 
+    @Test fun missingRemovalOwnerFailsWithinTheBoundedHandoffInsteadOfWaitingForever() = physicalRuntimeCase(removalOwnerGraceMs = 40) {
+        val job = currentJob().copy(status = DownloadStatus.CANCELLED, cleanupPending = true,
+            ownershipGeneration = 1)
+        repository.state.value = repository.state.value.copy(
+            physicalDownloads = mapOf(PhysicalRuntimeFixture.JOB to job))
+        val started = System.nanoTime()
+        val failure = assertNotNull(runtime.awaitRemovalOutcome(PhysicalRuntimeFixture.JOB),
+            "A missing owner with pending cleanup must fail closed")
+        assertEquals(FailureCode.BACKGROUND_RESTRICTED, failure.code)
+        assertTrue((System.nanoTime() - started) / 1_000_000 < 2_000,
+            "The missing-owner path must use the bounded handoff, not an indefinite wait")
+        assertTrue(removalJob().job.cleanupPending, "The bounded failure preserves the removal intent")
+    }
+
+    @Test fun terminalFailedCleanupOwnerSettlesTheObservationWithoutWaitingForOwnerRemoval() = physicalRuntimeCase(removalOwnerGraceMs = 10_000) {
+        val job = currentJob().copy(status = DownloadStatus.CANCELLED, cleanupPending = true,
+            ownershipGeneration = 1)
+        repository.state.value = repository.state.value.copy(
+            physicalDownloads = mapOf(PhysicalRuntimeFixture.JOB to job))
+        val epoch = runtime.epochs.begin(PhysicalRuntimeFixture.JOB, producer(contextR1), 1, null, null, null)
+        var failures = 0
+        val cleanup = DownloadPhysicalCleanup(runtime, epoch, listOf(
+            DownloadPhysicalCleanupStep({
+                if (failures++ == 0) error("authored terminal cleanup failure")
+            })), acceptedDurableOwner = true) {
+            AcquisitionDownloadDurableSettlement.Unconfirmed(
+                AppFailure(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed"))
+        }
+        host.cleanupRegistry.register(cleanup)
+        runtime.epochs.retain(epoch, cleanup.token, cleanup, completesAcquisition = true)
+        runtime.epochs.finishAdmission(epoch)
+        runtime.attemptCleanup(cleanup, report = false)
+        assertIs<DownloadCleanupObservation.Failed>(runtime.cleanupObservation(PhysicalRuntimeFixture.JOB))
+        assertTrue(host.cleanupRegistry.owners.value.values.any { it === cleanup },
+            "The failed owner remains registered; the observation itself is terminal")
+        val started = System.nanoTime()
+        val failure = assertNotNull(runtime.awaitRemovalOutcome(PhysicalRuntimeFixture.JOB))
+        assertEquals(FailureCode.BACKGROUND_RESTRICTED, failure.code)
+        assertTrue((System.nanoTime() - started) / 1_000_000 < 1_000,
+            "A terminal Failed observation must not wait for an owner that cannot make progress")
+    }
+
+    private suspend fun PhysicalRuntimeFixture.removalJob() =
+        assertNotNull(repository.physicalDownload(PhysicalRuntimeFixture.JOB))
+
     @Test fun revokedOwnerStaleFinalizerIsBenignButActiveOwnerStaleRemainsFatal() = physicalRuntimeCase {
         val job = currentJob().copy(ownershipGeneration = 1)
         repository.state.value = repository.state.value.copy(physicalDownloads = mapOf(PhysicalRuntimeFixture.JOB to job))
