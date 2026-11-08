@@ -9,8 +9,9 @@ import kotlin.test.*
 
 class RoomRecoveryTest {
     private suspend fun seed(directory: Path): AppSnapshot {
+        seedSchema2(directory, completeLibrary())
         val store = createPlatformLibraryStore(directory.toString())
-        return try { store.update { completeLibrary() }.getOrThrow() } finally { store.close() }
+        return try { store.initialize().getOrThrow() } finally { store.close() }
     }
 
     @Test fun corruptPrimaryRequiresExplicitVerifiedRecoveryAndPreservesDamagedInput() = runBlocking {
@@ -148,9 +149,10 @@ class RoomRecoveryTest {
 
     @Test fun explicitBackupIncludesCommittedWalAndCanBeRecoveredBeforeAnyCleanShutdown() = runBlocking {
         val directory = roomWorkDirectory("wal-backup")
+        seedSchema2(directory, completeLibrary())
         val store = createPlatformLibraryStore(directory.toString())
         try {
-            val expected = store.update { completeLibrary() }.getOrThrow()
+            val expected = store.initialize().getOrThrow()
             store.backup().getOrThrow()
             val restoreDirectory = directory.resolve("independent-restore")
             Files.createDirectories(restoreDirectory)

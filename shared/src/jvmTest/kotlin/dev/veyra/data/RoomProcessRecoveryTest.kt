@@ -60,8 +60,9 @@ class RoomProcessRecoveryTest {
     }
 
     private suspend fun seed(directory: Path): AppSnapshot {
+        seedSchema2(directory, completeLibrary())
         val store = createPlatformLibraryStore(directory.toString())
-        return try { store.update { completeLibrary() }.getOrThrow() } finally { store.close() }
+        return try { store.initialize().getOrThrow() } finally { store.close() }
     }
 
     private suspend fun killAtSignal(directory: Path, mode: String) {
@@ -135,15 +136,17 @@ object RoomProcessProbe {
             try {
                 val before = store.initialize().getOrThrow()
                 if (args[0] == "commit") {
-                    store.update(transform = ::processMutation).getOrThrow()
+                    writerUpdate(store, ::processMutation)
                     Files.writeString(directory.resolve("child.signal"), "commit")
                     awaitCancellation()
                 } else {
                     require(args[0] == "transaction")
+                    val baseline = AcquisitionGraph(database.libraryDao().readRows(), database.acquisitionDao().readAcquisitionRows())
                     database.useWriterConnection { connection ->
                         connection.execSQL("PRAGMA synchronous = FULL")
                         connection.immediateTransaction {
-                            database.libraryDao().writeDifference(before.toRows(), processMutation(before).copy(revision = before.revision + 1).toRows())
+                            database.libraryDao().writeDifference(baseline.library,
+                                processMutation(baseline.snapshot()).toRows(baseline.library))
                             // Preserve the all-current-rows negative-order crash point while the
                             // production DAO now requires exact, bounded staging identities.
                             database.libraryDao().readQueueEntries().map { it.id }.chunked(256).forEach { ids ->

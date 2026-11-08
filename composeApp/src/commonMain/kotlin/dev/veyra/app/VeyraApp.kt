@@ -369,6 +369,6 @@ private fun SourcePage.withArtwork(snapshot: AppSnapshot) = copy(
 
 private fun PlaybackState.withArtwork(snapshot: AppSnapshot) = copy(
     currentItem = currentItem?.let { it.copy(localArtworkPath = snapshot.media[it.id]?.localArtworkPath ?: it.localArtworkPath) },
-    crossfade = crossfade?.let { fade -> fade.copy(incomingItem = fade.incomingItem.copy(
-        localArtworkPath = snapshot.media[fade.incomingItem.id]?.localArtworkPath ?: fade.incomingItem.localArtworkPath)) },
+    crossfade = crossfade?.let { fade -> fade.copy(incomingItem = fade.incomingItem?.let { item -> item.copy(
+        localArtworkPath = snapshot.media[item.id]?.localArtworkPath ?: item.localArtworkPath) }) },
 )

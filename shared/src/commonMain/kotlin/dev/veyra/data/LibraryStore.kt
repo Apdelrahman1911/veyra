@@ -1,7 +1,6 @@
 package dev.veyra.data
 
-import dev.veyra.data.room.RoomLibraryPersistence
-import dev.veyra.data.room.VeyraDatabase
+import dev.veyra.data.room.*
 import dev.veyra.model.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -33,7 +32,10 @@ fun StoreResult.getOrThrow(): AppSnapshot = when (this) {
 class LibraryStore internal constructor(
     private val persistence: LibraryPersistence,
     private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
-) {
+) : LibraryTransactionOwned {
+    override val transactionOwner = LibraryTransactionOwner()
+    private val catalogLibraryUndoOwner = CatalogLibraryUndoOwner()
+
     constructor(database: VeyraDatabase, dispatcher: CoroutineDispatcher = Dispatchers.IO) :
         this(RoomLibraryPersistence(database), dispatcher)
 
@@ -47,6 +49,96 @@ class LibraryStore internal constructor(
     val state: StateFlow<AppSnapshot> = mutableState.asStateFlow()
     val status: StateFlow<StoreStatus> = mutableStatus.asStateFlow()
     val lastFailure: StateFlow<AppFailure?> = mutableFailure.asStateFlow()
+    /** Advisory eligibility only; Undo checks the actual complete graph inside its transaction. */
+    val catalogLibraryUndoAvailability: StateFlow<CatalogLibraryUndoAvailability> = catalogLibraryUndoOwner.availability
+
+    private val mutableAcquisition = MutableStateFlow(AcquisitionRepositoryState(0))
+    private val mutableReleaseCatalog = MutableStateFlow(ReleaseCatalogState(0))
+    internal val acquisitionState: StateFlow<AcquisitionRepositoryState> = mutableAcquisition.asStateFlow()
+    internal val releaseCatalogState: StateFlow<ReleaseCatalogState> = mutableReleaseCatalog.asStateFlow()
+    private val mutableAcquisitionView = MutableStateFlow(LibraryAcquisitionView(mutableState.value, mutableAcquisition.value))
+    /** Coherent post-commit presentation/local guard; never cached database commit authority. */
+    val acquisitionViews: StateFlow<LibraryAcquisitionView> = mutableAcquisitionView.asStateFlow()
+    /** One facade and one referential transaction owner, never independently constructed stores. */
+    val acquisition: AcquisitionLibraryRepository = RoomAcquisitionRepository(this)
+    /** Production Room uses schema3; old projection-only test seams must opt into legacy tests. */
+    internal val requiresTypedPlayback: Boolean get() = persistence is AcquisitionPersistence
+    val releases: ReleaseCatalogRepository get() = acquisition as ReleaseCatalogRepository
+
+    /** A same-owner Room read barrier, not two sequential StateFlow reads. */
+    suspend fun acquisitionView(): LibraryAcquisitionView = readAcquisition { graph ->
+        LibraryAcquisitionView(graph.snapshot(), graph.state())
+    }
+
+    internal suspend fun <T> readAcquisition(project: (AcquisitionGraph) -> T): T = withContext(dispatcher) {
+        mutex.withLock {
+            initializeLocked().getOrThrow()
+            val backend = requireAcquisitionBackend()
+            try {
+                val graph = backend.readAcquisitionGraph()
+                val value = project(graph)
+                publishGraph(graph)
+                value
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) { mutableFailure.value = classify(error); throw error }
+        }
+    }
+
+    internal suspend fun <T> transactAcquisition(
+        transform: (AcquisitionGraph) -> AcquisitionMutation<T>,
+    ): T = transactAcquisitionPublished(transform) { _, value -> value }
+
+    /** Post-COMMIT callbacks run before the same mutex is released, never in mutation.result. */
+    private suspend fun <T, R> transactAcquisitionPublished(
+        transform: (AcquisitionGraph) -> AcquisitionMutation<T>,
+        published: (AcquisitionGraph, T) -> R,
+    ): R = withContext(dispatcher) {
+        mutex.withLock {
+            initializeLocked().getOrThrow()
+            val backend = requireAcquisitionBackend()
+            try {
+                currentCoroutineContext().ensureActive()
+                withContext(NonCancellable) {
+                    var before: AcquisitionGraph? = null
+                    val committed = backend.transactAcquisition { graph ->
+                        check(before == null)
+                        before = graph
+                        transform(graph)
+                    }
+                    publishGraph(committed.graph, committedFrom = checkNotNull(before))
+                    published(committed.graph, committed.value)
+                }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) { mutableFailure.value = classify(error); throw error }
+        }
+    }
+
+    private fun requireAcquisitionBackend(): AcquisitionPersistence = persistence as? AcquisitionPersistence
+        ?: throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "Room acquisition backend required"))
+
+    private fun publishGraph(
+        graph: AcquisitionGraph,
+        committedFrom: AcquisitionGraph? = null,
+        freshIncarnation: Boolean = false,
+    ): AppSnapshot {
+        val snapshot = graph.snapshot()
+        val acquisition = graph.state()
+        val releases = graph.releaseCatalogState()
+        check(snapshot.revision == acquisition.libraryRevision && snapshot.revision == releases.libraryRevision)
+        catalogLibraryUndoOwner.publish(graph, committedFrom, freshIncarnation)
+        // One atomic value for consumers that cannot suspend for a read barrier. Publish this
+        // before the independent compatibility flows; never reconstruct it by sampling those.
+        mutableAcquisitionView.value = LibraryAcquisitionView(snapshot, acquisition)
+        mutableState.value = snapshot
+        mutableAcquisition.value = acquisition
+        mutableReleaseCatalog.value = releases
+        mutableFailure.value = null
+        return snapshot
+    }
+
+    private suspend fun readLatest(): AppSnapshot = if (persistence is AcquisitionPersistence) {
+        publishGraph(persistence.readAcquisitionGraph())
+    } else persistence.read().also { mutableState.value = it }
 
     suspend fun initialize(): StoreResult = withContext(dispatcher) { mutex.withLock { initializeLocked() } }
 
@@ -58,8 +150,18 @@ class LibraryStore internal constructor(
                 currentCoroutineContext().ensureActive()
                 // Once accepted, commit + memory publication form one cancellation-safe operation.
                 withContext(NonCancellable) {
-                    val next = persistence.transact(expectedRevision, transform)
-                    mutableState.value = next
+                    val next = if (persistence is AcquisitionPersistence) {
+                        var before: AcquisitionGraph? = null
+                        val committed = persistence.transactAcquisition { graph ->
+                            check(before == null)
+                            before = graph
+                            if (expectedRevision != null && expectedRevision != graph.revision) {
+                                throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "Stale database revision"))
+                            }
+                            AcquisitionMutation(graph.applyCatalogSnapshot(transform(graph.snapshot()))) { it.snapshot() }
+                        }
+                        publishGraph(committed.graph, committedFrom = checkNotNull(before))
+                    } else persistence.transact(expectedRevision, transform).also { mutableState.value = it }
                     mutableFailure.value = null
                     StoreResult.Success(next)
                 }
@@ -74,8 +176,7 @@ class LibraryStore internal constructor(
             val loaded = initializeLocked()
             if (loaded is StoreResult.Failure) return@withLock loaded
             try {
-                val latest = persistence.read()
-                mutableState.value = latest
+                val latest = readLatest()
                 StoreResult.Success(latest)
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) { fail(classify(error)) }
@@ -107,7 +208,10 @@ class LibraryStore internal constructor(
         observerJob.cancelAndJoin()
         mutex.withLock {
             if (mutableStatus.value == StoreStatus.Closed) return@withLock
-            try { persistence.close() } finally { mutableStatus.value = StoreStatus.Closed }
+            try { persistence.close() } finally {
+                catalogLibraryUndoOwner.invalidate()
+                mutableStatus.value = StoreStatus.Closed
+            }
         }
     }
 
@@ -153,6 +257,30 @@ class LibraryStore internal constructor(
         return claimed
     }
 
+    /**
+     * Metadata-only favorites/playlists/saved episodes on this same schema3 owner. This does not
+     * admit playback/downloads or resolve a source. All other projection fields are forbidden.
+     */
+    suspend fun editCatalogLibrary(transform: (AppSnapshot) -> AppSnapshot): CatalogLibraryEdit =
+        transactAcquisitionPublished({ graph ->
+            val before = CatalogLibrarySavedFrame.of(graph)
+            AcquisitionMutation(graph.applyCatalogLibraryEdit(transform(graph.snapshot()))) { before }
+        }) { committed, before ->
+            CatalogLibraryEdit(committed.snapshot(), catalogLibraryUndoOwner.receipt(before, committed))
+        }
+
+    /** Restores exact saved rows only; no caller-visible snapshot can reconstruct typed lineage. */
+    suspend fun undoCatalogLibrary(receipt: CatalogLibraryUndo): AppSnapshot = transactAcquisition { graph ->
+        AcquisitionMutation(catalogLibraryUndoOwner.restore(receipt, graph)) { it.snapshot() }
+    }
+
+    private suspend fun updateCatalogLibrary(transform: (AppSnapshot) -> AppSnapshot): StoreResult {
+        if (!requiresTypedPlayback) return update(transform = transform) // Explicit legacy test seam only.
+        return try { StoreResult.Success(editCatalogLibrary(transform).snapshot) }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (error: Exception) { StoreResult.Failure(classify(error)) }
+    }
+
     suspend fun upsertCatalog(items: List<MediaItem>, shows: List<PodcastShow> = emptyList(), artists: List<Artist> = emptyList(), albums: List<Album> = emptyList()): StoreResult = update { old ->
         old.copy(
             media = old.media + items.associate { it.id to it.withRetainedLocalArtwork(old.media[it.id]) },
@@ -162,14 +290,14 @@ class LibraryStore internal constructor(
         )
     }
 
-    suspend fun toggleFavorite(item: MediaItem): StoreResult = update { old ->
+    suspend fun toggleFavorite(item: MediaItem): StoreResult = updateCatalogLibrary { old ->
         old.copy(
             media = old.media + (item.id to item.withRetainedLocalArtwork(old.media[item.id])),
             favoriteIds = if (item.id in old.favoriteIds) old.favoriteIds - item.id else old.favoriteIds + item.id,
         )
     }
 
-    suspend fun toggleSavedEpisode(item: MediaItem): StoreResult = update { old ->
+    suspend fun toggleSavedEpisode(item: MediaItem): StoreResult = updateCatalogLibrary { old ->
         require(item.kind == MediaKind.EPISODE)
         old.copy(
             media = old.media + (item.id to item.withRetainedLocalArtwork(old.media[item.id])),
@@ -184,21 +312,21 @@ class LibraryStore internal constructor(
         )
     }
 
-    suspend fun createPlaylist(name: String, id: String = newEntityId("playlist"), nowEpochMs: Long = 0): StoreResult = update { old ->
+    suspend fun createPlaylist(name: String, id: String = newEntityId("playlist"), nowEpochMs: Long = 0): StoreResult = updateCatalogLibrary { old ->
         require(name.isNotBlank())
         require(old.playlists.none { it.id == id })
         old.copy(playlists = old.playlists + Playlist(id, name.trim(), createdEpochMs = nowEpochMs, updatedEpochMs = nowEpochMs))
     }
 
-    suspend fun renamePlaylist(id: String, name: String, nowEpochMs: Long = 0): StoreResult = update { old ->
+    suspend fun renamePlaylist(id: String, name: String, nowEpochMs: Long = 0): StoreResult = updateCatalogLibrary { old ->
         require(name.isNotBlank())
         require(old.playlists.any { it.id == id })
         old.copy(playlists = old.playlists.map { if (it.id == id) it.copy(name = name.trim(), updatedEpochMs = nowEpochMs) else it })
     }
 
-    suspend fun deletePlaylist(id: String): StoreResult = update { old -> old.copy(playlists = old.playlists.filterNot { it.id == id }) }
+    suspend fun deletePlaylist(id: String): StoreResult = updateCatalogLibrary { old -> old.copy(playlists = old.playlists.filterNot { it.id == id }) }
 
-    suspend fun addToPlaylist(playlistId: String, item: MediaItem, nowEpochMs: Long = 0): StoreResult = update { old ->
+    suspend fun addToPlaylist(playlistId: String, item: MediaItem, nowEpochMs: Long = 0): StoreResult = updateCatalogLibrary { old ->
         require(old.playlists.any { it.id == playlistId })
         old.copy(
             media = old.media + (item.id to item.withRetainedLocalArtwork(old.media[item.id])),
@@ -208,11 +336,11 @@ class LibraryStore internal constructor(
         )
     }
 
-    suspend fun removeFromPlaylist(playlistId: String, entryId: String): StoreResult = update { old ->
+    suspend fun removeFromPlaylist(playlistId: String, entryId: String): StoreResult = updateCatalogLibrary { old ->
         old.copy(playlists = old.playlists.map { if (it.id == playlistId) it.copy(entries = it.entries.filterNot { entry -> entry.id == entryId }) else it })
     }
 
-    suspend fun movePlaylistEntry(playlistId: String, entryId: String, toIndex: Int): StoreResult = update { old ->
+    suspend fun movePlaylistEntry(playlistId: String, entryId: String, toIndex: Int): StoreResult = updateCatalogLibrary { old ->
         old.copy(playlists = old.playlists.map { playlist ->
             if (playlist.id != playlistId) playlist else {
                 val entries = playlist.entries.toMutableList()
@@ -248,7 +376,11 @@ class LibraryStore internal constructor(
 
     private fun publishOpened(opened: OpenedLibrary): StoreResult {
         validateLibrarySnapshot(opened.snapshot)
-        mutableState.value = opened.snapshot
+        if (persistence is AcquisitionPersistence) {
+            val graph = requireNotNull(opened.acquisitionGraph) { "Room open must return its complete graph" }
+            check(graph.snapshot() == opened.snapshot)
+            publishGraph(graph, freshIncarnation = true)
+        } else mutableState.value = opened.snapshot
         mutableStatus.value = StoreStatus.Ready(opened.recoveredFromBackup)
         mutableFailure.value = null
         if (!observing) {
@@ -258,11 +390,7 @@ class LibraryStore internal constructor(
                     persistence.changes().collect {
                         mutex.withLock {
                             if (mutableStatus.value !is StoreStatus.Ready) return@withLock
-                            val latest = persistence.read()
-                            if (latest.revision > mutableState.value.revision) {
-                                validateLibrarySnapshot(latest)
-                                mutableState.value = latest
-                            }
+                            readLatest()
                         }
                     }
                 } catch (cancelled: CancellationException) { throw cancelled }

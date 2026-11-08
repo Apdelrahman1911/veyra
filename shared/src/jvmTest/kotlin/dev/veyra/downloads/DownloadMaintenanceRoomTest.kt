@@ -3,6 +3,7 @@ package dev.veyra.downloads
 import dev.veyra.data.LibraryPersistence
 import dev.veyra.data.getOrThrow
 import dev.veyra.model.*
+import dev.veyra.data.PhysicalDownloadCommit
 import dev.veyra.playback.AssetValidation
 import dev.veyra.playback.AssetValidator
 import kotlinx.coroutines.*
@@ -43,34 +44,38 @@ class DownloadMaintenanceRoomTest {
         withTimeout(3_000) { a.presentation.first { it.downloads[old.record.id]?.status == DownloadStatus.COMPLETE } }
     }
 
-    @Test fun deniedRecoveryAllowanceKeepsJournalAndRetriesOnlyAfterForegroundResume() = downloadCase {
-        val first = store()
-        val seeded = seedFinalization(first)
-        first.update { it.copy(settings = it.settings.copy(offlineOnly = true)) }.getOrThrow()
+    @Test fun deniedRecoveryAllowanceKeepsJournalAndRetriesOnlyAfterForegroundResume() = acquisitionDownloadRoomCase {
+        val owner = owner()
+        val seeded = prepareFinalizationSchema3(owner)
+        offline(owner)
         val denied = AtomicBoolean(true)
-        val gate = MaintenanceTestGate().apply {
-            acquiring = { if (denied.get()) throw VeyraException(AppFailure(FailureCode.BACKGROUND_RESTRICTED)) }
+        owner.gate.beforeAcquire = {
+            if (denied.get()) throw VeyraException(AppFailure(FailureCode.BACKGROUND_RESTRICTED))
         }
-        val gateway = DownloadTestGateway().apply { denyAcquisition() }
-        val a = coordinator(first, gateway, gate = gate)
-        a.start()
-        val blocked = eventually(first) { it.downloads[seeded.record.id]?.let { d ->
+        owner.validation = { AssetValidation.Valid(31_234) }
+        owner.denyFinalizationSchema3Acquisition()
+        owner.coordinator.start()
+        val blocked = awaitState(owner.store) { it.physicalDownloads[seeded.record.id]?.let { d ->
             d.status == DownloadStatus.NEEDS_FOREGROUND && d.leaseOwner == null
         } == true }
-        assertEquals(FailureCode.BACKGROUND_RESTRICTED, blocked.downloads[seeded.record.id]?.failure?.code)
-        assertEquals(seeded.intent, blocked.downloadFinalizations[seeded.record.id])
-        assertEquals(0, validationCount.get())
-        assertContentEquals(authoredBytes, Files.readAllBytes(Path.of(seeded.intent!!.stagingPath)))
+        assertEquals(FailureCode.BACKGROUND_RESTRICTED, blocked.physicalDownloads[seeded.record.id]?.failure?.code)
+        assertEquals(seeded.intent, blocked.physicalFinalizations[seeded.record.id])
+        assertEquals(seeded.attempt, blocked.physicalAttempts[seeded.attempt.id])
+        assertEquals(0, owner.validations.size)
+        assertContentEquals(authoredBytes, Files.readAllBytes(Path.of(seeded.intent.stagingPath)))
         assertFalse(Files.exists(Path.of(seeded.intent.finalPath)))
         delay(160)
-        assertEquals(1, gate.callbacks.size, "A denied allowance must not be polled in a retry loop")
-        withTimeout(3_000) { a.hasPendingWork.first { !it } }
+        assertEquals(1, owner.gate.expirations.size, "A denied allowance must not be polled in a retry loop")
+        withTimeout(3_000) { owner.coordinator.hasPendingWork.first { !it } }
         denied.set(false)
-        a.resumePending()
-        val ready = eventually(first) { it.downloads[seeded.record.id]?.status == DownloadStatus.COMPLETE }
-        assertNull(ready.downloads[seeded.record.id]?.failure)
-        assertFalse(seeded.record.id in ready.downloadFinalizations)
-        gateway.assertUnused()
+        owner.coordinator.resumePending()
+        val ready = awaitState(owner.store) { it.physicalDownloads[seeded.record.id]?.status == DownloadStatus.COMPLETE }
+        assertNull(ready.physicalDownloads[seeded.record.id]?.failure)
+        assertFalse(seeded.record.id in ready.physicalFinalizations)
+        idle(owner)
+        owner.assertFinalizationSchema3Recovered(seeded)
+        owner.coordinator.close()
+        assertTrue(owner.coordinator.dependencyReleaseSafeAfterClose)
     }
 
     @Test fun deniedCompletedCheckKeepsDurableCompleteButPresentsNeedsForegroundUntilAnAllowedRecheck() = downloadCase {
@@ -120,22 +125,26 @@ class DownloadMaintenanceRoomTest {
         gateway.assertUnused()
     }
 
-    @Test fun inlineMaintenanceAcquireExpirationCannotMissItsRegisteredChildOrSelfJoin() = downloadCase {
-        val first = store()
-        val seeded = seedFinalization(first, published = true)
-        val gate = MaintenanceTestGate().apply { acquiring = { expiration -> expiration() } }
-        val gateway = DownloadTestGateway().apply { denyAcquisition() }
-        val a = coordinator(first, gateway, gate = gate)
-        a.start()
-        val blocked = eventually(first) { it.downloads[seeded.record.id]?.let { d ->
+    @Test fun inlineMaintenanceAcquireExpirationCannotMissItsRegisteredChildOrSelfJoin() = acquisitionDownloadRoomCase {
+        val owner = owner()
+        val seeded = prepareFinalizationSchema3(owner, published = true)
+        owner.gate.beforeAcquire = { expiration -> expiration() }
+        owner.validation = { AssetValidation.Valid(31_234) }
+        owner.denyFinalizationSchema3Acquisition()
+        owner.coordinator.start()
+        val blocked = awaitState(owner.store) { it.physicalDownloads[seeded.record.id]?.let { d ->
             d.status == DownloadStatus.NEEDS_FOREGROUND && d.leaseOwner == null
-        } == true && gate.closes.get() == 1 }
-        assertEquals(1, gate.callbacks.size)
-        assertEquals(FailureCode.BACKGROUND_RESTRICTED, blocked.downloads[seeded.record.id]?.failure?.code)
-        assertEquals(seeded.intent, blocked.downloadFinalizations[seeded.record.id])
-        assertEquals(0, validationCount.get())
-        assertContentEquals(authoredBytes, Files.readAllBytes(Path.of(seeded.intent!!.finalPath)))
-        gateway.assertUnused()
+        } == true && owner.gate.closes.get() == 1 }
+        assertEquals(1, owner.gate.expirations.size)
+        assertEquals(FailureCode.BACKGROUND_RESTRICTED, blocked.physicalDownloads[seeded.record.id]?.failure?.code)
+        assertEquals(seeded.intent, blocked.physicalFinalizations[seeded.record.id])
+        assertEquals(seeded.attempt, blocked.physicalAttempts[seeded.attempt.id])
+        assertEquals(0, owner.validations.size)
+        assertContentEquals(authoredBytes, Files.readAllBytes(Path.of(seeded.intent.finalPath)))
+        assertFalse(Files.exists(Path.of(seeded.intent.stagingPath)))
+        owner.assertFinalizationSchema3SourceUnused()
+        owner.coordinator.close()
+        assertTrue(owner.coordinator.dependencyReleaseSafeAfterClose)
     }
 
     @Test fun expiredCheckpointRollbackStillCancelsMaintenanceAndFinishRetainsTypedJournal() = downloadCase {
@@ -281,50 +290,71 @@ class DownloadMaintenanceRoomTest {
         eventually(first) { it.downloads[id]?.status == DownloadStatus.COMPLETE }
     }
 
-    @Test fun idempotentForegroundAnnouncementKeepsAnActiveMaintenanceEpoch() = downloadCase {
-        val first = store()
-        val seeded = seedFinalization(first)
+    @Test fun idempotentForegroundAnnouncementKeepsAnActiveMaintenanceEpoch() = acquisitionDownloadRoomCase {
+        val owner = owner()
+        val seeded = prepareFinalizationSchema3(owner)
         val validation = barrier()
-        val native = AssetValidator { validation.stop(); AssetValidation.Valid(31_234) }
-        val gateway = DownloadTestGateway().apply { denyAcquisition() }
-        val a = coordinator(first, gateway, native, MaintenanceTestGate())
-        a.start(); validation.entered.await()
-        val before = first.flush().getOrThrow().downloads.getValue(seeded.record.id)
-        a.resumePending()
+        owner.validation = { validation.stop(); AssetValidation.Valid(31_234) }
+        owner.denyFinalizationSchema3Acquisition()
+        owner.coordinator.start(); validation.entered.await()
+        val beforeState = owner.store.acquisitionView().acquisition
+        val before = beforeState.physicalDownloads.getValue(seeded.record.id)
+        assertNotNull(before.leaseOwner)
+        // The canonical seed retired its writer. Its journal, not activeAttemptId=null,
+        // is the non-vacuous identity of the materializer undergoing recovery.
+        assertEquals(seeded.attempt.id, beforeState.physicalFinalizations.getValue(seeded.record.id).attemptId)
+        assertEquals(seeded.attempt, beforeState.physicalAttempts[seeded.attempt.id])
+        owner.coordinator.resumePending()
         delay(160)
-        val after = first.flush().getOrThrow().downloads.getValue(seeded.record.id)
+        val afterState = owner.store.acquisitionView().acquisition
+        val after = afterState.physicalDownloads.getValue(seeded.record.id)
         assertEquals(DownloadStatus.VERIFYING, after.status)
         assertEquals(before.leaseOwner, after.leaseOwner)
         assertEquals(before.activeAttemptId, after.activeAttemptId)
+        assertEquals(before.ownershipGeneration, after.ownershipGeneration)
+        assertEquals(seeded.intent, afterState.physicalFinalizations[seeded.record.id])
+        assertEquals(seeded.attempt, afterState.physicalAttempts[seeded.attempt.id])
         validation.release()
-        eventually(first) { it.downloads[seeded.record.id]?.status == DownloadStatus.COMPLETE }
-        gateway.assertUnused()
+        awaitState(owner.store) { it.physicalDownloads[seeded.record.id]?.status == DownloadStatus.COMPLETE }
+        idle(owner)
+        owner.assertFinalizationSchema3Recovered(seeded)
+        owner.coordinator.close()
+        assertTrue(owner.coordinator.dependencyReleaseSafeAfterClose)
     }
 
-    @Test fun cancelledDispatcherReturnAfterRealExecutionClaimCommitReleasesItsExactLease() = downloadCase {
-        val faults = persistence()
-        val first = store(faults)
+    @Test fun cancelledDispatcherReturnAfterRealExecutionClaimCommitReleasesItsExactLease() = executorSchema3Case {
+        // EX19: returned actual COMMIT is retained across cancellation, not replaced with a fake claim.
+        val owner = owner()
         val once = AtomicBoolean(true)
         val committed = barrier()
-        faults.afterCommit = { snapshot ->
-            if (snapshot.downloads.values.any { it.status == DownloadStatus.RESOLVING && it.leaseOwner != null } && once.compareAndSet(true, false)) {
+        owner.repository.afterAttemptClaim = { _, actual ->
+            if (actual is PhysicalDownloadCommit.Committed && once.compareAndSet(true, false)) {
                 committed.stop()
-                parent.cancel(CancellationException("authored parent shutdown after actual claim commit"))
+                parent.cancel(CancellationException("Authored parent shutdown after real claim COMMIT"))
             }
         }
-        val gateway = DownloadTestGateway().apply { denyAcquisition() }
-        val a = coordinator(first, gateway)
-        val id = a.enqueue(item()); a.start()
-        committed.entered.await(); committed.release()
-        val released = eventually(first) { !once.get() && it.downloads[id]?.let { d ->
-            d.leaseOwner == null && d.activeAttemptId == null
-        } == true && it.downloadAttempts.values.singleOrNull()?.finishedEpochMs != null }
-        assertEquals(DownloadStatus.QUEUED, released.downloads[id]?.status)
-        assertEquals(1, released.downloadAttempts.size)
-        val slot = assertNotNull(files.tryTransferSlot(1)); slot.close()
-        val path = released.downloads.getValue(id).stagingPath!!
-        val lease = assertNotNull(files.tryLeasePaths(listOf(path))); lease.close()
-        gateway.assertUnused()
+        val (id, selected) = enqueue(owner)
+        owner.coordinator.start(DownloadActivation.DURABLE_WORK)
+        committed.entered.await()
+        val claimed = join(owner, id)
+        assertNotNull(claimed.activeAttempt)
+        assertNull(probeFiles.tryLeasePaths(listOf(assertNotNull(claimed.job.stagingPath))))
+        committed.release()
+        val released = awaitJob(owner, id) {
+            !once.get() && it.job.leaseOwner == null && it.activeAttempt == null &&
+                it.attempts.singleOrNull()?.finishedEpochMs != null
+        }
+        assertEquals(DownloadStatus.QUEUED, released.job.status)
+        assertEquals(selected.context, released.producerContext)
+        assertEquals(1, released.attempts.size)
+        assertEquals(claimed.job.activeAttemptId, released.attempts.single().id)
+        assertNotNull(probeFiles.tryTransferSlot(1)).close()
+        assertNotNull(probeFiles.tryLeasePaths(listOf(assertNotNull(released.job.stagingPath)))).close()
+        assertEquals(0, owner.gate.acquires.get())
+        assertTrue(owner.gateway.prepareCalls.isEmpty())
+        assertTrue(owner.gateway.transfers.isEmpty())
+        assertEquals(1, owner.selector.requests.size)
+        owner.legacy.assertUnused()
     }
 
     @Test fun cancelledDispatcherReturnAfterRealMaintenanceCommitReleasesBeforeGateAcquisition() = downloadCase {

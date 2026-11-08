@@ -28,8 +28,11 @@ import dev.veyra.playback.AssetValidation
 import dev.veyra.playback.AssetValidator
 import dev.veyra.playback.AudioEngine
 import dev.veyra.playback.EngineCapabilities
+import dev.veyra.source.execution.AcquisitionPlaybackSource
 import dev.veyra.playback.EngineEvent
+import dev.veyra.playback.NativeReaderDrainResult
 import dev.veyra.playback.PlaybackResource
+import dev.veyra.playback.PlaybackSelection
 import dev.veyra.playback.ResolvedPlayable
 import dev.veyra.source.ResolvePurpose
 import dev.veyra.source.execution.KmpFirstResult
@@ -92,6 +95,13 @@ class DesktopRetainedLifetimeTest {
             preparationCalls.incrementAndGet()
             error("This host-lifetime fixture did not authorize playback")
         }
+        override suspend fun prepare(source: AcquisitionPlaybackSource, selection: PlaybackSelection,
+            startPositionMs: Long, generation: Long) {
+            preparationCalls.incrementAndGet()
+            error("This host-lifetime fixture did not authorize playback")
+        }
+        override suspend fun awaitRetiredReaders(expectedGeneration: Long): NativeReaderDrainResult =
+            NativeReaderDrainResult.Drained(expectedGeneration)
         override suspend fun play(generation: Long) = Unit
         override suspend fun pause(generation: Long) = Unit
         override suspend fun seek(positionMs: Long, seekSequence: Long, generation: Long) = Unit

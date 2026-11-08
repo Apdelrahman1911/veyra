@@ -3,7 +3,7 @@ package dev.veyra.desktop.audio
 import dev.veyra.desktop.runtime.DesktopRuntimeConfig
 import dev.veyra.model.AppFailure
 import dev.veyra.model.FailureCode
-import dev.veyra.model.MediaKind
+import dev.veyra.model.PlaybackControlsMode
 import dev.veyra.model.VeyraException
 import dev.veyra.playback.CrossfadeAudioEngine
 import dev.veyra.playback.CrossfadeCancelReason
@@ -11,7 +11,12 @@ import dev.veyra.playback.CrossfadeMix
 import dev.veyra.playback.EngineEvent
 import dev.veyra.playback.EnginePhase
 import dev.veyra.playback.InterruptionKind
+import dev.veyra.playback.NativeReaderDrainResult
+import dev.veyra.playback.NativePlaybackSource
+import dev.veyra.playback.PlaybackResource
+import dev.veyra.playback.PlaybackSelection
 import dev.veyra.playback.ResolvedPlayable
+import dev.veyra.source.execution.AcquisitionPlaybackSource
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -21,6 +26,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -28,9 +34,12 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.nio.file.Path
+import java.util.IdentityHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -39,8 +48,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  * No native playlist, second session, synthetic position clock, or system-mpv fallback is used.
  */
 class DesktopAudioEngine private constructor(
-    private val config: DesktopRuntimeConfig,
-    firstDeck: MpvAudioDeck,
+    firstDeck: DesktopAudioDeck,
+    private val newDeck: suspend () -> DesktopAudioDeck,
 ) : CrossfadeAudioEngine {
     override val capabilities = firstDeck.capabilities.copy(supportsCrossfade = true)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -59,14 +68,34 @@ class DesktopAudioEngine private constructor(
     private var incoming: Slot? = null
     private var overlap: Overlap? = null
     private var userGain = 1f
-    // A retired source/deck may no longer be current when its release fails. Never let a later
-    // successful stop of an unrelated deck turn that failure into permission to delete its files.
-    // Atomic because a rejected submitOwned also releases its resource on the caller's context.
+    // Source registration/rejected-plan disposal can run on the caller. All sets/owner completion
+    // fields below are guarded by gate. Failed records remain strongly held, not Boolean-only.
+    private var everOwnedSource = false
+    private val ownedSources = linkedSetOf<SourceOwner>()
+    // Only in-flight/failed closes are indexed. Successful resources are not kept in a lifetime
+    // cache, but handing the same failed resource back to this engine cannot trigger an auto-retry.
+    private val resourceCloseOwners = IdentityHashMap<PlaybackResource, SourceOwner>()
+    private val retiredDecks = linkedSetOf<Slot>()
     private val cleanupFailed = AtomicBoolean()
+    private val nativeSilenceFailed = AtomicBoolean()
 
-    private class Slot(val deck: MpvAudioDeck) {
+    private class SourceOwner(val source: NativePlaybackSource, val resourceAlias: SourceOwner? = null) {
+        // The actual native reader, not a generation/phase/mute inference. Source resources
+        // cannot be released until this exact deck positively acknowledges destruction.
+        var nativeSlot: Slot? = null
+        var retired = false
+        var completion: CompletableDeferred<Boolean>? = null
+    }
+
+    private class Slot(val deck: DesktopAudioDeck) {
         var generation = Long.MIN_VALUE
-        var source: ResolvedPlayable? = null
+        var sourceOwner: SourceOwner? = null
+        val source: NativePlaybackSource? get() = sourceOwner?.source
+        var everPrepared = false
+        var disposal: CompletableDeferred<Boolean>? = null
+        // null: close has not returned; false: attempted but unacknowledged; true: positive ACK.
+        var nativeReleaseAcknowledged: Boolean? = null
+        var silenceAcknowledged = true
         var collector: Job? = null
         var ready = false
         var durationMs: Long? = null
@@ -91,7 +120,8 @@ class DesktopAudioEngine private constructor(
     }
 
     private sealed interface Message {
-        class Command(val action: suspend () -> Unit, val result: CompletableDeferred<Unit>, val source: ResolvedPlayable? = null) : Message
+        class Command(val action: suspend () -> Unit, val result: CompletableDeferred<Unit>, val sourceOwner: SourceOwner? = null) : Message
+        class Drain(val expectedGeneration: Long, val result: CompletableDeferred<NativeReaderDrainResult>) : Message
         class Native(val slot: Slot, val event: EngineEvent) : Message
         data object Tick : Message
         data object Shutdown : Message
@@ -105,11 +135,22 @@ class DesktopAudioEngine private constructor(
                     is Message.Command -> try { message.action(); message.result.complete(Unit) }
                         catch (error: Throwable) {
                             withContext(NonCancellable) {
-                                runCatching { releaseResource(message.source) }
-                                if (cleanupFailed.get()) silenceAll()
+                                releaseResource(message.sourceOwner)
+                                // Only uncertain native silence is a transport-wide containment
+                                // problem. A retired A resource failure must not silence live B.
+                                if (error is NativeSilenceUnacknowledged) silenceAll()
                             }
-                            message.result.completeExceptionally(if (cleanupFailed.get()) cleanupFailure() else error)
+                            message.result.completeExceptionally(if (error is NativeSilenceUnacknowledged)
+                                VeyraException(AppFailure(FailureCode.INVALID_STATE, "native_audio_silence_unacknowledged")) else error)
                         }
+                    is Message.Drain -> {
+                        val result = try { drainRetiredReaders(message.expectedGeneration) }
+                        catch (_: Throwable) {
+                            retainCleanupFailure()
+                            NativeReaderDrainResult.Unacknowledged(cleanupFailure().failure)
+                        }
+                        message.result.complete(result)
+                    }
                     is Message.Native -> nativeEvent(message.slot, message.event)
                     Message.Tick -> {
                         tickQueued.set(false)
@@ -131,13 +172,20 @@ class DesktopAudioEngine private constructor(
                     runCatching { outgoing.deck.pause(outgoing.generation) }
                     incoming?.let { runCatching { dispose(it) } }
                     runCatching { dispose(outgoing) }
+                    // Includes a rejected invocation registered while shutdown was already
+                    // draining. Source closure is single-attempt per transferred ownership.
+                    finishResourceClosures(includeUnstarted = true)
                 }
                 messages.close()
                 while (true) {
                     val command = messages.tryReceive().getOrNull() ?: break
                     if (command is Message.Command) {
-                        withContext(NonCancellable) { runCatching { releaseResource(command.source) } }
+                        withContext(NonCancellable) { releaseResource(command.sourceOwner) }
                         command.result.completeExceptionally(IllegalStateException("Audio engine is closed"))
+                    } else if (command is Message.Drain) {
+                        command.result.complete(NativeReaderDrainResult.Unacknowledged(
+                            AppFailure(FailureCode.RECOVERY_REQUIRED, "native_audio_owner_closed"),
+                        ))
                     }
                 }
                 terminal.close(); samples.close(); progress.close()
@@ -153,31 +201,51 @@ class DesktopAudioEngine private constructor(
         }
     }
 
-    override suspend fun prepare(source: ResolvedPlayable, startPositionMs: Long, generation: Long) = submitOwned(source) {
-        if (generation < barrier) { releaseResource(source); return@submitOwned }
-        val previous = outgoing.source
+    override suspend fun prepare(source: ResolvedPlayable, startPositionMs: Long, generation: Long) =
+        prepareInput(NativePlaybackSource.Legacy(source), startPositionMs, generation)
+
+    override suspend fun prepare(source: AcquisitionPlaybackSource, selection: PlaybackSelection, startPositionMs: Long, generation: Long) =
+        prepareInput(NativePlaybackSource.Acquired(source, selection), startPositionMs, generation)
+
+    private suspend fun prepareInput(source: NativePlaybackSource, startPositionMs: Long, generation: Long) = submitOwned(source) { owner ->
+        if (generation < barrier) { releaseResource(owner); return@submitOwned }
+        // An invalid typed presentation is rejected without touching current B. The actor already
+        // registered this handoff, so failure uses the same retained close/fence as every source.
+        source.validateSelection()
+        checkUniqueResourceOwnership(owner)
+        checkNativeSilence()
+        // A loadfile replacement is not an old-reader release acknowledgement. Never put a second
+        // source on an already-loaded handle; retire/destroy/join the whole previous native deck.
+        val previous = outgoing.takeIf { it.everPrepared }
         try {
-        // Replacing/explicit navigation must never briefly restore a fading-out old track.
-        outgoing.deck.pause(outgoing.generation)
-        cancelStage(CrossfadeCancelReason.CANCELLED, immediate = true, emitHeldEnd = false)
-        barrier = generation
-        outgoing.apply {
-            this.generation = generation; this.source = source
-            music = source.item?.kind != MediaKind.EPISODE
-            ready = false; durationMs = null; seekable = false; heldEnd = false; heldFailure = null; snapshot = MpvDeckSnapshot()
-        }
-        outgoing.deck.setGain(outgoing.master * userGain)
-        outgoing.deck.prepare(source, startPositionMs, generation)
+            // Replacing/explicit navigation must never briefly restore a fading-out old track.
+            outgoing.deck.pause(outgoing.generation)
+            cancelStage(CrossfadeCancelReason.CANCELLED, immediate = true, emitHeldEnd = false)
+            if (previous != null) outgoing = Slot(newDeck()).also(::observe)
+            barrier = generation
+            outgoing.apply {
+                this.generation = generation; sourceOwner = owner; everPrepared = true
+                music = source.controlsMode == PlaybackControlsMode.MUSIC
+                ready = false; durationMs = null; seekable = false; heldEnd = false; heldFailure = null; snapshot = MpvDeckSnapshot()
+            }
+            synchronized(gate) { owner.nativeSlot = outgoing }
+            outgoing.deck.setGain(outgoing.master * userGain)
+            outgoing.deck.prepare(DesktopNativeInput.from(source), startPositionMs, generation)
         } catch (error: Throwable) {
-            releaseResource(source)
+            releaseResource(owner)
             throw error
         } finally {
-            if (previous?.resource !== source.resource) releaseResource(previous)
+            // The previous object can remain outgoing if allocating the replacement failed.
+            // In that case its existing owner is kept until an explicit stop/close can retire it.
+            if (previous != null && previous !== outgoing) dispose(previous)
         }
     }
 
     override suspend fun play(generation: Long) = submit {
-        if (current(generation)) outgoing.deck.play(generation)
+        if (current(generation)) {
+            checkNativeSilence()
+            outgoing.deck.play(generation)
+        }
     }
 
     override suspend fun pause(generation: Long) = submit {
@@ -208,39 +276,54 @@ class DesktopAudioEngine private constructor(
         incoming?.let { it.deck.pause(it.generation) }
         outgoing.deck.pause(outgoing.generation)
         cancelStage(CrossfadeCancelReason.CANCELLED, immediate = true, emitHeldEnd = false)
-        barrier = generation
         val previous = outgoing
         previous.deck.stop(generation)
         // mpv's stop command acceptance is not a Windows file-release proof. Destroy/join the
         // native handle before acknowledging the shared asset-removal barrier, then recreate idle.
         dispose(previous)
-        outgoing = Slot(MpvAudioDeck.create(config)).apply { this.generation = generation }
+        val idle = Slot(newDeck()).apply { this.generation = generation }
+        try { idle.deck.stop(generation) } catch (error: Throwable) {
+            dispose(idle)
+            throw error
+        }
+        outgoing = idle
+        barrier = generation
         observe(outgoing)
         publish(EngineEvent.StateChanged(generation, EnginePhase.IDLE, false))
         checkCleanup()
     }
 
-    override suspend fun preloadNext(source: ResolvedPlayable, startPositionMs: Long, nextGeneration: Long, generation: Long) = submitOwned(source) {
-        if (!current(generation) || nextGeneration <= generation) { releaseResource(source); return@submitOwned }
+    override suspend fun preloadNext(source: ResolvedPlayable, startPositionMs: Long, nextGeneration: Long, generation: Long) =
+        preloadInput(NativePlaybackSource.Legacy(source), startPositionMs, nextGeneration, generation)
+
+    override suspend fun preloadNext(source: AcquisitionPlaybackSource, selection: PlaybackSelection, startPositionMs: Long, nextGeneration: Long, generation: Long) =
+        preloadInput(NativePlaybackSource.Acquired(source, selection), startPositionMs, nextGeneration, generation)
+
+    private suspend fun preloadInput(source: NativePlaybackSource, startPositionMs: Long, nextGeneration: Long, generation: Long) = submitOwned(source) { owner ->
+        if (!current(generation) || nextGeneration <= generation) { releaseResource(owner); return@submitOwned }
+        source.validateSelection()
+        checkUniqueResourceOwnership(owner)
+        checkNativeSilence()
         cancelStage(CrossfadeCancelReason.CANCELLED, immediate = false)
-        if (!outgoing.music || source.item?.kind == MediaKind.EPISODE) {
+        if (!outgoing.music || source.controlsMode != PlaybackControlsMode.MUSIC) {
             publish(EngineEvent.StageFailed(generation, nextGeneration, AppFailure(FailureCode.INVALID_STATE, "podcasts_do_not_crossfade")))
-            releaseResource(source)
+            releaseResource(owner)
             return@submitOwned
         }
         var staged: Slot? = null
         try {
-            staged = Slot(MpvAudioDeck.create(config)).apply {
-                this.generation = nextGeneration; this.source = source; music = true
+            staged = Slot(newDeck()).apply {
+                this.generation = nextGeneration; sourceOwner = owner; everPrepared = true; music = true
             }
+            synchronized(gate) { owner.nativeSlot = staged }
             incoming = staged
             observe(staged)
             staged.deck.setGain(0f)
-            staged.deck.prepare(source, startPositionMs, nextGeneration)
+            staged.deck.prepare(DesktopNativeInput.from(source), startPositionMs, nextGeneration)
         } catch (error: Exception) {
             incoming = null
             staged?.let { dispose(it) }
-            releaseResource(source)
+            releaseResource(owner)
             publish(EngineEvent.StageFailed(generation, nextGeneration, (error as? VeyraException)?.failure
                 ?: AppFailure(FailureCode.INVALID_STATE, "crossfade_preload_failed")))
         }
@@ -249,6 +332,7 @@ class DesktopAudioEngine private constructor(
     override suspend fun beginCrossfade(durationMs: Long, nextGeneration: Long, generation: Long) = submit {
         val next = incoming ?: return@submit
         if (!current(generation) || next.generation != nextGeneration || !next.ready || overlap != null) return@submit
+        checkNativeSilence()
         require(durationMs in 1..30_000) { "Invalid crossfade duration" }
         val from = outgoing.deck.snapshot()
         val to = next.deck.snapshot()
@@ -274,7 +358,6 @@ class DesktopAudioEngine private constructor(
         outgoing = next; incoming = null; overlap = null
         barrier = nextGeneration
         outgoing.heldEnd = false
-        previous.deck.pause(previous.generation)
         dispose(previous)
         val actual = outgoing.deck.snapshot()
         outgoing.snapshot = actual
@@ -285,7 +368,8 @@ class DesktopAudioEngine private constructor(
 
     override suspend fun cancelNext(nextGeneration: Long, generation: Long) = submit {
         if (current(generation) && incoming?.generation == nextGeneration) cancelStage(CrossfadeCancelReason.CANCELLED, immediate = false)
-        checkCleanup()
+        // Known cleanup-only failures are reported by awaitRetiredReaders, never as Error(B)
+        // through a later unrelated cancel/seek/rate command. Unit is not a deletion ACK.
     }
 
     /** Route/focus callbacks use the same engine event path as the coordinator; never a second queue. */
@@ -321,14 +405,32 @@ class DesktopAudioEngine private constructor(
         return result
     }
 
+    override suspend fun awaitRetiredReaders(expectedGeneration: Long): NativeReaderDrainResult {
+        currentCoroutineContext().ensureActive()
+        val result = CompletableDeferred<NativeReaderDrainResult>()
+        val accepted = synchronized(gate) {
+            accepting && messages.trySend(Message.Drain(expectedGeneration, result)).isSuccess
+        }
+        if (!accepted) return NativeReaderDrainResult.Unacknowledged(
+            AppFailure(FailureCode.RECOVERY_REQUIRED, "native_audio_owner_closed"),
+        )
+        // Cancellation of the caller cannot cancel a queued retirement or manufacture an ACK.
+        return result.await()
+    }
+
     override suspend fun close() {
         synchronized(gate) {
             if (accepting) { accepting = false; messages.trySend(Message.Shutdown) }
         }
-        withContext(NonCancellable) { closed.await() }
-        // A resource handed to an already-closed engine can fail on another coroutine after the
-        // actor's terminal result. Repeated close remains a truthful fail-closed release fence.
-        checkCleanup()
+        withContext(NonCancellable) {
+            try { closed.await() } finally {
+                // A rejected post-shutdown handoff can still be closing on another coroutine.
+                // Join it even when the actor's earlier terminal result was already a failure;
+                // a completed `closed` plus a not-yet-set failure flag is not a release receipt.
+                finishResourceClosures(includeUnstarted = true)
+            }
+            checkCleanup()
+        }
     }
 
     private suspend fun tick() {
@@ -401,8 +503,8 @@ class DesktopAudioEngine private constructor(
         }
         when (event) {
             is EngineEvent.Ready -> { slot.ready = true; slot.durationMs = event.durationMs; slot.seekable = event.seekable }
-            is EngineEvent.Ended -> { cancelStage(CrossfadeCancelReason.OUTGOING_ENDED, immediate = true, emitHeldEnd = false); releaseResource(slot.source) }
-            is EngineEvent.Error -> { cancelStage(CrossfadeCancelReason.ERROR, immediate = true, emitHeldEnd = false); releaseResource(slot.source) }
+            is EngineEvent.Ended -> { cancelStage(CrossfadeCancelReason.OUTGOING_ENDED, immediate = true, emitHeldEnd = false); releaseResource(slot.sourceOwner) }
+            is EngineEvent.Error -> { cancelStage(CrossfadeCancelReason.ERROR, immediate = true, emitHeldEnd = false); releaseResource(slot.sourceOwner) }
             is EngineEvent.Interruption -> {
                 outgoing.deck.pause(outgoing.generation)
                 cancelStage(CrossfadeCancelReason.INTERRUPTED, immediate = true)
@@ -431,8 +533,10 @@ class DesktopAudioEngine private constructor(
             }
         } finally {
             withContext(NonCancellable) {
-                runCatching { next.deck.pause(next.generation) }
-                try { dispose(next) } finally { outgoing.deck.setGain(outgoing.master * userGain) }
+                // A failed central close is scoped, but if native pause AND destruction fail
+                // it is unsafe to restore/continue another audible deck. dispose distinguishes it.
+                dispose(next)
+                outgoing.deck.setGain(outgoing.master * userGain)
             }
         }
         publish(EngineEvent.CrossfadeCancelled(barrier, next.generation, reason))
@@ -462,21 +566,171 @@ class DesktopAudioEngine private constructor(
         }
     }
 
-    private suspend fun dispose(slot: Slot) = withContext(NonCancellable) {
-        slot.collector?.cancel()
-        var failed = false
-        try { slot.deck.close() } catch (_: Throwable) { cleanupFailed.set(true); failed = true }
-        try { releaseResource(slot.source); slot.source = null } catch (_: Throwable) { failed = true }
-        if (failed) throw cleanupFailure()
+    private class NativeSilenceUnacknowledged : Exception()
+
+    private suspend fun dispose(slot: Slot): Unit = withContext(NonCancellable) {
+        val existing = synchronized(gate) { slot.disposal }
+        if (existing != null) {
+            existing.await()
+            if (!slot.silenceAcknowledged) throw NativeSilenceUnacknowledged()
+            return@withContext
+        }
+        val completion = CompletableDeferred<Boolean>()
+        synchronized(gate) { slot.disposal = completion; retiredDecks += slot }
+        slot.collector?.cancelAndJoin()
+        // Silence and reader-release acknowledgements are separate. A destroyed handle is silent
+        // even if its preceding pause command failed; a paused handle whose close failed remains
+        // strongly retained with a release veto but need not interrupt unrelated B controls.
+        val paused = runCatching { slot.deck.pause(slot.generation) }.isSuccess
+        val nativeClosed = runCatching { slot.deck.close() }.isSuccess
+        synchronized(gate) { slot.nativeReleaseAcknowledged = nativeClosed }
+        slot.silenceAcknowledged = paused || nativeClosed
+        if (!slot.silenceAcknowledged) nativeSilenceFailed.set(true)
+        val resourceClosed = releaseResource(slot.sourceOwner)
+        val acknowledged = nativeClosed && resourceClosed
+        synchronized(gate) {
+            if (acknowledged) { retiredDecks -= slot; slot.sourceOwner = null }
+        }
+        if (!acknowledged) retainCleanupFailure()
+        completion.complete(acknowledged)
+        if (!paused && !nativeClosed) throw NativeSilenceUnacknowledged()
     }
 
-    private suspend fun releaseResource(source: ResolvedPlayable?) = withContext(NonCancellable) {
-        try { source?.resource?.close() }
-        catch (_: Throwable) {
-            cleanupFailed.set(true)
-            // Do not retain a bridge URL or native exception text in the public error.
-            throw cleanupFailure()
+    /** Exactly one close attempt per transferred source; failed owners remain pinned for life. */
+    private suspend fun releaseResource(owner: SourceOwner?): Boolean = withContext(NonCancellable) {
+        if (owner == null) return@withContext true
+        var start = false
+        val completion = synchronized(gate) {
+            owner.resourceAlias?.let { leader ->
+                // This input was rejected before native handoff. It is another reference to
+                // an existing owner, not permission to close B's resource or start a retry.
+                owner.retired = true
+                ownedSources -= owner
+                val existing = leader.completion ?: return@withContext true
+                owner.completion = existing
+                return@synchronized existing
+            }
+            val resource = owner.source.resource
+            owner.nativeSlot?.let { native ->
+                if (resource != null && native.nativeReleaseAcknowledged != true) {
+                    if (native.nativeReleaseAcknowledged == null) {
+                        // prepare failure/EOF/Error is not destruction. The deck still owns
+                        // the source; an explicit replacement/stop/close will retire it.
+                        return@withContext false
+                    }
+                    // Failed destruction is terminal for this owner. Retain BOTH the real
+                    // deck and its exact resource without attempting resource.close at all.
+                    owner.retired = true
+                    return@synchronized owner.completion ?: CompletableDeferred(false).also {
+                        owner.completion = it
+                        resourceCloseOwners[resource] = owner
+                    }
+                }
+            }
+            owner.retired = true
+            owner.completion ?: run {
+                val prior = resource?.let(resourceCloseOwners::get)
+                if (prior != null) {
+                    // The indexed leader strongly retains this exact resource and its completion.
+                    // Don't accumulate another failed-source record or close attempt for an alias.
+                    ownedSources -= owner
+                    requireNotNull(prior.completion).also { owner.completion = it }
+                } else CompletableDeferred<Boolean>().also {
+                    owner.completion = it
+                    if (resource != null) resourceCloseOwners[resource] = owner
+                    start = true
+                }
+            }
         }
+        if (start) {
+            val acknowledged = runCatching { owner.source.resource?.close() }.isSuccess
+            if (acknowledged) synchronized(gate) {
+                ownedSources -= owner
+                owner.source.resource?.let { resourceCloseOwners.remove(it) }
+            }
+            else retainCleanupFailure()
+            completion.complete(acknowledged)
+        }
+        completion.await()
+    }
+
+    private suspend fun finishResourceClosures(includeUnstarted: Boolean = false) {
+        // Failed completed records stay retained, but never prevent awaiting another pending close.
+        while (true) {
+            val pending = synchronized(gate) {
+                ownedSources.filter { (includeUnstarted || it.retired) && it.completion?.isCompleted != true &&
+                    (it.resourceAlias != null || it.source.resource == null || it.nativeSlot == null ||
+                        it.nativeSlot?.nativeReleaseAcknowledged != null) }
+            }
+            if (pending.isEmpty()) return
+            for (owner in pending) releaseResource(owner)
+        }
+    }
+
+    private fun pristine(): Boolean = synchronized(gate) {
+        accepting && barrier == Long.MIN_VALUE && !everOwnedSource && !outgoing.everPrepared &&
+            outgoing.sourceOwner == null && incoming == null && overlap == null &&
+            retiredDecks.isEmpty() && ownedSources.isEmpty() && !cleanupFailed.get()
+    }
+
+    private suspend fun drainRetiredReaders(expectedGeneration: Long): NativeReaderDrainResult {
+        if (expectedGeneration < 0L) return NativeReaderDrainResult.Superseded
+        if (synchronized(gate) { !accepting }) return ownerClosedResult()
+        if (expectedGeneration == 0L && pristine()) {
+            val initial = outgoing.deck.awaitRetiredReaders(0L)
+            if (initial is NativeReaderDrainResult.Unacknowledged) {
+                retainCleanupFailure()
+                return NativeReaderDrainResult.Unacknowledged(cleanupFailure().failure)
+            }
+            if (initial != NativeReaderDrainResult.Drained(0L)) return NativeReaderDrainResult.Superseded
+            // A source invocation can register concurrently while the native-owner queue waits.
+            // It must not turn a non-pristine engine into an arbitrary epoch-zero ACK.
+            synchronized(gate) {
+                if (initial == NativeReaderDrainResult.Drained(0L) && pristine()) {
+                    barrier = 0L; outgoing.generation = 0L
+                }
+            }
+        }
+        if (barrier != expectedGeneration || outgoing.generation != expectedGeneration) {
+            return NativeReaderDrainResult.Superseded
+        }
+        finishResourceClosures()
+        val retirements = synchronized(gate) { retiredDecks.mapNotNull { it.disposal } }
+        for (retirement in retirements) retirement.await()
+        var unacknowledged = false
+        for (slot in listOfNotNull(outgoing, incoming)) {
+            when (val result = slot.deck.awaitRetiredReaders(slot.generation)) {
+                is NativeReaderDrainResult.Drained -> if (result.expectedGeneration != slot.generation) {
+                    return NativeReaderDrainResult.Superseded
+                }
+                NativeReaderDrainResult.Superseded -> return NativeReaderDrainResult.Superseded
+                is NativeReaderDrainResult.Unacknowledged -> unacknowledged = true
+            }
+        }
+        finishResourceClosures()
+        currentCoroutineContext().ensureActive()
+        if (unacknowledged) retainCleanupFailure()
+        return synchronized(gate) {
+            when {
+                // close changes admission on its caller while this actor awaits a lower deck.
+                // Linearize the result with that admission state, not just the old load epoch.
+                !accepting -> ownerClosedResult()
+                barrier != expectedGeneration || outgoing.generation != expectedGeneration -> NativeReaderDrainResult.Superseded
+                cleanupFailed.get() -> NativeReaderDrainResult.Unacknowledged(cleanupFailure().failure)
+                else -> NativeReaderDrainResult.Drained(expectedGeneration)
+            }
+        }
+    }
+
+    private fun retainCleanupFailure() {
+        cleanupFailed.set(true)
+        // An exceptional close must not make the app/GC lose failed native handles or sources.
+        // Sticky veto deliberately lasts for this process; no implicit retry or URL is exposed.
+        synchronized(failedOwnerPins) { failedOwnerPins += this }
+    }
+
+    internal fun retainedReadersForTest(): Pair<Int, Int> = synchronized(gate) {
+        retiredDecks.size to ownedSources.count { it.retired && it.completion?.isCompleted == true }
     }
 
     private suspend fun silenceAll() {
@@ -485,7 +739,16 @@ class DesktopAudioEngine private constructor(
     }
 
     private fun cleanupFailure() = VeyraException(AppFailure(FailureCode.RECOVERY_REQUIRED, "playback_resource_cleanup"))
+    private fun ownerClosedResult() = NativeReaderDrainResult.Unacknowledged(
+        AppFailure(FailureCode.RECOVERY_REQUIRED, "native_audio_owner_closed"),
+    )
     private fun checkCleanup() { if (cleanupFailed.get()) throw cleanupFailure() }
+    private fun checkNativeSilence() { if (nativeSilenceFailed.get()) throw NativeSilenceUnacknowledged() }
+    private fun checkUniqueResourceOwnership(owner: SourceOwner) {
+        if (owner.resourceAlias != null) throw VeyraException(
+            AppFailure(FailureCode.INVALID_STATE, "native_playback_resource_already_owned"),
+        )
+    }
 
     private fun current(generation: Long) = barrier == generation && outgoing.generation == generation
     private fun publish(event: EngineEvent) { terminal.trySend(event).getOrThrow() }
@@ -499,11 +762,20 @@ class DesktopAudioEngine private constructor(
     }
 
     /** Invocation transfers the ephemeral resource even when this engine has already closed. */
-    private suspend fun submitOwned(source: ResolvedPlayable, action: suspend () -> Unit) {
+    private suspend fun submitOwned(source: NativePlaybackSource, action: suspend (SourceOwner) -> Unit) {
         val result = CompletableDeferred<Unit>()
-        val accepted = synchronized(gate) { accepting && messages.trySend(Message.Command(action, result, source)).isSuccess }
+        val owner: SourceOwner
+        val accepted = synchronized(gate) {
+            owner = SourceOwner(source, source.resource?.let { resource ->
+                ownedSources.firstOrNull { it.source.resource === resource }
+            })
+            everOwnedSource = true
+            ownedSources += owner
+            (accepting && messages.trySend(Message.Command({ action(owner) }, result, owner)).isSuccess)
+                .also { if (!it) owner.retired = true }
+        }
         if (!accepted) {
-            releaseResource(source)
+            releaseResource(owner)
             error("Audio engine is closed")
         }
         // Caller cancellation cannot prematurely destroy a resource already accepted by the actor.
@@ -511,7 +783,11 @@ class DesktopAudioEngine private constructor(
     }
 
     companion object {
-        suspend fun create(config: DesktopRuntimeConfig): DesktopAudioEngine = DesktopAudioEngine(config, MpvAudioDeck.create(config))
+        private val failedOwnerPins = linkedSetOf<DesktopAudioEngine>()
+        suspend fun create(config: DesktopRuntimeConfig): DesktopAudioEngine =
+            DesktopAudioEngine(MpvAudioDeck.create(config)) { MpvAudioDeck.create(config) }
+        internal fun createForTest(firstDeck: DesktopAudioDeck, newDeck: suspend () -> DesktopAudioDeck): DesktopAudioEngine =
+            DesktopAudioEngine(firstDeck, newDeck)
         internal suspend fun createInternal(config: DesktopRuntimeConfig, validation: Boolean): MpvAudioDeck = MpvAudioDeck.createInternal(config, validation)
         internal fun localPath(uri: String): Path = MpvAudioDeck.localPath(uri)
     }
