@@ -23,12 +23,16 @@ import dev.veyra.model.receipt
 enum class DownloadSurfaceOrigin { LEGACY, TYPED_CATALOGUE, TYPED_SOURCE }
 
 /**
- * [ready] is the existing schema2 readiness for legacy rows, and the exact-use checked readiness
- * for typed catalogue rows. A historical `COMPLETE` flag, a persisted materialization, a
- * process-history check or a producer completion are not enough. [checking] means owned bytes
- * exist and this process is currently verifying/blocked, so Ready must not be shown yet.
- * [displayTitle] is only the real captured request/observed title of a neutral source row; it
- * never creates an RSS/catalogue item. No private path, signed URL or native handle is exposed.
+ * [ready] is row-level exact-use checked physical readiness for ANY producer: the existing
+ * schema2 readiness for legacy rows, or a typed job whose paired current-process states and exact
+ * `AssetUse`/claim/asset/receipt proof all match. A neutral source row can therefore be physically
+ * verified/removable/stored, but it has no [mediaId], no catalogue binding, no catalogue
+ * membership and no Play action; catalogue playback readiness remains [readyMediaIds] over a
+ * non-null mediaId. A historical `COMPLETE` flag, a persisted materialization, a process-history
+ * check or a producer completion are not enough. [checking] means owned bytes exist and this
+ * process is currently verifying/blocked. [displayTitle] is only the real captured
+ * request/observed title of a neutral source row; it never creates an RSS/catalogue item. No
+ * private path, signed URL or native handle is exposed.
  */
 data class DownloadSurfaceEntry(
     val id: String,
@@ -52,6 +56,7 @@ data class DownloadSurfaceEntry(
     init {
         require(id.isNotBlank() && bytesDownloaded >= 0 && (totalBytes == null || totalBytes >= 0))
         require(!checking || hasOwnedBytes)
+        require(!ready || hasOwnedBytes)
         require(bindingId == null || origin == DownloadSurfaceOrigin.LEGACY || origin == DownloadSurfaceOrigin.TYPED_CATALOGUE)
         require(mediaId != null || origin == DownloadSurfaceOrigin.TYPED_SOURCE)
         require(origin != DownloadSurfaceOrigin.TYPED_SOURCE || mediaId == null)
@@ -154,7 +159,7 @@ private fun typedEntries(presentation: DownloadAcquisitionPresentation,
                 projected.status in setOf(DownloadStatus.VERIFYING, DownloadStatus.NEEDS_FOREGROUND),
             hasOwnedBytes = asset != null,
             cleanupPending = projected.cleanupPending,
-            bindingId = verified?.bindingId,
+            bindingId = verified?.bindingId?.takeIf { mediaId != null },
             measuredDurationMs = asset?.measuredDurationMs,
             assetId = asset?.id?.value,
             assetSizeBytes = asset?.sizeBytes,

@@ -216,6 +216,35 @@ class TypedDownloadSurfacesTest {
     }
 
     @Test
+    fun completedNeutralTypedRowIsHonestInArabicRtlAndRemovalUsesTheJobId() {
+        val actions = mutableListOf<MusicUiAction>()
+        val title = "Captured neutral member — تسجيل من المصدر"
+        val neutral = DownloadSurfaceEntry("neutral-complete", DownloadSurfaceOrigin.TYPED_SOURCE,
+            displayTitle = title, status = DownloadStatus.COMPLETE, bytesDownloaded = 100, totalBytes = 100,
+            updatedEpochMs = 30, ready = true, hasOwnedBytes = true,
+            assetId = "neutral-asset", assetSizeBytes = 100)
+        ui.setContent {
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+                VeyraTheme(true, LanguagePreference.ARABIC) {
+                    LibraryScreen(AppSnapshot(), LibrarySection.DOWNLOADS, { actions += it },
+                        Modifier.size(420.dp, 720.dp), options.copy(downloads = DownloadSurface(listOf(neutral))))
+                }
+            }
+        }
+        ui.onNodeWithTag("downloads-list").performScrollToNode(hasTestTag("download-neutral-complete"))
+        ui.onNodeWithText(title).assertIsDisplayed()
+        ui.onNodeWithText(arabic.text(TextKey.SourceRecording)).assertIsDisplayed()
+        ui.onNodeWithText(arabic.downloadStatus(DownloadStatus.COMPLETE)).assertIsDisplayed()
+        ui.onNodeWithText(arabic.format(TextKey.StorageUsed, arabic.byteSize(100))).assertIsDisplayed()
+        listOf(TextKey.Play, TextKey.ReadyOffline, TextKey.Download).forEach {
+            ui.onNodeWithText(arabic.text(it)).assertDoesNotExist()
+        }
+        ui.onNodeWithText(arabic.text(TextKey.RemoveDownload)).performClick()
+        ui.onNodeWithTag("confirm-action").performClick()
+        assertEquals(listOf<MusicUiAction>(MusicUiAction.RemoveDownload("neutral-complete")), actions)
+    }
+
+    @Test
     fun typedDownloadsFiltersAndStorageUseActualPairedStateWithoutDoubleCounting() {
         val other = track.copy(id = "other", title = "Second typed track")
         val ready = readyTyped()

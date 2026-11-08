@@ -46,6 +46,8 @@ import dev.veyra.ui.music.libraryMedia
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /** Pure tests of the one UI projection wired to the existing screens; no Room/I/O/native work. */
@@ -167,6 +169,7 @@ class DownloadSurfaceTest {
         assertEquals(DownloadStatus.NEEDS_FOREGROUND, coldEntry?.status)
         assertTrue(coldEntry?.checking == true)
         assertFalse(coldEntry?.ready == true)
+        assertEquals(0L, downloadSurface(AppSnapshot(), cold).storageBytes())
         assertEquals(null, cold.verifiedDownload(built.bindingId))
 
         val ready = presentation(built)
@@ -274,9 +277,63 @@ class DownloadSurfaceTest {
         assertEquals(null, neutralEntry.mediaId)
         assertEquals(sourceTitle, neutralEntry.displayTitle)
         assertFalse(neutralEntry.ready)
+        assertNull(neutralEntry.bindingId)
         assertTrue(surface.catalogueMediaIds.isEmpty())
         assertTrue(libraryMedia(AppSnapshot(media = mapOf(media.id to media)), surface).isEmpty())
         assertEquals("neutral-job", neutralEntry.id)
+    }
+
+    @Test
+    fun completedNeutralAssetIsPhysicallyVerifiedButHasNoCatalogueReadinessOrBinding() {
+        val sourceCapture = SourceCollectionCapture(SourceCollectionMetadata(SourceProvider.YOUTUBE, "captured-complete",
+            sourceTitle, "https://www.youtube.com/playlist?list=authored-complete", AcquisitionEntryKind.PLAYLIST, null))
+        val request = AcquisitionRequest(AcquisitionRequestId("neutral-complete-request"), sourceTitle, sourceCapture, 1)
+        val entry = SourceEntry(AcquisitionEntryKind.VIDEO, "CCCCCCCCCCC", "Observed neutral recording",
+            "https://www.youtube.com/watch?v=CCCCCCCCCCC", ordinal = 0)
+        val receipt = FirstResultReceipt.Observed(FirstResultReceiptId("neutral-complete-receipt"),
+            FirstResultObservation(request.id, sourceTitle, entry, entry.publicUrl), 2)
+        val recording = SourceRecording(SourceRecordingId("neutral-complete-recording"), "CCCCCCCCCCC",
+            requireNotNull(entry.publicUrl))
+        val subject = ExecutableSubject.SourceRecordingSubject(ExecutableSubjectId("neutral-complete-subject"), recording.id)
+        val binding = ExecutionBinding(ExecutionBindingId("neutral-complete-binding"), subject.id, receipt.id, recording.id,
+            ExecutionBindingOrigin.TYPED)
+        val producer = PhysicalDownloadProducer.Typed(subject.id, binding.id, recording.id)
+        val asset = MaterializationAsset(MaterializationAssetId("neutral-complete-asset"), producer,
+            "/owned/authored-neutral-complete", 4_096, kind = OfflineAssetKind.FILE, mimeType = "audio/mpeg",
+            codecs = "mp3", sha256 = "B".repeat(64), representationId = "authored-neutral-representation",
+            completedEpochMs = 9, materializerDownloadId = "neutral-complete-job",
+            materializerAttemptId = "neutral-complete-attempt", ownershipGeneration = 1)
+        val job = PhysicalDownloadJob("neutral-complete-job", producer, status = DownloadStatus.COMPLETE,
+            bytesDownloaded = 4_096, totalBytes = 4_096, assetId = asset.id, representationId = asset.representationId,
+            updatedEpochMs = 10, attemptCount = 1, ownershipGeneration = 1)
+        val claim = DownloadClaim(DownloadClaimId("neutral-complete-claim"), DownloadClaimOwner.Standalone(job.id),
+            job.id, binding.id, DownloadBatchIntent.ACTIVE, true, 11)
+        val state = AcquisitionRepositoryState(1,
+            requests = mapOf(request.id to dev.veyra.model.AcquisitionRecord(request, AcquisitionJobState.COMMITTED,
+                outcome = AcquisitionOutcome.Single(request.id, receipt.id, binding.id), updatedEpochMs = 3)),
+            receipts = mapOf(receipt.id to receipt), recordings = mapOf(recording.id to recording),
+            subjects = mapOf(subject.id to subject), bindings = mapOf(binding.id to binding),
+            claims = mapOf(claim.id to claim), assetUses = setOf(AssetUse(binding.id, asset.id, 1, 12)),
+            physicalDownloads = mapOf(job.id to job), materializations = mapOf(asset.id to asset),
+            materializationReceipts = mapOf(asset.id to asset.receipt()))
+        val complete = DownloadAcquisitionPresentation(LibraryAcquisitionView(AppSnapshot(revision = 1), state),
+            mapOf(job.id to job))
+        val verified = assertNotNull(complete.verifiedDownload(binding.id))
+        assertNull(verified.mediaId)
+        val verifiedSurface = downloadSurface(AppSnapshot(), complete)
+        val verifiedEntry = verifiedSurface.entries.single()
+        assertEquals(DownloadSurfaceOrigin.TYPED_SOURCE, verifiedEntry.origin)
+        assertTrue(verifiedEntry.ready)
+        assertNull(verifiedEntry.bindingId)
+        assertEquals(4_096L, verifiedSurface.storageBytes())
+        assertTrue(verifiedSurface.readyMediaIds.isEmpty())
+
+        val checking = DownloadAcquisitionPresentation(LibraryAcquisitionView(AppSnapshot(revision = 1), state),
+            mapOf(job.id to job.copy(status = DownloadStatus.NEEDS_FOREGROUND)))
+        val checkingEntry = downloadSurface(AppSnapshot(), checking).entries.single()
+        assertTrue(checkingEntry.checking)
+        assertEquals(0L, downloadSurface(AppSnapshot(), checking).storageBytes())
+        assertNull(checking.verifiedDownload(binding.id))
     }
 
     @Test

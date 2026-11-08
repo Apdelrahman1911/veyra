@@ -3,6 +3,9 @@ package dev.veyra.app
 import dev.kmpyt.YouTubeClient
 import dev.kmpyt.extraction.ResearchRequest
 import dev.kmpyt.extraction.ResearchTransport
+import dev.veyra.acquisition.AcquisitionCaptureFactory
+import dev.veyra.acquisition.AcquisitionCoordinator
+import dev.veyra.acquisition.AcquisitionResolution
 import dev.veyra.data.LibraryStore
 import dev.veyra.data.createPlatformLibraryStore
 import dev.veyra.model.*
@@ -20,6 +23,13 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicInteger
 
+internal data class QueuedNeutralDownload(
+    val jobId: String,
+    val requestId: AcquisitionRequestId,
+    val bindingId: ExecutionBindingId,
+    val title: String,
+)
+
 /**
  * Purpose-specific real AppContainer/Room fixture for the typed download presentation test.
  * Authored source/native answers are explicit fakes over NON-AUDIO bytes; files/Room are real.
@@ -33,6 +43,25 @@ internal class TypedDownloadPresentationSupport(val directory: Path) {
     val store: LibraryStore get() = platform.store
 
     suspend fun initialize() = app.initialize()
+
+    /**
+     * Drives the production capture/resolve/admit command facade over this fixture's ONE Room
+     * owner and gateway. The test-only coordinator is not a product controller, source client,
+     * Room owner or player; it supplies the neutral member request that no current screen action
+     * can create by itself.
+     */
+    suspend fun enqueueNeutralDownload(title: String): QueuedNeutralDownload {
+        val captures = AcquisitionCaptureFactory()
+        val coordinator = AcquisitionCoordinator(store.acquisition, gateway, captures, SystemClock(), offline = { false })
+        val show = PodcastShow("neutral-source-show", title, "https://example.org/authored-neutral-feed")
+        val record = coordinator.capture(captures.show(show).metadata)
+        val accepted = coordinator.resolve(record.request.id) as? AcquisitionResolution.Accepted
+            ?: error("neutral request was not accepted")
+        val single = accepted.record.outcome as? AcquisitionOutcome.Single
+            ?: error("neutral request did not bind a single source recording")
+        val jobId = app.downloads.enqueueAccepted(record.request.id, single.bindingId) {}
+        return QueuedNeutralDownload(jobId, record.request.id, single.bindingId, title)
+    }
 
     suspend fun close() {
         try { app.close() } finally { lifetime.cancelAndJoin() }
