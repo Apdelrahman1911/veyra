@@ -7,6 +7,7 @@ import dev.veyra.model.SourceProvider
 import dev.veyra.model.RepeatMode
 import dev.veyra.playback.PlaybackPhase
 import dev.veyra.playback.PlaybackState
+import dev.veyra.ui.downloads.DownloadSurface
 
 /** Numeric media time, deliberately independent of the surrounding text direction. */
 fun formatMediaTime(milliseconds: Long): String {
@@ -49,12 +50,13 @@ fun pendingOccurrenceIds(orderedIds: List<String>, currentId: String?): List<Str
 }
 
 /** Cached online search metadata alone is not library membership. */
-fun libraryMedia(snapshot: AppSnapshot): List<MediaItem> {
+fun libraryMedia(snapshot: AppSnapshot, downloads: DownloadSurface? = null): List<MediaItem> {
     val referenced = buildSet {
         addAll(snapshot.favoriteIds)
         addAll(snapshot.savedEpisodeIds)
         snapshot.playlists.forEach { playlist -> addAll(playlist.entries.map { it.mediaId }) }
         addAll(snapshot.downloads.values.map { it.mediaId })
+        addAll(downloads?.catalogueMediaIds.orEmpty())
         snapshot.followedShowIds.forEach { id -> addAll(snapshot.shows[id]?.episodeIds.orEmpty()) }
     }
     return snapshot.media.values.filter { it.id in referenced || it.source.provider == SourceProvider.LOCAL }

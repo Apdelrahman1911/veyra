@@ -13,6 +13,10 @@ import dev.veyra.model.PlaybackBinding
 import dev.veyra.model.PodcastShow
 import dev.veyra.model.QueueContext
 import dev.veyra.model.SourceProvider
+import dev.veyra.ui.downloads.DownloadSurface
+import dev.veyra.ui.downloads.DownloadSurfaceEntry
+import dev.veyra.ui.downloads.DownloadSurfaceOrigin
+import dev.veyra.ui.downloads.toDownloadSurfaceEntry
 
 /** Root owns these states and handles every effect; feature composables own no clients or players. */
 data class PodcastsUiState(
@@ -21,6 +25,8 @@ data class PodcastsUiState(
     val isRefreshing: Boolean = false,
     val failure: AppFailure? = null,
     val addFeed: AddPodcastFeedUiState? = null,
+    /** Paired typed/schema2 projection from the app composition; null keeps legacy-only callers. */
+    val downloads: DownloadSurface? = null,
 )
 
 data class AddPodcastFeedUiState(
@@ -36,6 +42,7 @@ data class PodcastShowUiState(
     val isLoading: Boolean = false,
     val isRefreshing: Boolean = false,
     val failure: AppFailure? = null,
+    val downloads: DownloadSurface? = null,
 ) {
     val show: PodcastShow? get() = snapshot.shows[showId]
 }
@@ -47,6 +54,7 @@ data class EpisodeDetailUiState(
     val failure: AppFailure? = null,
     /** Only the root knows the receipt actually loaded by the active audio coordinator. */
     val currentBinding: PlaybackBinding? = null,
+    val downloads: DownloadSurface? = null,
 ) {
     val episode: MediaItem? get() = snapshot.media[mediaId]?.takeIf { it.kind == MediaKind.EPISODE }
     val show: PodcastShow? get() = episode?.showId?.let(snapshot.shows::get)
@@ -91,6 +99,9 @@ data class PodcastEpisodeUiState(
     val show: PodcastShow? = null,
     val progress: MediaProgress? = null,
     val download: DownloadRecord? = null,
+    /** Paired typed catalogue projection only; legacy rows stay in [download]. */
+    val typedDownload: DownloadSurfaceEntry? = null,
+    val surfaceDownloaded: Boolean = false,
     val saved: Boolean = false,
     val queued: Boolean = false,
     val offlineOnly: Boolean = false,
@@ -103,10 +114,15 @@ data class PodcastEpisodeUiState(
     val listingDurationMs: Long? get() = episode.durationMs?.takeIf { it > 0L }
     /** Historical listening remains intact even when the next selection is a different recording. */
     val historicalPositionMs: Long get() = progress?.positionMs?.coerceAtLeast(0L) ?: 0L
+    /** The one row the existing download controls operate, by its actual physical job id. */
+    val activeDownload: DownloadSurfaceEntry? get() = typedDownload ?: download?.toDownloadSurfaceEntry()
     // PlayEpisode is a fresh Play, not a request to resume the displayed current binding.
     // The resolver prefers a completed local artifact; without one, a fresh online first-result
     // search is still unknown. Neither CURRENT nor the newest historical receipt pins that search.
     val nextPlayBinding: PlaybackBinding? get() {
+        // A typed download has exact execution/recording lineage, but no legacy PlaybackBinding.
+        // Never invent one; the playback owner resolves the typed asset independently.
+        if (typedDownload != null) return null
         val record = download?.takeIf { downloaded && !it.cleanupPending } ?: return null
         val asset = record.asset ?: return null
         return downloadedBinding?.takeIf {
@@ -128,8 +144,9 @@ data class PodcastEpisodeUiState(
         ?.takeIf { it > 0L && progressRecording == PodcastProgressRecording.MATCHED }
     val positionMs: Long get() = historicalPositionMs.takeIf { progressRecording == PodcastProgressRecording.MATCHED } ?: 0L
     val played: Boolean get() = progress?.played == true
-    // A status enum alone is not proof of usable local media. The owner must have committed its asset.
-    val downloaded: Boolean get() = download?.hasCommittedAssetFor(episode.id) == true
+    // A status enum alone is not proof of usable local media. The owner must have committed its
+    // asset (or the paired typed projection must carry exact-use checked readiness).
+    val downloaded: Boolean get() = surfaceDownloaded || activeDownload?.ready == true
     // A duration estimate or seek to the end is not confirmation that an episode was played.
     // Only the coordinator's confirmed natural-end/manual flag can remove it from Continue.
     val inProgress: Boolean get() = !played && historicalPositionMs > 0L
@@ -146,9 +163,11 @@ data class PodcastEpisodeUiState(
     } ?: false
 }
 
-fun AppSnapshot.podcastEpisodeUiState(episode: MediaItem, currentBinding: PlaybackBinding? = null): PodcastEpisodeUiState {
+fun AppSnapshot.podcastEpisodeUiState(episode: MediaItem, currentBinding: PlaybackBinding? = null,
+    downloadSurface: DownloadSurface? = null): PodcastEpisodeUiState {
     // App data guarantees one authoritative record per item; attempt history is separate.
     val download = downloads.values.firstOrNull { it.mediaId == episode.id }
+    val surfaceEntry = downloadSurface?.forMedia(episode.id)?.takeIf { it.origin == DownloadSurfaceOrigin.TYPED_CATALOGUE }
     val activeBinding = currentBinding?.takeIf { it.mediaId == episode.id }
     val downloadedBinding = download?.takeIf { it.hasCommittedAssetFor(episode.id) }?.asset?.executionBindingId
         ?.let { id -> playbackBindings[id]?.takeIf { it.id == id && it.mediaId == episode.id } }
@@ -162,6 +181,8 @@ fun AppSnapshot.podcastEpisodeUiState(episode: MediaItem, currentBinding: Playba
         show = episode.showId?.let(shows::get),
         progress = progress[episode.id],
         download = download,
+        typedDownload = surfaceEntry,
+        surfaceDownloaded = downloadSurface?.isDownloaded(episode.id) ?: (surfaceEntry?.ready == true),
         saved = episode.id in savedEpisodeIds,
         queued = queue(QueueContext.PODCAST).let { queue ->
             queue.entries.drop(queue.currentIndex.coerceAtLeast(0)).any { it.mediaId == episode.id }
@@ -187,8 +208,10 @@ private fun PlaybackBinding.recordingIdFor(mediaId: String): String? = selectedV
 private val podcastVideoId = Regex("[A-Za-z0-9_-]{11}")
 
 fun PodcastShowUiState.visibleEpisodes(): List<MediaItem> {
-    val downloadedIds = if (options.filter == PodcastEpisodeFilter.DOWNLOADED) snapshot.downloads.values
-        .filter { it.hasCommittedAssetFor(it.mediaId) }.mapTo(mutableSetOf()) { it.mediaId } else emptySet()
+    val downloadedIds = if (options.filter == PodcastEpisodeFilter.DOWNLOADED) {
+        downloads?.readyMediaIds ?: snapshot.downloads.values
+            .filter { it.hasCommittedAssetFor(it.mediaId) }.mapTo(mutableSetOf()) { it.mediaId }
+    } else emptySet()
     return snapshot.media.values
         .asSequence()
         .filter { it.kind == MediaKind.EPISODE && it.showId == showId }

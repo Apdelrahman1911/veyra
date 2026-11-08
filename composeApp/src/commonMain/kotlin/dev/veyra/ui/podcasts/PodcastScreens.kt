@@ -148,7 +148,7 @@ fun PodcastsScreen(
                         onToggle = { showAllContinuing = !showAllContinuing })
                 }
                 items(if (showAllContinuing) continuing else continuing.take(3), key = { "continue-${it.id}" }) { episode ->
-                    PodcastEpisodeRow(state.snapshot.podcastEpisodeUiState(episode), onAction)
+                    PodcastEpisodeRow(state.snapshot.podcastEpisodeUiState(episode, downloadSurface = state.downloads), onAction)
                 }
             }
             if (following.isNotEmpty()) {
@@ -163,7 +163,7 @@ fun PodcastsScreen(
                     }
                 } else {
                     items(if (showAllNew) newEpisodes else newEpisodes.take(5), key = { "new-${it.id}" }) { episode ->
-                        PodcastEpisodeRow(state.snapshot.podcastEpisodeUiState(episode), onAction)
+                        PodcastEpisodeRow(state.snapshot.podcastEpisodeUiState(episode, downloadSurface = state.downloads), onAction)
                     }
                 }
                 item(key = "following-heading") {
@@ -201,7 +201,7 @@ fun PodcastShowScreen(
 ) {
     val strings = LocalStrings.current
     val show = state.show
-    val episodes = remember(state.showId, state.snapshot.media, state.snapshot.progress, state.snapshot.downloads, state.options) {
+    val episodes = remember(state.showId, state.snapshot.media, state.snapshot.progress, state.snapshot.downloads, state.downloads, state.options) {
         state.visibleEpisodes()
     }
     val allCount = remember(state.showId, state.snapshot.media) {
@@ -283,7 +283,7 @@ fun PodcastShowScreen(
                     }
                 } else {
                     items(episodes, key = { it.id }) { episode ->
-                        PodcastEpisodeRow(state.snapshot.podcastEpisodeUiState(episode), onAction, showPublisher = false)
+                        PodcastEpisodeRow(state.snapshot.podcastEpisodeUiState(episode, downloadSurface = state.downloads), onAction, showPublisher = false)
                     }
                 }
             }
@@ -313,7 +313,7 @@ fun EpisodeDetailScreen(
                     )
                 }
             } else {
-                val row = state.snapshot.podcastEpisodeUiState(episode, state.currentBinding)
+                val row = state.snapshot.podcastEpisodeUiState(episode, state.currentBinding, state.downloads)
                 item(key = "episode-hero") {
                     PodcastHero(episode.title, row.show?.title ?: episode.creator,
                         episode.artworkUrl ?: row.show?.artworkUrl, state.snapshot.settings.offlineOnly,
@@ -362,8 +362,8 @@ fun EpisodeDetailScreen(
                             Text(strings.text(notice),
                                 style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        row.download?.let { PodcastDownloadProgress(it) }
-                        row.download?.failure?.let { failure -> ErrorState(strings.errorFor(failure)) }
+                        row.activeDownload?.let { PodcastDownloadProgress(it) }
+                        row.activeDownload?.failure?.let { failure -> ErrorState(strings.errorFor(failure)) }
                     }
                 }
                 if (episode.description.isNotBlank()) item(key = "episode-notes") {

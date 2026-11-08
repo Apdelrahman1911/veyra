@@ -38,7 +38,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.veyra.model.AppSnapshot
-import dev.veyra.model.DownloadRecord
 import dev.veyra.model.DownloadStatus
 import dev.veyra.model.MediaItem
 import dev.veyra.model.MediaKind
@@ -50,6 +49,8 @@ import dev.veyra.ui.design.LocalStrings
 import dev.veyra.ui.design.MetadataText
 import dev.veyra.ui.design.TextKey
 import dev.veyra.ui.design.VeyraIcons
+import dev.veyra.ui.downloads.DownloadSurfaceEntry
+import dev.veyra.ui.downloads.DownloadSurfaceOrigin
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -242,15 +243,16 @@ private fun DownloadsContent(snapshot: AppSnapshot, onAction: (MusicUiAction) ->
     options: MusicUiOptions, header: @Composable () -> Unit) {
     val strings = LocalStrings.current
     var filter by rememberSaveable { mutableStateOf(0) }
-    val downloads = snapshot.downloads.values.sortedByDescending { it.updatedEpochMs }.filter {
+    val surface = options.downloadSurface(snapshot)
+    val downloads = surface.rows().filter {
         when (filter) {
-            1 -> it.status !in setOf(DownloadStatus.COMPLETE, DownloadStatus.FAILED, DownloadStatus.CANCELLED)
-            2 -> it.isReady()
-            3 -> it.status in setOf(DownloadStatus.FAILED, DownloadStatus.NEEDS_FOREGROUND) || it.status == DownloadStatus.COMPLETE && it.asset == null
+            1 -> it.isActive
+            2 -> it.ready
+            3 -> it.needsAttention
             else -> true
         }
     }
-    val bytes = snapshot.downloads.values.filter { it.isReady() }.mapNotNull { it.asset }.distinctBy { it.id }.sumOf { it.sizeBytes }
+    val bytes = surface.storageBytes()
     LazyColumn(modifier.fillMaxSize().testTag("downloads-list"), contentPadding = PaddingValues(bottom = 24.dp)) {
         item { header() }
         item {
@@ -265,51 +267,60 @@ private fun DownloadsContent(snapshot: AppSnapshot, onAction: (MusicUiAction) ->
         if (downloads.isEmpty()) item {
             EmptyState(strings.text(TextKey.EmptyDownloads), strings.text(TextKey.EmptyDownloadsDescription), strings.text(TextKey.SearchMusic), { onAction(MusicUiAction.OpenSearch()) }, Modifier.padding(20.dp))
         }
-        items(downloads, key = { it.id }) { record -> DownloadRow(record, snapshot, onAction, options) }
+        items(downloads, key = { it.id }) { entry -> DownloadRow(entry, snapshot, onAction, options) }
     }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun DownloadRow(record: DownloadRecord, snapshot: AppSnapshot, onAction: (MusicUiAction) -> Unit, options: MusicUiOptions) {
+private fun DownloadRow(entry: DownloadSurfaceEntry, snapshot: AppSnapshot, onAction: (MusicUiAction) -> Unit, options: MusicUiOptions) {
     val strings = LocalStrings.current
-    val item = snapshot.media[record.mediaId]
-    var remove by remember(record.id) { mutableStateOf(false) }
-    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp).testTag("download-${record.id}"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    val item = entry.mediaId?.let(snapshot.media::get)
+    var remove by remember(entry.id) { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp).testTag("download-${entry.id}"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (item != null) MetadataText(item.title, Modifier.fillMaxWidth(), style = MaterialTheme.typography.titleMedium, maxLines = 3, overflow = TextOverflow.Ellipsis)
-        else Text(strings.text(TextKey.InformationUnavailable), style = MaterialTheme.typography.titleMedium)
-        Text(if (record.status == DownloadStatus.COMPLETE && !record.isReady()) strings.text(TextKey.FileUnavailable) else strings.downloadStatus(record.status), style = MaterialTheme.typography.bodyMedium)
-        if (item != null && record.isReady()) record.asset?.executionBindingId?.let(snapshot.playbackBindings::get)?.let { binding ->
-            PlaybackProvenanceCard(item, binding, compact = true, context = PlaybackProvenanceContext.DOWNLOADED)
-        }
-        val total = record.totalBytes
-        if (record.status != DownloadStatus.COMPLETE && record.status != DownloadStatus.CANCELLED) {
-            if (total != null && total > 0) {
-                LinearProgressIndicator(progress = { (record.bytesDownloaded.toDouble() / total.toDouble()).toFloat().coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
-                Text(strings.format(TextKey.DownloadProgress, strings.byteSize(record.bytesDownloaded), strings.byteSize(total)), style = MaterialTheme.typography.bodySmall)
-            } else {
-                if (record.status in setOf(DownloadStatus.RUNNING, DownloadStatus.RESOLVING, DownloadStatus.VERIFYING)) LinearProgressIndicator(Modifier.fillMaxWidth())
-                Text(strings.format(TextKey.DownloadProgressUnknown, strings.byteSize(record.bytesDownloaded)), style = MaterialTheme.typography.bodySmall)
+        else if (entry.origin == DownloadSurfaceOrigin.TYPED_SOURCE) {
+            MetadataText(entry.displayTitle ?: strings.text(TextKey.InformationUnavailable), Modifier.fillMaxWidth(),
+                style = MaterialTheme.typography.titleMedium, maxLines = 3, overflow = TextOverflow.Ellipsis)
+            Text(strings.text(TextKey.SourceRecording), style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        } else Text(strings.text(TextKey.InformationUnavailable), style = MaterialTheme.typography.titleMedium)
+        Text(entry.statusText(strings), style = MaterialTheme.typography.bodyMedium)
+        if (item != null && entry.ready && entry.origin == DownloadSurfaceOrigin.LEGACY) {
+            entry.bindingId?.let(snapshot.playbackBindings::get)?.let { binding ->
+                PlaybackProvenanceCard(item, binding, compact = true, context = PlaybackProvenanceContext.DOWNLOADED)
             }
         }
-        record.failure?.let { Text(strings.errorFor(it), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
+        val total = entry.totalBytes
+        if (entry.status != DownloadStatus.COMPLETE && entry.status != DownloadStatus.CANCELLED) {
+            if (total != null && total > 0) {
+                LinearProgressIndicator(progress = { (entry.bytesDownloaded.toDouble() / total.toDouble()).toFloat().coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
+                Text(strings.format(TextKey.DownloadProgress, strings.byteSize(entry.bytesDownloaded), strings.byteSize(total)), style = MaterialTheme.typography.bodySmall)
+            } else {
+                if (entry.status in setOf(DownloadStatus.RUNNING, DownloadStatus.RESOLVING, DownloadStatus.VERIFYING)) LinearProgressIndicator(Modifier.fillMaxWidth())
+                Text(strings.format(TextKey.DownloadProgressUnknown, strings.byteSize(entry.bytesDownloaded)), style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        entry.failure?.let { Text(strings.errorFor(it), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (record.isReady() || record.isRecheckingAsset()) {
-                if (item != null && record.isReady()) Button({ onAction(MusicUiAction.Play(item)) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.Play)) }
+            if (entry.ready || entry.checking) {
+                if (item != null && entry.ready) Button({ onAction(MusicUiAction.Play(item)) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.Play)) }
                 OutlinedButton({ remove = true }, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.RemoveDownload)) }
             } else {
-                when (record.status) {
-                    DownloadStatus.RUNNING, DownloadStatus.QUEUED, DownloadStatus.RESOLVING -> TextButton({ onAction(MusicUiAction.PauseDownload(record.id)) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.PauseDownload)) }
-                    DownloadStatus.PAUSED, DownloadStatus.WAITING_NETWORK, DownloadStatus.NEEDS_FOREGROUND, DownloadStatus.FAILED -> TextButton({ onAction(MusicUiAction.ResumeDownload(record.id)) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(if (record.status == DownloadStatus.FAILED) TextKey.Retry else TextKey.ResumeDownload)) }
+                when (entry.status) {
+                    DownloadStatus.RUNNING, DownloadStatus.QUEUED, DownloadStatus.RESOLVING -> TextButton({ onAction(MusicUiAction.PauseDownload(entry.id)) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.PauseDownload)) }
+                    DownloadStatus.PAUSED, DownloadStatus.WAITING_NETWORK, DownloadStatus.NEEDS_FOREGROUND, DownloadStatus.FAILED -> TextButton({ onAction(MusicUiAction.ResumeDownload(entry.id)) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(if (entry.status == DownloadStatus.FAILED) TextKey.Retry else TextKey.ResumeDownload)) }
+                    // Only a real catalogue item can start a new catalogue acquisition. A neutral
+                    // source-only row retains its own pause/resume/cancel/remove actions.
                     DownloadStatus.CANCELLED, DownloadStatus.COMPLETE -> if (item != null && item.source.provider in options.downloadableProviders) TextButton({ onAction(MusicUiAction.Download(item)) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.Retry)) }
                     DownloadStatus.VERIFYING -> Unit
                 }
-                if (record.status !in setOf(DownloadStatus.CANCELLED, DownloadStatus.COMPLETE)) TextButton({ onAction(MusicUiAction.CancelDownload(record.id)) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.CancelDownload)) }
+                if (entry.status !in setOf(DownloadStatus.CANCELLED, DownloadStatus.COMPLETE)) TextButton({ onAction(MusicUiAction.CancelDownload(entry.id)) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.CancelDownload)) }
             }
         }
         HorizontalDivider()
     }
-    if (remove) ConfirmActionDialog(strings.text(TextKey.RemoveDownload), strings.format(TextKey.ConfirmRemoveDownload, item?.title.orEmpty()), strings.text(TextKey.RemoveDownload), { remove = false }) {
-        onAction(MusicUiAction.RemoveDownload(record.id)); remove = false
+    if (remove) ConfirmActionDialog(strings.text(TextKey.RemoveDownload), strings.format(TextKey.ConfirmRemoveDownload, item?.title ?: entry.displayTitle.orEmpty()), strings.text(TextKey.RemoveDownload), { remove = false }) {
+        onAction(MusicUiAction.RemoveDownload(entry.id)); remove = false
     }
 }

@@ -32,6 +32,7 @@ import dev.veyra.model.*
 import dev.veyra.playback.PlaybackState
 import dev.veyra.source.SourcePage
 import dev.veyra.ui.design.*
+import dev.veyra.ui.downloads.downloadSurface
 import dev.veyra.ui.music.*
 import dev.veyra.ui.podcasts.*
 import dev.veyra.ui.settings.SettingsScreen
@@ -53,6 +54,9 @@ fun VeyraApp(container: AppContainer, modifier: Modifier = Modifier) {
     val podcasts by container.podcasts.collectAsState()
     val podcastDetails by container.podcastDetails.collectAsState()
     val storageBytes by container.storageBytes.collectAsState()
+    val downloadPresentation by container.downloads.acquisitionPresentation.collectAsState()
+    val screenDownloads = remember(snapshot, downloadPresentation) { downloadSurface(snapshot, downloadPresentation) }
+    val screenOptions = remember(options, screenDownloads) { options.copy(downloads = screenDownloads) }
     val notice by container.notice.collectAsState()
     val storeStatus by container.store.status.collectAsState()
     val mediaRuntime by container.platform.mediaRuntimeStatus.collectAsState()
@@ -148,34 +152,36 @@ fun VeyraApp(container: AppContainer, modifier: Modifier = Modifier) {
                                     Box(Modifier.weight(1f).fillMaxHeight()) {
                                         when {
                                             navigation.queueOpen && !sideQueue -> QueuePanel(snapshot, displayPlayer, navigation.viewedQueue,
-                                                container::onMusicAction, options = options)
-                                            navigation.playerOpen -> FullPlayer(snapshot, displayPlayer, container::onMusicAction, options = options)
+                                                container::onMusicAction, options = screenOptions)
+                                            navigation.playerOpen -> FullPlayer(snapshot, displayPlayer, container::onMusicAction, options = screenOptions)
                                             else -> {
                                                 val detail = navigation.detail
                                                 when (detail?.kind) {
                                                     DetailKind.TRACK -> TrackDetailScreen(snapshot, detail.id, displayPlayer,
-                                                        container::onMusicAction, options = options)
+                                                        container::onMusicAction, options = screenOptions)
                                                     DetailKind.EPISODE -> EpisodeDetailScreen(EpisodeDetailUiState(detail.id, snapshot,
-                                                        currentBinding = displayPlayer.executionBinding?.takeIf { it.mediaId == detail.id }), container::onPodcastAction)
+                                                        currentBinding = displayPlayer.executionBinding?.takeIf { it.mediaId == detail.id },
+                                                        downloads = screenDownloads), container::onPodcastAction)
                                                     DetailKind.SHOW -> PodcastShowScreen(PodcastShowUiState(detail.id, snapshot,
                                                         options = podcastDetails.options[detail.id] ?: PodcastListOptions(),
                                                         isLoading = detail.id in podcastDetails.refreshing && snapshot.shows[detail.id]?.lastRefreshEpochMs == null,
                                                         isRefreshing = detail.id in podcastDetails.refreshing,
-                                                        failure = podcastDetails.failures[detail.id]), container::onPodcastAction)
-                                                    DetailKind.PLAYLIST -> PlaylistDetailScreen(snapshot, detail.id, container::onMusicAction, options = options)
+                                                        failure = podcastDetails.failures[detail.id],
+                                                        downloads = screenDownloads), container::onPodcastAction)
+                                                    DetailKind.PLAYLIST -> PlaylistDetailScreen(snapshot, detail.id, container::onMusicAction, options = screenOptions)
                                                     DetailKind.COLLECTION -> detail.collection?.let { collection ->
                                                         val state = collections[detail.id] ?: CollectionUiState(collection)
                                                         CollectionDetailScreen(snapshot, state.copy(page = state.page.withArtwork(snapshot)),
-                                                            container::onMusicAction, options = options)
+                                                            container::onMusicAction, options = screenOptions)
                                                     }
                                                     DetailKind.LICENSES -> LicensesScreen()
                                                     null -> when (navigation.destination) {
                                                         AppDestination.LISTEN -> ListenScreen(snapshot, displayPlayer,
-                                                            discovery.copy(page = discovery.page.withArtwork(snapshot)), container::onMusicAction, options = options)
+                                                            discovery.copy(page = discovery.page.withArtwork(snapshot)), container::onMusicAction, options = screenOptions)
                                                         AppDestination.SEARCH -> SearchScreen(snapshot,
-                                                            search.copy(page = search.page.withArtwork(snapshot)), container::onMusicAction, options = options)
-                                                        AppDestination.PODCASTS -> PodcastsScreen(podcasts.copy(snapshot = snapshot), container::onPodcastAction)
-                                                        AppDestination.LIBRARY -> LibraryScreen(snapshot, navigation.librarySection, container::onMusicAction, options = options)
+                                                            search.copy(page = search.page.withArtwork(snapshot)), container::onMusicAction, options = screenOptions)
+                                                        AppDestination.PODCASTS -> PodcastsScreen(podcasts.copy(snapshot = snapshot, downloads = screenDownloads), container::onPodcastAction)
+                                                        AppDestination.LIBRARY -> LibraryScreen(snapshot, navigation.librarySection, container::onMusicAction, options = screenOptions)
                                                         AppDestination.SETTINGS -> SettingsScreen(settings, container.platform.engine.capabilities, storageBytes,
                                                             onSettingsChange = { action -> container.changeSettings { action.applyTo(it) } },
                                                             onManageStorage = { container.onMusicAction(MusicUiAction.OpenLibrary(LibrarySection.DOWNLOADS)) },
@@ -192,12 +198,12 @@ fun VeyraApp(container: AppContainer, modifier: Modifier = Modifier) {
                                                 VeyraIconButton(VeyraIcons.Close, strings.text(TextKey.Close), { container.navigateBack() })
                                             }
                                             QueuePanel(snapshot, displayPlayer, navigation.viewedQueue, container::onMusicAction,
-                                                Modifier.weight(1f), options)
+                                                Modifier.weight(1f), screenOptions)
                                         }
                                     }
                                 }
                                 if (!navigation.playerOpen && displayPlayer.currentItem != null) {
-                                    MiniPlayer(snapshot, displayPlayer, container::onMusicAction, options = options,
+                                    MiniPlayer(snapshot, displayPlayer, container::onMusicAction, options = screenOptions,
                                         compactHeight = shortWindow)
                                 }
                                 if (!useRail && !navigation.playerOpen && !navigation.queueOpen) {
