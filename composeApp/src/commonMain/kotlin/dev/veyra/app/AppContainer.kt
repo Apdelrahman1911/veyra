@@ -542,7 +542,7 @@ class AppContainer(
         }
         if (occurrence != null) {
             val bindingId = bindingIdValue?.takeIf { it.isNotBlank() }
-            val selected = try { PlaybackSelection.project(view.library, occurrence.id) } catch (_: Exception) { null }
+            val selected = try { PlaybackSelection.project(view, occurrence.id) } catch (_: Exception) { null }
             if (queueRevisionValue == null || queue.editRevision != queueRevisionValue ||
                 occurrence.id !in queue.displayedOrder || occurrence.controlsMode != PlaybackControlsMode.PODCAST ||
                 occurrence.selectionState != OccurrenceSelectionState.BOUND ||
@@ -566,7 +566,7 @@ class AppContainer(
             candidate.controlsMode == PlaybackControlsMode.PODCAST &&
                 candidate.selectionState == OccurrenceSelectionState.BOUND &&
                 candidate.bindingId?.value == bindingId &&
-                runCatching { PlaybackSelection.project(view.library, candidate.id).catalogMedia?.id }.getOrNull() == mediaId
+                runCatching { PlaybackSelection.project(view, candidate.id).catalogMedia?.id }.getOrNull() == mediaId
         }
         val target = matches.singleOrNull()
             ?: throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "resume_target_unavailable"))
