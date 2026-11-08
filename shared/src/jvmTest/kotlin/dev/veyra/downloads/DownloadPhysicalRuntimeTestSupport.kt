@@ -19,7 +19,9 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.*
 
 /** REAL owned paths/hash/OS leases; deliberately FAKE canonical commands, source and native gate. */
-internal class PhysicalRuntimeFixture {
+internal class PhysicalRuntimeFixture(
+    private val removalOwnerGraceMs: Long = 5_000L,
+) {
     val directory = physicalDownloadTestDirectory()
     val events = CopyOnWriteArrayList<String>()
     val leases = PhysicalRuntimeLeaseProbe(events)
@@ -60,7 +62,8 @@ internal class PhysicalRuntimeFixture {
         validation(it)
     }, { beforeDelete(it) }, { beforeAdoption(it) }, { admission() }, acquisition, batches, materializationEvidence)
     val runtime = DownloadPhysicalRuntime(repository, dependencies, files, legacy, EngineCapabilities(), gate,
-        clock, leaseDurationMs = 60_000, heartbeatMs = 10_000, host = host)
+        clock, leaseDurationMs = 60_000, heartbeatMs = 10_000, host = host,
+        removalOwnerGraceMs = removalOwnerGraceMs)
     val contextR1 = physicalContext("r1")
     val contextR2 = physicalContext("r2")
     val memberR2 = AcquisitionDownloadMemberKey(DownloadBatchId("authored-batch"), 0, 0,
@@ -238,8 +241,9 @@ internal class PhysicalRuntimeFixture {
     companion object { const val JOB = "authored-physical-job" }
 }
 
-internal fun physicalRuntimeCase(block: suspend PhysicalRuntimeFixture.() -> Unit) = runBlocking {
-    val fixture = PhysicalRuntimeFixture()
+internal fun physicalRuntimeCase(removalOwnerGraceMs: Long = 5_000L,
+    block: suspend PhysicalRuntimeFixture.() -> Unit) = runBlocking {
+    val fixture = PhysicalRuntimeFixture(removalOwnerGraceMs)
     try { withTimeout(30_000) { fixture.block() } }
     finally { fixture.close() }
 }

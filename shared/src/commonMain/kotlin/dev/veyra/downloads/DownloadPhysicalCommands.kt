@@ -195,11 +195,11 @@ internal class DownloadPhysicalCommands(
                 val settled = cleaned ?: pending.epoch
                 if (cleaned == null && !stopped || cleaned != null && !runtime.epochs.drain(cleaned))
                     fail(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")
-                if (discard && cleaned == null && stopped && pending.join.asset != null &&
-                    pending.join.job.failure != null &&
-                    repository.physicalDownload(id)?.job?.cleanupPending == true) {
+                // A normal remove return must mean actual authoritative removal for EVERY
+                // retained/staged/finalization shape, not just a prior failure-backed row.
+                if (discard && remove && repository.physicalDownload(id)?.job?.cleanupPending == true) {
                     val state = host.state()
-                    if (state.suspended || state.failure != null)
+                    if (!state.started || state.suspended || state.failure != null)
                         fail(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")
                     awaitRemoval(id)
                 }
@@ -208,21 +208,42 @@ internal class DownloadPhysicalCommands(
                     AcquisitionDownloadDurableSettlement.Stale -> fail(FailureCode.RECOVERY_REQUIRED, "download_checkpoint_stale")
                     else -> Unit // A detached idle epoch has no finalizer; the intent CAS above is positive.
                 }
+            } else if (discard && remove &&
+                repository.physicalDownload(id)?.job?.cleanupPending == true) {
+                // The intent may already have advanced beyond this caller's local observation
+                // epoch. The durable cleanupPending row is still the authority; never treat a
+                // detached null durable settlement as completion.
+                val state = host.state()
+                if (!state.started || state.suspended || state.failure != null)
+                    fail(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")
+                awaitRemoval(id)
             }
         } catch (error: CancellationException) {
             // A gate expiration cancels the maintenance child after the removal intent was
             // durably accepted. If the caller itself is still active, observe the exact durable
             // cleanup outcome; a future foreground retry may complete the actual deletion.
-            if (pending == null || !currentCoroutineContext().isActive) throw error
-            if (repository.physicalDownload(id)?.job?.cleanupPending == true) awaitRemoval(id)
+            if (!currentCoroutineContext().isActive) throw error
+            if (discard && repository.physicalDownload(id)?.job?.cleanupPending == true)
+                awaitRemoval(id, tolerateTransientCleanupFailure = true)
+            else if (pending == null) throw error
         } finally { host.signalWork() }
     }
 
-    /** Bounded truthful removal observation; never waits for an already-consumed owner. */
-    private suspend fun awaitRemoval(id: String) {
+    /**
+     * Bounded truthful removal observation. Success requires the durable row to be actually
+     * cleaned (no pending cleanup/asset/staging/finalization/active owner); a terminal failed
+     * observation or a missing owner within the bounded handoff is a real failure.
+     */
+    private suspend fun awaitRemoval(id: String, tolerateTransientCleanupFailure: Boolean = false) {
         host.state().failure?.let { throw VeyraException(it) }
-        runtime.awaitRemovalOutcome(id)?.let { throw VeyraException(it) }
-        if (repository.physicalDownload(id)?.job?.cleanupPending == true)
+        runtime.awaitRemovalOutcome(id, failedIsTerminal = !tolerateTransientCleanupFailure)
+            ?.let { throw VeyraException(it) }
+        val current = repository.physicalDownload(id)
+            ?: fail(FailureCode.RECOVERY_REQUIRED, "download_removal_join_missing")
+        if (current.job.cleanupPending || current.job.assetId != null || current.asset != null ||
+            current.job.stagingPath != null || current.finalization != null ||
+            current.cleanupReservation != null || current.job.maintenanceKind != null ||
+            current.job.leaseOwner != null || current.activeAttempt != null)
             fail(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")
     }
 

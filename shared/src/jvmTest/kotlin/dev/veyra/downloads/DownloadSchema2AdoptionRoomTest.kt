@@ -283,7 +283,10 @@ class DownloadSchema2AdoptionRoomTest {
 
     private suspend fun DownloadAcquisitionRoomFixture.cleanUnknown(owner: DownloadAcquisitionRoomOwner, seed: Schema2Seed) {
         offline(owner)
-        owner.coordinator.remove(seed.jobId) // Scheduling-only: accept REMOVE_CANDIDATE, do not activate native work.
+        // The cold host cannot prove physical cleanup; removal must report a truthful restriction
+        // while retaining the accepted REMOVE_CANDIDATE intent for the activated cleanup below.
+        val refused = assertFailsWith<VeyraException> { owner.coordinator.remove(seed.jobId) }
+        assertEquals(FailureCode.BACKGROUND_RESTRICTED, refused.failure.code)
         val queued = owner.store.acquisitionView().acquisition
         val job = queued.physicalDownloads.getValue(seed.jobId)
         assertTrue(job.cleanupPending, "Canonical REMOVE_CANDIDATE must account for a finished attempt's path even without a job stagingPath")

@@ -93,7 +93,8 @@ internal fun AcquisitionGraph.applyClaimMaintenance(command: ClaimPhysicalDownlo
     val explicitValidate = command.explicitLocalRevalidation
     if (job.producer != command.expectedProducer || job.ownershipGeneration != command.expectedOwnershipGeneration ||
         job.leaseOwner != null && (job.leaseExpiresEpochMs ?: 0) > command.nowEpochMs ||
-        !explicitValidate && (job.nextRetryEpochMs ?: 0) > command.nowEpochMs) return physicalStale()
+        !explicitValidate && command.kind != PhysicalDownloadMaintenanceKind.CLEANUP &&
+            (job.nextRetryEpochMs ?: 0) > command.nowEpochMs) return physicalStale()
     require(!explicitValidate || command.kind == PhysicalDownloadMaintenanceKind.VALIDATE &&
         command.requestedBindingId != null)
     require(command.owner.isNotBlank() && command.leaseDurationMs in 1_000..600_000 && command.nowEpochMs >= job.updatedEpochMs &&
