@@ -27,6 +27,8 @@ data class PodcastsUiState(
     val addFeed: AddPodcastFeedUiState? = null,
     /** Paired typed/schema2 projection from the app composition; null keeps legacy-only callers. */
     val downloads: DownloadSurface? = null,
+    /** Paired canonical playback view projection; null keeps the legacy snapshot fallback. */
+    val progressView: PodcastProgressView? = null,
 )
 
 data class AddPodcastFeedUiState(
@@ -43,6 +45,7 @@ data class PodcastShowUiState(
     val isRefreshing: Boolean = false,
     val failure: AppFailure? = null,
     val downloads: DownloadSurface? = null,
+    val progressView: PodcastProgressView? = null,
 ) {
     val show: PodcastShow? get() = snapshot.shows[showId]
 }
@@ -55,6 +58,7 @@ data class EpisodeDetailUiState(
     /** Only the root knows the receipt actually loaded by the active audio coordinator. */
     val currentBinding: PlaybackBinding? = null,
     val downloads: DownloadSurface? = null,
+    val progressView: PodcastProgressView? = null,
 ) {
     val episode: MediaItem? get() = snapshot.media[mediaId]?.takeIf { it.kind == MediaKind.EPISODE }
     val show: PodcastShow? get() = episode?.showId?.let(snapshot.shows::get)
@@ -110,10 +114,13 @@ data class PodcastEpisodeUiState(
     val bindingContext: PodcastBindingContext = PodcastBindingContext.PREVIOUS,
     val progressBinding: PlaybackBinding? = null,
     val downloadedBinding: PlaybackBinding? = null,
+    /** Canonical paired playback evidence; null keeps the legacy snapshot fallback. */
+    val progressView: PodcastProgressView? = null,
 ) {
     val listingDurationMs: Long? get() = episode.durationMs?.takeIf { it > 0L }
+    val canonicalProgress: PodcastEpisodeProgress? get() = progressView?.forEpisode(episode.id)
     /** Historical listening remains intact even when the next selection is a different recording. */
-    val historicalPositionMs: Long get() = progress?.positionMs?.coerceAtLeast(0L) ?: 0L
+    val historicalPositionMs: Long get() = canonicalProgress?.positionMs ?: progress?.positionMs?.coerceAtLeast(0L) ?: 0L
     /** The one row the existing download controls operate, by its actual physical job id. */
     val activeDownload: DownloadSurfaceEntry? get() = typedDownload ?: download?.toDownloadSurfaceEntry()
     // PlayEpisode is a fresh Play, not a request to resume the displayed current binding.
@@ -132,6 +139,7 @@ data class PodcastEpisodeUiState(
         }
     }
     val progressRecording: PodcastProgressRecording get() {
+        canonicalProgress?.let { return progressView?.recordingState(episode.id) ?: PodcastProgressRecording.UNVERIFIED }
         val historical = progressBinding?.takeIf { it.id == progress?.executionBindingId }
             ?.recordingIdFor(episode.id) ?: return PodcastProgressRecording.UNVERIFIED
         val selected = nextPlayBinding?.recordingIdFor(episode.id) ?: return PodcastProgressRecording.UNVERIFIED
@@ -140,10 +148,16 @@ data class PodcastEpisodeUiState(
     // RSS duration describes the requested listing, which may differ from the resolved recording.
     // Never use that estimate as a denominator for real listening progress or remaining audio.
     // Likewise, recording A's measured timeline must never be presented as recording B's.
-    val progressDurationMs: Long? get() = progress?.durationMs
-        ?.takeIf { it > 0L && progressRecording == PodcastProgressRecording.MATCHED }
-    val positionMs: Long get() = historicalPositionMs.takeIf { progressRecording == PodcastProgressRecording.MATCHED } ?: 0L
-    val played: Boolean get() = progress?.played == true
+    val progressDurationMs: Long? get() {
+        val canonical = canonicalProgress
+        return if (canonical != null) {
+            canonical.durationMs.takeIf { progressRecording == PodcastProgressRecording.MATCHED }
+        } else progress?.durationMs?.takeIf { it > 0L && progressRecording == PodcastProgressRecording.MATCHED }
+    }
+    val positionMs: Long get() = canonicalProgress?.positionMs
+        ?.takeIf { progressRecording == PodcastProgressRecording.MATCHED }
+        ?: historicalPositionMs.takeIf { progressRecording == PodcastProgressRecording.MATCHED } ?: 0L
+    val played: Boolean get() = canonicalProgress?.played ?: (progress?.played == true)
     // A status enum alone is not proof of usable local media. The owner must have committed its
     // asset (or the paired typed projection must carry exact-use checked readiness).
     val downloaded: Boolean get() = surfaceDownloaded || activeDownload?.ready == true
@@ -164,7 +178,7 @@ data class PodcastEpisodeUiState(
 }
 
 fun AppSnapshot.podcastEpisodeUiState(episode: MediaItem, currentBinding: PlaybackBinding? = null,
-    downloadSurface: DownloadSurface? = null): PodcastEpisodeUiState {
+    downloadSurface: DownloadSurface? = null, progressView: PodcastProgressView? = null): PodcastEpisodeUiState {
     // App data guarantees one authoritative record per item; attempt history is separate.
     val download = downloads.values.firstOrNull { it.mediaId == episode.id }
     val surfaceEntry = downloadSurface?.forMedia(episode.id)?.takeIf { it.origin == DownloadSurfaceOrigin.TYPED_CATALOGUE }
@@ -196,16 +210,9 @@ fun AppSnapshot.podcastEpisodeUiState(episode: MediaItem, currentBinding: Playba
         },
         progressBinding = progressBinding,
         downloadedBinding = downloadedBinding,
+        progressView = progressView,
     )
 }
-
-/** Fail closed on absent/malformed receipts; equal receipt IDs or discovery titles are not audio identity. */
-private fun PlaybackBinding.recordingIdFor(mediaId: String): String? = selectedVideoId?.takeIf {
-    this.mediaId == mediaId && id.isNotBlank() && queryTitle.isNotBlank() && selectionOrdinal == 0 &&
-        firstResultKind == FirstResultKind.VIDEO && firstResultId == it && podcastVideoId.matches(it)
-}
-
-private val podcastVideoId = Regex("[A-Za-z0-9_-]{11}")
 
 fun PodcastShowUiState.visibleEpisodes(): List<MediaItem> {
     val downloadedIds = if (options.filter == PodcastEpisodeFilter.DOWNLOADED) {
@@ -217,12 +224,14 @@ fun PodcastShowUiState.visibleEpisodes(): List<MediaItem> {
         .filter { it.kind == MediaKind.EPISODE && it.showId == showId }
         .filter { podcastMatchesQuery(options.query, it.title, it.creator, it.description) }
         .filter { item ->
+            val canonical = progressView?.forEpisode(item.id)
             val progress = snapshot.progress[item.id]
             when (options.filter) {
                 PodcastEpisodeFilter.ALL -> true
-                PodcastEpisodeFilter.UNPLAYED -> progress?.played != true
-                PodcastEpisodeFilter.IN_PROGRESS -> progress != null && !progress.played && progress.positionMs > 0L
-                PodcastEpisodeFilter.PLAYED -> progress?.played == true
+                PodcastEpisodeFilter.UNPLAYED -> canonical?.played?.not() ?: (progress?.played != true)
+                PodcastEpisodeFilter.IN_PROGRESS -> canonical?.let { !it.played && it.positionMs > 0L }
+                    ?: (progress != null && !progress.played && progress.positionMs > 0L)
+                PodcastEpisodeFilter.PLAYED -> canonical?.played ?: (progress?.played == true)
                 PodcastEpisodeFilter.DOWNLOADED -> item.id in downloadedIds
             }
         }
@@ -239,7 +248,13 @@ fun PodcastShowUiState.visibleEpisodes(): List<MediaItem> {
         }
 }
 
-internal fun PodcastsUiState.continueEpisodes(): List<MediaItem> = snapshot.media.values
+internal fun PodcastsUiState.continueEpisodes(): List<MediaItem> = if (progressView != null) {
+    snapshot.media.values.filter { item ->
+        item.kind == MediaKind.EPISODE && progressView.isInProgress(item.id)
+    }.sortedWith(compareByDescending<MediaItem> {
+        progressView.forEpisode(it.id)?.updatedEpochMs ?: 0L
+    }.thenBy { it.id })
+} else snapshot.media.values
     .filter { it.kind == MediaKind.EPISODE && snapshot.progress[it.id]?.let { progress ->
         !progress.played && progress.positionMs > 0L
     } == true }
@@ -250,8 +265,10 @@ internal fun PodcastsUiState.newEpisodes(): List<MediaItem> {
         .associate { it.id to it.episodeIds.toSet() }
     return snapshot.media.values
         .filter { item ->
-            item.kind == MediaKind.EPISODE && item.showId in snapshot.followedShowIds &&
-                snapshot.progress[item.id]?.let { !it.played && it.positionMs <= 0L } != false &&
+            val progressAllowsNew = if (progressView != null) {
+                progressView.forEpisode(item.id)?.let { !it.played && it.positionMs <= 0L } != false
+            } else snapshot.progress[item.id]?.let { !it.played && it.positionMs <= 0L } != false
+            item.kind == MediaKind.EPISODE && item.showId in snapshot.followedShowIds && progressAllowsNew &&
                 refreshedShowEpisodes[item.showId]?.let { item.id in it } != false
         }
         .sortedWith(compareByDescending<MediaItem> { it.publishedEpochMs ?: Long.MIN_VALUE }.thenBy { it.id })
