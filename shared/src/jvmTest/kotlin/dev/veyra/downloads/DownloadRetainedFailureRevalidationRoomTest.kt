@@ -116,6 +116,11 @@ class DownloadRetainedFailureRevalidationRoomTest {
             "A host interruption is presented as foreground work, never a fake COMPLETE")
         assertEquals("download_completed_check_needs_foreground", paused.failure?.detail)
         assertEquals(asset.id, paused.assetId)
+        val ordinaryResume = assertFailsWith<VeyraException> { owner.coordinator.resume(id) }
+        assertEquals(FailureCode.RECOVERY_REQUIRED, ordinaryResume.failure.code)
+        assertEquals("download_foreground_announcement_required", ordinaryResume.failure.detail)
+        assertEquals(paused, owner.store.acquisitionView().acquisition.physicalDownloads.getValue(id),
+            "Network Retry cannot clear a completed-check foreground marker")
 
         owner.coordinator.resumePending()
         idle(owner)
@@ -146,6 +151,10 @@ class DownloadRetainedFailureRevalidationRoomTest {
         assertEquals(DownloadStatus.NEEDS_FOREGROUND, hostHeld.status)
         assertEquals(originalFailure, hostHeld.failure)
         assertEquals(before.nextRetryEpochMs, hostHeld.nextRetryEpochMs)
+        val ordinaryResume = assertFailsWith<VeyraException> { owner.coordinator.resume(id) }
+        assertEquals(FailureCode.RECOVERY_REQUIRED, ordinaryResume.failure.code)
+        assertEquals("download_foreground_announcement_required", ordinaryResume.failure.detail)
+        assertEquals(hostHeld, owner.store.acquisitionView().acquisition.physicalDownloads.getValue(id))
         owner.coordinator.resumePending()
         idle(owner)
         val resumed = owner.store.acquisitionView().acquisition.physicalDownloads.getValue(id)
@@ -252,6 +261,78 @@ class DownloadRetainedFailureRevalidationRoomTest {
         assertEquals(DownloadStatus.COMPLETE, owner.store.acquisitionView().acquisition.physicalDownloads.getValue(id).status)
     }
 
+    @Test fun repeatedOriginRequiresExactMemberIdentityAndDoesNotChooseArbitrarily() = acquisitionDownloadRoomCase {
+        val owner = owner()
+        val first = enrollOriginUseBatch(owner)
+        val repeated = repeatOriginUseBatch(owner, first)
+        val job = owner.store.acquisitionView().acquisition.physicalDownloads.values.single()
+        val binding = assertNotNull(first.members.single().requiredBindingId)
+        assertEquals(binding, repeated.members.single().requiredBindingId)
+        owner.coordinator.start(DownloadActivation.DURABLE_WORK)
+        val published = awaitOriginUsePublication(owner, job.id).acquisition
+        owner.coordinator.start(DownloadActivation.USER_SESSION)
+        val asset = published.materializations.getValue(assertNotNull(published.physicalDownloads.getValue(job.id).assetId))
+        owner.validation = { AssetValidation.Invalid(AppFailure(FailureCode.CORRUPT_MEDIA, "authored_repeated_negative")) }
+        assertIs<AcquisitionDownloadAssetCheck.Unavailable>(owner.adapter.validateMemberAsset(
+            first.id, first.members.single().position, first.intentRevision, asset.id))
+        idle(owner)
+        val ambiguous = assertFailsWith<VeyraException> {
+            owner.coordinator.validateRetainedAssetUse(job.id, binding)
+        }
+        assertEquals(FailureCode.RECOVERY_REQUIRED, ambiguous.failure.code)
+        assertEquals("download_retained_validation_member_required", ambiguous.failure.detail)
+        owner.validation = { AssetValidation.Valid(733) }
+        val use = owner.coordinator.validateRetainedMemberAssetUse(first.id, first.members.single().position,
+            first.intentRevision, binding)
+        assertEquals(binding, use.requestedBindingId)
+        assertEquals(asset.id, use.materializationAssetId)
+        val recovered = owner.store.acquisitionView().acquisition
+        assertEquals(DownloadStatus.COMPLETE, recovered.physicalDownloads.getValue(job.id).status)
+        assertEquals(DownloadBatchMemberState.AVAILABLE, recovered.batches.getValue(first.id).members.single().state)
+        assertEquals(DownloadBatchMemberState.AVAILABLE, recovered.batches.getValue(repeated.id).members.single().state)
+        assertTrue(recovered.assetUses.any { it.requestedBindingId == binding })
+    }
+
+    @Test fun directBatchRetainedFinishCannotCrossBindAnotherMember() = acquisitionDownloadRoomCase {
+        val owner = owner()
+        val batch = enrollOriginUseBatch(owner, count = 2)
+        val initial = owner.store.acquisitionView().acquisition
+        val job = initial.physicalDownloads.values.single()
+        val second = batch.members.single { it.requiredBindingId != job.producer.bindingId }
+        val secondBinding = assertNotNull(second.requiredBindingId)
+        owner.coordinator.start(DownloadActivation.DURABLE_WORK)
+        val published = awaitOriginUsePublication(owner, job.id).acquisition
+        owner.coordinator.start(DownloadActivation.USER_SESSION)
+        val asset = published.materializations.getValue(assertNotNull(published.physicalDownloads.getValue(job.id).assetId))
+        owner.validation = { AssetValidation.Invalid(AppFailure(FailureCode.CORRUPT_MEDIA, "authored_direct_negative")) }
+        assertIs<AcquisitionDownloadAssetCheck.Unavailable>(owner.adapter.validateMemberAsset(
+            batch.id, second.position, batch.intentRevision, asset.id))
+        idle(owner)
+        val failed = owner.repository.physicalDownload(job.id) ?: fail("missing failed join")
+        val originMember = failed.claims.single { it.requestedBindingId == job.producer.bindingId }
+        val token = newEntityId("authored-direct-retained")
+        val claimed = assertIs<PhysicalDownloadCommit.Committed<ClaimedPhysicalDownload>>(
+            owner.repository.claimPhysicalDownloadMaintenance(ClaimPhysicalDownloadMaintenance(
+                job.id, failed.job.producer, failed.job.ownershipGeneration,
+                PhysicalDownloadMaintenanceKind.VALIDATE, token, clock.epochMs(), 5_000,
+                explicitLocalRevalidation = true, requestedBindingId = second.requiredBindingId)))
+        val stale = owner.repository.finishPhysicalDownloadMaintenance(FinishPhysicalDownloadMaintenance(
+            claimed.value.fence, PhysicalDownloadMaintenanceKind.VALIDATE, claimed.value.physical.claims,
+            cleanupCompleted = false, failure = null, nowEpochMs = clock.epochMs(),
+            retainedValidation = RetainedValidationCompletion(originMember, secondBinding, asset, 1)))
+        assertIs<PhysicalDownloadCommit.Stale>(stale)
+        val after = owner.store.acquisitionView().acquisition
+        assertEquals(DownloadStatus.FAILED, after.physicalDownloads.getValue(job.id).status)
+        assertTrue(after.assetUses.none { it.requestedBindingId == second.requiredBindingId })
+        assertEquals(asset, after.materializations.getValue(asset.id))
+        owner.repository.finishPhysicalDownloadMaintenance(FinishPhysicalDownloadMaintenance(
+            claimed.value.fence, PhysicalDownloadMaintenanceKind.VALIDATE, claimed.value.physical.claims,
+            cleanupCompleted = false, failure = AppFailure(FailureCode.INVALID_STATE, "authored_cleanup"), nowEpochMs = clock.epochMs(),
+            status = DownloadStatus.FAILED))
+        idle(owner)
+        owner.legacy.assertUnused()
+    }
+
     @Test fun exactR2RecoveryGrantsOnlyItsOwnUseAndKeepsTheOriginUse() = acquisitionDownloadRoomCase {
         val owner = owner()
         val batch = enrollOriginUseBatch(owner, count = 2)
@@ -265,12 +346,38 @@ class DownloadRetainedFailureRevalidationRoomTest {
         val publishedJob = published.physicalDownloads.getValue(job.id)
         val asset = published.materializations.getValue(assertNotNull(publishedJob.assetId))
         assertEquals(originUse, assertOnlyOriginUse(published, job.id))
+        // A stale member identity is a binding-local admission rejection, not a physical negative:
+        // it must not poison the shared job or the origin member.
+        val originMember = published.batches.getValue(batch.id).members.single {
+            it.requiredBindingId == job.producer.bindingId
+        }
+        assertEquals(DownloadBatchMemberState.AVAILABLE, originMember.state)
+        assertFailsWith<VeyraException> {
+            owner.adapter.validateMemberAsset(batch.id, second.position, batch.intentRevision + 1, asset.id)
+        }
+        val local = owner.store.acquisitionView().acquisition
+        assertEquals(DownloadStatus.COMPLETE, local.physicalDownloads.getValue(job.id).status)
+        assertEquals(DownloadBatchMemberState.AVAILABLE, local.batches.getValue(batch.id).members.single {
+            it.requiredBindingId == job.producer.bindingId
+        }.state)
+        assertEquals(originUse, local.assetUses.single())
         owner.validation = { AssetValidation.Invalid(AppFailure(FailureCode.CORRUPT_MEDIA, "authored_r2_negative")) }
         assertIs<AcquisitionDownloadAssetCheck.Unavailable>(owner.adapter.validateMemberAsset(
             batch.id, second.position, batch.intentRevision, asset.id))
         idle(owner)
         val failed = owner.store.acquisitionView().acquisition
         assertEquals(DownloadStatus.FAILED, failed.physicalDownloads.getValue(job.id).status)
+        val failedOrigin = failed.batches.getValue(batch.id).members.single {
+            it.requiredBindingId == job.producer.bindingId
+        }
+        // The shared bytes failed an actual physical/native check. Historical R1 receipt/use are
+        // retained, but a valid-looking AVAILABLE row beside a FAILED shared job would claim
+        // stale physical health. This is fail-closed, not binding-local poisoning.
+        assertEquals(DownloadBatchMemberState.FAILED, failedOrigin.state)
+        assertEquals(FailureCode.CORRUPT_MEDIA, failedOrigin.failure?.code)
+        assertTrue(failed.assetUses.any { it.requestedBindingId == job.producer.bindingId })
+        assertEquals(published.materializations, failed.materializations)
+        assertEquals(published.materializationReceipts, failed.materializationReceipts)
         assertTrue(failed.assetUses.none { it.requestedBindingId == second.requiredBindingId })
         val transfers = owner.gateway.transfers.size
 
@@ -291,6 +398,9 @@ class DownloadRetainedFailureRevalidationRoomTest {
         assertEquals(transfers, owner.gateway.transfers.size)
         assertEquals(DownloadBatchMemberState.AVAILABLE, recovered.batches.getValue(batch.id).members.single {
             it.requiredBindingId == second.requiredBindingId
+        }.state)
+        assertEquals(DownloadBatchMemberState.AVAILABLE, recovered.batches.getValue(batch.id).members.single {
+            it.requiredBindingId == job.producer.bindingId
         }.state)
     }
 
@@ -364,6 +474,14 @@ class DownloadRetainedFailureRevalidationRoomTest {
         assertEquals(before.assetUses, after.assetUses)
         assertEquals(asset.id, afterJob.assetId)
         assertTrue(Files.exists(Path.of(asset.uri)))
+        assertTrue(owner.coordinator.hasPendingCleanupOwners,
+            "A failed path close is retained; no lease may be released before its close ACK")
+        assertEquals(PhysicalDownloadMaintenanceKind.VALIDATE, afterJob.maintenanceKind)
+        assertNotNull(afterJob.leaseOwner)
+        assertTrue(leases.open.get() > 0)
+        assertEquals(FailureCode.BACKGROUND_RESTRICTED, assertFailsWith<VeyraException> {
+            owner.coordinator.validateRetainedAssetUse(id, binding)
+        }.failure.code, "A retained close lease must block a new explicit validation until recovery")
         leases.beforeClose = { _, _ -> }
     }
 
