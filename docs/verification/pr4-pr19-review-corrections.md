@@ -6,6 +6,16 @@ PR #4 (`t3/typed-room-download-recovery` at `6d09ed5fa24f39e97a6d7b9689e9e30a008
 frozen PR19 remote ref is unchanged. PR17/PR18 and the shared connected F2 execution remain
 unaccepted as recorded below.
 
+> **PR21 independent-review successor:** the frozen PR21 review confirmed that canonical Resume
+> could still be displayed while the PODCAST cursor was not the active selection and then fail on
+> tap; it also found the legacy Resume path source-only and the saved-authority preflight only
+> partially bounded. The successor `t3/pr4-pr21-review-corrections` carries exact cross-context
+> occurrence/binding/revision identities, records the accepted non-atomic boundary, and proves the
+> real schema2 migration result is `LEGACY_UNBOUND` with no queued binding. No runtime legacy Resume
+> success is claimed; the real owner test asserts `resume_target_unavailable`. Final evidence is in
+> `docs/verification/pr4-pr21-review-corrections.md`. This document's PR21 source refs remain frozen,
+> and its historical runs executed dirty at `c31b33d` rather than clean at `6e0a64a`.
+
 ## Stack
 
 | Layer | Ref | State |
