@@ -1,8 +1,9 @@
 # Retained-FAILED local validation correction
 
-Status: implementation and focused source/test correction; execution evidence is recorded below.
-This document does not claim Task A, platform, native, audio, live-source, signing, packaging or
-distribution acceptance.
+Status: implementation and focused source/test correction. Focused F2 and typed-maintenance suites
+are green; two integrated full-shared attempts each retained one non-reproducible single-test
+timeout, so no full-shared-green claim is made. This document does not claim Task A, platform,
+native, audio, live-source, signing, packaging or distribution acceptance.
 
 ## Source finding
 
@@ -50,10 +51,23 @@ the failure/backoff that explained why local validation was needed.
   cleanup/drain close failure leaves the job failed/blocked with its real provenance and retained
   bytes. Automatic maintenance continues to ignore `FAILED` jobs; only the explicit API admits
   one.
-- Foreground return no longer maps a retained `FAILED`/`NEEDS_FOREGROUND` job to `QUEUED`.
-  It restores `FAILED` with the local-validation requirement (or preserves the original failure)
-  and keeps the local backoff. A previously `COMPLETE` job interrupted during a host-held recheck
-  stays durably `COMPLETE` with the host restriction, so a foreground recheck can proceed.
+- Foreground return no longer maps a retained `FAILED` job to `QUEUED`. It restores the retained
+  local failure (or a `RECOVERY_REQUIRED` local-validation requirement) and keeps its backoff;
+  only the explicit local Validate can advance it. A previously `COMPLETE` check interrupted by
+  the host is kept with a `download_completed_check_needs_foreground` marker; after a real
+  foreground announcement it returns to `COMPLETE` so the allowed automatic recheck can run.
+- An interrupted cleanup retains its canonical reservation and can be admitted again after a
+  foreground announcement once the host is active; the late host-failure finalizer from the old
+  foreground generation cannot suspend the resumed host. A caller whose removal intent was
+  durably accepted is not failed merely because the gate cancelled the maintenance child; the
+  retained cleanup/retry owns the physical deletion.
+- A caller cancellation after a real maintenance claim COMMIT now releases the exact maintenance
+  lease before any new gate allowance is acquired.
+
+The three accepted PR16 typed-maintenance reds are covered by these rules:
+`cleanupExpirationRetainsAllReferencesThroughNoncancellableUnwindAndOldEpochCallback`,
+`cancelledDispatcherReturnAfterRealMaintenanceCommitReleasesBeforeGateAcquisition` and
+`deniedCompletedCheckKeepsDurableCompleteButPresentsNeedsForegroundUntilAnAllowedRecheck`.
 
 ## API contract for the UI/owner wiring
 
@@ -79,6 +93,8 @@ owner can add the action and localized label in its own scope.
 ## Changed production paths
 
 - `shared/src/commonMain/kotlin/dev/veyra/data/PhysicalDownloadRepository.kt`
+- `shared/src/commonMain/kotlin/dev/veyra/data/room/AcquisitionGraph.kt`
+- `shared/src/commonMain/kotlin/dev/veyra/data/room/AcquisitionStateMappings.kt`
 - `shared/src/commonMain/kotlin/dev/veyra/data/room/PhysicalDownloadCommands.kt`
 - `shared/src/commonMain/kotlin/dev/veyra/data/room/PhysicalDownloadFinalizationCommands.kt`
 - `shared/src/commonMain/kotlin/dev/veyra/downloads/DownloadCoordinator.kt`
@@ -103,8 +119,36 @@ owner can add the action and localized label in its own scope.
 
 ## Evidence and limitations
 
-Execution statements below are only valid for the exact attempt records in the ignored
-`.work/verification/pr4-retained-failed-revalidation/attempts/` tree. Parent-red, green and
-regression execution results are appended after those attempts complete. No live source,
-network transfer, physical device/emulator, native audio, packaging, signing, workflow or
-benchmark operation is part of this correction.
+Execution statements are only valid for the exact attempt records in the ignored
+`.work/verification/pr4-retained-failed-revalidation/attempts/` tree. Every attempt retained
+its own exact command argv, numeric exit, log, start/finish times and fresh XML; before/after
+tracked-input manifests were compared and were equal for every completed Gradle attempt.
+
+- Parent-production red `red-parent-3` at `6d09ed5`: 3 tests / 3 failed / 0 errors / 0 skipped.
+  The failures were the expected F2 defects: retained explicit validation not admitted
+  (`BACKGROUND_RESTRICTED`), Resume completing without rejection, and foreground return ending
+  in `QUEUED` instead of `COMPLETE`.
+- `green-focused-3`: 14 tests / 2 suites / 0 failures/errors/skips for the new F2 Room and pure
+  scheduling tests.
+- `green-maintenance-9`: 27 tests / 3 suites / 0 failures/errors/skips, including all 13
+  `DownloadMaintenanceRoomTest` methods (the three accepted PR16 reds plus related maintenance)
+  and the new F2 tests. This is the focused typed-maintenance gate requested for the correction.
+- `green-regressions-1`: 179 tests across cleanup/ownership/scheduling/retry/physical/integrity
+  classes; one `DownloadOwnershipRoomTest` timeout. That method passed alone and in its class
+  after the same source, so this is retained as non-reproducible scheduling timing, not a green
+  claim for the full batch.
+- `green-full-shared-1` (merge parent) and `green-full-shared-2` (current `1c91140`): each
+  1,177 tests / 99 suites / 0 errors / 0 skips, but one different single-test 15s timeout
+  (`DownloadRecoveryRoomTest.failedReturn...` and `DownloadIntegrityRoomTest.missingCompleted...`
+  respectively). Both methods passed alone and in their classes. No full-shared-green result is
+  claimed. An experimental cleanup-waiter addition was rejected after `green-full-shared-3`
+  exposed 12 timing failures; it was reverted before the current commit and is preserved only as
+  failed evidence.
+
+The focused API, exact R2/R1 use behavior, Retry rejection, blocked-host/offline, cancellation,
+stale-claim, foreground-return and cleanup-close cases are covered by real Room/commands/runtime
+tests with authored non-audio bytes and fake transfer/decoder seams. No live source, network
+transfer, physical device/emulator, native audio, packaging, signing, workflow or benchmark
+operation is part of this correction. The integrated full-shared timing result remains an
+explicit handoff limitation for Task A review.
+
