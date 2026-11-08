@@ -56,14 +56,15 @@ internal object DownloadPhysicalClaimRules {
     }
 
     fun maintenanceIntent(record: DownloadPhysicalScheduleRecord, kind: PhysicalDownloadMaintenanceKind,
-        checked: Boolean): Boolean = with(record) {
+        checked: Boolean, explicitRetainedValidation: Boolean = false): Boolean = with(record) {
         when (kind) {
             PhysicalDownloadMaintenanceKind.CLEANUP -> job.cleanupPending
             PhysicalDownloadMaintenanceKind.RECOVER_FINALIZATION -> !job.cleanupPending && !job.userPaused &&
                 finalization != null && knownProducer(job) && demand(record) == DownloadClaimDemand.CONTINUE &&
                 job.failure?.code !in terminalLocalFailures
-            PhysicalDownloadMaintenanceKind.VALIDATE -> !job.cleanupPending && job.status == DownloadStatus.COMPLETE &&
-                asset != null && knownProducer(job) && !checked
+            PhysicalDownloadMaintenanceKind.VALIDATE -> !job.cleanupPending && asset != null && knownProducer(job) &&
+                !checked && (job.status == DownloadStatus.COMPLETE ||
+                    explicitRetainedValidation && job.status == DownloadStatus.FAILED)
         }
     }
 

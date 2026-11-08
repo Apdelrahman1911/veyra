@@ -246,6 +246,24 @@ data class ClaimPhysicalDownloadMaintenance(
     val owner: String,
     val nowEpochMs: Long,
     val leaseDurationMs: Long,
+    /**
+     * Explicit one-shot local validation of retained FAILED bytes. It may bypass only the local
+     * validation recheck deadline; host/coverage/ownership/claim/cleanup gates stay authoritative.
+     */
+    val explicitLocalRevalidation: Boolean = false,
+    val requestedBindingId: ExecutionBindingId? = null,
+)
+
+/**
+ * Exact manual local-revalidation success. The pinned claim generation and asset are rechecked
+ * in the finish transaction; [requestedBindingId] is the ONLY use granted. No sibling use is
+ * inferred. This is not a transfer retry or a COMPLETE shortcut.
+ */
+data class RetainedValidationCompletion(
+    val expectedClaim: DownloadClaim,
+    val requestedBindingId: ExecutionBindingId,
+    val expectedAsset: MaterializationAsset,
+    val compatibilityPolicyVersion: Int,
 )
 
 data class FinishPhysicalDownloadMaintenance(
@@ -259,6 +277,8 @@ data class FinishPhysicalDownloadMaintenance(
     val status: DownloadStatus? = null,
     /** Durable bounded local-maintenance backoff; never a first-result retry authorization. */
     val nextRetryEpochMs: Long? = null,
+    /** Set ONLY after complete owned hash/native validation; clears failure/backoff atomically. */
+    val retainedValidation: RetainedValidationCompletion? = null,
 )
 
 /**

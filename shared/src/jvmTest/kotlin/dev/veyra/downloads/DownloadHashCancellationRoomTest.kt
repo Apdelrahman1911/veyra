@@ -85,46 +85,56 @@ class DownloadHashCancellationRoomTest {
 
     private fun completedHashCloseWaitsFor(boundary: HashBoundary) {
         val blocking = BlockingHashReadFileSystem(boundary)
-        downloadCase(blocking) {
+        executorSchema3Case(blocking) {
             releaseOnClose += { blocking.releaseBoundary() }
-            val first = store()
-            val seeded = seedComplete(first)
-            first.update { it.copy(settings = it.settings.copy(offlineOnly = true)) }.getOrThrow()
-            val asset = seeded.record.asset!!
-            blocking.target = asset.uri // Seed hashing has finished; block only the new session check.
-            val gateway = DownloadTestGateway().apply { denyAcquisition() }
-            val gate = HashReadCancellationGate()
-            val a = coordinator(first, gateway, gate = gate)
-            a.start(); blocking.boundaryEntered.await()
+            val setup = owner()
+            val (id, _) = enqueue(setup)
+            setup.coordinator.start(DownloadActivation.DURABLE_WORK)
+            val completed = complete(setup, id)
+            val asset = assertNotNull(completed.asset)
+            offline(setup)
+            setup.coordinator.close()
+            assertTrue(setup.coordinator.dependencyReleaseSafeAfterClose)
+            closeStore(setup.store)
+            blocking.target = asset.uri // The real materialization already hashed its own transfer.
+            val a = owner(store())
+            a.coordinator.start()
+            blocking.boundaryEntered.await()
             coroutineScope {
-                val closing = async(start = CoroutineStart.UNDISPATCHED) { a.close() }
-                gate.awaitCancellationRequested()
-                val retained = first.flush().getOrThrow().downloads.getValue(seeded.record.id)
-                assertEquals(DownloadStatus.COMPLETE, retained.status)
-                assertEquals(asset, retained.asset)
-                assertFalse(closing.isCompleted, "Closing the host must await the physical hash Source.close")
-                assertFalse(blocking.sourceClosed.isCompleted)
-                assertEquals(0, validationCount.get())
-                assertNull(files.tryLeasePaths(listOf(asset.uri)))
-                assertContentEquals(authoredBytes, Files.readAllBytes(Path.of(asset.uri)))
-                blocking.releaseBoundary()
-                withTimeout(3_000) { closing.await() }
+                val closing = async(start = CoroutineStart.UNDISPATCHED) { a.coordinator.close() }
+                try {
+                    awaitCondition { a.coordinator.physicalStates.value[id]?.status == DownloadStatus.NEEDS_FOREGROUND }
+                    val retained = join(a, id)
+                    assertEquals(DownloadStatus.COMPLETE, retained.job.status)
+                    assertEquals(asset, retained.asset)
+                    assertNotNull(retained.job.leaseOwner)
+                    assertEquals(1, a.gate.acquires.get(), "The completed-file check owns a real allowance")
+                    assertFalse(closing.isCompleted, "Closing the host must await the physical hash Source.close")
+                    assertFalse(blocking.sourceClosed.isCompleted)
+                    assertTrue(a.validations.isEmpty())
+                    assertNull(probeFiles.tryLeasePaths(listOf(asset.uri)))
+                    assertContentEquals(authoredBytes, Files.readAllBytes(Path.of(asset.uri)))
+                    blocking.releaseBoundary()
+                    withTimeout(5_000) { closing.await() }
+                } finally { blocking.releaseBoundary() }
             }
             assertTrue(blocking.sourceClosed.isCompleted)
             assertEquals(1, blocking.blockedSourceCloses.get())
-            assertEquals(0, validationCount.get(), "Cancellation at $boundary must be observed before the native validator")
-            val retained = first.flush().getOrThrow().downloads.getValue(seeded.record.id)
-            assertEquals(DownloadStatus.COMPLETE, retained.status)
+            assertTrue(a.validations.isEmpty(), "Cancellation at $boundary must be observed before the native validator")
+            val retained = join(a, id)
+            assertEquals(DownloadStatus.COMPLETE, retained.job.status)
             assertEquals(asset, retained.asset)
-            assertNull(retained.leaseOwner)
-            first.close()
-            val reopened = store()
-            val b = coordinator(reopened, gateway)
-            b.start()
-            withTimeout(3_000) { b.presentation.first { it.downloads[seeded.record.id]?.status == DownloadStatus.COMPLETE } }
-            assertEquals(1, validationCount.get())
+            assertNull(retained.job.leaseOwner)
+            closeStore(a.store)
+            val b = owner(store())
+            b.coordinator.start()
+            withTimeout(3_000) { b.coordinator.physicalStates.first { it[id]?.status == DownloadStatus.COMPLETE } }
+            assertEquals(1, b.validations.size)
             assertContentEquals(authoredBytes, Files.readAllBytes(Path.of(asset.uri)))
-            gateway.assertUnused()
+            assertTrue(b.gateway.transfers.isEmpty())
+            assertTrue(b.gateway.prepareCalls.isEmpty())
+            assertTrue(b.selector.requests.isEmpty())
+            b.legacy.assertUnused()
         }
     }
 }
