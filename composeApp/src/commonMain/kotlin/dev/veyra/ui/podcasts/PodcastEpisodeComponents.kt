@@ -71,8 +71,11 @@ fun PodcastEpisodeRow(
 ) {
     val strings = LocalStrings.current
     val savedBinding = state.savedPlayBindingId
-    val play = if (savedBinding != null) PodcastAction.PlaySavedEpisode(state.episode.id, savedBinding)
-    else PodcastAction.PlayEpisode(state.episode.id)
+    val play = when {
+        savedBinding != null -> PodcastAction.PlaySavedEpisode(state.episode.id, savedBinding)
+        state.resumeActionable -> PodcastAction.ResumeEpisode(state.episode.id, state.resumeBindingId)
+        else -> PodcastAction.PlayEpisode(state.episode.id)
+    }
     Card(
         onClick = { onAction(PodcastAction.OpenEpisode(state.episode.id)) },
         modifier = modifier.fillMaxWidth().testTag("podcast-episode-${state.episode.id}"),
@@ -132,7 +135,7 @@ fun PodcastEpisodeRow(
                     modifier = Modifier.weight(1f).heightIn(min = 48.dp)
                         .testTag("podcast-play-${state.episode.id}").semantics {
                             contentDescription = strings.format(TextKey.PlayItem, state.episode.title)
-                            if (state.canResume) stateDescription = strings.format(TextKey.ResumeAt, strings.spokenDuration(state.positionMs))
+                            if (state.resumeActionable) stateDescription = strings.format(TextKey.ResumeAt, strings.spokenDuration(state.positionMs))
                             else podcastHistoricalProgressNoticeKey(state)?.let {
                                 stateDescription = strings.format(it, strings.spokenDuration(state.historicalPositionMs))
                             }
@@ -140,7 +143,7 @@ fun PodcastEpisodeRow(
                 ) {
                     Icon(VeyraIcons.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(6.dp))
-                    PodcastActionText(podcastPlayLabel(state, strings))
+                    PodcastActionText(podcastDisplayPlayLabel(state, strings))
                 }
                 PodcastEpisodeMenu(state, onAction)
             }
@@ -352,21 +355,24 @@ fun PodcastEpisodeMenu(
 internal fun PodcastEpisodeControls(state: PodcastEpisodeUiState, onAction: (PodcastAction) -> Unit) {
     val strings = LocalStrings.current
     val savedBinding = state.savedPlayBindingId
-    val play = if (savedBinding != null) PodcastAction.PlaySavedEpisode(state.episode.id, savedBinding)
-    else PodcastAction.PlayEpisode(state.episode.id)
+    val play = when {
+        savedBinding != null -> PodcastAction.PlaySavedEpisode(state.episode.id, savedBinding)
+        state.resumeActionable -> PodcastAction.ResumeEpisode(state.episode.id, state.resumeBindingId)
+        else -> PodcastAction.PlayEpisode(state.episode.id)
+    }
     var confirmStartOver by remember(state.episode.id) { mutableStateOf(false) }
     FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Button(onClick = { onAction(play) }, enabled = state.canPlay,
             modifier = Modifier.podcastActionTarget().testTag("podcast-detail-play").semantics {
                 contentDescription = strings.format(TextKey.PlayItem, state.episode.title)
-                if (state.canResume) stateDescription = strings.format(TextKey.ResumeAt, strings.spokenDuration(state.positionMs))
+                if (state.resumeActionable) stateDescription = strings.format(TextKey.ResumeAt, strings.spokenDuration(state.positionMs))
                 else podcastHistoricalProgressNoticeKey(state)?.let {
                     stateDescription = strings.format(it, strings.spokenDuration(state.historicalPositionMs))
                 }
             }) {
             Icon(VeyraIcons.PlayArrow, null, modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(8.dp))
-            PodcastActionText(podcastPlayLabel(state, strings))
+            PodcastActionText(podcastDisplayPlayLabel(state, strings))
         }
         PodcastDownloadButton(state, onAction)
         OutlinedButton(onClick = { onAction(PodcastAction.SetSaved(state.episode.id, !state.saved)) },
@@ -483,6 +489,14 @@ private fun PodcastActionText(text: String) {
 // Minimum interactive geometry, not fixed height: long localized labels can still wrap and grow.
 private fun Modifier.podcastActionTarget(): Modifier =
     sizeIn(minWidth = VeyraSpacing.TouchTarget, minHeight = VeyraSpacing.TouchTarget)
+
+internal fun podcastDisplayPlayLabel(state: PodcastEpisodeUiState, strings: AppStrings): String = when {
+    state.resumeActionable -> podcastPlayLabel(state, strings)
+    // A matched historical position without an exact target must not promise Resume, but the
+    // ordinary Play/Replay label remains truthful for played and unmatched rows.
+    state.canResume -> strings.text(TextKey.Play)
+    else -> podcastPlayLabel(state, strings)
+}
 
 internal fun podcastPlayLabel(state: PodcastEpisodeUiState, strings: AppStrings): String = when {
     state.canResume -> strings.format(TextKey.ResumeAt, strings.mediaTime(state.positionMs))

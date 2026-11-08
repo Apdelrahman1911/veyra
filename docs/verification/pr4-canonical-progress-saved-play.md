@@ -6,6 +6,15 @@ ACK candidate, with the frozen PR17 retained-validation API merged provisionally
 wiring. PR17 remains unaccepted and under shared-owner correction; its connected F2 execution
 test is intentionally not claimed green here.
 
+> **Independent-review correction:** this document describes the frozen PR19 candidate
+> `c31b33d` and is preserved as historical evidence. The successor branch
+> `t3/pr4-pr19-review-corrections` corrects the displayed-Resume/fresh-`Play` defect, the
+> saved-authority online fallback, the missing second-tap/podcast-position coverage, the
+> ambiguous newest-recording selection and the outside-lock evidence runner. Its results and
+> exact old/new assertion mapping are in `docs/verification/pr4-pr19-review-corrections.md`.
+> The historical focused counts below remain classified as outside-lock snapshots, not in-gate
+> drain proof.
+
 ## Stack
 
 | Layer | Ref | State |
@@ -86,7 +95,13 @@ and PR14's download `screenDownloads`/`screenOptions` wiring.
 ## Executed verification
 
 All final runs used the host gate's existing project lock, offline Gradle, the exact bounded JVM
-argument and one 384 MiB SerialGC/2-CPU Test fork.
+argument and one 384 MiB SerialGC/2-CPU Test fork. **Evidence-process limitation:** the historical
+`run_group_gate.sh` captured before/after input manifests and performed its drain scan outside the
+gate/project-lock lifetime. The historical music run recorded an idle task-owned
+`KotlinCompileDaemon` PID 22252; a later scan at 11:55:42 found no owned process, but no PID/start/
+termination action was recorded inside the run. Those runs remain useful focused test results, but
+they are not in-lock snapshot/drain proof. The successor runner and its fresh attempts are recorded
+in `docs/verification/pr4-pr19-review-corrections.md`.
 
 - `final-stack-core-001` at `060f1c3`: **44/44 pass**, 0 failures/errors/skips, exit 0; 14
   CoreShell + 7 lifetime + 18 platform ownership + 5 startup methods. Inputs unchanged
@@ -115,5 +130,8 @@ music set.
 
 Authored gateway/transfer/native answers are non-audio doubles over real Room/files. No live
 source, native decoder, physical audio/crossfade, emulator/device, package, signing, workflow or
-Task B evidence is claimed. F2 physical semantics and PR17 acceptance remain with the shared
+Task B evidence is claimed. The legacy paired-view/progress projection tests are pure projections;
+they do not execute a real-Room schema2 graph. The historical saved-play mismatch test used only a
+nonexistent binding, and `PodcastScreensTest` was excluded from the final 28; both gaps are
+addressed by the successor tests. F2 physical semantics and PR17 acceptance remain with the shared
 owner; this branch is a provisional integration candidate, not accepted Task A.

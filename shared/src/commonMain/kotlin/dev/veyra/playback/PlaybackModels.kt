@@ -76,6 +76,8 @@ sealed interface PlaybackCommand {
         val activate: Boolean = false,
         val startOccurrenceId: ExecutionOccurrenceId? = null,
         val startFromBeginning: Boolean = false,
+        /** Saved-intent admission: the actor/resolver must never fall back to online preparation. */
+        val localOnly: Boolean = false,
     ) : PlaybackCommand
 
     data class PlayOccurrence(
@@ -84,6 +86,19 @@ sealed interface PlaybackCommand {
         val occurrenceId: ExecutionOccurrenceId,
         val expectedBindingId: ExecutionBindingId? = null,
         val startFromBeginning: Boolean = false,
+    ) : PlaybackCommand
+
+    /**
+     * Exact existing occurrence activation that always uses the occurrence/canonical checkpoint
+     * resume policy, never the fresh-capture Play path. [localOnly] forbids online preparation
+     * when no exact local materialization exists (saved-R1 intents).
+     */
+    data class ResumeOccurrence(
+        val context: QueueContext,
+        val expectedQueueRevision: Long,
+        val occurrenceId: ExecutionOccurrenceId,
+        val expectedBindingId: ExecutionBindingId? = null,
+        val localOnly: Boolean = false,
     ) : PlaybackCommand
 
     /**

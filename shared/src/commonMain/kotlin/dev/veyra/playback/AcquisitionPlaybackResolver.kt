@@ -53,18 +53,22 @@ class AcquisitionPlaybackResolver(
         capabilities: EngineCapabilities,
         offlineOnly: Boolean,
         requiredRepresentationId: String? = null,
+        localOnly: Boolean = false,
     ): AcquisitionPlaybackPreparation {
         currentCoroutineContext().ensureActive()
         checkOpen()
         val view = store.acquisitionView()
         requireContext(view.acquisition, context)
         requireNoCleanup(view.acquisition, context)
-        val uses = view.acquisition.assetUses.filter { it.requestedBindingId == context.binding.id }
+        val allUses = view.acquisition.assetUses.filter { it.requestedBindingId == context.binding.id }
+        val uses = if (localOnly) allUses.filter { it.compatibilityPolicyVersion == 1 } else allUses
         val candidates = uses.mapNotNull { use -> view.acquisition.materializations[use.materializationAssetId] }
+            .distinctBy { it.id }
         if (candidates.isNotEmpty()) {
-            // Stable explicit materialization selection; never silently try a different file on failure.
-            val asset = candidates.sortedBy { it.id.value }.first()
-            requireLocal(view.acquisition, context, asset)
+            // Saved intent selects only the exact receipt/job/use that currently verifies. A stale
+            // sibling use never wins by lowest ID, and more than one verified candidate is ambiguous.
+            val asset = if (localOnly) verifiedLocalCandidate(view.acquisition, context, candidates)
+            else candidates.sortedBy { it.id.value }.first().also { requireLocal(view.acquisition, context, it) }
             if (requiredRepresentationId != null && requiredRepresentationId != asset.representationId) fail(FailureCode.INVALID_STATE, "offline_representation_changed")
             if (!capabilities.supportsLocalFiles) fail(FailureCode.UNSUPPORTED_TRANSPORT, "local_files_not_supported")
             if (!capabilities.supports(StreamTransport.PROGRESSIVE, asset.mimeType, asset.codecs)) fail(FailureCode.UNSUPPORTED_CODEC, "offline_codec_not_supported")
@@ -116,6 +120,7 @@ class AcquisitionPlaybackResolver(
                 asset.mimeType, asset.codecs, requireNotNull(asset.representationId), durationMs = duration,
                 seekableHint = true, isLocal = true, materializationAssetId = asset.id), asset)
         }
+        if (localOnly) fail(FailureCode.INVALID_STATE, "saved_local_authority_lost")
         if (offlineOnly || store.acquisitionViews.value.snapshot.settings.offlineOnly) fail(FailureCode.OFFLINE_POLICY, "offline_materialization_unavailable")
         currentCoroutineContext().ensureActive()
         // This prepares the already-accepted raw-first C. It cannot acquire/search again.
@@ -123,6 +128,43 @@ class AcquisitionPlaybackResolver(
         // Ownership passes to the controller even if policy changed during this await. It disposes
         // rejected/unhanded sources through its failure-retaining resource registry, never here.
         return AcquisitionPlaybackPreparation(source)
+    }
+
+    /**
+     * Pre-activation saved-intent fence. Reads the current Room graph, before any queue mutation,
+     * and requires the single exact compatibility-v1 use/asset/receipt/job for [bindingId].
+     * This does not grant playback; the resolver and native worker still revalidate after activation.
+     */
+    suspend fun requireExactLocalAuthority(bindingId: ExecutionBindingId) {
+        currentCoroutineContext().ensureActive()
+        checkOpen()
+        val view = store.acquisitionView()
+        val context = view.acquisition.executionContext(bindingId)
+        requireContext(view.acquisition, context)
+        requireNoCleanup(view.acquisition, context)
+        val candidates = view.acquisition.assetUses
+            .filter { it.requestedBindingId == bindingId && it.compatibilityPolicyVersion == 1 }
+            .mapNotNull { use -> view.acquisition.materializations[use.materializationAssetId] }
+            .distinctBy { it.id }
+        val verified = verifiedLocalCandidate(view.acquisition, context, candidates)
+        requireLocal(view.acquisition, context, verified)
+    }
+
+    /**
+     * Exactly one candidate must currently pass the full receipt/job/claim/use guard. A stale use
+     * beside a valid newer materialization is not silently selected; two valid candidates fail.
+     */
+    private fun verifiedLocalCandidate(state: AcquisitionRepositoryState, context: AcquisitionExecutionContext,
+        candidates: List<MaterializationAsset>): MaterializationAsset {
+        val verified = candidates.mapNotNull { asset ->
+            try { requireLocal(state, context, asset); asset }
+            catch (_: VeyraException) { null }
+        }
+        if (verified.size != 1) {
+            fail(FailureCode.INVALID_STATE,
+                if (verified.isEmpty()) "saved_local_authority_lost" else "saved_local_asset_ambiguous")
+        }
+        return verified.single()
     }
 
     /** Synchronous coherent final guard for the ordered native worker; never a Room write. */

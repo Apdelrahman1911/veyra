@@ -483,7 +483,8 @@ class PlaybackController(
     private suspend fun handleCommand(command: PlaybackCommand) {
         if (typed?.handleCommand(command) == true) return
         when (command) {
-            is PlaybackCommand.AdmitAcquisition, is PlaybackCommand.PlayOccurrence ->
+            is PlaybackCommand.AdmitAcquisition, is PlaybackCommand.PlayOccurrence,
+            is PlaybackCommand.ResumeOccurrence ->
                 throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "typed_playback_services_required"))
             is PlaybackCommand.Enqueue, is PlaybackCommand.Remove, is PlaybackCommand.Move,
             is PlaybackCommand.ClearUpcoming, is PlaybackCommand.UndoQueueEdit,
@@ -491,7 +492,8 @@ class PlaybackController(
             else -> Unit // Native pause/seek/stop paths cancel immediately, without a preceding ramp.
         }
         when (command) {
-            is PlaybackCommand.AdmitAcquisition, is PlaybackCommand.PlayOccurrence ->
+            is PlaybackCommand.AdmitAcquisition, is PlaybackCommand.PlayOccurrence,
+            is PlaybackCommand.ResumeOccurrence ->
                 throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "typed_playback_services_required"))
             is PlaybackCommand.Play -> playCollection(command)
             is PlaybackCommand.PlayEntry -> playEntry(command.context, command.entryId)
@@ -1610,6 +1612,7 @@ class PlaybackController(
         val expectedBindingId: ExecutionBindingId?,
         val renewalDelayMs: Long? = null,
         val requiredRepresentationId: String? = null,
+        val localOnly: Boolean = false,
     ) {
         val isStage: Boolean get() = generation != outgoingGeneration
         var selection: PlaybackSelection? = null // Actor-owned after exact current-queue rejoin.
@@ -1739,6 +1742,7 @@ class PlaybackController(
             when (command) {
                 is PlaybackCommand.AdmitAcquisition -> admit(command)
                 is PlaybackCommand.PlayOccurrence -> playOccurrence(command)
+                is PlaybackCommand.ResumeOccurrence -> resumeOccurrence(command)
                 is PlaybackCommand.Play -> {
                     require(command.items.isNotEmpty() && command.startIndex in command.items.indices &&
                         command.items.all { contextFor(it) == command.context })
@@ -1812,6 +1816,18 @@ class PlaybackController(
             command.prepared.expectedCatalogRevision?.let { expected ->
                 if (before.snapshot.revision != expected) invalid("acquisition_stale_library_revision")
             }
+            if (command.localOnly && command.activate) {
+                val startId = command.startOccurrenceId ?: invalid("saved_local_occurrence_missing")
+                val start = command.prepared.occurrences.singleOrNull { it.id == startId }
+                    ?: invalid("saved_local_occurrence_missing")
+                // A newly admitted saved occurrence is PENDING until resolve attaches the exact
+                // accepted binding. The request outcome, not the pending occurrence, supplies it.
+                val accepted = command.prepared.requests.singleOrNull()?.id
+                    ?.let { before.acquisition.requests[it]?.outcome as? AcquisitionOutcome.Single }
+                val bindingId = start.bindingId ?: accepted?.bindingId
+                    ?: invalid("saved_local_binding_missing")
+                services.resolver.requireExactLocalAuthority(bindingId)
+            }
             val previous = remembered(before.acquisition.queues.getValue(command.context))
             require(previous.editRevision == command.expectedQueueRevision)
             val oldCurrent = mutableState.value.currentEntryId
@@ -1827,7 +1843,8 @@ class PlaybackController(
             undo[command.context] = previous
             if (shuffle == true) shuffle(command.context, true, remember = false, outgoing = false)
             if (command.activate) start(view, true, true,
-                if (command.startFromBeginning) AcquisitionPosition.ZERO else AcquisitionPosition.RESUME)
+                if (command.startFromBeginning) AcquisitionPosition.ZERO else AcquisitionPosition.RESUME,
+                localOnly = command.localOnly)
             else if (oldContext == admitted.snapshot.activeContext && oldCurrent != mutableState.value.currentEntryId) {
                 // Admission alone never initiates source work; a replaced active queue restores paused.
                 stopTransport()
@@ -1855,6 +1872,26 @@ class PlaybackController(
                 rateFor(PlaybackSelection.project(view.library, command.occurrenceId), queue), command.startFromBeginning,
                 clock.epochMs(), checkpointWrite()))
             start(updated, true, true, policy, command.expectedBindingId)
+        }
+
+        /**
+         * Exact occurrence resume: always RESUME policy (canonical checkpoint/history), never the
+         * same-current queue position shortcut. Keeps PR15's post-ACK stage retirement ordering.
+         */
+        private suspend fun resumeOccurrence(command: PlaybackCommand.ResumeOccurrence) {
+            read()
+            val queue = view.acquisition.queues.getValue(command.context)
+            require(queue.editRevision == command.expectedQueueRevision && command.occurrenceId in queue.displayedOrder)
+            val old = mutableState.value
+            val selection = PlaybackSelection.project(view.library, command.occurrenceId)
+            if (command.localOnly) {
+                services.resolver.requireExactLocalAuthority(selection.bindingId ?: invalid("saved_local_binding_missing"))
+            }
+            val updated = apply(AcquisitionPlaybackCommand.Activate(expected(queue), command.occurrenceId,
+                command.expectedBindingId, old.activeContext, 0, rateFor(selection, queue), false,
+                clock.epochMs(), checkpointWrite()))
+            start(updated, true, true, AcquisitionPosition.RESUME, command.expectedBindingId,
+                localOnly = command.localOnly)
         }
 
         suspend fun resume() {
@@ -1962,7 +1999,8 @@ class PlaybackController(
         }
 
         private suspend fun start(latest: PlaybackAcquisitionView, desired: Boolean, manual: Boolean,
-            policy: AcquisitionPosition, expectedBinding: ExecutionBindingId? = null, renewalDelayMs: Long? = null) {
+            policy: AcquisitionPosition, expectedBinding: ExecutionBindingId? = null, renewalDelayMs: Long? = null,
+            localOnly: Boolean = false) {
             cancelNext(notifyEngine = false)
             if (manual) { intentRevision++; if (mutableState.value.sleepTimer?.mode == SleepTimerMode.END_OF_EPISODE) clearTimer() }
             resumeToken = null; resolveJob?.cancel()
@@ -1988,7 +2026,7 @@ class PlaybackController(
             sendEngine(releaseBarrier = true) { stopNative(token) }
             if (selected == null) return
             val load = AcquisitionLoad(token, token, expected(queue), selected.occurrenceId, policy, queue.positionMs,
-                expectedBinding ?: selected.bindingId, renewalDelayMs, requiredRepresentation)
+                expectedBinding ?: selected.bindingId, renewalDelayMs, requiredRepresentation, localOnly)
             currentLoad = load
             launchSelection(load, selected)
         }
@@ -2073,7 +2111,7 @@ class PlaybackController(
                         messages.send(Message.Schema2AcquisitionResolved(load.outgoingGeneration, load, source))
                     } else {
                         val prepared = services.resolver.resolve(requireNotNull(selected.executionContext), engine.capabilities,
-                            committed.snapshot.settings.offlineOnly, load.requiredRepresentationId)
+                            committed.snapshot.settings.offlineOnly, load.requiredRepresentationId, load.localOnly)
                         unhanded = prepared.source
                         ensureActive(); unhanded = null
                         messages.send(Message.AcquisitionResolved(load.outgoingGeneration, load, prepared))
