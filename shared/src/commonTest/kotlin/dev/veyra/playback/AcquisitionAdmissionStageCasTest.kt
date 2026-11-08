@@ -303,6 +303,325 @@ class AcquisitionAdmissionStageCasTest {
         }
     }
 
+    @Test fun rejectedActivationAfterThePreliminaryReadRetainsTheHandedStageAndOutgoingOwner() = runTest {
+        val rig = Fixture(this)
+        val gate = ApplyGate()
+        val resource = CountingPlaybackResource()
+        try {
+            val target = rig.admitInactive(QueueContext.PODCAST)
+            val stage = rig.startStage(resource)
+            val targetRequest = assertNotNull(rig.durable.acquisition.occurrences.getValue(target).requestId)
+            rig.event(EngineEvent.Position(stage.outgoingGeneration, 86_125, 100_000))
+            val activeBinding = assertNotNull(rig.state.currentSelection).bindingId
+            val targetQueue = rig.queue(QueueContext.PODCAST)
+            val preparations = rig.gateway.preparations.size
+            val command = PlaybackCommand.PlayOccurrence(QueueContext.PODCAST, targetQueue.editRevision, target)
+            rig.beforeActivate = { gate.await() }
+            val dispatched = async { rig.controller.dispatch(command) }
+            gate.entered.await(); runCurrent()
+            assertFalse(dispatched.isCompleted)
+            assertEquals(1, rig.attemptedActivations.size)
+            assertTrue(rig.acknowledgedActivations.isEmpty())
+            assertEquals(86_125L, rig.state.positionMs)
+            assertEquals(activeBinding, rig.state.currentSelection?.bindingId)
+            rig.assertStage(stage)
+
+            // The preliminary read already passed. Only the inactive target queue advances.
+            rig.store.acquisition.applyPlayback(AcquisitionPlaybackCommand.EditQueue(
+                ExecutionQueueExpectation(targetQueue.context, targetQueue.editRevision, targetQueue.currentOccurrenceId),
+                targetQueue.displayedOrder, targetQueue.originalOrder, targetQueue.currentOccurrenceId,
+                targetQueue.positionMs, targetQueue.speed, targetQueue.shuffle, targetQueue.repeat, null))
+            val afterIndependentWrite = rig.persistence.graph
+            assertEquals(targetQueue.editRevision + 1, rig.queue(QueueContext.PODCAST).editRevision)
+            assertEquals(QueueContext.MUSIC, rig.durable.snapshot.activeContext)
+            rig.assertStage(stage)
+            assertEquals(0, resource.closeCalls)
+
+            gate.release.complete(Unit)
+            val failed = assertIs<PlaybackResult.Failure>(dispatched.await())
+            runCurrent()
+            assertEquals(FailureCode.INVALID_STATE, failed.failure.code)
+            assertEquals("playback_queue_action_stale", failed.failure.detail)
+            assertEquals(1, rig.attemptedActivations.size)
+            assertTrue(rig.acknowledgedActivations.isEmpty())
+            assertSame(afterIndependentWrite, rig.persistence.graph)
+            assertEquals(QueueContext.MUSIC, rig.durable.snapshot.activeContext)
+            assertEquals(activeBinding, rig.state.currentSelection?.bindingId)
+            assertEquals(stage.outgoing.value, rig.state.currentEntryId)
+            assertEquals(stage.outgoingGeneration, rig.state.generation)
+            rig.assertStage(stage)
+            assertEquals(0, resource.closeCalls)
+            assertEquals(target, rig.queue(QueueContext.PODCAST).displayedOrder.single())
+            assertEquals(OccurrenceSelectionState.PENDING, rig.durable.acquisition.occurrences.getValue(target).selectionState)
+            assertEquals(AcquisitionJobState.READY, rig.durable.acquisition.requests.getValue(targetRequest).state)
+            assertTrue(rig.gateway.selections.acquisitions.none { it.id == targetRequest })
+            assertEquals(preparations, rig.gateway.preparations.size)
+            assertEquals(stage.stops, rig.engine.stops)
+            assertEquals(stage.loads, rig.engine.loads)
+            assertEquals(listOf(stage.native), rig.engine.preloads)
+
+            // The rejected transaction must not clear the still-dirty outgoing native sample.
+            rig.controller.dispatch(PlaybackCommand.FlushProgress).getOrThrow(); runCurrent()
+            assertEquals(86_125L, rig.durable.checkpoints.getValue(stage.outgoing).positionMs)
+            assertTrue(rig.durable.checkpoints.getValue(stage.outgoing).sequence > 1)
+            assertEquals(86_125L, rig.durable.history.single().lastPositionMs)
+            rig.assertStage(stage)
+            assertEquals(0, resource.closeCalls)
+        } finally {
+            gate.release.complete(Unit)
+            rig.beforeActivate = {}
+            rig.close()
+        }
+    }
+
+    @Test fun rejectedActivationAcknowledgementRetainsTheOldStageAndQueuesItsReadyEvent() = runTest {
+        val rig = Fixture(this)
+        val gate = ApplyGate()
+        val resource = CountingPlaybackResource()
+        try {
+            val target = rig.admitInactive(QueueContext.PODCAST)
+            val stage = rig.startStage(resource)
+            rig.event(EngineEvent.Position(stage.outgoingGeneration, 86_125, 100_000))
+            val before = rig.persistence.graph
+            val undo = rig.state.undoableQueueContexts
+            val targetQueue = rig.queue(QueueContext.PODCAST)
+            var proposedChecks = 0
+            rig.persistence.beforeAcknowledgement = { proposed ->
+                val view = proposed.playbackView()
+                if (view.snapshot.activeContext == QueueContext.PODCAST &&
+                    view.acquisition.queues.getValue(QueueContext.PODCAST).currentOccurrenceId == target) {
+                    proposedChecks++
+                    val outgoing = view.checkpoints.getValue(stage.outgoing)
+                    assertEquals(86_125L, outgoing.positionMs)
+                    assertEquals(100_000L, outgoing.measuredDurationMs)
+                    assertTrue(outgoing.sequence > 0)
+                    assertEquals(stage.outgoingGeneration, outgoing.generation)
+                    assertEquals(stage.outgoing, view.acquisition.queues.getValue(QueueContext.MUSIC).currentOccurrenceId)
+                    gate.await()
+                    throw VeyraException(AppFailure(FailureCode.STORAGE_IO, "authored_activation_ack_rejected"))
+                }
+            }
+            val command = PlaybackCommand.PlayOccurrence(QueueContext.PODCAST, targetQueue.editRevision, target)
+            val preparations = rig.gateway.preparations.size
+            val dispatched = async { rig.controller.dispatch(command) }
+            gate.entered.await(); runCurrent()
+            assertFalse(dispatched.isCompleted)
+            assertEquals(1, proposedChecks)
+            assertEquals(1, rig.attemptedActivations.size)
+            assertSame(before, rig.persistence.graph)
+            assertEquals(86_125L, rig.state.positionMs)
+            rig.assertStage(stage)
+            assertEquals(0, resource.closeCalls)
+
+            // Real event collector/mailbox while the activation transaction is suspended.
+            rig.engine.emit(EngineEvent.StageReady(stage.outgoingGeneration, stage.native.generation, 100_000, true))
+            runCurrent()
+            assertEquals(stage.ui, rig.state.crossfade)
+            gate.release.complete(Unit)
+            val failed = assertIs<PlaybackResult.Failure>(dispatched.await())
+            runCurrent()
+            assertEquals(FailureCode.STORAGE_IO, failed.failure.code)
+            assertEquals("authored_activation_ack_rejected", failed.failure.detail)
+            assertEquals(1, rig.attemptedActivations.size)
+            assertTrue(rig.acknowledgedActivations.isEmpty())
+            assertSame(before, rig.persistence.graph)
+            assertEquals(undo, rig.state.undoableQueueContexts)
+            rig.assertStage(stage, stage.ui.copy(phase = CrossfadePhase.READY))
+            assertEquals(0, resource.closeCalls)
+
+            rig.persistence.beforeAcknowledgement = {}
+            rig.controller.dispatch(PlaybackCommand.FlushProgress).getOrThrow(); runCurrent()
+            assertEquals(86_125L, rig.durable.checkpoints.getValue(stage.outgoing).positionMs)
+            assertTrue(rig.durable.checkpoints.getValue(stage.outgoing).sequence > 1)
+            assertEquals(86_125L, rig.durable.history.single().lastPositionMs)
+            assertEquals(preparations, rig.gateway.preparations.size)
+            assertEquals(stage.loads, rig.engine.loads)
+            assertEquals(listOf(stage.native), rig.engine.preloads)
+            rig.assertStage(stage, stage.ui.copy(phase = CrossfadePhase.READY))
+            assertEquals(0, resource.closeCalls)
+        } finally {
+            gate.release.complete(Unit)
+            rig.persistence.beforeAcknowledgement = {}
+            rig.close()
+        }
+    }
+
+    @Test fun rejectedActivationDoesNotCancelOrRepeatTheInFlightNeighbourSelection() = runTest {
+        val rig = Fixture(this)
+        val sourceGate = ApplyGate()
+        val ackGate = ApplyGate()
+        val resource = CountingPlaybackResource()
+        try {
+            val outgoing = rig.startQueue()
+            val incoming = rig.queue(QueueContext.MUSIC).displayedOrder.last()
+            val requestId = assertNotNull(rig.durable.acquisition.occurrences.getValue(incoming).requestId)
+            var sourceCancelled = false
+            rig.gateway.selections.acquireResult = { request ->
+                assertEquals(requestId, request.id)
+                try { sourceGate.await() }
+                catch (cancelled: CancellationException) { sourceCancelled = true; throw cancelled }
+                authoredSingle(request)
+            }
+            rig.gateway.prepare = { context, required -> rig.gateway.source(context, required, resource) }
+            rig.requestStage(); sourceGate.entered.await(); runCurrent()
+            val ui = assertNotNull(rig.state.crossfade)
+            val generation = rig.state.generation
+            val stops = rig.engine.stops.toList()
+            val cancellations = rig.engine.cancellations.toList()
+            assertTrue(rig.engine.preloads.isEmpty())
+            assertEquals(AcquisitionJobState.CLAIMED, rig.durable.acquisition.requests.getValue(requestId).state)
+            assertEquals(2, rig.gateway.selections.acquisitions.size)
+            val preparations = rig.gateway.preparations.size
+            val queue = rig.queue(QueueContext.MUSIC)
+            rig.persistence.beforeAcknowledgement = { proposed ->
+                val view = proposed.playbackView()
+                if (view.snapshot.activeContext == QueueContext.MUSIC &&
+                    view.acquisition.queues.getValue(QueueContext.MUSIC).currentOccurrenceId == incoming) {
+                    ackGate.await()
+                    throw VeyraException(AppFailure(FailureCode.STORAGE_IO, "authored_activation_ack_rejected"))
+                }
+            }
+            val command = PlaybackCommand.PlayOccurrence(QueueContext.MUSIC, queue.editRevision, incoming)
+            val dispatched = async { rig.controller.dispatch(command) }
+            ackGate.entered.await(); runCurrent()
+            assertFalse(dispatched.isCompleted)
+            assertEquals(1, rig.attemptedActivations.size)
+            assertFalse(sourceCancelled)
+            assertEquals(ui, rig.state.crossfade)
+            assertEquals(generation, rig.state.generation)
+            assertEquals(outgoing.value, rig.state.currentEntryId)
+            assertEquals(stops, rig.engine.stops)
+            assertEquals(cancellations, rig.engine.cancellations)
+            assertEquals(AcquisitionJobState.CLAIMED, rig.durable.acquisition.requests.getValue(requestId).state)
+            assertTrue(rig.engine.preloads.isEmpty())
+            assertEquals(2, rig.gateway.selections.acquisitions.size)
+
+            ackGate.release.complete(Unit)
+            val failed = assertIs<PlaybackResult.Failure>(dispatched.await())
+            runCurrent()
+            assertEquals(FailureCode.STORAGE_IO, failed.failure.code)
+            assertEquals("authored_activation_ack_rejected", failed.failure.detail)
+            assertTrue(rig.acknowledgedActivations.isEmpty())
+            assertFalse(sourceCancelled)
+            assertEquals(ui, rig.state.crossfade)
+            assertEquals(generation, rig.state.generation)
+            assertEquals(outgoing.value, rig.state.currentEntryId)
+
+            sourceGate.release.complete(Unit); runCurrent()
+            assertFalse(sourceCancelled)
+            assertEquals(AcquisitionJobState.COMMITTED, rig.durable.acquisition.requests.getValue(requestId).state)
+            assertEquals(2, rig.gateway.selections.acquisitions.size)
+            assertEquals(preparations + 1, rig.gateway.preparations.size)
+            val preload = rig.engine.preloads.single()
+            assertEquals(ui.incomingGeneration, preload.generation)
+            assertEquals(incoming, assertNotNull(preload.acquired).selection.occurrenceId)
+            assertEquals(ui.incomingGeneration, rig.state.crossfade?.incomingGeneration)
+            assertEquals(outgoing.value, rig.state.currentEntryId)
+            assertEquals(generation, rig.state.generation)
+            assertEquals(0, resource.closeCalls)
+
+            rig.event(EngineEvent.StageReady(generation, preload.generation, 100_000, true))
+            assertEquals(CrossfadePhase.READY, rig.state.crossfade?.phase)
+            assertEquals(incoming.value, rig.state.crossfade?.incomingEntryId)
+            assertEquals(outgoing.value, rig.state.currentEntryId)
+        } finally {
+            sourceGate.release.complete(Unit)
+            ackGate.release.complete(Unit)
+            rig.persistence.beforeAcknowledgement = {}
+            rig.close()
+        }
+    }
+
+    @Test fun successfulActivationRetiresTheOldStageOnlyAfterTheCommittedAcknowledgement() = runTest {
+        val rig = Fixture(this)
+        val gate = ApplyGate()
+        val resource = CountingPlaybackResource()
+        try {
+            val stage = rig.startStage(resource)
+            val incoming = rig.queue(QueueContext.MUSIC).displayedOrder.last()
+            val binding = assertNotNull(rig.durable.acquisition.occurrences.getValue(incoming).bindingId)
+            rig.event(EngineEvent.Position(stage.outgoingGeneration, 86_125, 100_000))
+            val queue = rig.queue(QueueContext.MUSIC)
+            val stops = rig.engine.stops.toList()
+            val cancellations = rig.engine.cancellations.toList()
+            val loads = rig.engine.loads.toList()
+            val preloads = rig.engine.preloads.toList()
+            val preparations = rig.gateway.preparations.size
+            val acquisitions = rig.gateway.selections.acquisitions.size
+            var sawCommittedAck = false
+            rig.beforeActivate = { gate.await() }
+            rig.afterActivate = { _, committed ->
+                assertEquals(incoming, committed.acquisition.queues.getValue(QueueContext.MUSIC).currentOccurrenceId)
+                assertEquals(queue.editRevision + 1, committed.acquisition.queues.getValue(QueueContext.MUSIC).editRevision)
+                assertEquals(binding, committed.acquisition.occurrences.getValue(incoming).bindingId)
+                assertEquals(86_125L, committed.checkpoints.getValue(stage.outgoing).positionMs)
+                assertTrue(committed.checkpoints.getValue(stage.outgoing).sequence > 0)
+                // The canonical ACK is real, but the controller has not processed it yet.
+                assertSame(stage.native, rig.engine.staged)
+                assertEquals(stage.ui, rig.state.crossfade)
+                assertEquals(stage.outgoing.value, rig.state.currentEntryId)
+                assertEquals(stage.outgoingGeneration, rig.state.generation)
+                assertEquals(stops, rig.engine.stops)
+                assertEquals(loads, rig.engine.loads)
+                assertEquals(preparations, rig.gateway.preparations.size)
+                assertEquals(0, resource.closeCalls)
+                sawCommittedAck = true
+            }
+            val command = PlaybackCommand.PlayOccurrence(QueueContext.MUSIC, queue.editRevision, incoming, binding)
+            val dispatched = async { rig.controller.dispatch(command) }
+            gate.entered.await(); runCurrent()
+            assertFalse(dispatched.isCompleted)
+            assertEquals(1, rig.attemptedActivations.size)
+            assertTrue(rig.acknowledgedActivations.isEmpty())
+            assertSame(stage.native, rig.engine.staged)
+            assertEquals(stage.ui, rig.state.crossfade)
+            assertEquals(stage.outgoing.value, rig.state.currentEntryId)
+            assertEquals(stage.outgoingGeneration, rig.state.generation)
+            assertEquals(stops, rig.engine.stops)
+            assertEquals(loads, rig.engine.loads)
+            assertEquals(preloads, rig.engine.preloads)
+            assertEquals(preparations, rig.gateway.preparations.size)
+            assertEquals(acquisitions, rig.gateway.selections.acquisitions.size)
+            assertEquals(0, resource.closeCalls)
+
+            // A queued old StageReady must not promote the replaced stage after the ACK.
+            rig.engine.emit(EngineEvent.StageReady(stage.outgoingGeneration, stage.native.generation, 100_000, true))
+            runCurrent()
+            assertEquals(stage.ui, rig.state.crossfade)
+            gate.release.complete(Unit)
+            assertIs<PlaybackResult.Accepted>(dispatched.await())
+            runCurrent()
+
+            assertTrue(sawCommittedAck)
+            assertEquals(1, rig.attemptedActivations.size)
+            assertEquals(1, rig.acknowledgedActivations.size)
+            assertEquals(incoming.value, rig.state.currentEntryId)
+            assertEquals(binding, rig.state.currentSelection?.bindingId)
+            assertEquals(incoming, rig.durable.acquisition.queues.getValue(QueueContext.MUSIC).currentOccurrenceId)
+            assertEquals(binding, rig.durable.acquisition.occurrences.getValue(incoming).bindingId)
+            assertEquals(86_125L, rig.durable.checkpoints.getValue(stage.outgoing).positionMs)
+            assertNull(rig.state.crossfade)
+            assertTrue(rig.state.desiredPlaying)
+            assertNotEquals(stage.outgoingGeneration, rig.state.generation)
+            assertEquals(rig.state.generation, assertNotNull(rig.engine.active).generation)
+            assertSame(rig.engine.active, rig.engine.loads.last())
+            assertEquals(incoming, assertNotNull(rig.engine.active?.acquired).selection.occurrenceId)
+            assertEquals(1, rig.engine.preloads.size)
+            assertEquals(stops.size + 1, rig.engine.stops.size)
+            assertEquals(rig.state.generation, rig.engine.stops.last())
+            assertEquals(loads.size + 1, rig.engine.loads.size)
+            assertEquals(cancellations, rig.engine.cancellations)
+            assertEquals(preparations + 1, rig.gateway.preparations.size)
+            assertEquals(acquisitions, rig.gateway.selections.acquisitions.size)
+            assertEquals(1, resource.closeCalls)
+        } finally {
+            gate.release.complete(Unit)
+            rig.beforeActivate = {}
+            rig.afterActivate = { _, _ -> }
+            rig.close()
+        }
+    }
+
     private class ApplyGate {
         val entered = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()
@@ -349,18 +668,36 @@ class AcquisitionAdmissionStageCasTest {
             }, materializationEvidence)
         var beforeAdmit: suspend (AcquisitionPlaybackCommand.AdmitQueue) -> Unit = {}
         var afterAdmit: suspend (AcquisitionPlaybackCommand.AdmitQueue, PlaybackAcquisitionView) -> Unit = { _, _ -> }
+        var beforeActivate: suspend (AcquisitionPlaybackCommand.Activate) -> Unit = {}
+        var afterActivate: suspend (AcquisitionPlaybackCommand.Activate, PlaybackAcquisitionView) -> Unit = { _, _ -> }
         val attemptedAdmissions = mutableListOf<AcquisitionPlaybackCommand.AdmitQueue>()
         val acknowledgedAdmissions = mutableListOf<AcquisitionPlaybackCommand.AdmitQueue>()
+        val attemptedActivations = mutableListOf<AcquisitionPlaybackCommand.Activate>()
+        val acknowledgedActivations = mutableListOf<AcquisitionPlaybackCommand.Activate>()
         private val repository = object : AcquisitionLibraryRepository by store.acquisition {
             override suspend fun applyPlayback(command: AcquisitionPlaybackCommand): PlaybackAcquisitionView {
-                if (command is AcquisitionPlaybackCommand.AdmitQueue) {
-                    attemptedAdmissions += command
-                    beforeAdmit(command)
+                when (command) {
+                    is AcquisitionPlaybackCommand.AdmitQueue -> {
+                        attemptedAdmissions += command
+                        beforeAdmit(command)
+                    }
+                    is AcquisitionPlaybackCommand.Activate -> {
+                        attemptedActivations += command
+                        beforeActivate(command)
+                    }
+                    else -> Unit
                 }
                 val result = store.acquisition.applyPlayback(command)
-                if (command is AcquisitionPlaybackCommand.AdmitQueue) {
-                    acknowledgedAdmissions += command
-                    afterAdmit(command, result)
+                when (command) {
+                    is AcquisitionPlaybackCommand.AdmitQueue -> {
+                        acknowledgedAdmissions += command
+                        afterAdmit(command, result)
+                    }
+                    is AcquisitionPlaybackCommand.Activate -> {
+                        acknowledgedActivations += command
+                        afterActivate(command, result)
+                    }
+                    else -> Unit
                 }
                 return result
             }
@@ -388,8 +725,28 @@ class AcquisitionAdmissionStageCasTest {
             return PlaybackCommand.AdmitAcquisition(prepared, context, queue(context).editRevision, operation, activate)
         }
 
-        suspend fun startStage(): Stage {
+        suspend fun admitInactive(context: QueueContext): ExecutionOccurrenceId {
+            controller.initialize().getOrThrow()
+            testScope.runCurrent()
+            val command = admission(context)
+            controller.dispatch(command).getOrThrow()
+            testScope.runCurrent()
+            return command.prepared.occurrences.single().id
+        }
+
+        suspend fun startStage(neighbourResource: PlaybackResource? = null): Stage {
             val outgoing = startQueue()
+            if (neighbourResource != null) {
+                val incoming = queue(QueueContext.MUSIC).displayedOrder.last()
+                val requestId = requireNotNull(durable.acquisition.occurrences.getValue(incoming).requestId)
+                var handed = false
+                gateway.prepare = { context, required ->
+                    if (!handed && context.request.id == requestId) {
+                        handed = true
+                        gateway.source(context, required, neighbourResource)
+                    } else gateway.source(context, required)
+                }
+            }
             requestStage()
             val native = engine.preloads.single()
             val ui = assertNotNull(state.crossfade)

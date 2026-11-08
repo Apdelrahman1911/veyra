@@ -1846,7 +1846,10 @@ class PlaybackController(
                 old.currentEntryId == command.occurrenceId.value && old.activeContext == command.context && old.phase != PlaybackPhase.ENDED -> AcquisitionPosition.QUEUE
                 else -> AcquisitionPosition.RESUME
             }
-            cancelNext(notifyEngine = false)
+            // Activation is a transaction too. The handed stage and any in-flight neighbour
+            // reservation belong to the outgoing owner until the final Room CAS and outgoing
+            // checkpoint are acknowledged. start() retires them only after that positive ACK;
+            // a rejected activation must leave the unchanged native stage and its events owned.
             val updated = apply(AcquisitionPlaybackCommand.Activate(expected(queue), command.occurrenceId, command.expectedBindingId,
                 old.activeContext, if (policy == AcquisitionPosition.QUEUE) queuePosition(queue) else 0,
                 rateFor(PlaybackSelection.project(view.library, command.occurrenceId), queue), command.startFromBeginning,
