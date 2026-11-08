@@ -1,69 +1,84 @@
-# PR #4 — CoreShell typed fixture/test port (Task A)
+# PR #4 — canonical typed queue/player consumers (Task A)
 
-Status: **draft and incomplete by design.** The CoreShell fixture and its original 13 GUI
-methods now run on the schema-3 typed Room/acquisition composition, plus one fresh typed shell
-control. The execution selector is red on five methods: three canonical queue-panel methods,
-one playlist replacement-confirmation method, and one typed player-provenance method. All five
-are actual production UI/consumer mismatches that this lane does not own. The PR remains draft
-and is not mergeable or release-ready.
+Status: **draft; production consumers corrected; original CoreShell oracles retained.** PR12's
+five verified failures were consumer mismatches: the owner publishes canonical
+`executionQueues`/`queueSelections`/`currentSelection`, while `QueuePanel`,
+`PlaylistDetailScreen`, the mini/full player and crossfade disclosure read the legacy
+`queues`/`queue`, `executionBinding` field. This revision corrects those consumers without
+changing shared production, the controller, schema, pin, dependencies, workflows or downloads.
 
-## Result in one paragraph
+## Result
 
-`CoreShellTestFixture` no longer writes execution/progress/download/saved authority through
-`store.update { initial }`. Catalogue/show/settings/navigation enter through their existing
-commands; favorites and the duplicate playlist enter through `editCatalogLibrary`; requests,
-receipts, bindings and occurrences enter through real `capture`/`claim`/`commit`/`admitQueue`/
-`attachOccurrence`; queue positions/order/shuffle/speed use `AcquisitionPlaybackCommand.EditQueue`;
-and the paused download is a real standalone physical job/claim paused by
-`UpdateStandaloneDownloadIntent`. The fixture engine now owns a typed prepared load directly,
-so remote typed play/seek/stop work without a legacy `PlaybackResource` or legacy `source`
-field. The final focused run executed 44 tests: **39 passed, 5 failed, 0 errors, 0 skipped**.
-All 30 headless desktop controls passed. The five CoreShell failures are the queue consumer,
-playlist shuffle confirmation, and typed player-provenance consumers outside this test-only
-scope.
+- The complete 14-method `CoreShellFlowsTest`: **14/14 pass**; all four headless desktop classes:
+  **30/30** (7 lifetime, 18 platform ownership, 5 startup jobs). `final-core-001`: **44/44**,
+  0 failures/errors/skips, Gradle exit 0.
+- New canonical read-model/UI/neutral journey and playlist compatibility: **16/16 pass** in
+  `final-new-001` (7 pure projections, 2 typed surface methods, 1 connected neutral journey,
+  6 retained playlist methods), Gradle exit 0.
+- A selected existing-music subset is **not accepted green**: the host disk free-space floor
+  (6 GiB) was below the gate floor after the two green final runs, so no new heavy build was
+  admitted. The attempted subset, earlier pre-freeze results and the one diagnosed legacy
+  crossfade hang are recorded below; no broader music pass is claimed.
 
-## Fixture and seed changes
+## Production behavior
 
-| Area | Previous fixture | Ported fixture |
+| Area | Corrected behavior |
+|---|---|
+| `QueuePanel` | Renders canonical `ExecutionQueue.displayedOrder` with the paired `queueSelections[id]`. Preserves duplicates, exact occurrence/context, current cursor, displayed-order indices, shuffle state and Undo availability. Canonical empty stays empty even when a stale legacy queue exists. Legacy snapshot rows are used only when no canonical queues were published. |
+| Queue rows | Carry captured presentation/identity only. A missing selection is `InformationUnavailable` and non-playable; `PENDING` is resolvable/playable; `BOUND` is playable; `UNPLAYABLE`/`LEGACY_UNBOUND`/`OUTCOME_UNKNOWN` are visibly non-playable. A neutral source recording has no `MediaItem` and no fabricated catalogue/binding/download authority. |
+| Playlist replacement | `PlaylistDetailScreen` accepts the published playback state and confirms replacement against canonical upcoming music occurrence IDs. Standalone legacy callers keep the explicit snapshot fallback only when canonical queues are absent. |
+| Current player | Mini/full player and provenance derive from `currentSelection` and its exact requested/observed/executed/receipt identity. They never look up a newer catalogue row, a browsed queue, or a future queued recording. Schema2 receipts remain labelled legacy; typed receipts use `FirstResultReceipt.Observed`. |
+| Incoming crossfade | Uses `incomingSelection`: requested A is labelled requested, captured member B is labelled captured member, executed C is labelled resolved. No incoming item/receipt is borrowed from a different row. A neutral incoming recording has no fabricated `MediaItem`. |
+| Transport | Shuffle/repeat and next availability come from the active canonical `ExecutionQueue`; legacy controls are the fallback only when no canonical queue exists. Podcast skip/speed and music shuffle/repeat follow `controlsMode`, not a fabricated media kind. |
+
+No `PlaybackController`, shared production, Room/schema, download, pin, dependency, workflow or
+build-policy file changed. Only narrow bilingual labels were added
+(`CapturedMemberTitleValue`, `QueueEntryUnavailable`); no PR14 download strings were copied.
+
+## Original CoreShell method mapping
+
+| Method | Original assertion | Final |
 |---|---|---|
-| Initial `create()` | `store.update { initial }` with legacy queues/progress/bindings/downloads | `store.initialize`, `upsertCatalog`, scalar settings/navigation/follow update, then real save and acquisition commands |
-| Catalogue/show/settings/navigation | mixed into the guarded snapshot write | `upsertCatalog` plus the existing scalar `store.update` ingress |
-| Favorites/playlist | snapshot write | `editCatalogLibrary`, preserving `playlist-first` and duplicate `playlist-copy` occurrence IDs |
-| Music queue | `QueueSnapshot("music-now","music-next","music-copy")`, position 17,000 ms, shuffle | four canonical requests; three BOUND occurrences attached; `EditQueue` current `music-now`, displayed/original order exact, position 17,000 ms, shuffle true |
-| Podcast queue | legacy `episode-now`, 25,000 ms | canonical PENDING `episode-now` occurrence, position 25,000 ms; no pre-play/query/native prepare |
-| Paused download | legacy `DownloadRecord("ui-fixture-paused-download", music.id, PAUSED)` | canonical typed physical job + standalone claim, intent PAUSED/userPaused, no staging path/attempt/asset/AssetUse |
-| Gateway | `KmpMediaGateway` only | `KmpMediaGateway`, `AcquisitionGateway`, `AcquisitionExecutionGateway`; a separate seed gateway keeps app query counters entry-time truthful |
-| Engine | typed prepare set `source = null`; play/seek required legacy source | one active typed/legacy load owner; typed play/seek/stop/replacement, generation filtering, native Position/SeekCompleted samples, exact release bookkeeping |
+| `queueInspectionDoesNotActivateAudioAndExplicitOccurrenceSelectionUsesTheSinglePlayer` | canonical queue inspection; exact `episode-now` PlayEntry; one native load; no catalogue query for inspect | pass |
+| `occurrenceReorderDisablesShuffleAndConfirmedClearUndoRestoresOnlyUpcomingEdits` | exact displayed/original order, occurrence IDs, revision 3, position 17,000 ms, shuffle off, clear+Undo | pass |
+| `detailsFavoritesAndDuplicatePlaylistMembershipAreConnectedButDoNotPlayOrDeleteDownloads` | canonical queues/physical job unchanged across save/Undo | pass |
+| `confirmedPlaylistShuffleHasOneUndoBackToTheOriginalOccurrenceQueue` | canonical upcoming confirmation, shuffle replacement, exact duplicate occurrences, one Undo | pass |
+| `backgroundSpaceTogglesButTypingSpacesAndNavigationShortcutsDoNotHijackText` | focus/keyboard behavior; no extra engine loads | pass |
+| `aFocusedPlayerSliderOwnsArrowKeysAndSpaceActivatesAButtonOnlyOnce` | seek/focus and one activation | pass |
+| `escapeClosesADialogThenQueueThenPlayerWithoutChangingTheAudioOwner` | modal/queue/player Escape and owner identity | pass |
+| `queueContextNavigationKeepsTheClickedChipFocusedWithoutStartingPlayback` | inspected context never changes active context/audio | pass |
+| `heldSpaceReleasedByAChildDoesNotSuppressTheNextBackgroundPress` | held-key/focus and exact play/pause/load counts | pass |
+| `narrowArabicLargeTextMirrorsNavigationButKeepsThePlayerTransportLtrAndReachable` | 320 dp Arabic 175% RTL/LTR, controls and 48 dp reachability | pass |
+| `shortLandscapeKeepsLibraryInputAndScrollableRailReachableAboveTheMiniPlayer` | 720×360 Arabic 175% layout/runtime-error behavior | pass |
+| `compactNavigationKeepsEverySelectedLabelUnclippedAt200PercentInBothLanguages` | en/ar 200% labels, selected state and focus | pass |
+| `resizingLongMetadataKeepsPauseAndSeekVisibleWhileCompleteProvenanceRemainsReadable` | typed current receipt, `player-resolved-title`, complete requested/resolved disclosure, transport visibility | pass |
+| `freshTypedLibraryPlayUsesTheCanonicalOccurrenceAndRendersInTheQueuePanel` | real Library Play → canonical occurrence revision 4, no legacy queue/binding, rendered queue entry | pass |
 
-`attachUninitialized` remains a truthful caller-owned-store startup seam with the existing
-canonical containment checks. No production source, schema, pin, build file, workflow or legal
-resource was changed.
+The original assertions, scene input paths and strict checks were not weakened. Fixtures still
+create execution state through production capture/claim/commit/admit/attach/EditQueue commands
+over real Room; only the optional neutral occurrence is an authored non-audio fixture answer.
 
-## Original method → canonical assertion mapping
+## New focused tests
 
-| Original method | Ported canonical seam | Result |
-|---|---|---|
-| `queueInspectionDoesNotActivateAudioAndExplicitOccurrenceSelectionUsesTheSinglePlayer` | canonical `ExecutionQueue`, occurrence IDs, typed load `mediaId`, exact seed revision 2 | **red**: QueuePanel does not emit `queue-play-episode-now` |
-| `occurrenceReorderDisablesShuffleAndConfirmedClearUndoRestoresOnlyUpcomingEdits` | canonical displayed/original/current/position/shuffle + exact revisions 2→3→4→5 | **red**: QueuePanel does not emit `queue-up-music-copy` |
-| `detailsFavoritesAndDuplicatePlaylistMembershipAreConnectedButDoNotPlayOrDeleteDownloads` | canonical queues + physical job map; paused job status/userPaused; same duplicate playlist identities through save/undo | **pass** |
-| `confirmedPlaylistShuffleHasOneUndoBackToTheOriginalOccurrenceQueue` | canonical queue facts before/after play and Undo | **red**: `PlaylistDetailScreen` decides confirmation from the legacy queue, so `confirm-action` is absent |
-| `backgroundSpaceTogglesButTypingSpacesAndNavigationShortcutsDoNotHijackText` | unchanged user-visible keyboard assertions; typed play count | **pass** |
-| `aFocusedPlayerSliderOwnsArrowKeysAndSpaceActivatesAButtonOnlyOnce` | unchanged focus/seek assertions; typed seek acknowledgement | **pass** |
-| `escapeClosesADialogThenQueueThenPlayerWithoutChangingTheAudioOwner` | unchanged dialog/queue/player focus and audio-owner assertions | **pass** |
-| `queueContextNavigationKeepsTheClickedChipFocusedWithoutStartingPlayback` | canonical queue map unchanged; canonical selection identity unchanged | **pass** |
-| `heldSpaceReleasedByAChildDoesNotSuppressTheNextBackgroundPress` | canonical selection identity, typed `loads`, exact play/pause counts | **pass** |
-| `narrowArabicLargeTextMirrorsNavigationButKeepsThePlayerTransportLtrAndReachable` | unchanged 320dp Arabic/175%/RTL/LTR assertions | **pass** |
-| `shortLandscapeKeepsLibraryInputAndScrollableRailReachableAboveTheMiniPlayer` | unchanged 720×360 Arabic/175% layout and runtime-error assertions | **pass** |
-| `compactNavigationKeepsEverySelectedLabelUnclippedAt200PercentInBothLanguages` | unchanged en/ar 200% label/layout assertions | **pass** |
-| `resizingLongMetadataKeepsPauseAndSeekVisibleWhileCompleteProvenanceRemainsReadable` | authored typed long query/resolved receipt; canonical current selection/queue assertions retained | **red**: typed receipt exists canonically, but the player renders only legacy `executionBinding`, so `player-resolved-title` is absent |
-| `freshTypedLibraryPlayUsesTheCanonicalOccurrenceAndRendersInTheQueuePanel` (new) | real LibraryScreen Play intent → typed capture/acquire/prepare; canonical occurrence revision 4; no legacy queue/binding copied | **red**: after the canonical success assertions, the rendered QueuePanel has no `queue-entry-<occurrence>` node |
+- `CanonicalPlaybackPresentationTest` (7 methods): canonical-empty versus stale legacy,
+  duplicate exact IDs/order/context, inspected versus audible transport, current/incoming exact
+  receipt after later catalogue updates, requested/observed/executed labels, neutral and pending
+  rows without catalogue fabrication, non-playable action states.
+- `TypedPlaybackSurfacesTest` (2 methods): current and incoming exact typed receipts with a decoy
+  legacy item; canonical-empty QueuePanel renders no stale legacy row.
+- `TypedNeutralPlayerJourneyTest` (1 method): real VeyraApp/AppContainer/Room with a neutral SHOW
+  source recording, actual queue PlayEntry, no new title query, no `MediaItem`, podcast controls,
+  en/ar 320 dp 175% layout and authored screenshots.
+- `PlaylistFlowsTest` (6 retained methods): legacy playlist callers keep their behavior,
+  including the viewed-context replacement/Undo test.
 
 ## Actual validation
 
-Final run: `port-final-004`, fresh per-attempt JUnit directory, actual Compose X11 display via
-`scripts/with-display.sh`, shared heavy-build flock held for the complete Gradle child.
+All Gradle work used the existing Veyra heavy-build admission gate/project lock, offline
+`scripts/gradle.sh`, one bounded Test fork (384 MiB heap, 256 MiB metaspace, SerialGC,
+2 processors), and real X11 via `scripts/with-display.sh`.
 
-Command selection:
+### `final-core-001` (head `aa583a8`, 2026-11-08T07:49:39Z–07:51:12Z)
 
 ```text
 :composeApp:desktopTest
@@ -73,81 +88,79 @@ Command selection:
   --tests dev.veyra.desktop.DesktopStartupJobsTest
 ```
 
-Wrapper/guard: `scripts/with-display.sh scripts/gradle.sh --offline`, the one literal
-`-Dorg.gradle.jvmargs=-Xmx1280m -XX:MaxMetaspaceSize=512m -XX:+UseSerialGC -XX:ActiveProcessorCount=2 -Dfile.encoding=UTF-8`,
-and the ignored `desktop-test-bounds.init.gradle` (`maxParallelForks=1`, 384 MiB heap,
-256 MiB metaspace, SerialGC, 2 processors, fresh XML output).
+**44 tests / 44 passed / 0 failed / 0 errors / 0 skipped**, Gradle exit 0. Class counts:
+CoreShell 14, lifetime 7, platform ownership 18, startup jobs 5. Before/after inputs identical
+(`0b769af4e7b336b885d89217c17ee83d2e41baf2daaa0e6f68230ec159892586`); HEAD unchanged;
+gitlink/pin and actual checkout `c0a08090fe7dbd76e20216559b8184ad2cccde63`; schema-3 SHA256
+`aab30e43a35a431a25a7ecbb7ebccefd849811f688957054304b02d3caf6d367`; owned process drain none.
+Log SHA256 `ac2b77f7bf3eb5e1c63dc765042fd8542eb93d4f17b1e9b940d4166f825469c5`;
+result SHA256 `92e24318ce3c61a4856258d97b4617cdbc14399af7888a43cd4127bf89d8566e`.
+Fresh XML: CoreShell `0c4111fbe95f3ba739969e1c9c24527684a6b395afeab5d257723216ed6b1741`;
+lifetime `0db263851e877ee263b8a14bbee8a21c3a6973d3458f0b2f4820a06f61163c23`; platform
+ownership `0a7e87bd375c60652afa854bf13677ab64a26b6d644364c6fb6e9359da97115c`; startup jobs
+`1294fa4b36aec19eb5c61c8a9cfba9508c4793bf1bea095c92ff8be02142070d`.
 
-Result: **44 tests / 39 passed / 5 failed / 0 errors / 0 skipped**, Gradle exit 1.
-- `CoreShellFlowsTest`: 14 tests / 9 passed / 5 failed.
-- `DesktopLifetimeTest`: 7/7 passed.
-- `DesktopPlatformServicesOwnershipTest`: 18/18 passed.
-- `DesktopStartupJobsTest`: 5/5 passed.
-- Production `:composeApp:compileKotlinDesktop` and shared JVM compilation succeeded before
-  test execution; `:composeApp:compileTestKotlinDesktop` succeeded in the final run.
+### `final-new-001` (head `aa583a8`, 2026-11-08T07:53:38Z–08:01:10Z)
 
-Fresh evidence (ignored; not committed):
+```text
+:composeApp:desktopTest
+  --tests dev.veyra.app.TypedNeutralPlayerJourneyTest
+  --tests dev.veyra.ui.music.CanonicalPlaybackPresentationTest
+  --tests dev.veyra.ui.music.TypedPlaybackSurfacesTest
+  --tests dev.veyra.ui.music.PlaylistFlowsTest
+```
 
-| Artifact | SHA-256 |
-|---|---|
-| `runs/port-final-004/gradle.log` | `a8cf7e13731124d6b93c4c5c329b7ac230e172f00de0799fc550984c6cf5aa06` |
-| `runs/port-final-004/result.json` | `9e57ce71ab1c02dbfaefb4fa04a07f93c15e1fb599a286019a8aff5644042de3` |
-| `runs/port-final-004/xml/TEST-dev.veyra.app.CoreShellFlowsTest.xml` | `0e3fb9fbb5c47547a3614590cfc1bbbbcaf478a3d499915b0bc7b8c8d0616d85` |
-| `runs/port-final-004/xml/TEST-dev.veyra.desktop.DesktopLifetimeTest.xml` | `4d06dd67d104dfabcc78757002e5159fc370ea8bb005d80fc9c040618b57f562` |
-| `runs/port-final-004/xml/TEST-dev.veyra.desktop.DesktopPlatformServicesOwnershipTest.xml` | `ee181ffdbc51018d3583dc412019840644efefa435fd3ea218a029377f6f3762` |
-| `runs/port-final-004/xml/TEST-dev.veyra.desktop.DesktopStartupJobsTest.xml` | `ca7ffa42981590316b2c9ee7126bfa641e23a92eebcc69bb58697e67e129c49f` |
-| `inputs-before-004.json` / `inputs-after-004.json` | identical, `4508b8f5039cd2bc0230c0cc9e4be8c8b2b2f2d4b090c8f659480aeee3fcc667` |
+**16 tests / 16 passed / 0 failed / 0 errors / 0 skipped**, Gradle exit 0 (neutral 1, pure 7,
+typed surfaces 2, playlist 6). Before/after inputs identical
+(`0b769af4e7b336b885d89217c17ee83d2e41baf2daaa0e6f68230ec159892586`); tested HEAD `aa583a8`;
+pin/gitlink/schema unchanged. Log SHA256
+`b3874b56997a822feac7c39f8a4e69270fe0787658d026624f43add7ea9f54ff`; result SHA256
+`88f78dd393289ea2bd024277cd1456f03182b9fb78b248c8842aa24e592e5a69`.
+Fresh XML: neutral `a472fb087120e3dbcf2aea39078f9a8c951dc0056f4904ceb4cb0ab734f96f14`;
+pure `0ce543f99428247065bb9f061155514d4048243a29bd156ead9bd51179dd0b63`; surfaces
+`66d2d4d81abe3b3204e6bcf7475f8779b336041702b39ae0db25903a4961f820`; playlist
+`c12cef43b9a5bd88eac1515dcb801a158bff127df0bc527fb74fd878f61d4027`.
+The captured drain listed one idle Kotlin compile daemon (PID 30630) after the Gradle/test
+processes exited; it was terminated and a post-cleanup scan found no owned compiler/test
+process. No test runner or Gradle worker remains.
 
-The before/after manifest covers 507 tracked regular files, one untracked source input, HEAD
-`67594669c6cd51e63ca772b281d4fc56144cafdd`, branch `t3/core-shell-typed-ports`, pin/gitlink,
-actual submodule `c0a08090fe7dbd76e20216559b8184ad2cccde63` (clean), schema-3 hash
-`aab30e43a35a431a25a7ecbb7ebccefd849811f688957054304b02d3caf6d367`, and the three legal
-baseline files. It reports **0 drift** across before/after.
+Authored evidence:
+- `.work/verification/pr4-core-shell-corrections/runs/final-core-001/`
+- `.work/verification/pr4-core-shell-corrections/runs/final-new-001/`
+- Neutral screenshots under `composeApp/build/test-evidence/music/core-shell-neutral/`
+  (not committed).
 
-Earlier attempts are preserved honestly:
-- `port-final-001`: configuration failure before tests; the init script also applied to the
-  pinned included kmpYT build.
-- `port-final-002`: test compilation failed on one unresolved import; 0 tests.
-- `port-final-003`: compile succeeded; 44 tests / 39 passed / 5 failed. One failure was a test
-  expectation correction (fresh Play has a replace admission **and** an activation edit, so
-  revision is 4), not a production gap.
-- The pre-edit baseline attempts were blocked by the shared Gradle lock queue; the original
-  fixture failure was **not executed** in this lane. The lead’s source evidence remains
-  source-only.
+## Red / unexecuted checks
 
-## Production blockers exposed (outside this test-only lane)
-
-1. **QueuePanel and playlist confirmation still read the legacy queue projection.**
-   `composeApp/.../ui/music/PlayerSurfaces.kt:523` selects
-   `playback.queues[viewedContext] ?: snapshot.queue(viewedContext)`, while
-   `shared/.../playback/PlaybackController.kt:1668` deliberately publishes the real typed
-   order in `executionQueues`/`queueSelections` and keeps legacy `queues = latest.snapshot.queues`.
-   `composeApp/.../ui/music/LibraryScreens.kt:192-194` also decides the shuffle replacement
-   confirmation from `snapshot.queue(QueueContext.MUSIC)`. The three queue-panel/node failures
-   and the missing confirmation are the exact visible consequences. The UI lane must port the
-   rendered queue/action path without reconstructing legacy queues.
-2. **Typed playback provenance is not exposed to the player.**
-   `PlaybackController.kt:1670` sets `PlaybackState.executionBinding` only for
-   `PlaybackTarget.Schema2`; the typed current selection has the exact receipt/context in
-   `currentSelection`/`executionQueues` but not in the legacy field.
-   `PlayerSurfaces.kt:97,227,253` and `PlaybackProvenance.kt:44` consume only
-   `playback.executionBinding`. The long-metadata test therefore has a canonical typed receipt
-   but no rendered `player-resolved-title`/provenance receipt.
-3. **Typed physical downloads are absent from the legacy snapshot/download UI projection.**
-   `shared/.../data/room/RowMappings.kt:151` and
-   `shared/.../downloads/DownloadPhysicalPresentation.kt:109-129` only project
-   `PhysicalDownloadProducerOrigin.SCHEMA2`; `AppContainer.kt:131` exposes
-   `downloads.presentation` to the UI. The canonical paused job is correct and tested, but the
-   current Downloads screen cannot see it. The download UI lane owns this read-model correction.
-4. **Podcast UI still reads legacy progress.** `PodcastUiContract.kt:154-157,197,220-231`
-   reads `snapshot.progress`/`playbackBindings`; canonical catalogue progress and occurrence
-   checkpoints live in `store.acquisition.playbackView().catalogProgress`/checkpoints. Not
-   exercised by these 14 methods, but source-confirmed.
+- Preserved pre-freeze attempts: `port-correction-001` (44 core/desktop methods passed, then two
+  newly-authored test-definition defects and a known legacy crossfade step; no XML because the
+  aggregate task reached its bound), `port-correction-002-groupB` (the same two authored defects
+  plus the legacy step), `pre-new-001` (16 executed / 15 passed / 1 authored UI-scroll
+  expectation failed; fixed), `pre-surfaces-002` (cancelled 143 before admission),
+  `pre-surfaces-003` (2/2 passed, pre-freeze input drift because the test viewport was edited
+  while queued).
+- `MusicSurfacesTest.requestedAndFirstResultTitlesStayDistinctAndOnlyConfirmedOverlapLooksActive`
+  is **not accepted green**. It advances through the exact current/incoming receipt assertions
+  and then stops in `performScrollTo` of `crossfade-progress` on the legacy schema2 fixture; the
+  thread dump shows the AWT thread in a Compose semantics scroll animation that does not reach
+  idle. This is not one of the 14 CoreShell oracles. The typed incoming receipt UI is covered by
+  `TypedPlaybackSurfacesTest`, and the legacy crossfade card path itself remains unchanged.
+  Diagnostic attempt and both thread dumps are retained under
+  `runs/diagnose-crossfade-jstack/`.
+- The selected existing-music subset (`inspectingPodcastQueue…`, `duplicateQueueRows…`,
+  `episodeControls…`, `compactMini…`, `repeatOne…`, `aNonFirstReceipt…`,
+  `arabicLargeText…`, `seekCommits…`) was **not executed on the final head**. It was queued
+  behind the host admission gate, then the shared disk free-space floor dropped below 6 GiB,
+  so no new heavy build was admitted. One of those methods (`compactMini…`) had passed in the
+  pre-freeze `port-correction-001` aggregate before the aggregate bound was reached; that is
+  not claimed as final-head evidence.
+- No unfiltered desktop suite, native/mobile execution, packaging, live source, Actions run or
+  benchmark is claimed.
 
 ## Limits
 
-The source answers, transfer answers, native events and screenshots are authored test doubles.
-They are not live-source, authentication, transfer, native decoder, physical audio/crossfade,
-device, platform-build or distribution evidence. This lane did not run Android/iOS/native
-builds, workflow dispatch, packages, publication or a real source. Task B remains gated on the
-eventual reviewed, merged and independently validated Task A SHA.
+All gateway/engine/native answers are authored non-audio test doubles over real Room/files.
+No live authentication, transfer, native decoder, physical audio/crossfade, emulator/device,
+package, signing or distribution evidence is claimed. Schema3 remains
+`aab30e43a35a431a25a7ecbb7ebccefd849811f688957054304b02d3caf6d367` (92 entities), the kmpYT
+gitlink/pin remains `c0a08090fe7dbd76e20216559b8184ad2cccde63`, and Task B remains gated.
