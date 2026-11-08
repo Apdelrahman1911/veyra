@@ -45,8 +45,10 @@ an exact successful local check.
 deterministic race test revokes only the exact durable claim at that point, releases the actor, and
 records the actual queue edit/current-occurrence commit, the exact
 `offline_asset_removal_pending` local-only failure, zero new native loads and unchanged gateway
-counters. The queue/checkpoint mutation is asserted, not denied. PR15 post-ACK stage-retirement
-ordering remains unchanged for normal paths.
+counters. The queue revision/current-occurrence mutation is asserted. Admission/checkpoint rows
+and the outgoing native owner are not observed by this race test; it covers `ResumeOccurrence`,
+not the first-play `AdmitAcquisition` path. No stronger observation is claimed. PR15 post-ACK
+stage-retirement ordering remains unchanged for normal paths.
 
 ### PR21-F3 — real schema2 legacy limitation, not a simulated Resume
 
@@ -77,7 +79,7 @@ when an exact canonical target exists, so a `ResumeAt` for recording B can never
 Downloads rows remain exact. Tests cover two ready A/B, typed ready A plus canonical current/progress
 B, exact legacy matching target shape, and action precedence.
 
-### PR21-F5 — test-strength closure
+### PR21-F5 — test-strength improvements and remaining gaps
 
 - Pre-admission revocation asserts exact `saved_local_authority_lost`.
 - The saved-music second tap asserts the exact occurrence ID and unchanged queue edit revision.
@@ -116,12 +118,12 @@ before/after input manifests, fresh XML/log, exit 0 and `owned_processes=0`/`dra
 |---|---|---|---|
 | `pr21-final-ui-002` | 13 affected podcast/UI/journey/saved classes | **98/98 pass** | `dd5db5c743b7cf78b000906bbdbe65ef450bade36a7cbc1bfb21537f7dfd636e` |
 | `pr21-final-shared-004` | resolver + 8 shared playback/admission/command/restart classes | **98/98 pass** | `f7582fefe0a2e698ee5b5b3ffb00cd702c1871487a44a4c6a0fb064f2351029a` |
-| `pr21-final-core-001` | core 44 + music 16 + PR18/retained 9 | **69/69 pass** | `243a6d984a5795e63d78f6e0ebfa74d6c486dc7eaa77371aacc32ca84500e37d` |
+| `pr21-final-core-001` | core 44 + music 17 + PR18/retained 8 | **69/69 pass** | `243a6d984a5795e63d78f6e0ebfa74d6c486dc7eaa77371aacc32ca84500e37d` |
 
-Class counts: UI includes journey 3, saved 8, SavedCatalogue 3, and the 84 existing podcast/UI
-methods. Shared includes resolver 2 (no-use local-only plus selection policy), activation admission
+Class counts: UI includes journey 3, saved 8, SavedCatalogue 3, and the 84 podcast/UI
+methods (81 existing and 3 new). Shared includes resolver 2 (no-use local-only plus selection policy), activation admission
 11, playback acquisition 13+17+26, selection 12, restart 9 and shutdown 8. Core/music/PR18 is 44
-core + 16 music + 9 retained/progress methods.
+core + 17 music + 8 retained/progress methods.
 
 ### Red attempts preserved
 
@@ -150,3 +152,31 @@ claimed. PR17 F2/Validate/foreground, PR20 and the shared successor remain separ
 API was integrated. The real migrated schema2 queue occurrence is `LEGACY_UNBOUND`, so no runtime
 legacy Resume success is claimed; a legacy Resume is only offered when an exact BOUND target is
 provided by a future accepted owner path. The known scroll hang remains unaccepted.
+
+## Independent review and retained test gaps
+
+The independent PR22 review found no HIGH/MEDIUM source defect and verified the committed-source
+98/98 UI, 98/98 shared and 69/69 core results. Its reviewed head is `3d8d397`; the later
+documentation correction changes no production or test file and needs no test rerun. Scoped source
+acceptance covers cross-context Resume, the truthful schema2 migration limit, unambiguous saved
+selection and the accepted non-atomic preflight boundary. It does not accept Task A or shared API
+integration.
+
+- A repeated saved tap while the first occurrence is still `PENDING` is not deterministically
+  tested. Source review shows that reusing its accepted request reaches
+  `ResumeOccurrence(localOnly = true)` without a binding and fails closed with `INVALID_STATE` /
+  `saved_local_binding_missing`, before that command activates the queue. The first admission can
+  continue independently; no successful PENDING-repeat behavior is claimed. Simultaneous admission
+  remains revision-fenced. The passing repeat tests cover the already-BOUND occurrence only.
+- The stale revision/binding checks and duplicate legacy-target rejection are source-reviewed, with
+  lower-level actor negative tests. They lack direct negative tests through
+  `PodcastAction.ResumeEpisode` / AppContainer; that test-strength gap remains for combined
+  integration.
+- The post-preflight race asserts queue revision/current occurrence, the exact asynchronous failure,
+  no native load and unchanged gateway counters. Admission/checkpoint rows, outgoing-owner behavior
+  and a first-admission race remain unobserved.
+- Saved A plus canonical Resume B is covered by state/detail tests. Row and detail share the same
+  Resume-first action policy, but no row action test combines saved A with canonical B.
+
+Historical red evidence is unchanged. Runner-written argv, configured worker bounds and zero-process
+drains retain their stated attestation limits.
