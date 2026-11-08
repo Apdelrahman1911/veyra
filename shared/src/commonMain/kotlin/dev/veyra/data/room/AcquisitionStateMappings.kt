@@ -3,7 +3,7 @@ package dev.veyra.data.room
 import dev.veyra.data.*
 import dev.veyra.model.*
 
-internal fun AcquisitionRows.toAcquisitionState(library: LibraryRows): AcquisitionRepositoryState {
+internal fun AcquisitionRows.toAcquisitionState(library: LibraryRows, validate: Boolean = true): AcquisitionRepositoryState {
     val runs = collectionRuns()
     val snapshots = collectionSnapshots(runs)
     val captures = capturedRequests(snapshots)
@@ -76,7 +76,7 @@ internal fun AcquisitionRows.toAcquisitionState(library: LibraryRows): Acquisiti
         materializations = library.assets.rowIndex { MaterializationAssetId(it.id) }.mapValues { it.value.toMaterialization() },
         materializationReceipts = materializationReceiptRows.rowIndex { MaterializationAssetId(it.id) }.mapValues { it.value.toReceipt() },
     )
-    validateAcquisitionState(state, library, this)
+    if (validate) validateAcquisitionState(state, library, this)
     return state
 }
 

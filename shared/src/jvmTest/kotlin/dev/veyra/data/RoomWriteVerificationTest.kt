@@ -1,6 +1,8 @@
 package dev.veyra.data
 
 import androidx.sqlite.execSQL
+import dev.veyra.data.room.FavoriteEntity
+import dev.veyra.data.room.FavoriteSubjectEntity
 import dev.veyra.model.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collect
@@ -150,19 +152,26 @@ class RoomWriteVerificationTest {
             // change before uniqueness is evaluated, so only this seam can prove that the actual
             // transactional guard (not an unrelated schema-3 veto) rejects the collision.
             val competing = assertFailsWith<IllegalArgumentException> {
-                writerRowsUpdate(store) { rows ->
+                writerRowsUpdate(store, { rows ->
+                    // This unrelated saved/favorite relation is VALID on its own: music-2 is a
+                    // real catalogue subject and CATALOG origin has no request/binding/occurrence
+                    // lineage. It shares the SAME real rollback transaction as the asset collision.
+                    rows.copy(favoriteSubjectRows = rows.favoriteSubjectRows +
+                        FavoriteSubjectEntity("music-2", SavedLibraryOrigin.CATALOG, null, null, null, null))
+                }) { rows ->
+                    val withFavorite = rows.copy(favorites = rows.favorites + FavoriteEntity("music-2"))
                     if (duplicateId) {
                         // Two current downloads claim the same offline asset identity.
-                        rows.copy(downloads = rows.downloads.map { download ->
+                        withFavorite.copy(downloads = withFavorite.downloads.map { download ->
                             if (download.id == episodeDownload.id) download.copy(assetId = existingAsset.id) else download
                         })
                     } else {
                         // Two distinct asset ids claim the same owned file path.
-                        val legacy = rows.assets.single { it.id == existingAsset.id }
-                        rows.copy(
-                            assets = rows.assets + legacy.copy(id = "asset-2", mediaId = episodeDownload.mediaId,
+                        val legacy = withFavorite.assets.single { it.id == existingAsset.id }
+                        withFavorite.copy(
+                            assets = withFavorite.assets + legacy.copy(id = "asset-2", mediaId = episodeDownload.mediaId,
                                 uri = existingAsset.uri, executionBindingId = episodeDownload.executionBindingId),
-                            downloads = rows.downloads.map { download ->
+                            downloads = withFavorite.downloads.map { download ->
                                 if (download.id == episodeDownload.id) download.copy(assetId = "asset-2") else download
                             },
                         )
@@ -171,12 +180,14 @@ class RoomWriteVerificationTest {
             }
             assertEquals(expectedMessage, competing.message)
             assertEquals(before, store.state.value)
+            assertFalse("music-2" in store.state.value.favoriteIds)
             assertEquals(before, store.flush().getOrThrow())
             withSql(directory.resolve("veyra.db")) { db ->
                 assertEquals(1L, db.longValue("SELECT count(*) FROM offline_assets"))
-                assertEquals(if (duplicateId) existingAsset.id else existingAsset.id,
-                    db.textValue("SELECT assetId FROM downloads WHERE id='download-1'"))
+                assertEquals(existingAsset.id, db.textValue("SELECT assetId FROM downloads WHERE id='download-1'"))
                 assertEquals(0L, db.longValue("SELECT count(*) FROM downloads WHERE id='download-2' AND assetId IS NOT NULL"))
+                assertEquals(0L, db.longValue("SELECT count(*) FROM favorites WHERE mediaId='music-2'"))
+                assertEquals(0L, db.longValue("SELECT count(*) FROM favorite_subjects WHERE subjectId='music-2'"))
                 assertEquals(before.revision, db.longValue("SELECT revision FROM store_meta WHERE id=0"))
             }
 

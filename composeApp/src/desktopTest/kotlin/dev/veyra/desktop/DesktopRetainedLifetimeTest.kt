@@ -5,38 +5,32 @@ import dev.kmpyt.extraction.ResearchTransport
 import dev.veyra.app.AppContainer
 import dev.veyra.app.AppInitialization
 import dev.veyra.app.PlatformServices
+import dev.veyra.data.executionContext
+import dev.veyra.data.getOrThrow
 import dev.veyra.data.StoreStatus
 import dev.veyra.data.createPlatformLibraryStore
-import dev.veyra.data.getOrThrow
 import dev.veyra.desktop.DesktopServiceResources.Slot
 import dev.veyra.desktop.runtime.AlreadyRunningException
 import dev.veyra.desktop.runtime.DesktopProcessContext
 import dev.veyra.desktop.runtime.DesktopStartupJobs
 import dev.veyra.downloads.DownloadExecutionGate
 import dev.veyra.downloads.DownloadExecutionLease
-import dev.veyra.model.AppFailure
-import dev.veyra.model.FailureCode
-import dev.veyra.model.FirstResultKind
-import dev.veyra.model.LanguagePreference
-import dev.veyra.model.MediaItem
-import dev.veyra.model.MediaKind
-import dev.veyra.model.PlaybackBinding
-import dev.veyra.model.SourceProvider
-import dev.veyra.model.SourceRef
-import dev.veyra.model.VeyraException
-import dev.veyra.playback.AssetValidation
-import dev.veyra.playback.AssetValidator
-import dev.veyra.playback.AudioEngine
-import dev.veyra.playback.EngineCapabilities
-import dev.veyra.source.execution.AcquisitionPlaybackSource
-import dev.veyra.playback.EngineEvent
-import dev.veyra.playback.NativeReaderDrainResult
-import dev.veyra.playback.PlaybackResource
-import dev.veyra.playback.PlaybackSelection
-import dev.veyra.playback.ResolvedPlayable
+import dev.veyra.model.*
+import dev.veyra.playback.*
 import dev.veyra.source.ResolvePurpose
+import dev.veyra.source.execution.AcquisitionExecutionContext
+import dev.veyra.source.execution.AcquisitionPlaybackSource
+import dev.veyra.source.execution.AcquisitionExecutionGateway
+import dev.veyra.source.execution.AcquisitionGateway
+import dev.veyra.source.execution.AcquisitionInspection
+import dev.veyra.source.execution.AcquisitionRepresentation
+import dev.veyra.source.execution.AcquisitionTransferProgress
+import dev.veyra.source.execution.AcquisitionTransferResult
+import dev.veyra.source.execution.CollectionContinuation
 import dev.veyra.source.execution.KmpFirstResult
 import dev.veyra.source.execution.KmpMediaGateway
+import dev.veyra.source.execution.PreparedAcquisitionDownload
+import dev.veyra.source.execution.SourceCollectionPage
 import dev.veyra.source.network.SafeHttp
 import dev.veyra.source.network.SafeHttpBytes
 import dev.veyra.source.network.SafeHttpRequest
@@ -55,6 +49,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -80,10 +75,11 @@ import kotlin.test.assertTrue
 
 /**
  * Actual AppContainer/download ownership and Room, plus real repository-private process locks.
- * Audio/validation/transfer/OS allowance are explicit fakes; bytes are authored NON-AUDIO.
- * Host services use inert slot sentinels through the real createOwned/closeAcquiredResources path.
- * This is the generic accepted-owner contract, NOT a claim that normal YouTube DOWNLOAD plans
- * currently return a SABR PlaybackResource, or proof of native/audio/physical-device execution.
+ * The public Download action runs through canonical typed capture/selection/admission, the real
+ * physical job/claim/attempt/finalization owner and owned files on disk. Source selection,
+ * transfer, native local validation and the OS execution allowance are explicit authored fakes
+ * over authored NON-AUDIO bytes; Room, files, application lifetime, host lifetime and OS process
+ * locks are real. This is a host/OS-lock lifetime regression, NOT native playback verification.
  */
 class DesktopRetainedLifetimeTest {
     private class NoAudioEngine : AudioEngine {
@@ -123,16 +119,40 @@ class DesktopRetainedLifetimeTest {
         override fun close() { closeCalls.incrementAndGet() }
     }
 
-    private class Resource : PlaybackResource {
-        val closeCalls = AtomicInteger()
-        override suspend fun close() { closeCalls.incrementAndGet() }
-    }
-
     private class PlatformProbe(directory: Path) : PlatformServices {
         override val dataDirectory = directory.toString()
         override val store = createPlatformLibraryStore(directory.resolve("library").toString())
         override val engine = NoAudioEngine()
-        override val validator = AssetValidator { AssetValidation.Valid(1_000L) }
+        val assetValidations = AtomicInteger()
+        /** Legacy asset validation must not be reached by the typed physical download path. */
+        override val validator = AssetValidator { assetValidations.incrementAndGet(); AssetValidation.Valid(1_000L) }
+        val localValidations = AtomicInteger()
+        val localValidationInputs = ConcurrentLinkedQueue<LocalMediaValidationInput>()
+        @Volatile var localValidationFailure: Throwable? = null
+        /**
+         * Authored identity-free local validation. Exact input assertions run in-flow, while the
+         * original path lease/generation is still owned, then return an authored success.
+         */
+        override val localValidator = LocalMediaValidator { input ->
+            localValidations.incrementAndGet()
+            localValidationInputs += input
+            try {
+                assertEquals(OfflineAssetKind.FILE, input.kind)
+                assertEquals(NON_AUDIO.size.toLong(), input.sizeBytes)
+                assertEquals("audio/mpeg", input.mimeType)
+                assertEquals("mp3", input.codecs)
+                assertEquals(NON_AUDIO_SHA256, input.sha256)
+                assertEquals(REPRESENTATION, input.representationId)
+                assertEquals(0L, input.validatorGeneration)
+                assertTrue(Path.of(input.uri).startsWith(directory), "Validation must read this app-owned path")
+                assertEquals("transfer.part", Path.of(input.uri).fileName.toString())
+                assertTrue(Files.isRegularFile(Path.of(input.uri)))
+            } catch (failure: Throwable) {
+                localValidationFailure = failure
+                throw failure
+            }
+            AssetValidation.Valid(1_000L)
+        }
         override val systemLanguage = LanguagePreference.ENGLISH
         val youtubeRequests = AtomicInteger()
         val youtubeCloseCalls = AtomicInteger()
@@ -163,31 +183,149 @@ class DesktopRetainedLifetimeTest {
         }
     }
 
-    private class GatewayProbe : KmpMediaGateway {
-        val resource = Resource()
+    /**
+     * One central gateway fake. Typed acquisition/execution is the ONLY authorized path; the
+     * legacy first-result/resolve/download and playback/collection paths fail loudly and are
+     * asserted to stay at zero.
+     */
+    private class GatewayProbe : KmpMediaGateway, AcquisitionGateway, AcquisitionExecutionGateway {
+        val acquisitions = AtomicInteger()
         val queries = AtomicInteger()
-        val resolutions = AtomicInteger()
-        val transfers = AtomicInteger()
-        override suspend fun firstResult(completeTitle: String): KmpFirstResult {
+        val preparations = AtomicInteger()
+        val transferInvocations = AtomicInteger()
+        val transferCompletions = AtomicInteger()
+        val legacyFirstResults = AtomicInteger()
+        val legacyResolves = AtomicInteger()
+        val legacyTransfers = AtomicInteger()
+        val playbackPreparations = AtomicInteger()
+
+        override suspend fun firstResult(completeTitle: String): KmpFirstResult? {
+            legacyFirstResults.incrementAndGet()
+            throw IllegalStateException("This host-lifetime fixture authorizes only typed acquisition")
+        }
+
+        override suspend fun resolve(binding: PlaybackBinding, capabilities: EngineCapabilities,
+            purpose: ResolvePurpose): ResolvedPlayable {
+            legacyResolves.incrementAndGet()
+            throw IllegalStateException("This host-lifetime fixture authorizes only typed download execution")
+        }
+
+        override suspend fun download(binding: PlaybackBinding, destinationPath: String,
+            capabilities: EngineCapabilities, representationId: String?,
+            onProgress: suspend (YouTubeTransferProgress) -> Unit): YouTubeTransferResult {
+            legacyTransfers.incrementAndGet()
+            throw IllegalStateException("This host-lifetime fixture authorizes only typed download execution")
+        }
+
+        override suspend fun acquire(request: AcquisitionRequest): SourceAcquisitionResult {
+            acquisitions.incrementAndGet()
             queries.incrementAndGet()
-            assertEquals(ITEM.title, completeTitle)
-            return KmpFirstResult(completeTitle, FirstResultKind.VIDEO, FIRST, "Authored selected recording",
-                "https://www.youtube.com/watch?v=$FIRST")
+            assertEquals(ITEM.title, request.completeTitle, "Exactly the displayed complete title is queried")
+            assertEquals(ITEM.id, assertIs<MediaCapture>(request.metadata).media.id)
+            val entry = SourceEntry(
+                kind = AcquisitionEntryKind.VIDEO,
+                id = FIRST,
+                title = "Authored selected recording",
+                publicUrl = FIRST_RESULT_URL,
+                ordinal = 0,
+            )
+            val receipt = FirstResultObservation(request.id, request.completeTitle, entry, FIRST_RESULT_URL)
+            return SourceAcquisitionResult.Single(request.id, receipt,
+                SourceDisplayItem(FIRST, "Authored selected recording", FIRST_RESULT_URL, AcquisitionEntryKind.VIDEO))
         }
-        override suspend fun resolve(binding: PlaybackBinding, capabilities: EngineCapabilities, purpose: ResolvePurpose): ResolvedPlayable {
-            resolutions.incrementAndGet()
-            assertEquals(ResolvePurpose.DOWNLOAD, purpose)
-            return ResolvedPlayable("youtube:$FIRST", "https://media.example.com/authored-no-network",
-                mimeType = "audio/mpeg", codecs = "mp3", durationMs = 1_000L, representationId = REPRESENTATION,
-                item = MediaItem("youtube:$FIRST", "Authored selected recording", MediaKind.MUSIC,
-                    SourceRef(SourceProvider.YOUTUBE, FIRST)), resource = resource)
+
+        /** Pure structural restore; no I/O, membership reload or historical attestation. */
+        override fun restore(request: AcquisitionRequest, receipt: FirstResultObservation): SourceAcquisitionResult {
+            val entry = receipt.entry
+            if (receipt.requestId != request.id || receipt.queryTitle != request.completeTitle || entry.ordinal != 0) {
+                throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "fixture_receipt_mismatch"))
+            }
+            val id = entry.id
+            val title = entry.title
+            val publicUrl = entry.publicUrl
+            return if (entry.kind == AcquisitionEntryKind.VIDEO && entry.issue == null && id != null && title != null &&
+                publicUrl != null) SourceAcquisitionResult.Single(request.id, receipt,
+                SourceDisplayItem(id, title, publicUrl, AcquisitionEntryKind.VIDEO))
+            else SourceAcquisitionResult.Unplayable(request.id, receipt,
+                AcquisitionProblem(AcquisitionProblemCode.FIRST_RESULT_UNSUPPORTED))
         }
-        override suspend fun download(binding: PlaybackBinding, destinationPath: String, capabilities: EngineCapabilities,
-            representationId: String?, onProgress: suspend (YouTubeTransferProgress) -> Unit): YouTubeTransferResult {
-            transfers.incrementAndGet()
-            Files.write(Path.of(destinationPath), NON_AUDIO)
-            onProgress(YouTubeTransferProgress(NON_AUDIO.size.toLong(), NON_AUDIO.size.toLong()))
-            return YouTubeTransferResult(NON_AUDIO.size.toLong(), "audio/mpeg", "mp3", "mp3", REPRESENTATION)
+
+        override suspend fun collection(request: AcquisitionRequest, selection: SourceAcquisitionResult.Collection,
+            limits: CollectionLimits): SourceCollectionPage =
+            throw VeyraException(AppFailure(FailureCode.UNSUPPORTED_SOURCE, "fixture_collection_unsupported"))
+        override suspend fun more(continuation: CollectionContinuation): SourceCollectionPage =
+            throw VeyraException(AppFailure(FailureCode.UNSUPPORTED_SOURCE, "fixture_collection_unsupported"))
+        override suspend fun inspect(request: AcquisitionRequest,
+            selection: SourceAcquisitionResult.Single): AcquisitionInspection = object : AcquisitionInspection {
+            override val selection = selection
+        }
+
+        override suspend fun preparePlayback(context: AcquisitionExecutionContext, capabilities: EngineCapabilities,
+            requiredRepresentationId: String?, inspection: AcquisitionInspection?): AcquisitionPlaybackSource {
+            playbackPreparations.incrementAndGet()
+            throw IllegalStateException("This host-lifetime fixture did not authorize playback preparation")
+        }
+
+        override suspend fun prepareDownload(context: AcquisitionExecutionContext, capabilities: EngineCapabilities,
+            requiredRepresentationId: String?, inspection: AcquisitionInspection?): PreparedAcquisitionDownload {
+            preparations.incrementAndGet()
+            assertEquals(ITEM.id, assertIs<MediaCapture>(context.request.metadata).media.id)
+            assertEquals(ITEM.title, context.request.completeTitle)
+            assertEquals(0, context.receipt.observation.entry.ordinal)
+            assertEquals(AcquisitionEntryKind.VIDEO, context.receipt.observation.entry.kind)
+            assertEquals(FIRST, context.recording.canonicalId)
+            assertEquals(FIRST_RESULT_URL, context.receipt.observation.canonicalUrl)
+            assertEquals(ITEM.id, assertIs<ExecutableSubject.CatalogMedia>(context.subject).mediaId)
+            assertNull(inspection, "The standalone physical executor supplies no optional inspection")
+            val representation = AcquisitionRepresentation(REPRESENTATION, "audio/mpeg", "mp3", "mp3")
+            // A required key must be an actually offered key, never a silent relabel.
+            if (requiredRepresentationId != null && requiredRepresentationId != representation.representationId) {
+                throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "authored_download_representation_unavailable"))
+            }
+            return Prepared(this, context, requiredRepresentationId, representation)
+        }
+
+        override suspend fun download(prepared: PreparedAcquisitionDownload, destinationPath: String,
+            onProgress: suspend (AcquisitionTransferProgress) -> Unit): AcquisitionTransferResult {
+            val owned = prepared as? Prepared
+                ?: throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "prepared_download_type_mismatch"))
+            // Issuer/context/single-consumption checks all precede the first I/O.
+            owned.consume(this)
+            transferInvocations.incrementAndGet()
+            val destination = Path.of(destinationPath)
+            assertTrue(destination.isAbsolute)
+            assertEquals("transfer.part", destination.fileName.toString())
+            Files.createDirectories(destination.parent)
+            Files.write(destination, NON_AUDIO)
+            onProgress(AcquisitionTransferProgress(NON_AUDIO.size.toLong(), NON_AUDIO.size.toLong()))
+            transferCompletions.incrementAndGet()
+            return AcquisitionTransferResult(owned.context, NON_AUDIO.size.toLong(), owned.representation)
+        }
+
+        private class Prepared(
+            private val issuer: GatewayProbe,
+            override val context: AcquisitionExecutionContext,
+            override val requiredRepresentationId: String?,
+            override val representation: AcquisitionRepresentation,
+        ) : PreparedAcquisitionDownload {
+            private val consumed = AtomicBoolean()
+            fun consume(gateway: GatewayProbe) {
+                if (issuer !== gateway) {
+                    throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "prepared_download_foreign_issuer"))
+                }
+                if (!consumed.compareAndSet(false, true)) {
+                    throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "prepared_download_reused"))
+                }
+                if (requiredRepresentationId != null && representation.representationId != requiredRepresentationId) {
+                    throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "prepared_download_representation_mismatch"))
+                }
+                if (context.request.completeTitle != ITEM.title ||
+                    (context.request.metadata as? MediaCapture)?.media?.id != ITEM.id ||
+                    (context.subject as? ExecutableSubject.CatalogMedia)?.mediaId != ITEM.id ||
+                    context.receipt.observation.entry.ordinal != 0) {
+                    throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "prepared_download_context_mismatch"))
+                }
+            }
         }
     }
 
@@ -209,6 +347,7 @@ class DesktopRetainedLifetimeTest {
         val appJob = hostJob.children.single { it !in previousChildren }
         val slots = Slot.entries.associateWith(::HostSlot)
         val verificationCloses = AtomicInteger()
+        val downloadFailures = ConcurrentLinkedQueue<AppFailure>()
 
         suspend fun attachHostOwners() {
             DesktopPlatformServices.createOwned(context, silentAudio = true, onOwned = { host.services = it }) {
@@ -226,18 +365,101 @@ class DesktopRetainedLifetimeTest {
             }
         }
 
+        /**
+         * Real public Download action over an actually inserted catalogue row: one complete-title
+         * typed selection, one physical claim/attempt/transfer/local validation/finalization and
+         * an authored NON-AUDIO file. Only the execution-allowance close is deliberately failed.
+         */
         suspend fun failInitialAllowanceCleanup() {
             assertFalse(app.dependencyReleaseSafeAfterClose)
             assertFalse(app.retainedForCleanup, "An empty pin registry is not a positive release receipt")
             app.initialize()
             assertEquals(AppInitialization.Ready, app.initialization.value)
+            platform.store.upsertCatalog(listOf(ITEM)).getOrThrow()
+            assertEquals(ITEM, platform.store.state.value.media.getValue(ITEM.id))
+            val failureCollector = host.scope.launch {
+                app.downloads.lastFailure.filterNotNull().collect { downloadFailures += it }
+            }
             app.onMusicAction(MusicUiAction.Download(ITEM))
-            app.downloads.lastFailure.first { it == CLEANUP_FAILURE }
-            val asset = assertNotNull(platform.store.state.value.downloads.getValue(app.files.key(ITEM.id)).asset)
-            assertContentEquals(NON_AUDIO, Files.readAllBytes(Path.of(asset.uri)))
-            assertEquals(1, gateway.resource.closeCalls.get())
+            try {
+                app.downloads.lastFailure.first { it == CLEANUP_FAILURE }
+            } finally {
+                failureCollector.cancel()
+            }
+            assertCanonicalPublication()
             assertEquals(1, platform.allowanceCloses.get())
             assertFalse(platform.allowanceConsumed.get())
+            assertAuthoredDownloadStagesOnce()
+        }
+
+        private suspend fun assertCanonicalPublication() {
+            // One same-owner read barrier: completed job, immutable asset/use and exact lineage.
+            val view = platform.store.acquisitionView()
+            assertEquals(1, view.acquisition.requests.size)
+            assertEquals(1, view.acquisition.receipts.size)
+            assertEquals(1, view.acquisition.bindings.size)
+            assertEquals(1, view.acquisition.physicalDownloads.size)
+            val job = assertNotNull(view.acquisition.physicalDownloads.values.singleOrNull())
+            if (job.status != DownloadStatus.COMPLETE) {
+                val inputs = platform.localValidationInputs.joinToString("; ") {
+                    "size=${it.sizeBytes},mime=${it.mimeType},codecs=${it.codecs},hash=${it.sha256}," +
+                        "rep=${it.representationId},gen=${it.validatorGeneration},file=${Path.of(it.uri).fileName}"
+                }
+                assertEquals(DownloadStatus.COMPLETE, job.status,
+                    "finalization=${view.acquisition.physicalFinalizations[job.id] != null} " +
+                        "attempt=${job.activeAttemptId?.let { view.acquisition.physicalAttempts[it]?.status }} " +
+                        "localValidationFailure=${platform.localValidationFailure?.message} " +
+                        "downloadFailures=[${downloadFailures.joinToString { "${it.code}:${it.detail}" }}] inputs=[$inputs]")
+            }
+            assertEquals(DownloadStatus.COMPLETE, job.status)
+            assertNull(job.failure)
+            assertFalse(job.cleanupPending)
+            assertNull(job.leaseOwner)
+            assertNull(job.activeAttemptId)
+            val producer = assertIs<PhysicalDownloadProducer.Typed>(job.producer)
+            val context = view.acquisition.executionContext(producer.bindingId)
+            assertEquals(ITEM.title, context.request.completeTitle)
+            assertEquals(ITEM.id, assertIs<MediaCapture>(context.request.metadata).media.id)
+            assertEquals(0, context.receipt.observation.entry.ordinal)
+            assertEquals(AcquisitionEntryKind.VIDEO, context.receipt.observation.entry.kind)
+            assertEquals(FIRST, context.receipt.observation.entry.id)
+            assertEquals(FIRST_RESULT_URL, context.receipt.observation.canonicalUrl)
+            assertEquals(FIRST, context.recording.canonicalId)
+            val asset = assertNotNull(job.assetId?.let { view.acquisition.materializations[it] })
+            assertEquals(job.assetId, asset.id)
+            assertEquals(producer, asset.producer)
+            assertEquals(OfflineAssetKind.FILE, asset.kind)
+            assertEquals(REPRESENTATION, asset.representationId)
+            assertEquals(0L, asset.validatorGeneration)
+            assertEquals(NON_AUDIO.size.toLong(), asset.sizeBytes)
+            assertEquals(NON_AUDIO_SHA256, asset.sha256)
+            assertEquals(job.id, asset.materializerDownloadId)
+            val attempt = assertNotNull(asset.materializerAttemptId?.let { view.acquisition.physicalAttempts[it] })
+            assertEquals(job.id, attempt.downloadId)
+            assertEquals(DownloadAttemptStatus.SUCCEEDED, attempt.status)
+            assertTrue(Path.of(asset.uri).startsWith(directory.resolve("media")), "Published path must be app-owned")
+            assertContentEquals(NON_AUDIO, Files.readAllBytes(Path.of(asset.uri)))
+            val use = assertNotNull(view.acquisition.assetUses.singleOrNull {
+                it.requestedBindingId == producer.bindingId && it.materializationAssetId == asset.id
+            })
+            assertEquals(1, use.compatibilityPolicyVersion)
+            assertEquals(asset.id, use.materializationAssetId)
+            assertEquals(asset.receipt(), view.acquisition.materializationReceipts[asset.id])
+        }
+
+        /** Earlier typed stages must be exactly once; cleanup retries never replay source/validation. */
+        fun assertAuthoredDownloadStagesOnce() {
+            assertEquals(1, gateway.acquisitions.get(), "Exactly one typed acquisition")
+            assertEquals(1, gateway.queries.get(), "Exactly one complete-title query")
+            assertEquals(1, gateway.preparations.get(), "Exactly one prepared typed download")
+            assertEquals(1, gateway.transferInvocations.get(), "Cleanup retries must never replay a transfer")
+            assertEquals(1, gateway.transferCompletions.get(), "One transfer completed successfully")
+            assertEquals(1, platform.localValidations.get(), "One local validation for the authored bytes")
+            assertEquals(1, platform.allowanceAcquires.get(), "Cleanup retries must not re-acquire the allowance")
+            assertEquals(0, gateway.legacyFirstResults.get())
+            assertEquals(0, gateway.legacyResolves.get())
+            assertEquals(0, gateway.legacyTransfers.get())
+            assertEquals(0, gateway.playbackPreparations.get())
         }
 
         suspend fun assertRetained(engineCloses: Int = 1) {
@@ -256,6 +478,10 @@ class DesktopRetainedLifetimeTest {
             assertEquals(0, verificationCloses.get())
             assertFalse(host.submitMediaCallback { error("Retired callback must never run") })
             assertFailsWith<AlreadyRunningException> { DesktopProcessContext.acquire(directory).close() }
+            assertTrue(platform.cleanupActive.isNotEmpty() && platform.cleanupActive.all { it },
+                "Every retained cleanup attempt, including a held retry, must still be NonCancellable")
+            assertFalse(platform.allowanceConsumed.get(), "Retained cleanup is not a positive allowance receipt")
+            assertAuthoredDownloadStagesOnce()
         }
 
         suspend fun assertReleased() {
@@ -276,7 +502,12 @@ class DesktopRetainedLifetimeTest {
             assertEquals(0, http.requests.get())
             assertEquals(0, platform.youtubeRequests.get())
             assertEquals(0, platform.engine.preparationCalls.get())
-            assertTrue(platform.cleanupActive.all { it })
+            assertEquals(0, platform.assetValidations.get())
+            assertEquals(0, gateway.legacyFirstResults.get())
+            assertEquals(0, gateway.legacyResolves.get())
+            assertEquals(0, gateway.legacyTransfers.get())
+            assertEquals(0, gateway.playbackPreparations.get())
+            assertTrue(platform.cleanupActive.all { it }, "All cleanup, including explicit retries, is NonCancellable")
         }
 
         suspend fun finish() {
@@ -327,7 +558,6 @@ class DesktopRetainedLifetimeTest {
         assertNull(first.cause)
         assertTrue(first.suppressedExceptions.isEmpty())
         assertEquals(2, platform.allowanceCloses.get())
-        assertEquals(1, gateway.resource.closeCalls.get())
         assertRetained()
         assertTrue(startup.isCompleted)
         assertEquals(1, startupFinalizers.get())
@@ -341,10 +571,7 @@ class DesktopRetainedLifetimeTest {
         assertReleased()
         assertEquals(3, platform.allowanceCloses.get())
         assertTrue(platform.allowanceConsumed.get())
-        assertEquals(1, gateway.resource.closeCalls.get())
-        assertEquals(1, gateway.queries.get())
-        assertEquals(1, gateway.resolutions.get())
-        assertEquals(1, gateway.transfers.get(), "Cleanup retries must never replay a transfer")
+        assertAuthoredDownloadStagesOnce()
         DesktopProcessContext.acquire(directory).use {
             assertSame(first, runCatching { host.close() }.exceptionOrNull())
             assertFailsWith<AlreadyRunningException> { DesktopProcessContext.acquire(directory).close() }
@@ -397,8 +624,7 @@ class DesktopRetainedLifetimeTest {
         assertSame(first, runCatching { host.close() }.exceptionOrNull())
         assertReleased()
         assertEquals(4, platform.allowanceCloses.get())
-        assertEquals(1, gateway.resource.closeCalls.get())
-        assertEquals(1, gateway.transfers.get())
+        assertAuthoredDownloadStagesOnce()
     }
 
     @Test fun cancellationCannotReleaseTheHostWhileFirstApplicationCloseStillAwaitsItsPositiveReceipt() = checkCase {
@@ -431,7 +657,7 @@ class DesktopRetainedLifetimeTest {
         assertReleased()
         assertTrue(platform.allowanceConsumed.get())
         assertEquals(2, platform.allowanceCloses.get())
-        assertEquals(1, gateway.resource.closeCalls.get())
+        assertAuthoredDownloadStagesOnce()
         assertSame(first, runCatching { host.close() }.exceptionOrNull())
         assertEquals(2, platform.allowanceCloses.get())
     }
@@ -444,8 +670,11 @@ class DesktopRetainedLifetimeTest {
         host.close()
         assertReleased()
         assertEquals(0, platform.allowanceAcquires.get())
+        assertEquals(0, gateway.acquisitions.get())
         assertEquals(0, gateway.queries.get())
-        assertEquals(0, gateway.transfers.get())
+        assertEquals(0, gateway.preparations.get())
+        assertEquals(0, gateway.transferInvocations.get())
+        assertEquals(0, platform.localValidations.get())
         DesktopProcessContext.acquire(directory).close()
         host.close()
         assertReleased()
@@ -480,8 +709,11 @@ class DesktopRetainedLifetimeTest {
     private companion object {
         const val FIRST = "AAAAAAAAAAA"
         const val REPRESENTATION = "authored-host-lifetime-representation"
+        const val FIRST_RESULT_URL = "https://www.youtube.com/watch?v=$FIRST"
         val CLEANUP_FAILURE = AppFailure(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_failed_restart_required")
         val NON_AUDIO = "Authored host ownership fixture. NOT AUDIO; validator is deliberately fake.".encodeToByteArray()
+        val NON_AUDIO_SHA256 = java.security.MessageDigest.getInstance("SHA-256").digest(NON_AUDIO)
+            .joinToString("") { (it.toInt() and 0xff).toString(16).padStart(2, '0') }
         val ITEM = MediaItem("authored-host-retained-download", "Complete authored title — العنوان الكامل", MediaKind.MUSIC,
             SourceRef(SourceProvider.COMMONS, "authored-host-retained-download"))
 
