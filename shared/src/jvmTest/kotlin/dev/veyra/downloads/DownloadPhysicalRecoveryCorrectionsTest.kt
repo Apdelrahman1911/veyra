@@ -54,6 +54,26 @@ class DownloadPhysicalRecoveryCorrectionsTest {
             "The foreign cancellation durably completed this exact generation; its late stale write is not an unknown checkpoint")
         assertIs<DownloadCleanupObservation.Completed>(runtime.cleanupObservation(PhysicalRuntimeFixture.JOB))
 
+        // The cancellation maintenance may advance the ownership generation before its cleaning
+        // owner completes; the older execution epoch is still exactly superseded.
+        repository.state.value = repository.state.value.copy(
+            physicalDownloads = mapOf(PhysicalRuntimeFixture.JOB to original.copy(
+                status = DownloadStatus.CANCELLED, cleanupPending = false, leaseOwner = null,
+                leaseExpiresEpochMs = null, maintenanceKind = null, ownershipGeneration = 2)),
+            claims = mapOf(cancelled.id to cancelled.copy(generation = cancelled.generation + 1)))
+        val supersededLate = runtime.epochs.begin(PhysicalRuntimeFixture.JOB, producer(contextR1),
+            1, null, null, null)
+        val supersededCleanup = DownloadPhysicalCleanup(runtime, supersededLate, emptyList(),
+            acceptedDurableOwner = true, expectedClaims = listOf(claimR2)) {
+            AcquisitionDownloadDurableSettlement.Stale
+        }
+        host.cleanupRegistry.register(supersededCleanup)
+        runtime.epochs.retain(supersededLate, supersededCleanup.token, supersededCleanup, completesAcquisition = true)
+        runtime.epochs.finishAdmission(supersededLate)
+        runtime.attemptCleanup(supersededCleanup, report = false)
+        assertNull(runtime.drainCheckpointFailure(),
+            "A newer completed cancellation generation still proves this older finalizer was superseded")
+
         // The SAME stale settlement remains fatal while the exact generation is still active.
         repository.state.value = repository.state.value.copy(
             physicalDownloads = mapOf(PhysicalRuntimeFixture.JOB to original.copy(
