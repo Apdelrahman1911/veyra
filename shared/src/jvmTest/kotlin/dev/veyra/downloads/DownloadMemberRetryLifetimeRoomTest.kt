@@ -15,20 +15,51 @@ class DownloadMemberRetryLifetimeRoomTest {
         failRetryJob(old, admitted.fence.job.physicalJobId)
         offline(old)
         val command = retryRoomCommand(old, batch.id)
-        assertIs<AcquisitionDownloadRetryResult.Retried>(old.adapter.retryMember(command))
+        val retryResult = old.adapter.retryMember(command)
+        assertIs<AcquisitionDownloadRetryResult.Retried>(retryResult)
         val retried = old.store.acquisitionView()
+        val retriedJob = retried.acquisition.physicalDownloads.getValue(command.expectedJob.id)
+        assertEquals(DownloadStatus.QUEUED, retriedJob.status, "Explicit Retry must commit a queued reset row")
+        assertNull(retriedJob.failure)
+        assertNull(retriedJob.nextRetryEpochMs)
+        assertNull(retriedJob.leaseOwner)
+        assertNull(retriedJob.activeAttemptId)
+        assertEquals(command.expectedJob.producer, retriedJob.producer)
+        val retriedClaim = retried.acquisition.claims.getValue(command.expectedClaim.id)
+        assertEquals(command.expectedClaim.generation + 1, retriedClaim.generation)
+        assertEquals(command.expectedClaim.ownerIntentRevision, retriedClaim.ownerIntentRevision)
         val accepted = retried.acquisition.executionContext(command.member.requestedBindingId)
         val priorAttempts = retried.acquisition.physicalAttempts
+        val priorRequests = retried.acquisition.requests.keys
+        val priorBindings = retried.acquisition.bindings.keys
+        val priorReceipts = retried.acquisition.receipts.keys
+        val priorRevision = retried.snapshot.revision
         assertNoRetryWork(old)
         old.coordinator.close()
         old.store.close()
         val restored = owner()
         restored.coordinator.initializeScheduling()
-        assertEquals(retried, restored.store.acquisitionView())
+        val reopened = restored.store.acquisitionView()
+        assertEquals(retried.snapshot, reopened.snapshot,
+            "Cold reopen changed the snapshot at revision $priorRevision -> ${reopened.snapshot.revision}")
+        assertEquals(retried.acquisition, reopened.acquisition,
+            "Cold reopen changed the canonical graph at library revision " +
+                "${retried.acquisition.libraryRevision} -> ${reopened.acquisition.libraryRevision}")
         assertNoRetryWork(restored)
         restored.coordinator.start(DownloadActivation.DURABLE_WORK)
         idle(restored)
+        val stillOffline = restored.store.acquisitionView().acquisition.physicalDownloads.getValue(command.expectedJob.id)
+        assertEquals(DownloadStatus.QUEUED, stillOffline.status,
+            "Explicit Retry remains metadata-only while offline; no new owner is admitted")
+        assertNull(stillOffline.leaseOwner)
+        assertNull(stillOffline.activeAttemptId)
+        assertNull(stillOffline.failure)
+        assertNull(stillOffline.nextRetryEpochMs)
+        assertEquals(0, restored.gate.acquires.get())
+        assertEquals(FailureCode.OFFLINE_POLICY, restored.coordinator.schedulingPlan().blockedReason?.code)
         assertTrue(restored.gateway.preparations.isEmpty(), "Explicit retry does not waive the offline execution gate")
+        assertTrue(restored.gateway.transfers.isEmpty())
+        assertTrue(restored.selector.requests.isEmpty())
         offline(restored, false)
         val complete = awaitState(restored.store) { it.physicalDownloads[command.expectedJob.id]?.status == DownloadStatus.COMPLETE }
         idle(restored)
@@ -37,6 +68,9 @@ class DownloadMemberRetryLifetimeRoomTest {
         assertEquals(accepted, restored.gateway.preparations.single().context)
         assertEquals(command.expectedJob.representationId, restored.gateway.preparations.single().requiredRepresentationId)
         assertTrue(restored.selector.requests.isEmpty(), "No new first-result request on Retry or restart")
+        assertEquals(priorRequests, complete.requests.keys, "Retry/restart must not create a new acquisition request")
+        assertEquals(priorBindings, complete.bindings.keys, "Retry/restart must not create a new execution binding")
+        assertEquals(priorReceipts, complete.receipts.keys, "Retry/restart must not create a new first-result receipt")
         assertEquals(priorAttempts, complete.physicalAttempts.filterKeys { it in priorAttempts })
         assertEquals(command.expectedJob.producer, complete.physicalDownloads.getValue(command.expectedJob.id).producer)
         assertEquals(command.expectedJob.attemptCount + 1, complete.physicalDownloads.getValue(command.expectedJob.id).attemptCount)
