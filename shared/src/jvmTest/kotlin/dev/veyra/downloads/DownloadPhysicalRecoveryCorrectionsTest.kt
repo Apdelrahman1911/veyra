@@ -36,7 +36,8 @@ class DownloadPhysicalRecoveryCorrectionsTest {
         repository.state.value = repository.state.value.copy(physicalDownloads = mapOf(PhysicalRuntimeFixture.JOB to job))
         val revoked = runtime.epochs.begin(PhysicalRuntimeFixture.JOB, producer(contextR1), 1, null, null, null)
         revoked.revoked = true
-        val cleanup = DownloadPhysicalCleanup(runtime, revoked, emptyList(), acceptedDurableOwner = true) {
+        val cleanup = DownloadPhysicalCleanup(runtime, revoked, emptyList(), acceptedDurableOwner = true,
+            maintenanceKind = PhysicalDownloadMaintenanceKind.CLEANUP) {
             AcquisitionDownloadDurableSettlement.Stale
         }
         host.cleanupRegistry.register(cleanup)
@@ -46,7 +47,8 @@ class DownloadPhysicalRecoveryCorrectionsTest {
         assertNull(runtime.drainCheckpointFailure(), "A revoked owner's stale finalizer is not an unknown checkpoint")
 
         val active = runtime.epochs.begin(PhysicalRuntimeFixture.JOB, producer(contextR1), 1, null, null, null)
-        val activeCleanup = DownloadPhysicalCleanup(runtime, active, emptyList(), acceptedDurableOwner = true) {
+        val activeCleanup = DownloadPhysicalCleanup(runtime, active, emptyList(), acceptedDurableOwner = true,
+            maintenanceKind = PhysicalDownloadMaintenanceKind.CLEANUP) {
             AcquisitionDownloadDurableSettlement.Stale
         }
         host.cleanupRegistry.register(activeCleanup)

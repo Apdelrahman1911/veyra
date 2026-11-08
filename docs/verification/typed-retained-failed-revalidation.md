@@ -46,27 +46,27 @@ acquisition for a cancellation that occurs inside a third-party gate's own criti
 guaranteed; the contract is the bounded acquire/close protocol rather than the stronger
 "never call acquire" claim. This is the explicit adjudication point for the lead.
 
-### F4 — remove/caller vs reconciler cleanup ownership (partially corrected; held)
+### F4 — remove/caller vs reconciler cleanup ownership (corrected for retained failures; one contract held)
 
-`stop` now observes the exact scheduler cleanup owner and its completion when a removal caller
-loses the ownership race; it no longer treats another owner's active deletion as its own success.
-The inherited real-Room `missingCompletedFileIsNeverReadyAndExplicitRetryRetainsItsRecording`
-method (the actual 0.655 s full2 assertion) is green in focused execution after this change.
+`stop` now observes the exact scheduler cleanup owner and its completion when a retained-
+asset failure removal caller loses the ownership race; it does not treat another owner's active
+deletion as its own success. The inherited real-Room
+`missingCompletedFileIsNeverReadyAndExplicitRetryRetainsItsRecording` method (the actual 0.655 s
+full2 assertion) and the full shared suite are green after this change.
 
-The gate-expiry catch path remains a held contract question: the caller can still receive success
-after a durably accepted removal intent while cleanup is retained for retry. Changing that to a
-failure or adding a mandatory wait risks hanging the inherited `cleanupExpiration...` contract,
-which expects the removal caller to complete after the retained cleanup retry. This is reported
-for lead adjudication rather than hidden.
+The gate-expiry catch path still acknowledges a durably accepted removal intent while cleanup is
+retained for host retry. That is the existing `cleanupExpiration...` contract and is explicitly
+held for lead adjudication rather than changed to an untested indefinite wait.
 
 ### F5 — stale accepted-owner finalizer classification (corrected)
 
 A stale maintenance finish is now nonfatal only when exact supersession evidence exists: the
 owner epoch is revoked, the current job producer/ownership generation differs, the job row is
-gone, or the exact admitted claim set changed. An active owner with unchanged producer,
-generation and claims still latches `INVALID_STATE / download_checkpoint_stale`. The focused
-fake-owner test proves both sides; the inherited real ownership class remains the acceptance
-probe.
+gone, the exact admitted claim set changed, or a retained cleanup/failed-file removal is
+explicitly superseded. Active owners with unchanged producer, generation and claims still latch
+`INVALID_STATE / download_checkpoint_stale`; the transfer-finalizer stale oracle remains green.
+The focused fake-owner test proves both sides; the inherited real ownership class and full suite
+are green.
 
 ### F6 — evidence statement correction
 
@@ -89,9 +89,18 @@ The frozen PR17 evidence is retained unchanged. The corrected record is:
 - Only attempts that actually contain `command.argv`, `before/after.inputs.sha256` and drain
   files are claimed as such; no historical evidence was backfilled.
 
-The new correction attempts are separate under
-`.work/verification/pr17-review-corrections/attempts/`; their argv/XML/log/drain evidence is
-recorded as they complete.
+The correction topic has new, separate evidence under
+`.work/verification/pr17-review-corrections/attempts/`:
+
+- `final-focused-3`: 30 tests / 5 suites / 0 failures/errors/skips at correction head
+  `fd0be85` (F1/F2/F8 Room cases, F3/F5 physical cases, all 13 maintenance methods and the
+  inherited integrity and stale-transfer oracles), exit 0, before/after manifests equal.
+- `ownership-final-1`: 11/11 `DownloadOwnershipRoomTest` methods, exit 0.
+- `full-shared-4`: **1,181 tests / 100 suites / 0 failures / 0 errors / 0 skips**, exit 0,
+  before/after tracked-input manifests equal, fresh XML; log SHA-256
+  `49c1f43880cc4dc1ec1ff392d21c1460061ffc0ff7816056104af28209b89d12`.
+- `full-shared-3` (earlier correction source) retained one `DownloadRecoveryRoomTest` 15s
+  timeout before the final narrow F4/F5 adjustments; it is preserved, not used as green proof.
 
 ### F7 — UI dependency (core owner)
 
@@ -152,4 +161,5 @@ New focused tests:
 
 Authored non-audio bytes and fake decoder/transfer/source seams; real Room/files/OS leases only.
 No live source, network transfer, native audio, device/emulator, package, signing, workflow or
-benchmark operation. Full-shared-green is not claimed unless a final clean attempt succeeds.
+benchmark operation. The full-shared green result covers correction head `fd0be85`; the F4
+gate-expiry acknowledgment contract remains an explicit adjudication item.

@@ -122,11 +122,13 @@ internal class DownloadPhysicalCleanup(
     val acceptedDurableOwner: Boolean,
     /** Exact claim set observed at owner admission; a changed set is positive supersession. */
     val expectedClaims: List<DownloadClaim> = emptyList(),
+    /** Null for a transfer finalizer; maintenance kinds may allow a superseded stale settlement. */
+    val maintenanceKind: PhysicalDownloadMaintenanceKind? = null,
     val durableFinish: suspend () -> AcquisitionDownloadDurableSettlement?,
 ) : DownloadCleanupOwner(newEntityId("download-physical-cleanup")) {
     var durableAttempted = false
     var durableResult: AcquisitionDownloadDurableSettlement? = null
-    /** Exact attempt settlement for a caller observing a scheduler-owned cleanup. */
+    /** Exact settlement for a caller waiting on a scheduler-owned failed-file cleanup. */
     val completion = kotlinx.coroutines.CompletableDeferred<AcquisitionDownloadDurableSettlement?>()
 }
 
@@ -851,7 +853,7 @@ internal class DownloadPhysicalRuntime(
                             { current.validationReaders.requireReleased() },
                             { allowance?.close(); current.allowanceCallbacksOpen.value = false },
                             { current.pathLease.close() },
-                        ), acceptedDurableOwner = true, expectedClaims = current.current.claims) { finishMaintenance(current, failure.value) }
+                        ), acceptedDurableOwner = true, expectedClaims = current.current.claims, maintenanceKind = kind) { finishMaintenance(current, failure.value) }
                         epochs.finishAdmission(current.epoch)
                         if (failure.value != null || !current.actionFinished.value) deferClaim(id, kind.physicalClaimKind())
                         else clearClaimDeferrals(id, kind.physicalClaimKind())
@@ -1601,7 +1603,11 @@ internal class DownloadPhysicalRuntime(
             val superseded = cleanup.epoch.revoked || currentJob == null ||
                 currentJob.ownershipGeneration != cleanup.epoch.physicalOwnershipGeneration ||
                 currentJob.producer != cleanup.epoch.producer || claimsChanged
-            val benignStale = cleanup.acceptedDurableOwner && durable == AcquisitionDownloadDurableSettlement.Stale && superseded
+            val benignStale = cleanup.acceptedDurableOwner && durable == AcquisitionDownloadDurableSettlement.Stale &&
+                (cleanup.maintenanceKind != null && superseded ||
+                    currentJob?.cleanupPending == true && (cleanup.epoch.revoked || claimsChanged ||
+                        currentJob?.ownershipGeneration != cleanup.epoch.physicalOwnershipGeneration) ||
+                    cleanup.epoch.revoked && currentJob?.status == DownloadStatus.CANCELLED)
             val checkpointFailure = if (cleanup.acceptedDurableOwner && !benignStale) when (durable) {
                 is AcquisitionDownloadDurableSettlement.Confirmed -> null
                 is AcquisitionDownloadDurableSettlement.Unconfirmed -> durable.failure
@@ -1635,6 +1641,7 @@ internal class DownloadPhysicalRuntime(
         report: Boolean = true,
         acceptedDurableOwner: Boolean = false,
         expectedClaims: List<DownloadClaim> = emptyList(),
+        maintenanceKind: PhysicalDownloadMaintenanceKind? = null,
         durable: suspend () -> AcquisitionDownloadDurableSettlement?,
     ): DownloadPhysicalCleanup {
         require(temporaryAfter in 0..stages.size)
@@ -1643,7 +1650,7 @@ internal class DownloadPhysicalRuntime(
             stages.take(temporaryAfter).map { DownloadPhysicalCleanupStep(it) } +
                 temporary.map { DownloadPhysicalCleanupStep({ it.close() }, explicitRetryOnly = it.failed.value) } +
                 stages.drop(temporaryAfter).map { DownloadPhysicalCleanupStep(it) }, acceptedDurableOwner,
-            expectedClaims, durable)
+            expectedClaims, maintenanceKind, durable)
         host.cleanupRegistry.register(cleanup)
         epochs.retain(epoch, cleanup.token, cleanup, completesAcquisition = true)
         partial.adopted()

@@ -195,7 +195,8 @@ internal class DownloadPhysicalCommands(
                 val settled = cleaned ?: pending.epoch
                 if (cleaned == null && !stopped || cleaned != null && !runtime.epochs.drain(cleaned))
                     fail(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")
-                if (discard && cleaned == null && stopped &&
+                if (discard && cleaned == null && stopped && pending.join.asset != null &&
+                    pending.join.job.failure != null &&
                     repository.physicalDownload(id)?.job?.cleanupPending == true) {
                     val state = host.state()
                     if (state.suspended || state.failure != null)
