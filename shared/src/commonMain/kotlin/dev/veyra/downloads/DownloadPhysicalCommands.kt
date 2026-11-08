@@ -214,20 +214,14 @@ internal class DownloadPhysicalCommands(
             // durably accepted. If the caller itself is still active, observe the exact durable
             // cleanup outcome; a future foreground retry may complete the actual deletion.
             if (pending == null || !currentCoroutineContext().isActive) throw error
-            if (repository.physicalDownload(id)?.job?.cleanupPending == true) awaitRemoval(id)
+            if (repository.physicalDownload(id)?.job?.cleanupPending == true) awaitRemoval(id, allowMissingOwnerWait = true)
         } finally { host.signalWork() }
     }
 
     /** Bounded truthful removal observation; never waits for an already-consumed owner. */
-    private suspend fun awaitRemoval(id: String) {
+    private suspend fun awaitRemoval(id: String, allowMissingOwnerWait: Boolean = false) {
         host.state().failure?.let { throw VeyraException(it) }
-        when (val observation = runtime.cleanupObservation(id)) {
-            is DownloadCleanupObservation.Failed -> throw VeyraException(observation.failure)
-            DownloadCleanupObservation.Completed,
-            DownloadCleanupObservation.InProgress,
-            null -> Unit
-        }
-        runtime.awaitRemovalOutcome(id)?.let { throw VeyraException(it) }
+        runtime.awaitRemovalOutcome(id, allowMissingOwnerWait)?.let { throw VeyraException(it) }
         if (repository.physicalDownload(id)?.job?.cleanupPending == true)
             fail(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")
     }

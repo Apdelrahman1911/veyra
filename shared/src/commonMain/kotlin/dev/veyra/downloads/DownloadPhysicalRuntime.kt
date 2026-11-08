@@ -1199,14 +1199,23 @@ internal class DownloadPhysicalRuntime(
     internal fun clearPhysicalClaimDeferrals(id: String) = clearClaimDeferrals(id)
 
     internal fun cleanupObservation(id: String): DownloadCleanupObservation? = cleanupObservations.value[id]
+    internal fun cleanupOwner(id: String): DownloadPhysicalCleanup? =
+        host.cleanupRegistry.owners.value.values.filterIsInstance<DownloadPhysicalCleanup>()
+            .singleOrNull { it.epoch.downloadId == id }
 
     /** Observe durable cleanup completion/failure independent of a consumed registry owner. */
-    internal suspend fun awaitRemovalOutcome(id: String): AppFailure? {
+    internal suspend fun awaitRemovalOutcome(id: String, allowMissingOwnerWait: Boolean = false): AppFailure? {
         val pending = repository.state.map { it.physicalDownloads[id]?.cleanupPending == true }
         val observation = cleanupObservations.map { it[id] }
-        val result = combine(pending, observation) { isPending, state -> isPending to state }
-            .first { (isPending, state) -> !isPending || state is DownloadCleanupObservation.Completed ||
-                state is DownloadCleanupObservation.Failed }
+        val ownerPresent = host.cleanupRegistry.owners.map { owners ->
+            owners.values.any { it is DownloadPhysicalCleanup && it.epoch.downloadId == id }
+        }
+        val result = combine(pending, observation, ownerPresent) { isPending, state, hasOwner ->
+            Triple(isPending, state, hasOwner)
+        }.first { (isPending, state, hasOwner) ->
+            !isPending || (!hasOwner && state is DownloadCleanupObservation.Failed) ||
+                (!hasOwner && !allowMissingOwnerWait)
+        }
         if (!result.first) return null
         return (result.second as? DownloadCleanupObservation.Failed)?.failure
             ?: AppFailure(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")
