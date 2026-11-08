@@ -8,8 +8,11 @@ execution and not a release claim. PR #4 remains draft; this branch is not merge
 
 - Repository: `https://github.com/Apdelrahman1911/veyra`
 - Integration parent inspected: `9b1b0479a2748012988d378d1f631cf5a50fff79`
-- Parent draft PR #4 head: `67594669c6cd51e63ca772b281d4fc56144cafdd`
-  (`t3/typed-room-download-recovery`), a fast-forward descendant of the integration parent.
+- Parent draft PR #4 head at this correction: `6d09ed5fa24f39e97a6d7b9689e9e30a008e1857`
+  (`t3/typed-room-download-recovery`). PR14's merge-base with that branch remains
+  `67594669c6cd51e63ca772b281d4fc56144cafdd`; GitHub reports the stacked PR mergeable, but
+  PR14 does not contain parent head `6d09ed5`, so combined Task A QA is still required after
+  integration.
 - This worktree was clean at `9b1b047...`; the supplied local branch was fast-forwarded only to
   `6759466...` after ancestor verification. No reset/rebase/force-push or other tree was changed.
 - Tested code/test commit: `462858b86afeca1621d56975484c9edab92d5c87`
@@ -64,9 +67,10 @@ to be catalogue/legacy-only. That threw from composition as soon as the complete
 observed. The correction keeps the genuine neutral subject/recording/request identity and the
 exact current-process `AssetUse`/claim/asset proof, but leaves `bindingId` null for neutral rows.
 It never manufactures a `MediaItem`, `PlaybackBinding`, catalogue membership or playback grant.
-A connected real-Room test now drives capture/resolve/admission through the production command
-facade, completes a neutral transfer, exercises the actual Downloads screen, and cold-revalidates
-the same row in a new AppContainer instance. The pre-fix test attempt is preserved as red evidence;
+A connected real-Room test now drives capture/resolve/admission through the production
+`AcquisitionCoordinator` command facade (a test-only driver over the fixture's one Room owner and
+gateway, not a product controller), completes a neutral transfer, exercises the actual Downloads
+screen, and cold-revalidates the same row in a new AppContainer instance. The pre-fix test attempt is preserved as red evidence;
 the final run is green.
 
 ## Readiness boundary
