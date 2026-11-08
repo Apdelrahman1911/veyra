@@ -74,6 +74,10 @@ internal class DownloadPhysicalCommands(
         requireAdmission()
         val before = repository.physicalDownload(id) ?: return@withLock
         runtime.requireExecutableProducer(before)
+        // Network Retry must not consume a retained FAILED file. This used to reconcile the
+        // asset-backed job to QUEUED, which neither transfer nor local validation can admit.
+        if (before.job.assetId != null && before.job.status == DownloadStatus.FAILED)
+            fail(FailureCode.RECOVERY_REQUIRED, "download_retained_local_validation_required")
         requireAdmission()
         updateIntentLocked(before, DownloadBatchIntent.ACTIVE, retain = true, retry = true)
         changed(id)

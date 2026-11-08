@@ -8,6 +8,8 @@ internal data class AcquisitionGraph(val library: LibraryRows, val rows: Acquisi
     val revision: Long get() = requireNotNull(library.meta).revision
     fun snapshot(): AppSnapshot = library.toSnapshot().also(::validateLibrarySnapshot)
     fun state(): AcquisitionRepositoryState = rows.toAcquisitionState(library)
+    /** Transient in-memory projection only; the committed graph must still pass [state]. */
+    fun stateForBatchProjection(): AcquisitionRepositoryState = rows.toAcquisitionState(library, validate = false)
     fun sameRelations(other: AcquisitionGraph): Boolean = library.sameLibraryRelations(other.library) && rows.sameRelations(other.rows)
     fun withRevision(value: Long): AcquisitionGraph = copy(library = library.copy(meta = requireNotNull(library.meta).copy(revision = value)))
     fun withJob(job: PhysicalDownloadJob): AcquisitionGraph = copy(library = library.copy(

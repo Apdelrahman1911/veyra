@@ -431,6 +431,15 @@ class DownloadCoordinator(
     suspend fun validateStandaloneAssetUse(id: String, requiredBindingId: ExecutionBindingId): AssetUse =
         requirePhysicalRuntime().validateStandaloneAssetUse(id, requiredBindingId)
 
+    /**
+     * Explicit local Validate for a retained FAILED job. It never performs a source lookup,
+     * network transfer or removal. Only the local validation retry/deferral is bypassed; host,
+     * coverage, claims, ownership leases, native-reader and cleanup gates remain authoritative.
+     * Success atomically restores COMPLETE/clears failure and records ONLY this binding's use.
+     */
+    suspend fun validateRetainedAssetUse(id: String, requiredBindingId: ExecutionBindingId): AssetUse =
+        requirePhysicalRuntime().validateRetainedAssetUse(id, requiredBindingId)
+
     /** An explicit playback receipt pins Play -> Download; an existing different selection is not silently replaced. */
     suspend fun enqueue(item: MediaItem, reuseBindingId: String? = null): String =
         physicalRuntime?.userCommands?.enqueueKnownCatalog(item, reuseBindingId) ?: commands.withLock {

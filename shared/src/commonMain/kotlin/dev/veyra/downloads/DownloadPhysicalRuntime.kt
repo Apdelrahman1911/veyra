@@ -93,10 +93,24 @@ internal class DownloadPhysicalRun(
     /** Latched by the existing host BEFORE cancellation; durable settlement follows real drain. */
     val hostFinishStatus = MutableStateFlow<DownloadStatus?>(null)
     var published: PhysicalDownloadCommit.Committed<PhysicalDownloadJoin>? = null
+    /** Set only after this run's complete hash/native check; the durable finish grants its use. */
+    var retainedValidation: RetainedValidationGrant? = null
+    var recoveredValidationUse: AssetUse? = null
+    var recoveredValidationFence: AcquisitionDownloadFence? = null
+    var recoveredValidationRevision: Long = 0
     var cleanupCompleted = false
     val validationReaders = DownloadValidationReaderRetention()
     override fun toString() = "DownloadPhysicalRun(identity=redacted,paths=redacted)"
 }
+
+/** Exact owner/asset identity captured BEFORE a manual retained-file validation starts. */
+internal data class RetainedValidationGrant(
+    val expectedClaim: DownloadClaim,
+    val requestedBindingId: ExecutionBindingId,
+    val asset: MaterializationAsset,
+    /** Non-null only for the batch adapter path; standalone uses its existing public receipt. */
+    val member: AcquisitionDownloadMemberKey? = null,
+)
 
 /** Physical stages and the durable finish are deliberately different acknowledgements. */
 internal class DownloadPhysicalCleanup(
@@ -401,8 +415,13 @@ internal class DownloadPhysicalRuntime(
         // Owned by this invocation, not an actor/UI callback. A real negative survives a later
         // cleanup exception; precheck/CAS/policy/busy/cleanup-only failures leave it null.
         var validationRejection: DownloadMaterializationRejection? = null
+        var retainedRun: DownloadPhysicalRun? = null
         return try {
-            val outcome = withMaintenance(command.expectedClaim.physicalJobId, PhysicalDownloadMaintenanceKind.VALIDATE) { run ->
+            val before = repository.physicalDownload(command.expectedClaim.physicalJobId)
+            val explicitRetained = before?.job?.status == DownloadStatus.FAILED
+            val outcome = withMaintenance(command.expectedClaim.physicalJobId, PhysicalDownloadMaintenanceKind.VALIDATE,
+                explicitLocalRevalidation = explicitRetained,
+                requestedBindingId = command.member.requestedBindingId) { run ->
                 requireMemberClaim(command.member, command.expectedClaim, run.current)
                 val asset = run.current.asset ?: fail(FailureCode.NOT_FOUND, "download_asset_missing")
                 if (asset.id != command.materializationAssetId || run.current.job.assetId != asset.id ||
@@ -417,19 +436,37 @@ internal class DownloadPhysicalRuntime(
                     command.member.requestedBindingId, command.member.requestId, command.member, command.expectedClaim)
                 validate(run, asset.validationInput(), attempt) { validationRejection = it }
                 ensureRun(run, network = false)
-                val use = repository.commitMaterializationUse(CommitMaterializationUse(
-                    command.member.expectation(command.expectedClaim.id), command.expectedClaim.id, command.expectedClaim.generation,
-                    run.fence.ownershipGeneration, asset, dependencies.compatibilityPolicyVersion, clock.epochMs()))
-                if (use !is PhysicalDownloadCommit.Committed) fail(FailureCode.INVALID_STATE, "download_asset_use_stale")
-                if (use.value.requestedBindingId != command.member.requestedBindingId ||
-                    use.value.materializationAssetId != asset.id ||
-                    use.value.compatibilityPolicyVersion != dependencies.compatibilityPolicyVersion)
-                    fail(FailureCode.RECOVERY_REQUIRED, "download_asset_use_mismatch")
-                materializationEvidence.recordPhysicalSuccess(run.fence.downloadId, asset)
-                val fence = host.activeLock.withLock { issueFence(command.member, command.expectedClaim, run.current).first }
-                AcquisitionDownloadAssetCheck.Validated(AcquisitionDownloadValidatedUse(fence, use.value, use.libraryRevision))
+                if (run.current.job.status == DownloadStatus.FAILED) {
+                    // The durable COMPLETE/use transition is the exact-fenced finish, after the
+                    // physical readers/allowance/path lease close. No provisional use or status.
+                    retainedRun = run
+                    run.retainedValidation = RetainedValidationGrant(command.expectedClaim,
+                        command.member.requestedBindingId, asset, command.member)
+                    null
+                } else {
+                    val use = repository.commitMaterializationUse(CommitMaterializationUse(
+                        command.member.expectation(command.expectedClaim.id), command.expectedClaim.id, command.expectedClaim.generation,
+                        run.fence.ownershipGeneration, asset, dependencies.compatibilityPolicyVersion, clock.epochMs()))
+                    if (use !is PhysicalDownloadCommit.Committed) fail(FailureCode.INVALID_STATE, "download_asset_use_stale")
+                    if (use.value.requestedBindingId != command.member.requestedBindingId ||
+                        use.value.materializationAssetId != asset.id ||
+                        use.value.compatibilityPolicyVersion != dependencies.compatibilityPolicyVersion)
+                        fail(FailureCode.RECOVERY_REQUIRED, "download_asset_use_mismatch")
+                    materializationEvidence.recordPhysicalSuccess(run.fence.downloadId, asset)
+                    val fence = host.activeLock.withLock { issueFence(command.member, command.expectedClaim, run.current).first }
+                    AcquisitionDownloadAssetCheck.Validated(AcquisitionDownloadValidatedUse(fence, use.value, use.libraryRevision))
+                }
             }
-            outcome ?: AcquisitionDownloadAssetCheck.Unavailable(AppFailure(FailureCode.BACKGROUND_RESTRICTED, "download_asset_check_not_admitted"))
+            retainedRun?.let { recovered ->
+                val use = recovered.recoveredValidationUse
+                val fence = recovered.recoveredValidationFence
+                return if (use != null && fence != null) AcquisitionDownloadAssetCheck.Validated(
+                    AcquisitionDownloadValidatedUse(fence, use, recovered.recoveredValidationRevision))
+                else AcquisitionDownloadAssetCheck.Unavailable(
+                    AppFailure(FailureCode.INVALID_STATE, "download_retained_validation_not_committed"))
+            }
+            return outcome ?: AcquisitionDownloadAssetCheck.Unavailable(AppFailure(FailureCode.BACKGROUND_RESTRICTED,
+                "download_asset_check_not_admitted"))
         } catch (error: CancellationException) { throw error }
         catch (error: Exception) {
             // A real cancellation after the negative still revokes validity but returns no
@@ -440,8 +477,11 @@ internal class DownloadPhysicalRuntime(
     }
 
     /** Exact standalone R2 compatibility, through the same owned local-validation path. */
-    internal suspend fun validateStandaloneAssetUse(id: String, bindingId: ExecutionBindingId): AssetUse =
-        withMaintenance(id, PhysicalDownloadMaintenanceKind.VALIDATE) { run ->
+    internal suspend fun validateStandaloneAssetUse(id: String, bindingId: ExecutionBindingId): AssetUse {
+        val explicitRetained = repository.physicalDownload(id)?.job?.status == DownloadStatus.FAILED
+        var retainedRun: DownloadPhysicalRun? = null
+        val result = withMaintenance(id, PhysicalDownloadMaintenanceKind.VALIDATE,
+            explicitLocalRevalidation = explicitRetained, requestedBindingId = bindingId) { run ->
             val claim = run.current.claims.singleOrNull { it.owner == DownloadClaimOwner.Standalone(id) ||
                 it.owner == DownloadClaimOwner.Schema2Standalone(id) }
                 ?: fail(FailureCode.INVALID_STATE, "download_standalone_claim_missing")
@@ -458,17 +498,69 @@ internal class DownloadPhysicalRuntime(
             val attempt = materializationEvidence.admit(id, asset, bindingId, requestId)
             validate(run, asset.validationInput(), attempt)
             ensureRun(run, network = false)
-            val result = repository.commitStandaloneMaterializationUse(CommitStandaloneMaterializationUse(id,
-                bindingId, claim.id, claim.generation, run.fence.ownershipGeneration, asset,
-                dependencies.compatibilityPolicyVersion, clock.epochMs()))
-            if (result !is PhysicalDownloadCommit.Committed)
-                fail(FailureCode.INVALID_STATE, "download_asset_use_stale")
-            if (result.value.requestedBindingId != bindingId || result.value.materializationAssetId != asset.id ||
-                result.value.compatibilityPolicyVersion != dependencies.compatibilityPolicyVersion)
-                fail(FailureCode.RECOVERY_REQUIRED, "download_asset_use_mismatch")
-            materializationEvidence.recordPhysicalSuccess(id, asset)
-            result.value
-        } ?: fail(FailureCode.BACKGROUND_RESTRICTED, "download_asset_check_not_admitted")
+            if (run.current.job.status == DownloadStatus.FAILED) {
+                // The exact-fenced finish below atomically restores COMPLETE, clears the local
+                // failure/backoff and grants ONLY this requested binding's use.
+                retainedRun = run
+                run.retainedValidation = RetainedValidationGrant(claim, bindingId, asset)
+                null
+            } else {
+                val committed = repository.commitStandaloneMaterializationUse(CommitStandaloneMaterializationUse(id,
+                    bindingId, claim.id, claim.generation, run.fence.ownershipGeneration, asset,
+                    dependencies.compatibilityPolicyVersion, clock.epochMs()))
+                if (committed !is PhysicalDownloadCommit.Committed)
+                    fail(FailureCode.INVALID_STATE, "download_asset_use_stale")
+                if (committed.value.requestedBindingId != bindingId || committed.value.materializationAssetId != asset.id ||
+                    committed.value.compatibilityPolicyVersion != dependencies.compatibilityPolicyVersion)
+                    fail(FailureCode.RECOVERY_REQUIRED, "download_asset_use_mismatch")
+                materializationEvidence.recordPhysicalSuccess(id, asset)
+                committed.value
+            }
+        }
+        retainedRun?.let {
+            return it.recoveredValidationUse
+                ?: fail(FailureCode.INVALID_STATE, "download_retained_validation_not_committed")
+        }
+        return result ?: fail(FailureCode.BACKGROUND_RESTRICTED, "download_asset_check_not_admitted")
+    }
+
+    /**
+     * Explicit local Validate for a retained FAILED physical job, keyed by the surfaced physical
+     * job and the exact requested binding. This never performs a network Retry/removal and never
+     * grants a sibling binding's use. The batch adapter path is reused so its lineage/claim
+     * checks stay authoritative; [validateStandaloneAssetUse] owns the standalone equivalent.
+     */
+    internal suspend fun validateRetainedAssetUse(id: String, bindingId: ExecutionBindingId): AssetUse {
+        val before = repository.physicalDownload(id) ?: fail(FailureCode.NOT_FOUND, "download_job_missing")
+        val asset = before.asset ?: fail(FailureCode.NOT_FOUND, "download_asset_missing")
+        if (before.job.status != DownloadStatus.FAILED || before.finalization != null || before.job.cleanupPending ||
+            before.job.assetId != asset.id) fail(FailureCode.INVALID_STATE, "download_retained_validation_not_available")
+        val claim = before.claims.singleOrNull { claim ->
+            claim.requestedBindingId == bindingId && (claim.intent != DownloadBatchIntent.CANCELLED || claim.retainCompletedAsset)
+        } ?: before.claims.singleOrNull { claim ->
+            (claim.owner is DownloadClaimOwner.Standalone || claim.owner is DownloadClaimOwner.Schema2Standalone) &&
+                (claim.intent != DownloadBatchIntent.CANCELLED || claim.retainCompletedAsset)
+        } ?: fail(FailureCode.INVALID_STATE, "download_retained_validation_claim_missing")
+        return when (val owner = claim.owner) {
+            is DownloadClaimOwner.Standalone, is DownloadClaimOwner.Schema2Standalone ->
+                validateStandaloneAssetUse(id, bindingId)
+            is DownloadClaimOwner.BatchMember -> {
+                val state = repository.state.value
+                val batch = state.batches[owner.batchId]
+                    ?: fail(FailureCode.INVALID_STATE, "download_retained_validation_batch_missing")
+                val member = batch.members.singleOrNull { it.position == owner.position }
+                    ?: fail(FailureCode.INVALID_STATE, "download_retained_validation_member_missing")
+                val required = member.requiredBindingId
+                    ?: fail(FailureCode.INVALID_STATE, "download_retained_validation_binding_missing")
+                val key = AcquisitionDownloadMemberKey(batch.id, member.position, batch.intentRevision,
+                    member.occurrenceId, member.requestId, required)
+                when (val result = validateAssetUse(ValidateAcquisitionDownloadAsset(key, claim, asset.id))) {
+                    is AcquisitionDownloadAssetCheck.Validated -> result.validation.use
+                    is AcquisitionDownloadAssetCheck.Unavailable -> throw VeyraException(result.failure)
+                }
+            }
+        }
+    }
 
     /** Metadata precondition only: never a replacement for the actual reader/native barrier. */
     internal fun requireClearedSchema2(join: PhysicalDownloadJoin) {
@@ -629,6 +721,8 @@ internal class DownloadPhysicalRuntime(
 
     private suspend fun <T> withMaintenance(id: String, kind: PhysicalDownloadMaintenanceKind,
         expectedOwner: PhysicalDownloadJoin? = null,
+        explicitLocalRevalidation: Boolean = false,
+        requestedBindingId: ExecutionBindingId? = null,
         action: suspend (DownloadPhysicalRun) -> T): T? {
         var cleanup: DownloadPhysicalCleanup? = null
         val result = coroutineScope {
@@ -644,7 +738,8 @@ internal class DownloadPhysicalRuntime(
                         // Preserve the accepted CAS AND actual Job registration across dispatch
                         // cancellation. The outer finally owns run before this block can return.
                         withContext(NonCancellable) {
-                            val claimed = claimMaintenance(id, kind, operation, expectedOwner) ?: return@withContext null
+                            val claimed = claimMaintenance(id, kind, operation, expectedOwner,
+                                explicitLocalRevalidation, requestedBindingId) ?: return@withContext null
                             run = claimed
                             host.active[id] = operation
                             epochs.registerJob(claimed.epoch, operation)
@@ -655,6 +750,10 @@ internal class DownloadPhysicalRuntime(
                         }
                     }
                 } ?: return@coroutineScope null
+                // The claim COMMIT and owner registration above are noncancellable. A caller
+                // cancellation that arrived after that commit must release this exact lease through
+                // the finally path, not acquire a new host allowance for orphaned work.
+                currentCoroutineContext().ensureActive()
                 heartbeat = launch {
                     while (isActive && !admitted.actionFinished.value) {
                         delay(heartbeatMs)
@@ -733,17 +832,71 @@ internal class DownloadPhysicalRuntime(
             val current = repository.physicalDownload(run.fence.downloadId)
             if (current == null || !sameMaintenanceFence(current, run))
                 return@withLock AcquisitionDownloadDurableSettlement.Stale
+            val priorStatus = run.current.job.status
+            val hostBlocked = run.hostFinishStatus.value == DownloadStatus.NEEDS_FOREGROUND &&
+                host.state().generation == run.hostGeneration ||
+                host.state().suspended && !host.state().closed || failure?.code == FailureCode.BACKGROUND_RESTRICTED
+            // A host-only restriction must not overwrite an already-retained local failure with
+            // NEEDS_FOREGROUND (which used to reconcile to a dead QUEUED state). An actual
+            // hash/native negative remains the durable failure.
+            val validationHostHold = kind == PhysicalDownloadMaintenanceKind.VALIDATE && hostBlocked &&
+                (physicalFailure == null || physicalFailure.code == FailureCode.BACKGROUND_RESTRICTED)
+            val statusOverride = when {
+                validationHostHold && priorStatus == DownloadStatus.COMPLETE -> DownloadStatus.NEEDS_FOREGROUND
+                validationHostHold && priorStatus == DownloadStatus.FAILED -> DownloadStatus.NEEDS_FOREGROUND
+                run.hostFinishStatus.value == DownloadStatus.NEEDS_FOREGROUND &&
+                    host.state().generation == run.hostGeneration -> DownloadStatus.NEEDS_FOREGROUND
+                host.state().suspended && !host.state().closed ||
+                    failure?.code == FailureCode.BACKGROUND_RESTRICTED -> DownloadStatus.NEEDS_FOREGROUND
+                // Rejection of this exact R2/claim does not corrupt the shared R1 file.
+                kind == PhysicalDownloadMaintenanceKind.VALIDATE && physicalFailure != null -> DownloadStatus.FAILED
+                else -> null
+            }
+            val finishFailure = when {
+                // The marker lets foreground resume distinguish a previously COMPLETE file whose
+                // check was denied from a retained local failure that must stay stopped.
+                validationHostHold && priorStatus == DownloadStatus.COMPLETE ->
+                    AppFailure(FailureCode.BACKGROUND_RESTRICTED, "download_completed_check_needs_foreground")
+                validationHostHold && priorStatus == DownloadStatus.FAILED ->
+                    run.current.job.failure?.takeUnless { it.code == FailureCode.BACKGROUND_RESTRICTED }
+                        ?: AppFailure(FailureCode.RECOVERY_REQUIRED, "download_local_validation_required")
+                else -> physicalFailure
+            }
+            val nextRetry = when {
+                validationHostHold && priorStatus == DownloadStatus.FAILED -> run.current.job.nextRetryEpochMs
+                else -> physicalFailure?.let { deadline(LOCAL_RECHECK_MS) }
+            }
+            val grant = run.retainedValidation
+            val grantValid = grant != null && failure == null && kind == PhysicalDownloadMaintenanceKind.VALIDATE &&
+                statusOverride == null && current.job.status == DownloadStatus.FAILED && !current.job.cleanupPending &&
+                current.finalization == null && current.asset == grant.asset && current.job.assetId == grant.asset.id &&
+                current.claims.singleOrNull { it.id == grant.expectedClaim.id } == grant.expectedClaim &&
+                (grant.expectedClaim.intent != DownloadBatchIntent.CANCELLED || grant.expectedClaim.retainCompletedAsset)
+            if (grantValid) {
+                checkNotNull(grant)
+                val committed = repository.finishPhysicalDownloadMaintenance(FinishPhysicalDownloadMaintenance(run.fence,
+                    kind, current.claims, run.cleanupCompleted, null, clock.epochMs(),
+                    retainedValidation = RetainedValidationCompletion(grant.expectedClaim, grant.requestedBindingId,
+                        grant.asset, dependencies.compatibilityPolicyVersion)))
+                if (committed !is PhysicalDownloadCommit.Committed)
+                    return@withLock AcquisitionDownloadDurableSettlement.Stale
+                val use = repository.state.value.assetUses.singleOrNull {
+                    it.requestedBindingId == grant.requestedBindingId && it.materializationAssetId == grant.asset.id
+                } ?: fail(FailureCode.RECOVERY_REQUIRED, "download_retained_validation_use_missing")
+                run.current = committed.value
+                materializationEvidence.recordPhysicalSuccess(run.fence.downloadId, grant.asset)
+                run.recoveredValidationUse = use
+                run.recoveredValidationRevision = committed.libraryRevision
+                grant.member?.let { member ->
+                    run.recoveredValidationFence = host.activeLock.withLock {
+                        issueFence(member, grant.expectedClaim, run.current).first
+                    }
+                }
+                return@withLock AcquisitionDownloadDurableSettlement.Confirmed(committed.libraryRevision)
+            }
             settle { repository.finishPhysicalDownloadMaintenance(FinishPhysicalDownloadMaintenance(run.fence,
-                kind, current.claims, run.cleanupCompleted, physicalFailure, clock.epochMs(),
-                status = when {
-                    run.hostFinishStatus.value == DownloadStatus.NEEDS_FOREGROUND &&
-                        host.state().generation == run.hostGeneration -> DownloadStatus.NEEDS_FOREGROUND
-                    host.state().suspended && !host.state().closed ||
-                        failure?.code == FailureCode.BACKGROUND_RESTRICTED -> DownloadStatus.NEEDS_FOREGROUND
-                    // Rejection of this exact R2/claim does not corrupt the shared R1 file.
-                    kind == PhysicalDownloadMaintenanceKind.VALIDATE && physicalFailure != null -> DownloadStatus.FAILED
-                    else -> null
-                }, nextRetryEpochMs = physicalFailure?.let { deadline(LOCAL_RECHECK_MS) })) }
+                kind, current.claims, run.cleanupCompleted, finishFailure, clock.epochMs(),
+                status = statusOverride, nextRetryEpochMs = nextRetry)) }
         }
     }
 
@@ -763,19 +916,24 @@ internal class DownloadPhysicalRuntime(
 
     /** Existing commands+active locks are held until this claim's actual task is registered. */
     private suspend fun claimMaintenance(id: String, kind: PhysicalDownloadMaintenanceKind, admissionOwner: Job,
-        expectedOwner: PhysicalDownloadJoin?): DownloadPhysicalRun? {
+        expectedOwner: PhysicalDownloadJoin?, explicitLocalRevalidation: Boolean = false,
+        requestedBindingId: ExecutionBindingId? = null): DownloadPhysicalRun? {
         val state = host.state()
         if (!state.started || state.closed || state.suspended || state.drainsInFlight != 0 || state.failure != null ||
             kind == PhysicalDownloadMaintenanceKind.VALIDATE && !state.checksActivated || !epochs.canAdmit(id)) return null
         val before = repository.physicalDownload(id) ?: return null
         if (expectedOwner != null && !sameClaimOwner(before, expectedOwner)) return null
+        if (explicitLocalRevalidation && (kind != PhysicalDownloadMaintenanceKind.VALIDATE || requestedBindingId == null)) return null
         val relevant = before.scheduleRecord()
         if (DownloadPhysicalClaimRules.backgroundBlocked(before.job) || before.job.livePhysicalLease(clock.epochMs()) ||
-            (before.job.nextRetryEpochMs ?: 0) > clock.epochMs() ||
-            (physicalClaimDeferredUntil(relevant, kind.physicalClaimKind(), claimDeferrals.value) ?: 0) > clock.epochMs()) return null
+            !explicitLocalRevalidation && (before.job.nextRetryEpochMs ?: 0) > clock.epochMs() ||
+            !explicitLocalRevalidation &&
+                (physicalClaimDeferredUntil(relevant, kind.physicalClaimKind(), claimDeferrals.value) ?: 0) > clock.epochMs()) return null
         val intent = before.finalization
-        // Explicit validateAssetUse may recheck an already-checked exact asset for a new R2.
-        val eligible = DownloadPhysicalClaimRules.maintenanceIntent(relevant, kind, checked = false)
+        // Explicit validate may recheck an already-checked exact asset for a new R2; it never
+        // bypasses host/lease/coverage/claim/cleanup gates, only the local recheck deadline.
+        val eligible = DownloadPhysicalClaimRules.maintenanceIntent(relevant, kind, checked = false,
+            explicitRetainedValidation = explicitLocalRevalidation)
         if (!eligible) return null
         if (kind != PhysicalDownloadMaintenanceKind.CLEANUP) requireKnownProducer(before)
         dependencies.requireOwnerAdmission()
@@ -800,7 +958,8 @@ internal class DownloadPhysicalRuntime(
             ensureHost(state.generation, network = false)
             val claimed = withContext(NonCancellable) {
                 repository.claimPhysicalDownloadMaintenance(ClaimPhysicalDownloadMaintenance(id, before.job.producer,
-                    before.job.ownershipGeneration, kind, token, clock.epochMs(), leaseDurationMs))
+                    before.job.ownershipGeneration, kind, token, clock.epochMs(), leaseDurationMs,
+                    explicitLocalRevalidation = explicitLocalRevalidation, requestedBindingId = requestedBindingId))
             }
             if (claimed !is PhysicalDownloadCommit.Committed) return null
             acceptedDurableOwner = true
