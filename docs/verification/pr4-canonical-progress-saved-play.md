@@ -83,6 +83,34 @@ and PR14's download `screenDownloads`/`screenOptions` wiring.
 - Existing PR18 progress projection/surface/compatibility classes and PR14 typed podcast
   download state tests are retained.
 
+## Executed verification
+
+All final runs used the host gate's existing project lock, offline Gradle, the exact bounded JVM
+argument and one 384 MiB SerialGC/2-CPU Test fork.
+
+- `final-stack-core-001` at `060f1c3`: **44/44 pass**, 0 failures/errors/skips, exit 0; 14
+  CoreShell + 7 lifetime + 18 platform ownership + 5 startup methods. Inputs unchanged
+  (`b3e331dd7fc436bdba18c151a353d886b4e500d502eb6fc3c9846ac1eb5e3f8e`), dirty none, drain none.
+  Log SHA256 `9423888698cd00df456f2af56d41ddfc8a1268cfa84cf49c14b2ea13744a9ae7`.
+- `final-stack-features-001` at `060f1c3`: **28/28 pass**, 0 failures/errors/skips, exit 0
+  (9 classes: F3 connected, progress journeys, legacy paired view, progress projection/surfaces/
+  compatibility, retained action/UI, typed podcast download state). Same unchanged input
+  manifest, drain none. Log SHA256
+  `b843f6d49558f129391570aec40014d8aa3a793c7c3759ee7febc417e353b09c`.
+- `final-stack-pr12-music-002` at `060f1c3`: **24/24 pass**, 0 failures/errors/skips, exit 0;
+  16 PR12/new typed queue-player methods plus 8 selected legacy music presentation/provenance
+  methods. Inputs unchanged (same `b3e331dd…`), dirty none; the captured idle Kotlin compile
+  daemon was terminated and a post-cleanup scan found no owned compiler/test process. Log SHA256
+  `1ccf98cf2accb28bde52e1156b6f3af15c179a1566f40c646502ee99efa97a44`.
+
+Red attempts preserved under `.work/verification/pr4-core-shell-corrections/runs/`:
+`red-pr18-legacy` (real 2/3 failures, source bug confirmed), `f2-f3-focused-001` (F2 retained-state
+fixture timeouts and neutral-action failure; fixed UI action, connected F2 held for shared PR17),
+`progress-journey-005..011` (test/test-only harness defects and the authored seekSequence filter;
+each was changed before the next attempt), and the earlier PR12 reds. The legacy crossfade
+`crossfade-progress` scroll hang remains unaccepted from PR12; it is not in the final selected
+music set.
+
 ## Limits
 
 Authored gateway/transfer/native answers are non-audio doubles over real Room/files. No live
