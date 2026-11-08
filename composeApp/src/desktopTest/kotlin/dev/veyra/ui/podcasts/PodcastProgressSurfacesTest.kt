@@ -14,6 +14,7 @@ import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
@@ -51,7 +52,10 @@ class PodcastProgressSurfacesTest {
 
     private fun view(progress: PodcastEpisodeProgress, currentRecording: String? = "aaaaaaaaaaa") =
         PodcastProgressView(mapOf(episode.id to progress), currentEpisodeId = episode.id,
-            currentRecordingId = currentRecording)
+            currentRecordingId = currentRecording, currentOccurrenceId = "occurrence-a",
+            currentBindingId = "binding-a", queueRevision = 1L,
+            queuedTargets = mapOf(episode.id to listOf(PodcastResumeTarget(
+                "occurrence-a", "binding-a", currentRecording ?: "aaaaaaaaaaa", queueRevision = 1L))))
 
     @Test
     fun matchedProgressShowsResumeAndInProgressInEnglish() {
@@ -87,6 +91,22 @@ class PodcastProgressSurfacesTest {
         compose.onNodeWithTag("podcast-episode-detail").performScrollToNode(hasTestTag("podcast-detail-play"))
         compose.onNodeWithTag("podcast-detail-play").assertTextEquals(arabic.text(TextKey.Play))
         assertEquals(PodcastProgressRecording.CHANGED, changedView.recordingState(episode.id))
+    }
+
+    @Test
+    fun rowResumeActionCarriesTheExactCanonicalOccurrenceAndRevision() {
+        val actions = mutableListOf<PodcastAction>()
+        val row = snapshot.podcastEpisodeUiState(episode, progressView = view(progress()))
+        compose.setContent {
+            VeyraTheme(false, LanguagePreference.ENGLISH) {
+                Box(Modifier.size(420.dp, 760.dp)) { PodcastEpisodeRow(row, actions::add) }
+            }
+        }
+        compose.onNodeWithTag("podcast-play-${episode.id}").performClick()
+        compose.runOnIdle {
+            assertEquals(listOf<PodcastAction>(PodcastAction.ResumeEpisode(
+                episode.id, "binding-a", "occurrence-a", 1L)), actions)
+        }
     }
 
     @Test

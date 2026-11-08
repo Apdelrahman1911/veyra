@@ -72,8 +72,11 @@ fun PodcastEpisodeRow(
     val strings = LocalStrings.current
     val savedBinding = state.savedPlayBindingId
     val play = when {
+        // Resume wins over a saved download so a canonical ResumeAt for recording B cannot
+        // dispatch the saved action for a different recording A.
+        state.resumeActionable -> PodcastAction.ResumeEpisode(state.episode.id, state.resumeBindingId,
+            state.resumeOccurrenceId, state.resumeQueueRevision)
         savedBinding != null -> PodcastAction.PlaySavedEpisode(state.episode.id, savedBinding)
-        state.resumeActionable -> PodcastAction.ResumeEpisode(state.episode.id, state.resumeBindingId)
         else -> PodcastAction.PlayEpisode(state.episode.id)
     }
     Card(
@@ -356,8 +359,11 @@ internal fun PodcastEpisodeControls(state: PodcastEpisodeUiState, onAction: (Pod
     val strings = LocalStrings.current
     val savedBinding = state.savedPlayBindingId
     val play = when {
+        // Resume wins over a saved download so a canonical ResumeAt for recording B cannot
+        // dispatch the saved action for a different recording A.
+        state.resumeActionable -> PodcastAction.ResumeEpisode(state.episode.id, state.resumeBindingId,
+            state.resumeOccurrenceId, state.resumeQueueRevision)
         savedBinding != null -> PodcastAction.PlaySavedEpisode(state.episode.id, savedBinding)
-        state.resumeActionable -> PodcastAction.ResumeEpisode(state.episode.id, state.resumeBindingId)
         else -> PodcastAction.PlayEpisode(state.episode.id)
     }
     var confirmStartOver by remember(state.episode.id) { mutableStateOf(false) }

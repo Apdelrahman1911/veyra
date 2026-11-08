@@ -66,6 +66,9 @@ import dev.veyra.model.QueueSnapshot
 import dev.veyra.model.SourceProvider
 import dev.veyra.model.SourceRef
 import dev.veyra.ui.design.AppStrings
+import dev.veyra.ui.downloads.DownloadSurface
+import dev.veyra.ui.downloads.DownloadSurfaceEntry
+import dev.veyra.ui.downloads.DownloadSurfaceOrigin
 import dev.veyra.ui.design.TextKey
 import dev.veyra.ui.design.VeyraTheme
 import java.awt.image.BufferedImage
@@ -467,8 +470,17 @@ class PodcastScreensTest {
         val current = receipt("currently-streaming-B", "lmnopqrstuv")
         val correctedEpisode = episode.copy(title = "Corrected authored publisher title", durationMs = 30_000L)
         val original = recordedSnapshot(target).copy(media = mapOf(episode.id to correctedEpisode))
+        val progressView = PodcastProgressView(mapOf(episode.id to PodcastEpisodeProgress(
+            mediaId = episode.id, positionMs = 45_000L, durationMs = 180_000L, played = false,
+            updatedEpochMs = 1L, bindingId = target.id, recordingId = "abcdefghijk",
+            occurrenceId = "legacy-occurrence", source = PodcastProgressSource.LEGACY, bindingValid = true,
+        )), queuedTargets = mapOf(episode.id to listOf(PodcastResumeTarget(
+            occurrenceId = "legacy-occurrence", bindingId = target.id, recordingId = "schema2:abcdefghijk",
+            legacyRecordingId = "abcdefghijk", queueRevision = 7L,
+        ))))
         compose.setContent { TestFrame {
-            EpisodeDetailScreen(EpisodeDetailUiState(episode.id, original, currentBinding = current), actions::add)
+            EpisodeDetailScreen(EpisodeDetailUiState(episode.id, original, currentBinding = current,
+                progressView = progressView), actions::add)
         } }
 
         compose.onNodeWithTag("podcast-episode-detail").performScrollToNode(hasText(current.firstResultTitle))
@@ -484,9 +496,41 @@ class PodcastScreensTest {
         compose.onNodeWithTag("podcast-detail-play").assertIsEnabled()
             .assertTextEquals(english.format(TextKey.ResumeAt, english.mediaTime(45_000L))).performClick()
         compose.runOnIdle {
-            assertEquals(listOf<PodcastAction>(PodcastAction.ResumeEpisode(episode.id, target.id)), actions)
+            assertEquals(listOf<PodcastAction>(PodcastAction.ResumeEpisode(episode.id, target.id,
+                occurrenceId = "legacy-occurrence", expectedQueueRevision = 7L)), actions)
             assertEquals(target, original.podcastEpisodeUiState(correctedEpisode, current).nextPlayBinding)
             assertEquals(45_000L, original.progress.getValue(episode.id).positionMs)
+        }
+    }
+
+    @Test
+    fun canonicalResumeForBIsNotOverriddenBySavedTypedRecordingA() {
+        val actions = mutableListOf<PodcastAction>()
+        val canonical = PodcastEpisodeProgress(
+            mediaId = episode.id, positionMs = 45_000L, durationMs = 180_000L, played = false,
+            updatedEpochMs = 2L, bindingId = "canonical-binding-B", recordingId = "lmnopqrstuv",
+            occurrenceId = "occ-B", source = PodcastProgressSource.CANONICAL, bindingValid = true,
+        )
+        val view = PodcastProgressView(mapOf(episode.id to canonical), currentEpisodeId = episode.id,
+            currentRecordingId = "lmnopqrstuv", currentOccurrenceId = "occ-B",
+            currentBindingId = "canonical-binding-B", queueRevision = 11L,
+            queuedTargets = mapOf(episode.id to listOf(PodcastResumeTarget(
+                "occ-B", "canonical-binding-B", "lmnopqrstuv", queueRevision = 11L))))
+        val savedA = DownloadSurface(listOf(DownloadSurfaceEntry(
+            id = "saved-A", origin = DownloadSurfaceOrigin.TYPED_CATALOGUE, mediaId = episode.id,
+            status = DownloadStatus.COMPLETE, bytesDownloaded = 10L, hasOwnedBytes = true,
+            ready = true, bindingId = "binding-A", updatedEpochMs = 1L,
+        )))
+        compose.setContent { TestFrame {
+            EpisodeDetailScreen(EpisodeDetailUiState(episode.id, snapshot(), downloads = savedA,
+                progressView = view), actions::add)
+        } }
+        scrollDetailTo("podcast-detail-play")
+        compose.onNodeWithTag("podcast-detail-play")
+            .assertTextEquals(english.format(TextKey.ResumeAt, english.mediaTime(45_000L))).performClick()
+        compose.runOnIdle {
+            assertEquals(listOf<PodcastAction>(PodcastAction.ResumeEpisode(episode.id,
+                "canonical-binding-B", "occ-B", 11L)), actions)
         }
     }
 

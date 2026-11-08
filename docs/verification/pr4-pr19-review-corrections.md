@@ -6,6 +6,16 @@ PR #4 (`t3/typed-room-download-recovery` at `6d09ed5fa24f39e97a6d7b9689e9e30a008
 frozen PR19 remote ref is unchanged. PR17/PR18 and the shared connected F2 execution remain
 unaccepted as recorded below.
 
+> **PR21 independent-review successor:** the frozen PR21 review confirmed that canonical Resume
+> could still be displayed while the PODCAST cursor was not the active selection and then fail on
+> tap; it also found the legacy Resume path source-only and the saved-authority preflight only
+> partially bounded. The successor `t3/pr4-pr21-review-corrections` carries exact cross-context
+> occurrence/binding/revision identities, records the accepted non-atomic boundary, and proves the
+> real schema2 migration result is `LEGACY_UNBOUND` with no queued binding. No runtime legacy Resume
+> success is claimed; the real owner test asserts `resume_target_unavailable`. Final evidence is in
+> `docs/verification/pr4-pr21-review-corrections.md`. This document's PR21 source refs remain frozen,
+> and its historical runs executed dirty at `c31b33d` rather than clean at `6e0a64a`.
+
 ## Stack
 
 | Layer | Ref | State |
@@ -61,8 +71,11 @@ same exact binding, no new gateway title query, and the saved checkpoint before 
   capable.
 - Before any `Activate` or `AdmitQueue` Room mutation, the controller calls
   `AcquisitionPlaybackResolver.requireExactLocalAuthority(bindingId)` from a fresh Room read. A
-  revoked/mismatched/ambiguous saved authority therefore rejects with `INVALID_STATE` while the
-  queue, occurrence set, outgoing native owner and gateway counters stay unchanged.
+  revoked/mismatched/ambiguous authority observed by that preflight rejects with `INVALID_STATE`
+  before queue, occurrence, native-owner or gateway mutation. The following activation is not atomic
+  with the preflight: later revocation can be found after queue/admission/checkpoint changes and a
+  positive ACK, without rollback. Local-only resolution still forbids online fallback and native
+  loading without exact successful local validation.
 - `SavedRecordingPlaybackTest` covers a revoked exact AssetUse before actor admission, an existing
   occurrence with another media's genuine accepted binding, and a stale queue edit revision. Each
   asserts no queue/occurrence/load/gateway mutation. `SavedLocalOnlyResolverTest` verifies no
@@ -144,8 +157,8 @@ No red attempt was deleted or reused:
 - `progress-journey-021`: 8 tests, 7 pass, 1 failure (immutable `AssetUse` wait).
 - `saved-local-only-001`: shared test compilation failed, 0 tests (missing import).
 - `podcast-ui-001`: 84 tests, 83 pass, 1 failure (`Replay` label regression).
-- `core-music-pr18-001`: **red hang**, 0 finalized XML, worker exit 143, positive drain. The verified
-  task-owned worker was stopped after ~12 minutes spinning in
+- `core-music-pr18-001`: **red hang**, 0 finalized XML, executor exit 143, positive drain.
+  No in-run worker PID/start/TERM identity was retained. The captured stacks locate the hang in
   `MusicSurfacesTest.requestedAndFirstResultTitlesStayDistinctAndOnlyConfirmedOverlapLooksActive`
   at `performScrollTo`/AWT idle. This is the known unresolved legacy scroll hang; it is excluded
   from the green 69-method group and is not called green.

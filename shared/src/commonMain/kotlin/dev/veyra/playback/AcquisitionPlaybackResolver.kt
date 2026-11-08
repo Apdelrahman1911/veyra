@@ -156,14 +156,11 @@ class AcquisitionPlaybackResolver(
      */
     private fun verifiedLocalCandidate(state: AcquisitionRepositoryState, context: AcquisitionExecutionContext,
         candidates: List<MaterializationAsset>): MaterializationAsset {
-        val verified = candidates.mapNotNull { asset ->
-            try { requireLocal(state, context, asset); asset }
-            catch (_: VeyraException) { null }
+        val verified = selectVerifiedCandidates(candidates) { asset ->
+            try { requireLocal(state, context, asset); true }
+            catch (_: VeyraException) { false }
         }
-        if (verified.size != 1) {
-            fail(FailureCode.INVALID_STATE,
-                if (verified.isEmpty()) "saved_local_authority_lost" else "saved_local_asset_ambiguous")
-        }
+        savedLocalAuthorityFailure(verified.size)?.let { fail(FailureCode.INVALID_STATE, it) }
         return verified.single()
     }
 
@@ -265,4 +262,14 @@ class AcquisitionPlaybackResolver(
     }
 
     private fun fail(code: FailureCode, detail: String): Nothing = throw VeyraException(AppFailure(code, detail))
+}
+
+/** Testable selection policy for the defensive ambiguous/corrupt-graph branch. */
+internal fun <T> selectVerifiedCandidates(candidates: List<T>, verify: (T) -> Boolean): List<T> =
+    candidates.filter(verify)
+
+internal fun savedLocalAuthorityFailure(verifiedCount: Int): String? = when (verifiedCount) {
+    1 -> null
+    0 -> "saved_local_authority_lost"
+    else -> "saved_local_asset_ambiguous"
 }

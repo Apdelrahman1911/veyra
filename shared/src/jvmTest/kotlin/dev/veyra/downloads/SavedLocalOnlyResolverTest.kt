@@ -2,15 +2,17 @@ package dev.veyra.downloads
 
 import dev.veyra.data.executionContext
 import dev.veyra.model.AcquisitionOutcome
-import dev.veyra.model.AppFailure
 import dev.veyra.model.FailureCode
 import dev.veyra.model.VeyraException
 import dev.veyra.playback.AcquisitionPlaybackResolver
 import dev.veyra.playback.EngineCapabilities
+import dev.veyra.playback.savedLocalAuthorityFailure
+import dev.veyra.playback.selectVerifiedCandidates
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /** Saved intent must never prepare an online source when the exact local authority is absent. */
@@ -33,5 +35,14 @@ class SavedLocalOnlyResolverTest {
         } finally {
             resolver.close()
         }
+    }
+
+    @Test fun verifiedCandidatePolicyDistinguishesStaleSiblingAndAmbiguity() {
+        assertEquals(listOf("valid"), selectVerifiedCandidates(listOf("stale", "valid", "also-stale")) { it == "valid" })
+        assertEquals(listOf("a", "b"), selectVerifiedCandidates(listOf("a", "b")) { true })
+        assertEquals(listOf("a"), selectVerifiedCandidates(listOf("a", "b")) { it == "a" })
+        assertNull(savedLocalAuthorityFailure(1))
+        assertEquals("saved_local_authority_lost", savedLocalAuthorityFailure(0))
+        assertEquals("saved_local_asset_ambiguous", savedLocalAuthorityFailure(2))
     }
 }

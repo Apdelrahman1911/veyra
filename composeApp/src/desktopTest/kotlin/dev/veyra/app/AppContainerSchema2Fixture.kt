@@ -16,6 +16,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.nio.file.Files
 import java.nio.file.Path
+import java.security.MessageDigest
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -171,6 +172,118 @@ internal object AppContainerSchema2Fixture {
             val original = seedTables.associateWith { connection.scalarRows(it) }
             return Receipt(databasePath, item, binding, original)
         }
+    }
+
+    /** Real schema-2 podcast rows for an exact queued legacy download resume journey. */
+    data class PodcastReceipt(
+        val base: Receipt,
+        val item: MediaItem,
+        val binding: PlaybackBinding,
+        val occurrenceId: String,
+        val assetPath: Path,
+    )
+
+    fun seedPodcast(directory: Path): PodcastReceipt {
+        val base = seed(directory)
+        val item = MediaItem(
+            id = "authored-schema2-podcast-episode",
+            title = "Authored schema2 podcast — authored episode",
+            kind = MediaKind.EPISODE,
+            source = SourceRef(SourceProvider.RSS, "authored-schema2-podcast-guid",
+                feedUrl = "https://publisher.example.invalid/legacy-podcast.xml",
+                episodeGuid = "authored-schema2-podcast-guid"),
+            creator = "Authored schema2 publisher",
+            durationMs = 300_000L,
+            showId = "authored-schema2-podcast-show",
+        )
+        val show = "authored-schema2-podcast-show"
+        val binding = PlaybackBinding(
+            id = "authored-schema2-podcast-binding",
+            mediaId = item.id,
+            queryTitle = "Authored schema2 complete podcast title",
+            firstResultKind = FirstResultKind.VIDEO,
+            firstResultId = "AbCdEf12345",
+            firstResultTitle = "Authored schema2 podcast recording",
+            firstResultUrl = "https://www.youtube.com/watch?v=AbCdEf12345",
+            selectedVideoId = "AbCdEf12345",
+            resolvedEpochMs = 901L,
+            selectionOrdinal = 0,
+        )
+        val occurrenceId = "authored-schema2-podcast-occurrence"
+        val assetPath = directory.resolve("media/files/authored-schema2-podcast.m4a")
+        Files.createDirectories(requireNotNull(assetPath.parent))
+        val bytes = "authored non-audio schema2 podcast fixture".toByteArray()
+        Files.write(assetPath, bytes)
+        val sha = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it.toInt() and 0xff) }
+
+        bundledDriver().open(base.databasePath.toString()).use { connection ->
+            connection.execSQL("PRAGMA foreign_keys = ON")
+            connection.execSQL("BEGIN IMMEDIATE")
+            try {
+                connection.insert("podcasts", mapOf(
+                    "id" to show, "title" to "Authored schema2 podcast",
+                    "feedUrl" to "https://publisher.example.invalid/legacy-podcast.xml",
+                    "publisher" to "Authored schema2 publisher", "description" to "Authored fixture",
+                    "language" to "en", "explicit" to false,
+                ))
+                connection.insert("media", mapOf(
+                    "id" to item.id, "title" to item.title, "kind" to item.kind.name,
+                    "creator" to item.creator, "description" to "Authored schema2 podcast fixture",
+                    "explicit" to false, "advisoryDurationMs" to item.durationMs,
+                    "source_provider" to item.source.provider.name,
+                    "source_canonicalId" to item.source.canonicalId,
+                    "source_canonicalUrl" to "https://publisher.example.invalid/legacy-podcast.xml",
+                    "source_feedUrl" to "https://publisher.example.invalid/legacy-podcast.xml",
+                    "source_episodeGuid" to "authored-schema2-podcast-guid",
+                ))
+                connection.insert("episodes", mapOf("mediaId" to item.id, "podcastId" to show))
+                connection.insert("podcast_episodes", mapOf("podcastId" to show, "episodeId" to item.id, "position" to 0))
+                connection.insert("playback_bindings", mapOf(
+                    "id" to binding.id, "mediaId" to binding.mediaId, "queryTitle" to binding.queryTitle,
+                    "firstResultKind" to binding.firstResultKind.name, "firstResultId" to binding.firstResultId,
+                    "firstResultTitle" to binding.firstResultTitle, "firstResultUrl" to binding.firstResultUrl,
+                    "selectedVideoId" to binding.selectedVideoId, "resolvedEpochMs" to binding.resolvedEpochMs,
+                    "selectionOrdinal" to binding.selectionOrdinal,
+                ))
+                connection.insert("queue_entries", mapOf(
+                    "id" to occurrenceId, "contextId" to "PODCAST", "mediaId" to item.id,
+                    "position" to 0, "originalPosition" to 0,
+                ))
+                connection.insert("queue_cursors", mapOf("contextId" to "PODCAST", "entryId" to occurrenceId))
+                connection.execSQL("UPDATE queue_contexts SET positionMs = 45000 WHERE id = 'PODCAST'")
+                connection.insert("media_progress", mapOf(
+                    "mediaId" to item.id, "positionMs" to 45_000L, "durationMs" to 300_000L,
+                    "played" to false, "updatedEpochMs" to 2_000L, "sessionId" to "authored-schema2-session",
+                    "generation" to 1L, "sequence" to 1L, "executionBindingId" to binding.id,
+                ))
+                connection.insert("offline_assets", mapOf(
+                    "id" to "authored-schema2-podcast-asset", "mediaId" to item.id,
+                    "uri" to assetPath.toString(), "sizeBytes" to bytes.size.toLong(), "kind" to "FILE",
+                    "mimeType" to "audio/mp4", "codecs" to "aac", "sha256" to sha,
+                    "representationId" to "140", "validatorGeneration" to 1L,
+                    "completedEpochMs" to 3_000L, "executionBindingId" to binding.id,
+                    "measuredDurationMs" to 300_000L,
+                ))
+                connection.insert("downloads", mapOf(
+                    "id" to "authored-schema2-podcast-download", "mediaId" to item.id,
+                    "status" to "COMPLETE", "bytesDownloaded" to bytes.size.toLong(),
+                    "totalBytes" to bytes.size.toLong(), "assetId" to "authored-schema2-podcast-asset",
+                    "representationId" to "140", "validatorGeneration" to 1L,
+                    "updatedEpochMs" to 3_000L, "executionBindingId" to binding.id,
+                    "attemptCount" to 0, "priority" to 0, "createdEpochMs" to 3_000L,
+                    "userPaused" to false, "automaticRetryCount" to 0,
+                ))
+                connection.execSQL("UPDATE store_meta SET revision = 8")
+                connection.execSQL("COMMIT")
+            } catch (failure: Throwable) {
+                try { connection.execSQL("ROLLBACK") } catch (rollback: Throwable) {
+                    if (rollback !== failure) failure.addSuppressed(rollback)
+                }
+                throw failure
+            }
+            connection.requireIntegrity()
+        }
+        return PodcastReceipt(base, item, binding, occurrenceId, assetPath)
     }
 
     /**

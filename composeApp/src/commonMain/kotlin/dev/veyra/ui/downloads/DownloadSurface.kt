@@ -89,6 +89,18 @@ data class DownloadSurface(val entries: List<DownloadSurfaceEntry>) {
         entries.filter { it.mediaId == mediaId && it.ready }
             .maxWithOrNull(compareBy<DownloadSurfaceEntry> { it.updatedEpochMs }.thenBy { it.id })
 
+    /**
+     * Exact saved playback choice for a media row/detail: one unambiguous ready typed catalogue
+     * binding. Two different ready recordings are an explicit Downloads-surface choice, never a
+     * newest-row authority. Physical download-row selection remains [forMedia].
+     */
+    fun unambiguousCatalogueBinding(mediaId: String): String? = entries
+        .asSequence()
+        .filter { it.mediaId == mediaId && it.ready && it.origin == DownloadSurfaceOrigin.TYPED_CATALOGUE }
+        .mapNotNull { it.bindingId?.takeIf(String::isNotBlank) }
+        .distinct()
+        .singleOrNull()
+
     fun isDownloaded(mediaId: String): Boolean = readyMediaIds.contains(mediaId)
 
     fun storageBytes(): Long = entries.asSequence().filter { it.ready }
