@@ -215,9 +215,46 @@ New correction attempts:
   ordering), retained; they are not acceptance evidence.
 - `removal-final-smoke-1`: 26 tests / 4 suites / 0 failures for the observation, integration,
   adoption and maintenance classes; pre-final only.
+- `final2-compile-1`, `final2-focused-1`, `final2-full-1`: the final same-commit executed gates at
+  source `55931d5`; results and hashes are recorded above.
 
 Final executed compile/focused/full results are recorded by the docs-only successor commit with
 the exact tested source SHA. No historical evidence was backfilled.
+
+## Final same-commit evidence (source `55931d51e0fabaa868bf67b44919a3776aa27967`)
+
+All three attempts were run through `/usr/local/bin/vps-build run --profile normal` with the
+existing project lock, `scripts/gradle.sh --offline`, one worker, and the single literal JVM
+argument `-Dorg.gradle.jvmargs=-Xmx1280m -XX:MaxMetaspaceSize=512m -XX:+UseSerialGC
+-XX:ActiveProcessorCount=2 -Dfile.encoding=UTF-8`. Each attempt has a fresh directory, exact
+numeric exit, start/finish, sealed inputs/XML/log/drain, `inputs_equal=0`, clean HEAD/status,
+pin `c0a08090fe7dbd76e20216559b8184ad2cccde63`, indexed gitlink and actual submodule head, and
+schema3 `aab30e43a35a431a25a7ecbb7ebccefd849811f688957054304b02d3caf6d367`. `/proc/locks`
+and `lslocks` record the actual outer vps-build holder PID/start ticks for the same
+device:inode; the harness did not re-acquire the lock. Drain scans report zero owned matches.
+
+- `final2-compile-1`: exit 0; actually executed `:kmpYT:kmpyt:compileKotlinJvm`
+  (UP-TO-DATE for the existing pin), `:shared:compileKotlinJvm` and
+  `:shared:compileTestKotlinJvm` under `--rerun-tasks`; `run.log` SHA-256
+  `b63175913adc3b2d65fe29158a0a962a23a2b238ca4001022641f9d0b70106d7`, attempt seal
+  `f606a694c089fa6cff035b09e14e4cdd957a5a61e5910067f2a3f466bd1f09c1`.
+- `final2-focused-1`: exit 0; 118 tests / 11 suites / 0 failures / 0 errors / 0 skipped; includes
+  both new focused test classes, the real interrupted-retry integration case, the cold-host
+  adoption case and all historic required classes; `run.log` SHA-256
+  `d816220d4b5fc832c6b7627c2fe7be487738f6424eee18a04faa33eae0b35c3e`, XML seal
+  `f7e782d23efce2e5a259fdfcab641f8d174840662d559d6e544da4382778b19c`, attempt seal
+  `a97adaad1f7d1284ea2da647a339dcb0852c37832259eb1621e105b275f54b55`.
+- `final2-full-1`: exit 0; 1,194 tests / 102 suites / 0 failures / 0 errors / 0 skipped;
+  `run.log` SHA-256 `4192e509a18c8c5741200d327a39b9020b3467c8a86047f9b8e205f6c4ca26ca`, XML
+  seal `d2cbb76ac033431ff1f9f3c001ce7dc5d5f627be91fad6dccddadd5b609dd826`, attempt seal
+  `4efd50eb7a719ff5ef9497d52777f629dc5cbfc83b17b1969ea7cce7349ddb2b`.
+
+The tested source is `55931d5`; the docs-only successor changes only this verification document.
+The older base `04b1d07` observations remain distinct: compile exit 0, focused 113/9/1 with the
+original 0.648 s `cleanupExpiration...` failure, full 1,189/100/0. The dirty 113/9/0 smoke is not
+acceptance. `final-focused-1`'s known `gate.log` seal mismatch remains deliberately unrepaired
+(actual `492c554c…`, sealed `f04019c4…`); its XML/run log are retained as the genuine red, but the
+attempt is not described as fully sealed.
 
 ## P12 — cleanup audit
 
