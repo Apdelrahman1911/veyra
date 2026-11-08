@@ -2,8 +2,10 @@
 
 Status: **draft, incomplete.** R7, R8 and the requested R9 contracts are implemented and
 executed. R6 is partially complete: the already-typed EX34 scheduler case is fixed and
-passing, but 50 legacy-fixture shared methods and 21 AppContainer composition methods are
-still unported (exact names below). No merge or release claim.
+passing, and this document keeps the original 50-legacy-fixture/21-AppContainer failure
+inventory. The scoped successor wave ports the two `RoomLibraryStoreTest` methods (see
+`pr4-room-regression-ports.md`); the remaining shared and AppContainer methods are owned by
+their separate sibling lanes and are not claimed here. No merge or release claim.
 
 ## Accepted launch
 
@@ -36,10 +38,10 @@ Files: `composeApp/src/commonMain/kotlin/dev/veyra/app/AppContainer.kt`,
 | `youtubeAcquisitionResult` applies a blocking page `AppFailure` **before** the valid-video `Single` branch. The raw ordinal-zero entry/receipt is still returned with `Unplayable(FIRST_RESULT_UNAVAILABLE)`. | `YouTubeAcquisitionGatewayTest.validFirstVideoOnABlockingPageIsUnplayableAndKeepsTheTruthfulRawReceipt` | Problem code, raw id/title/url/ordinal preserved; entry issue stays truthful. |
 | Non-blocking page warnings still allow a supported first video. | `aNonBlockingPageWarningDoesNotDestroyAValidSupportedSelection` (real kmpYT parser/transport) | One query; `Single` with raw ordinal-zero receipt. |
 | Blocking transport refusal never becomes Single and never issues a second query. | `aBlockingPageTransportRefusalNeverBecomesASingleOrASecondQuery` | `PROVIDER_ACCESS_REQUIRED`, one request, sanitized cause. |
-| A blocked receipt is committed as a durable `AcquisitionOutcome.Unplayable`; no binding/occurrence is executable. | `AcquisitionCoordinatorTest.blockedPageWithAValidFirstReceiptStaysUnplayableAcrossRestoreAndCannotBind` | Receipt retained; no binding; `boundOccurrence` rejects; Room-only `restore()` returns the same Unplayable outcome; repeated resolve does not re-query. |
+| A blocked receipt is committed as a durable `AcquisitionOutcome.Unplayable`; no binding/occurrence is executable. | `AcquisitionCoordinatorTest.blockedPageWithAValidFirstReceiptStaysUnplayableAcrossRestoreAndCannotBind` (fake-port `AcquisitionTestRepository`) and `dev.veyra.data.RoomAcquisitionRestoreTest.blockedValidVideoOutcomeSurvivesRealRoomCloseAndReopenWithoutBindingOrSourceWork` (actual Room close/reopen) | Receipt retained; no binding; `boundOccurrence` rejects; repeated resolve does not re-query. The fake-port case is not Room proof; the jvmTest class executes actual Room close/reopen and proves the same persisted Unplayable outcome/problem with no binding/occurrence or source query/inspect. |
 
 Files: `YouTubeAcquisitionGateway.kt`, `YouTubeAcquisitionGatewayTest.kt`,
-`AcquisitionCoordinatorTest.kt`.
+`AcquisitionCoordinatorTest.kt`, `shared/src/jvmTest/kotlin/dev/veyra/data/RoomAcquisitionRestoreTest.kt`.
 
 ## R9 — wrong-reason successes and prepared contracts
 
@@ -47,8 +49,8 @@ Files: `YouTubeAcquisitionGateway.kt`, `YouTubeAcquisitionGatewayTest.kt`,
 
 | Case | Setup | Assertion |
 |---|---|---|
-| Duplicate asset identity | Supported validator on a two-download/one-asset graph; same-owner Room `writerRowsUpdate` remaps the second download to the existing asset; raw SQL attempts a second row with the same primary key but a distinct URI. | Exact `"Offline asset identities must be unique"` from the transactional validator; exact `UNIQUE constraint failed: offline_assets.id`; full graph/revision unchanged; cold reopen equal; one asset row. |
-| Duplicate asset URI | Two distinct asset ids claim the same owned URI; raw SQL attempts a second row with a new id and the same URI. | Exact `"Offline asset files must have one owner"`; exact `UNIQUE constraint failed: offline_assets.uri`; full graph/revision unchanged; cold reopen equal; no dedup/partial write. |
+| Duplicate asset identity | Supported validator on a two-download/one-asset graph; same-owner Room `writerRowsUpdate` remaps the second download to the existing asset AND adds a VALID unrelated CATALOG saved relation plus its legacy favourite projection (`music-2`) in that same transaction; raw SQL attempts a second row with the same primary key but a distinct URI. | Exact `"Offline asset identities must be unique"` from the transactional validator; exact `UNIQUE constraint failed: offline_assets.id`; the unrelated favorite row is absent after rollback; full graph/revision unchanged; cold reopen equal; one asset row. |
+| Duplicate asset URI | Two distinct asset ids claim the same owned URI AND the same transaction adds a VALID unrelated CATALOG saved relation plus its legacy favourite projection (`music-2`); raw SQL attempts a second row with a new id and the same URI. | Exact `"Offline asset files must have one owner"`; exact `UNIQUE constraint failed: offline_assets.uri`; the unrelated favorite row is absent after rollback; full graph/revision unchanged; cold reopen equal; no dedup/partial write. |
 
 File: `shared/src/jvmTest/kotlin/dev/veyra/data/RoomWriteVerificationTest.kt`.
 
@@ -71,8 +73,8 @@ File: `shared/src/commonTest/kotlin/dev/veyra/source/youtube/YouTubePreparedDown
 
 | Method | Cause | Resolution |
 |---|---|---|
-| `DownloadPolicyRoomTest.twoRealRoomSchedulersRespectOneTwoAndFourGlobalSlotsAndLoweredLimit` | Two real Room owners race slot admission after 4→1 revocation. The scheduler correctly takes its documented bounded local recheck (5/10/20/40/60 s) on the injected clock; wall time alone could never reach that deadline. | The test advances exactly the published bounded deadline only while no physical owner is busy, and keeps the 1/2/4-slot, revocation, single-owner-query and all-complete assertions. Passed in runs 023/025 and the full run 027. |
-| `DownloadMemberRetryLifetimeRoomTest.coldReopenRetainsRetryAndLaterActivatedExecutionUsesTheOriginalAcceptedContextAndKey` | Previously failed once in the agent run (15 s timeout) but not in the lead run; no deterministic defect was reproduced. | Re-ran the exact method three times (all pass). No assertion removed. This remains an observed intermittent and is not claimed as fixed; a deterministic ordering case was not proven necessary. |
+| `DownloadPolicyRoomTest.twoRealRoomSchedulersRespectOneTwoAndFourGlobalSlotsAndLoweredLimit` | Two real Room owners race slot admission after 4→1 revocation. The scheduler correctly takes its documented bounded local recheck (5/10/20/40/60 s) on the injected clock; wall time alone could never reach that deadline. | The test advances exactly the published bounded deadline only while no physical owner is busy, and keeps the 1/2/4-slot, revocation, single-owner-query and all-complete assertions. Run 023 retained XML records **one test / one failure** (teardown), so it is not green evidence; run 025 and the full run 027 pass this method. |
+| `DownloadMemberRetryLifetimeRoomTest.coldReopenRetainsRetryAndLaterActivatedExecutionUsesTheOriginalAcceptedContextAndKey` | The older cold member-retry trace (`.work/verification/pr4-review-corrections/run-011-full-shared/stdout.log`) records an **AssertionError**, not an established 15-second timeout. The exact failed assertion/root cause is not retained in the short console trace; it was not reproduced in the later lead run. | Re-ran the exact method three times (all pass). No assertion removed. This remains an observed intermittent with unknown root cause and is not claimed as fixed; three passes do not establish a repair. The ownership/recovery lane owns further investigation. |
 
 ### Still failing — legacy snapshot fixtures (50)
 
@@ -80,7 +82,9 @@ All fail at `DownloadFixture.seedFinalization/seedComplete/seedPending` (or equi
 legacy snapshot seeding) with `INVALID_STATE`, before their intended assertions:
 
 - `RoomLibraryStoreTest` (2): `downloadUniquenessLeaseAndAttemptFinalizationAreTransactional`,
-  `cleanupIntentBlocksOrdinaryClaimAndSurvivesRestart`.
+  `cleanupIntentBlocksOrdinaryClaimAndSurvivesRestart` — **ported and passing in the scoped
+  successor wave**, see `pr4-room-regression-ports.md`; retained here as the historical failure
+  inventory.
 - `DownloadCleanupRoomTest` (4): `maintenanceClaimFailureBeforeAndAfterCommitKeepsFileAndRoomOwnershipUntilExplicitClose`,
   `maintenanceAllowanceFailureRetainsFinalizationFilesAndRoomClaimThroughIndependentDrain`,
   `partialMaintenancePathAcquisitionFailureRetainsRealFirstLeaseBeforeRoomClaim`,
@@ -162,7 +166,8 @@ non-audio bytes; Room/SQLite/files/OS leases are real.
 | Run | Command | Exit | Actual result | Evidence |
 |---|---|---:|---|---|
 | 001/002/004..019 | focused shared/common/gateway/Room/app tests | 0 on final repetitions | R7/R8/R9 contract tests and ported composition tests pass | `.work/verification/pr4-r6-r9-fixes/run-00*/` |
-| 023/025 | EX34 scheduler case | 0 | 1/2/4 slots, 4→1 revocation, bounded recheck, all 7 complete | `run-023-scheduler/`, `run-025-scheduler/` |
+| 023 | EX34 scheduler case | 1 | **1 test / 1 failure (teardown)**; retained as a failed attempt, not green evidence | `run-023-scheduler/` |
+| 025 | EX34 scheduler case (same method, later run) | 0 | 1/2/4 slots, 4→1 revocation, bounded recheck, all 7 complete | `run-025-scheduler/` |
 | 026 | member-retry cold reopen, 3 repetitions | 0,0,0 | same accepted context/key; one preparation/transfer; no new query | `run-026-member-retry-*/` |
 | 027 | full `:shared:jvmTest` | 1 | **1162 tests / 96 suites, 50 failures, 0 errors, 0 skipped** (scheduler fixed; 9 tests added) | `run-027-full-shared/`; log SHA-256 `ec1cad03cbbd1dc99f6ec30045a4537ad066c3cc0eed4a1f058b20beca2f1f82` |
 | 028 | `:composeApp:desktopTest --tests dev.veyra.app.AppContainerIntegrationTest` | 1 | **35 tests, 21 failures, 0 errors, 0 skipped** (2 fixed, 2 added) | `run-028-app-container/`; log SHA-256 `9f07d65af5fa91500203971c273b9f3494fd9516a9aa93021260c9602f6afe8e` |
