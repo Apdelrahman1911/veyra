@@ -124,6 +124,8 @@ Execution statements are only valid for the exact attempt records in the ignored
 its own exact command argv, numeric exit, log, start/finish times and fresh XML; before/after
 tracked-input manifests were compared and were equal for every completed Gradle attempt.
 
+- `green-final-focused` at `4995071`: 27 tests / 3 suites / 0 failures/errors/skips with
+  before/after input equality and fresh XML. This is the final focused typed-maintenance/F2 gate.
 - Parent-production red `red-parent-3` at `6d09ed5`: 3 tests / 3 failed / 0 errors / 0 skipped.
   The failures were the expected F2 defects: retained explicit validation not admitted
   (`BACKGROUND_RESTRICTED`), Resume completing without rejection, and foreground return ending
