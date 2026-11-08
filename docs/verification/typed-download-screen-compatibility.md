@@ -12,13 +12,10 @@ execution and not a release claim. PR #4 remains draft; this branch is not merge
   (`t3/typed-room-download-recovery`), a fast-forward descendant of the integration parent.
 - This worktree was clean at `9b1b047...`; the supplied local branch was fast-forwarded only to
   `6759466...` after ancestor verification. No reset/rebase/force-push or other tree was changed.
-- Tested code/test commit: `b7308cc912e21efeaddcd4e755bfe7313ea02120`
-  (`Cover queued and cancelled typed surface rows`); its production code is identical to
-  `0184e50185c158c6f1e99693dfad963cfb61112f` (`Connect typed downloads to existing music and
-  podcast surfaces`).
-- Evidence was captured at that commit. Subsequent commits are documentation-only; rehashing all
-  tracked files shows only this document differs from the tested input set, so production/test
-  hashes remain exactly equal.
+- Tested code/test commit: `462858b86afeca1621d56975484c9edab92d5c87`
+  (`Keep verified neutral downloads displayable without catalogue binding`). This is the F1
+  correction on top of the original typed-screen commit; the evidence below was captured at that
+  exact commit. The final docs-only head may advance; production/test hashes remain equal.
 - Local branch: `t3/typed-download-screen-compat`; pushed as the scoped stacked branch
   `t3/pr4-typed-download-screen-compatibility`; PR base `t3/typed-room-download-recovery`.
 - Accepted launch settings: OpenCode provider `opencode`, model
@@ -53,7 +50,24 @@ Schema2 histories keep their existing semantics. A typed catalogue row displays 
 catalogue `MediaItem` through its `CatalogMedia` subject. A neutral `SourceRecordingSubject` row
 shows the captured request/observed title plus a localized "Source recording" label, never a
 fabricated RSS episode, catalogue item, `OfflineAsset`, `PlaybackBinding`, `MediaItem`, source URL,
-native handle or Room row.
+native handle or Room row. Its row-level exact-use `ready` can be true once this process verifies
+the retained bytes, but it has no `mediaId`, no catalogue binding, no catalogue membership and no
+Play action; `readyMediaIds` (catalogue playback readiness) remains empty for neutral rows. The
+neutral row is counted once in storage and offers a confirmed local Remove once verified or
+checking.
+
+### F1 correction (2026-11-08)
+
+A verified neutral `SourceRecordingSubject` previously reached `typedEntries` with
+`ready=true` and a non-null execution binding while `DownloadSurfaceEntry` required binding IDs
+to be catalogue/legacy-only. That threw from composition as soon as the completed neutral row was
+observed. The correction keeps the genuine neutral subject/recording/request identity and the
+exact current-process `AssetUse`/claim/asset proof, but leaves `bindingId` null for neutral rows.
+It never manufactures a `MediaItem`, `PlaybackBinding`, catalogue membership or playback grant.
+A connected real-Room test now drives capture/resolve/admission through the production command
+facade, completes a neutral transfer, exercises the actual Downloads screen, and cold-revalidates
+the same row in a new AppContainer instance. The pre-fix test attempt is preserved as red evidence;
+the final run is green.
 
 ## Readiness boundary
 
@@ -140,7 +154,9 @@ New focused tests:
 - R1/R2 shared recording: exact use/claim/recording/generation required; producer completion or
   historical check alone is not Ready; cleanup/lease/maintenance/stale projection stays not Ready.
 - Adopted schema2 row keeps one stable physical id (no duplicate); neutral source rows show the
-  real captured title and only pause/cancel/remove, never catalogue membership, Play or Ready.
+  real captured title and only pause/cancel/remove; physical completion is shown as Downloaded
+  and contributes storage/removal, but it is never catalogue membership, a catalogue binding,
+  Play authority or catalogue Ready.
 - Downloads list/filter/storage and podcast downloaded filter use actual typed state; shared
   physical bytes count once; English/Arabic labels and RTL layout are exercised.
 - Real AppContainer/Room integration consumes the same surface in `LibraryScreen`; source/native
@@ -148,50 +164,80 @@ New focused tests:
 
 ## Verification evidence
 
-Evidence root (ignored, task-owned):
-`/root/.t3/worktrees/Veyra/t3-100c62d1/.work/verification/typed-download-screen-compatibility`.
+Correction evidence root (ignored, task-owned):
+`/root/.t3/worktrees/Veyra/t3-100c62d1/.work/verification/pr14-neutral-correction`.
 
 - `result.json` SHA-256:
-  `8b8279fd2037c92437f4452c0514e91a59fc0f5441fff8e7ffd0b3a6529b0c34`
-- `inputs-before.json` (513 tracked regular files) SHA-256:
-  `b94b173531ad7ce346da1f81ebe36dcda1717b4b172cd68a0ea614de948aff87`
+  `92802d6ee077b265905b9264952814b9d88cd4d8805f79cdcd315698018ca432`
+- `inputs-before.json` and `inputs-after.json` (both 513 tracked regular files) SHA-256:
+  `94cce4f2a2f7064938fd2941dca780778a0fdab41af46497ad548f8c48f87bba`
+  (identical before/after; source freeze and no drift)
 - Complete evidence manifest SHA-256:
-  `faad77073c31cd04599b225b9e1be52d7d2931ce73f301a4434e399793e8cc43`
-  (`manifest.sha256` covers 36 log/XML/result files; no source drift)
+  `4fb299fcf2b55226b769ec1293741ea23bf381414593d5b5f1bf07c07ee35647` (49 files)
+- Preserved pre-fix red `red-result.json` SHA-256:
+  `c95a80632c9086cd3b1bde5867d910abe4e2be1ddbaffcaf64e2e6e89b49a0ab`;
+  red log/XML are under `run-001-red/`, and the failure is the exact
+  `DownloadSurfaceEntry` constructor exception from the new connected neutral test.
+- `drain.json` SHA-256:
+  `fdc5749130df732cdedab97f72aa84576fb81be8e5653fd11432f8909928bd59`;
+  no task-owned JVM/Gradle/test process remained after the evidence runs.
+- New green runs are all `--offline`; actual argv includes `flock`, the shared project lock,
+  `scripts/with-display.sh` for GUI, the bounded test init and the single required JVM argument.
+  Each run has fresh exact-task XML and its own log/result/failures files.
 - Tracked input drift: **none**. Working tree clean before/after. Host:
   `Linux-6.1.72-x86_64-with-glibc2.39`, 12 logical CPUs, OpenJDK 21.0.12.
-- UTC window: `2026-11-07T20:41:29Z` to `2026-11-07T20:44:02Z`.
-
-All commands ran from the worktree root, under the shared lock
-`/root/projects/Veyra/.work/verification/pr4-ports-wave-20261107/gradle.lock`, with the bounded
-test initializer and the single Gradle JVM argument
-`-Dorg.gradle.jvmargs=-Xmx1280m -XX:MaxMetaspaceSize=512m -XX:+UseSerialGC -XX:ActiveProcessorCount=2 -Dfile.encoding=UTF-8`.
+- UTC window: `2026-11-08T06:48:21Z` to `2026-11-08T07:44:27Z` (captured in `result.json`).
 
 | Run | Command task(s) | Exit | Suites | Tests | Failures/errors/skips | Log SHA-256 |
 | --- | --- | --- | --- | --- | --- | --- |
-| run-001 | `:composeApp:compileKotlinDesktop` | 0 | 0 | 0 | 0/0/0 | `b13c446a1d15499b0c53859fc0261a4a7eecfc13319e3c65a90ac758fda0be40` |
-| run-002 | `:composeApp:compileTestKotlinDesktop` | 0 | 0 | 0 | 0/0/0 | `5903410c484cf0331d716e0839c28d8fcbf7d59e73c2ce0492d3db1f5f514191` |
-| run-003 | focused common tests (11 classes) | 0 | 11 | 92 | 0/0/0 | `b8f07b0a4417a6a72061feac7d717795961369eda3a389f09142148aa1d2c016` |
-| run-004 | focused existing music/podcast surfaces (13 methods) | 0 | 3 | 13 | 0/0/0 | `cff3fabdaf3f8014f32a8914ddd8be2b450aad644b6342341d10b5de15eece30` |
-| run-005 | new typed surfaces + real AppContainer/Room integration (6 tests) | 0 | 2 | 6 | 0/0/0 | `74fecfa1a2c0930754b4a46220fa9c489cb4e410a7b5b80c15874aff66bb6755` |
-| run-006 | `:shared:compileDebugKotlinAndroid :composeApp:compileDebugKotlinAndroid` | 0 | 0 | 0 | 0/0/0 | `ec6e83eb4adeaee43bbe16a4adf60dc03e2b2cd2cbffb8cfbc1954886ca60a14` |
+| run-002 | `:composeApp:compileKotlinDesktop --offline` | 0 | 0 | 0 | 0/0/0 | `4f51192c24bc7313488da69db3a96bf2f3c91c8d20c1fe4d35330d8e388ba0ec` |
+| run-003 | `:composeApp:compileTestKotlinDesktop --offline` | 0 | 0 | 0 | 0/0/0 | `8144995dd072b7a99b0a0be7cfbf2a81908de5f0cf0381be4dbc70511198c879` |
+| run-004 | focused common tests (11 classes) `--offline` | 0 | 11 | 93 | 0/0/0 | `a85b49322f8421657681cb7fb1494fc1bfcac4d427586d358af3ca8d3703be2e` |
+| run-005 | focused existing UI surfaces (13 methods) `--offline` | 0 | 3 | 13 | 0/0/0 | `a5760f1a17cbeea4ad137e06da61e0a3653935748cfbd511dd7ccc10c4ccf7a8` |
+| run-006 | typed UI + real AppContainer/Room integration (8 tests) `--offline` | 0 | 2 | 8 | 0/0/0 | `b2bc4910dd6889c8012bfa89727077421f8bcf6e9372dde4a705797dcb92f7b5` |
+| run-007 | `:shared:compileDebugKotlinAndroid :composeApp:compileDebugKotlinAndroid --offline` | 0 | 0 | 0 | 0/0/0 | `ae014be8e17f5dccdbb3d219d821b52873d1007f8c5deeefd8668f9acfbb898a` |
 
-`run-003` classes: `AppStringsTest`, `DownloadSurfaceTest`, `TypedPodcastDownloadStateTest`,
+`run-004` classes: `AppStringsTest`, `DownloadSurfaceTest`, `TypedPodcastDownloadStateTest`,
 `MusicPresentationTest`, `TrackDetailPresentationTest`, `PodcastDownloadActionTest`,
 `PodcastPresentationTest`, `PodcastBindingTest`, `PodcastProgressRecordingTest`,
 `PodcastUiStateTest`, `PodcastUnavailablePlaybackNoticeTest`.
+`run-005` retains the 13 original music/podcast download/readiness methods mapped above.
+`run-006` is `TypedDownloadSurfacesTest` (6 tests) plus both
+`TypedDownloadPresentationIntegrationTest` methods (2 tests), including the connected neutral
+completion/cold-revalidation and Arabic RTL neutral removal tests. Exact-task XML is under each
+`run-*/composeApp-desktopTest/xml/`; all green `failures.json` files are empty arrays.
 
-`run-004` retained methods are the 13 mapped rows above. `run-005` is
-`TypedDownloadSurfacesTest` (5 tests) plus
-`TypedDownloadPresentationIntegrationTest.coldCompleteTypedJobIsCheckingOnTheExistingScreenAndBecomesReadyOnlyAfterThisProcessValidates`
-(1 test). Exact-task XML is under each `run-*/composeApp-desktopTest/xml/`; all `failures.json`
-files are the empty array (SHA-256
-`37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570`).
+The earlier evidence root
+`.work/verification/typed-download-screen-compatibility/` remains preserved as history but is
+**superseded** for F4: its commands omitted `--offline` and it persisted no after-input manifest.
+It is not used as acceptance evidence. The earlier unsupported broad-timeout claim is withdrawn;
+no broad-suite pass or retained broad-timeout attempt is claimed. Only the exact focused methods
+above are claimed.
 
-A preliminary broad UI invocation (all of `MusicSurfacesTest`, `TrackDetailFlowsTest`,
-`PodcastScreensTest`) exceeded Gradle's configured 15-minute test-task timeout after the download
-tests had already passed; it is not presented as a full-suite pass. Final evidence uses the exact
-focused download/readiness methods above.
+These correction runs were executed before the new host-gate policy arrived and used the shared
+project `flock` directly; no other lane was killed. Any further heavy work will use
+`/usr/local/bin/vps-build` with the same lock. This is evidence from the tested commit, not a
+release/acceptance claim.
+
+## Remaining findings / dependencies
+
+- **F2 (unresolved, separate owner):** typed `FAILED` with retained bytes still exposes a Retry
+  action in the existing UI while the shared runtime has no executable retained-FAILED local
+  revalidation path. This PR does not modify shared/runtime/Room/controller/AppContainer and does
+  not simulate `COMPLETE` or hide a required Validate. The shared retained-FAILED owner and the
+  coordinated AppContainer/PR12 action wiring must land before F2 can be called resolved.
+- **F3 (confirmed, dependency):** a media-level `ready` row can come from R1 while a fresh
+  `MusicUiAction.Play`/`PodcastAction.PlayEpisode` reaches the typed controller, captures a new
+  same-recording R2, and the exact resolver filters `assetUses` by R2; offline-only then fails
+  with `OFFLINE_POLICY`. Call sequence: `AppContainer.play` -> `PlaybackCommand.Play` ->
+  `PlaybackController` typed `handleCommand` -> `admissions.catalogLeaves` (new R2) -> `admit` ->
+  `start` -> `AcquisitionPlaybackResolver.resolve` exact-use filter. This is a truthfulness issue;
+  the execution guard still fails closed. It is intentionally not "fixed" by clearing valid R1
+  media-level readiness or forcing a fresh Play to reuse a binding. It needs the PR12
+  current-selection/provenance/action-reuse owner and remains unresolved in this correction.
+- **F4 (corrected for new runs):** new affected runs above use `--offline`, persist before and
+  after input hashes, preserve the genuine red attempt, and make no timeout claim. Old evidence is
+  retained but marked non-compliant/superseded.
 
 ## Explicitly unverified / held
 
