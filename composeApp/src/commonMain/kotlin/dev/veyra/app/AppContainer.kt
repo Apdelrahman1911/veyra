@@ -717,6 +717,25 @@ class AppContainer(
         }
     }
 
+    /**
+     * Podcast Start Over is an existing-episode restart, not a fresh catalogue lookup. Only the
+     * exact CURRENT bound occurrence for this episode may be reactivated; otherwise preserve the
+     * established fresh Play admission, and let a stale queue CAS fail truthfully rather than
+     * silently recapturing a different request.
+     */
+    private suspend fun restartCurrentPodcast(mediaId: String): Boolean {
+        val state = playback.state.value
+        val selection = state.currentSelection ?: return false
+        if (state.activeContext != QueueContext.PODCAST || selection.controlsMode != PlaybackControlsMode.PODCAST ||
+            selection.catalogMedia?.id != mediaId || selection.selectionState != OccurrenceSelectionState.BOUND) return false
+        val bindingId = selection.bindingId ?: return false
+        val queue = store.acquisitionView().acquisition.queues.getValue(QueueContext.PODCAST)
+        if (queue.currentOccurrenceId != selection.occurrenceId) return false
+        command(PlaybackCommand.PlayOccurrence(QueueContext.PODCAST, queue.editRevision,
+            selection.occurrenceId, bindingId, startFromBeginning = true))
+        return true
+    }
+
     private suspend fun handlePodcast(action: PodcastAction) {
         when (action) {
             PodcastAction.FindPodcasts -> handleMusic(MusicUiAction.OpenSearch(SearchKind.PODCASTS))
@@ -745,7 +764,9 @@ class AppContainer(
                 mutablePodcastDetails.update { it.copy(options = it.options + (action.showId to action.options)) }
             }
             is PodcastAction.PlayEpisode -> play(listOf(episode(action.mediaId)))
-            is PodcastAction.StartOver -> play(listOf(episode(action.mediaId)), startFromBeginning = true)
+            is PodcastAction.StartOver -> if (!restartCurrentPodcast(action.mediaId)) {
+                play(listOf(episode(action.mediaId)), startFromBeginning = true)
+            }
             is PodcastAction.SetPlayed -> command(PlaybackCommand.MarkPlayed(action.mediaId, action.played))
             is PodcastAction.SetSaved -> store.update { old ->
                 require(old.media[action.mediaId]?.kind == MediaKind.EPISODE)
