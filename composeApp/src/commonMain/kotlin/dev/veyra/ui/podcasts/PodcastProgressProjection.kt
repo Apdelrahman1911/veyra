@@ -1,13 +1,16 @@
 package dev.veyra.ui.podcasts
 
 import dev.veyra.data.PlaybackAcquisitionView
+import dev.veyra.model.AcquisitionOrigin
 import dev.veyra.model.ExecutableSubject
 import dev.veyra.model.ExecutionBindingId
 import dev.veyra.model.ExecutionBindingOrigin
 import dev.veyra.model.FirstResultKind
 import dev.veyra.model.MediaKind
 import dev.veyra.model.MediaProgress
+import dev.veyra.model.OccurrenceSelectionState
 import dev.veyra.model.PlaybackBinding
+import dev.veyra.model.PlaybackControlsMode
 import dev.veyra.model.QueueContext
 
 enum class PodcastProgressSource { CANONICAL, LEGACY }
@@ -37,10 +40,24 @@ data class PodcastEpisodeProgress(
  * selected now; other rows remain historical/unverified until a fresh Play establishes a
  * recording. A row's played flag is independent of resume compatibility.
  */
+/** Exact queue occurrence/binding/revision target; never a same-media or newest-recording guess. */
+data class PodcastResumeTarget(
+    val occurrenceId: String,
+    val bindingId: String,
+    val recordingId: String,
+    val legacyRecordingId: String? = null,
+    val queueRevision: Long,
+)
+
 data class PodcastProgressView(
     val episodes: Map<String, PodcastEpisodeProgress>,
     val currentEpisodeId: String? = null,
     val currentRecordingId: String? = null,
+    val currentOccurrenceId: String? = null,
+    val currentBindingId: String? = null,
+    val queueRevision: Long? = null,
+    /** Exact displayed PODCAST queue targets, keyed by catalogue episode id. */
+    val queuedTargets: Map<String, List<PodcastResumeTarget>> = emptyMap(),
 ) {
     fun forEpisode(mediaId: String): PodcastEpisodeProgress? = episodes[mediaId]
 
@@ -102,7 +119,32 @@ fun podcastProgressView(view: PlaybackAcquisitionView?): PodcastProgressView? {
     val currentEpisodeId = subject?.mediaId?.takeIf { snapshot.media[it]?.kind == MediaKind.EPISODE }
     val currentRecordingId = occurrence?.bindingId?.let(state.bindings::get)?.recordingId
         ?.let(state.recordings::get)?.canonicalId
-    return PodcastProgressView(entries, currentEpisodeId, currentRecordingId)
+    val queuedTargets = linkedMapOf<String, MutableList<PodcastResumeTarget>>()
+    queue?.displayedOrder?.forEach { id ->
+        val item = state.occurrences[id] ?: return@forEach
+        if (item.controlsMode != PlaybackControlsMode.PODCAST || item.selectionState != OccurrenceSelectionState.BOUND) {
+            return@forEach
+        }
+        val bindingId = item.bindingId ?: return@forEach
+        val subject = item.subjectId?.let(state.subjects::get) as? ExecutableSubject.CatalogMedia ?: return@forEach
+        val binding = state.bindings[bindingId] ?: return@forEach
+        val recording = binding.recordingId?.let(state.recordings::get)?.canonicalId ?: return@forEach
+        val legacyRecording = if (item.origin == AcquisitionOrigin.SCHEMA2) {
+            snapshot.playbackBindings[bindingId.value]?.recordingIdFor(subject.mediaId)
+        } else null
+        queuedTargets.getOrPut(subject.mediaId) { mutableListOf() } += PodcastResumeTarget(
+            occurrenceId = id.value,
+            bindingId = bindingId.value,
+            recordingId = recording,
+            legacyRecordingId = legacyRecording,
+            queueRevision = queue.editRevision,
+        )
+    }
+    return PodcastProgressView(entries, currentEpisodeId, currentRecordingId,
+        currentOccurrenceId = queue?.currentOccurrenceId?.value,
+        currentBindingId = occurrence?.bindingId?.value,
+        queueRevision = queue?.editRevision,
+        queuedTargets = queuedTargets)
 }
 
 private fun legacyProgress(mediaId: String, progress: MediaProgress,

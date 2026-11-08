@@ -65,6 +65,7 @@ class AppContainer(
     private val http: SafeHttp = createSafeHttp(),
     gateway: KmpMediaGateway = YouTubeKmpMediaGateway(platform.youtube),
     private val clock: Clock = SystemClock(),
+    private val playbackTestHooks: PlaybackTestHooks = PlaybackTestHooks(),
 ) {
     private val lifetime = SupervisorJob(parentScope.coroutineContext[Job])
     private val scope = CoroutineScope(parentScope.coroutineContext + lifetime + Dispatchers.Default)
@@ -119,7 +120,7 @@ class AppContainer(
     val resolver = AppSourceResolver(store, files, platform.validator, executionGateway, clock,
         materializationEvidence = acquisitionOwner.materializationEvidence)
     val playback = PlaybackController(store, platform.engine, resolver, scope, clock,
-        acquisition = acquisitionOwner.playbackServices)
+        acquisition = acquisitionOwner.playbackServices, testHooks = playbackTestHooks)
     private val acquisition = acquisitionOwner.acquisition
     private val downloadBatches = acquisitionOwner.batches
     private val acquisitionDependencies = acquisitionOwner.downloadDependencies(
@@ -529,28 +530,48 @@ class AppContainer(
      * occurrence naming the displayed legacy/current binding may be resumed; no fresh request or
      * online fallback is manufactured. Stale queue/occurrence identity fails closed.
      */
-    private suspend fun resumeEpisode(mediaId: String, bindingIdValue: String?) {
-        val state = playback.state.value
-        val selected = state.currentSelection
+    private suspend fun resumeEpisode(mediaId: String, bindingIdValue: String?, occurrenceIdValue: String?,
+        queueRevisionValue: Long?) {
         val view = store.acquisitionView()
         val queue = view.acquisition.queues[QueueContext.PODCAST]
             ?: throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "resume_queue_missing"))
-        if (selected != null && selected.controlsMode == PlaybackControlsMode.PODCAST &&
-            selected.catalogMedia?.id == mediaId && selected.selectionState == OccurrenceSelectionState.BOUND &&
-            queue.currentOccurrenceId == selected.occurrenceId &&
-            (bindingIdValue.isNullOrBlank() || selected.bindingId?.value == bindingIdValue)) {
+        val occurrenceId = occurrenceIdValue?.takeIf { it.isNotBlank() }?.let(::ExecutionOccurrenceId)
+        val occurrence = occurrenceId?.let(view.acquisition.occurrences::get)
+        if (occurrenceId != null && occurrence == null) {
+            throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "resume_target_unavailable"))
+        }
+        if (occurrence != null) {
+            val bindingId = bindingIdValue?.takeIf { it.isNotBlank() }
+            val selected = try { PlaybackSelection.project(view.library, occurrence.id) } catch (_: Exception) { null }
+            if (queueRevisionValue == null || queue.editRevision != queueRevisionValue ||
+                occurrence.id !in queue.displayedOrder || occurrence.controlsMode != PlaybackControlsMode.PODCAST ||
+                occurrence.selectionState != OccurrenceSelectionState.BOUND ||
+                bindingId == null || occurrence.bindingId?.value != bindingId ||
+                selected?.catalogMedia?.id != mediaId) {
+                throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "resume_target_unavailable"))
+            }
             command(PlaybackCommand.ResumeOccurrence(QueueContext.PODCAST, queue.editRevision,
-                selected.occurrenceId, selected.bindingId))
+                occurrence.id, occurrence.bindingId))
             return
         }
+        // Compatibility for a caller that carries only the exact legacy binding. The binding must
+        // still resolve to exactly one displayed occurrence for this media/context, never a newest
+        // same-media or current-MUSIC substitute.
         val bindingId = bindingIdValue?.takeIf { it.isNotBlank() }
             ?: throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "resume_target_unavailable"))
-        val occurrence = queue.displayedOrder.asSequence()
-            .mapNotNull(view.acquisition.occurrences::get)
-            .firstOrNull { it.controlsMode == PlaybackControlsMode.PODCAST && it.bindingId?.value == bindingId }
+        if (queueRevisionValue != null && queue.editRevision != queueRevisionValue) {
+            throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "resume_target_unavailable"))
+        }
+        val matches = queue.displayedOrder.mapNotNull(view.acquisition.occurrences::get).filter { candidate ->
+            candidate.controlsMode == PlaybackControlsMode.PODCAST &&
+                candidate.selectionState == OccurrenceSelectionState.BOUND &&
+                candidate.bindingId?.value == bindingId &&
+                runCatching { PlaybackSelection.project(view.library, candidate.id).catalogMedia?.id }.getOrNull() == mediaId
+        }
+        val target = matches.singleOrNull()
             ?: throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "resume_target_unavailable"))
         command(PlaybackCommand.ResumeOccurrence(QueueContext.PODCAST, queue.editRevision,
-            occurrence.id, occurrence.bindingId))
+            target.id, target.bindingId))
     }
 
     /**
@@ -924,7 +945,8 @@ class AppContainer(
                 mutablePodcastDetails.update { it.copy(options = it.options + (action.showId to action.options)) }
             }
             is PodcastAction.PlayEpisode -> play(listOf(episode(action.mediaId)))
-            is PodcastAction.ResumeEpisode -> resumeEpisode(action.mediaId, action.bindingId)
+            is PodcastAction.ResumeEpisode -> resumeEpisode(action.mediaId, action.bindingId,
+                action.occurrenceId, action.expectedQueueRevision)
             is PodcastAction.PlaySavedEpisode -> playSaved(episode(action.mediaId), action.bindingId)
             is PodcastAction.ValidateRetainedDownload -> validateRetainedDownload(action.downloadId, action.bindingId)
             is PodcastAction.StartOver -> if (!restartCurrentPodcast(action.mediaId)) {

@@ -8,6 +8,8 @@ import dev.veyra.data.getOrThrow
 import dev.veyra.model.AppFailure
 import dev.veyra.model.FailureCode
 import dev.veyra.model.AppSettings
+import dev.veyra.data.UpdateStandaloneDownloadIntent
+import dev.veyra.model.DownloadBatchIntent
 import dev.veyra.model.DownloadStatus
 import dev.veyra.model.ExecutableSubject
 import dev.veyra.model.ExecutionBindingId
@@ -32,12 +34,15 @@ import dev.veyra.playback.NativeReaderDrainResult
 import dev.veyra.playback.PlaybackCommand
 import dev.veyra.playback.PlaybackSelection
 import dev.veyra.playback.PlaybackState
+import dev.veyra.playback.PlaybackTestHooks
 import dev.veyra.playback.getOrThrow as playbackResultGetOrThrow
 import dev.veyra.playback.ResolvedPlayable
 import dev.veyra.source.execution.AcquisitionPlaybackSource
 import dev.veyra.source.youtube.YouTubeMediaSource
 import dev.veyra.ui.music.MusicUiAction
 import dev.veyra.ui.podcasts.PodcastAction
+import dev.veyra.ui.podcasts.podcastEpisodeUiState
+import dev.veyra.ui.podcasts.podcastProgressView
 import dev.veyra.ui.downloads.verifiedDownload
 import java.nio.file.Files
 import java.nio.file.Path
@@ -92,11 +97,23 @@ class SavedRecordingPlaybackTest {
 
                 // A saved playback creates/reuses exactly one exact occurrence for the R1 request.
                 assertEquals(1, fixture.occurrencesFor(binding))
+                val occurrenceBefore = fixture.store.acquisitionView().acquisition.queues
+                    .getValue(QueueContext.MUSIC).let { queue ->
+                        queue to queue.displayedOrder.mapNotNull { id ->
+                            fixture.store.acquisitionView().acquisition.occurrences[id]
+                        }.single { it.bindingId == binding }.id
+                    }
                 val firstLoads = fixture.engine.loads.size
                 fixture.playSaved(MusicUiAction.PlaySaved(item, binding.value), binding)
                 withTimeout(20_000L) { while (fixture.engine.loads.size <= firstLoads) delay(20) }
                 assertEquals(1, fixture.occurrencesFor(binding),
                     "The second saved tap must reuse the exact queued occurrence")
+                val queueAfter = fixture.store.acquisitionView().acquisition.queues.getValue(QueueContext.MUSIC)
+                assertEquals(occurrenceBefore.second, queueAfter.displayedOrder.mapNotNull { id ->
+                    fixture.store.acquisitionView().acquisition.occurrences[id]
+                }.single { it.bindingId == binding }.id, "The exact occurrence identity must be reused")
+                assertEquals(occurrenceBefore.first.editRevision, queueAfter.editRevision,
+                    "The reused occurrence must not requeue with a new edit revision")
                 assertEquals(firstLoads + 1, fixture.engine.loads.size)
                 assertEquals(before, fixture.gatewayCounts)
 
@@ -162,6 +179,134 @@ class SavedRecordingPlaybackTest {
                 withTimeout(20_000L) { while (fixture.engine.loads.size <= firstLoads) delay(20) }
                 assertEquals(45_000L, fixture.engine.loads.last().startPositionMs)
                 assertEquals(1, fixture.occurrencesFor(binding))
+                assertEquals(before, fixture.gatewayCounts,
+                    "The second saved podcast tap must not prepare/query/transfer")
+            } finally {
+                fixture.close()
+            }
+        }
+    }
+
+    @Test
+    fun postPreflightRevocationMayCommitQueueButNeverNativeOrOnline() = runBlocking {
+        withTimeout(180_000L) {
+            val item = TypedDownloadPresentationSupport.youtubeItem("saved-race", "Saved race title")
+            val fixture = SavedPlaybackFixture()
+            try {
+                fixture.initialize()
+                fixture.store.upsertCatalog(listOf(item)).getOrThrow()
+                val binding = fixture.downloadAndWait(item)
+                fixture.playSaved(MusicUiAction.PlaySaved(item, binding.value), binding)
+                fixture.app.playback.dispatch(PlaybackCommand.Stop).playbackResultGetOrThrow()
+                val initial = fixture.store.acquisitionView()
+                val initialQueue = initial.acquisition.queues.getValue(QueueContext.MUSIC)
+                val occurrence = initialQueue.displayedOrder.mapNotNull(initial.acquisition.occurrences::get)
+                    .single { it.bindingId == binding }
+                val assetId = initial.acquisition.assetUses.single { it.requestedBindingId == binding }.materializationAssetId
+                val asset = initial.acquisition.materializations.getValue(assetId)
+                val job = initial.acquisition.physicalDownloads.values.single { it.assetId == asset.id }
+                val claim = initial.acquisition.claims.values.single {
+                    it.physicalJobId == job.id && it.requestedBindingId == binding
+                }
+                // Make the saved occurrence genuinely non-current so the tested Activate path runs.
+                fixture.app.onMusicAction(MusicUiAction.Enqueue(item, playNext = false))
+                withTimeout(20_000L) {
+                    fixture.store.acquisitionView().acquisition.queues.getValue(QueueContext.MUSIC)
+                        .displayedOrder.size == initialQueue.displayedOrder.size + 1
+                }
+                val nextQueue = fixture.store.acquisitionView().acquisition.queues.getValue(QueueContext.MUSIC)
+                val nextOccurrence = nextQueue.displayedOrder.first { it != occurrence.id }
+                fixture.app.onMusicAction(MusicUiAction.PlayQueueEntry(QueueContext.MUSIC, nextOccurrence.value))
+                withTimeout(20_000L) {
+                    fixture.store.acquisitionView().acquisition.queues.getValue(QueueContext.MUSIC)
+                        .currentOccurrenceId == nextOccurrence
+                }
+                val before = fixture.store.acquisitionView()
+                val queue = before.acquisition.queues.getValue(QueueContext.MUSIC)
+                assertEquals(occurrence.id, queue.displayedOrder.first { it != nextOccurrence })
+                val beforeLoads = fixture.engine.loads.size
+                val beforeGateway = fixture.gatewayCounts
+                val entered = CompletableDeferred<Unit>()
+                val release = CompletableDeferred<Unit>()
+                fixture.playbackHooks.beforeActivate = { entered.complete(Unit); release.await() }
+                try {
+                    fixture.app.onMusicAction(MusicUiAction.PlaySaved(item, binding.value))
+                    withTimeout(20_000L) { entered.await() }
+                    // Deterministic post-preflight/pre-Activate loss: change only the exact durable
+                    // claim, not the queue or a native owner. The actor then commits Activate/
+                    // AdmitLoad, and the final local-only resolver must reject before native/online.
+                    fixture.store.acquisition.updateStandaloneDownloadIntent(UpdateStandaloneDownloadIntent(
+                        downloadId = job.id, expectedProducer = job.producer,
+                        expectedOwnershipGeneration = job.ownershipGeneration, claimId = claim.id,
+                        expectedClaimGeneration = claim.generation, expectedOwnerIntentRevision = claim.ownerIntentRevision,
+                        intent = DownloadBatchIntent.CANCELLED, retainCompletedAsset = false,
+                        nowEpochMs = claim.updatedEpochMs + 1,
+                    ))
+                    release.complete(Unit)
+                    val failure = withTimeout(20_000L) {
+                        fixture.app.notice.first { it?.failure != null }?.failure
+                    }
+                    assertNotNull(failure)
+                    assertEquals(FailureCode.INVALID_STATE, failure.code)
+                    assertEquals("saved_local_authority_lost", failure.detail)
+                    val after = fixture.store.acquisitionView().acquisition
+                    assertTrue(after.queues.getValue(QueueContext.MUSIC).editRevision > queue.editRevision,
+                        "The accepted non-atomic boundary may commit the queue activation")
+                    assertEquals(occurrence.id, after.queues.getValue(QueueContext.MUSIC).currentOccurrenceId)
+                    assertEquals(beforeLoads, fixture.engine.loads.size,
+                        "No native load may start after the local-only post-admission check fails")
+                    assertEquals(beforeGateway, fixture.gatewayCounts,
+                        "No online prepare/query/transfer may occur")
+                } finally {
+                    fixture.playbackHooks.beforeActivate = null
+                    release.complete(Unit)
+                }
+            } finally {
+                fixture.close()
+            }
+        }
+    }
+
+    @Test
+    fun legacyDownloadedPodcastResumeUsesExactQueuedOccurrenceAt45sAndFailsClosedWithoutOne() = runBlocking {
+        withTimeout(180_000L) {
+            val directory = TypedDownloadPresentationSupport.workDirectory()
+            val historical = AppContainerSchema2Fixture.seedPodcast(directory)
+            val fixture = SavedPlaybackFixture(directory)
+            try {
+                fixture.initialize()
+                val view = fixture.store.acquisition.playbackView()
+                val progress = assertNotNull(podcastProgressView(view))
+                val queue = view.acquisition.queues.getValue(QueueContext.PODCAST)
+                val occurrence = assertNotNull(queue.currentOccurrenceId?.let(view.acquisition.occurrences::get))
+                assertEquals(historical.binding.id, occurrence.bindingId?.value)
+                val ui = fixture.store.state.value.podcastEpisodeUiState(historical.item, progressView = progress)
+                assertTrue(ui.resumeActionable)
+                assertEquals(historical.binding.id, ui.resumeBindingId)
+                assertEquals(occurrence.id.value, ui.resumeOccurrenceId)
+                assertEquals(queue.editRevision, ui.resumeQueueRevision)
+                val beforeGateway = fixture.gatewayCounts
+                val beforeLoads = fixture.engine.legacyLoads.size
+                fixture.app.onPodcastAction(PodcastAction.ResumeEpisode(historical.item.id, ui.resumeBindingId,
+                    ui.resumeOccurrenceId, ui.resumeQueueRevision))
+                withTimeout(20_000L) { while (fixture.engine.legacyLoads.size <= beforeLoads) delay(20) }
+                val load = fixture.engine.legacyLoads.single()
+                assertEquals(45_000L, load.startPositionMs)
+                val state = fixture.app.playback.state.value
+                assertEquals(QueueContext.PODCAST, state.activeContext)
+                assertEquals(historical.binding.id, state.currentSelection?.bindingId?.value)
+                assertEquals(occurrence.id, state.currentSelection?.occurrenceId)
+                assertEquals(beforeGateway, fixture.gatewayCounts,
+                    "Exact legacy local resume must not resolve or transfer online")
+
+                val loadsAfter = fixture.engine.legacyLoads.size
+                fixture.app.onPodcastAction(PodcastAction.ResumeEpisode(historical.item.id, historical.binding.id,
+                    "missing-legacy-occurrence", queue.editRevision))
+                val failure = withTimeout(20_000L) { fixture.app.notice.first { it?.failure != null }?.failure }
+                assertNotNull(failure)
+                assertEquals(FailureCode.INVALID_STATE, failure.code)
+                assertEquals("resume_target_unavailable", failure.detail)
+                assertEquals(loadsAfter, fixture.engine.legacyLoads.size)
             } finally {
                 fixture.close()
             }
@@ -256,6 +401,7 @@ class SavedRecordingPlaybackTest {
                         queue.editRevision, occurrence.id, binding, localOnly = true)).playbackResultGetOrThrow()
                 }
                 assertEquals(FailureCode.INVALID_STATE, failure.failure.code)
+                assertEquals("saved_local_authority_lost", failure.failure.detail)
                 assertEquals(beforeQueue, fixture.store.acquisitionView().acquisition.queues)
                 assertEquals(beforeOccurrences, fixture.store.acquisitionView().acquisition.occurrences)
                 assertEquals(beforeLoads, fixture.engine.loads.size)
@@ -347,7 +493,8 @@ private class SavedPlaybackFixture(
     private val lifetime = SupervisorJob()
     private val scope = CoroutineScope(lifetime + Dispatchers.Default +
         CoroutineExceptionHandler { _, _ -> })
-    val app = AppContainer(platform, scope, gateway = platform.gateway)
+    val playbackHooks = PlaybackTestHooks()
+    val app = AppContainer(platform, scope, gateway = platform.gateway, playbackTestHooks = playbackHooks)
     val store get() = app.store
     val engine get() = platform.engine
     val gateway get() = platform.gateway
@@ -437,24 +584,39 @@ internal class SavedPlaybackEngine : AudioEngine {
         val startPositionMs: Long,
         val generation: Long,
     )
+    data class LegacyLoad(
+        val source: ResolvedPlayable,
+        val startPositionMs: Long,
+        val generation: Long,
+    )
     override val capabilities = EngineCapabilities()
     private val channel = Channel<EngineEvent>(Channel.UNLIMITED)
     override val events: Flow<EngineEvent> = channel.receiveAsFlow()
     val loads = CopyOnWriteArrayList<Load>()
+    val legacyLoads = CopyOnWriteArrayList<LegacyLoad>()
     private var activeGeneration = 0L
     private var active: Load? = null
+    private var legacyActive = false
     private var positionMs = 0L
     private var durationMs: Long? = null
     private var seekSequence = 0L
 
     override suspend fun prepare(source: ResolvedPlayable, startPositionMs: Long, generation: Long) {
-        error("Saved playback never uses the legacy source path")
+        if (generation < activeGeneration || generation == activeGeneration && (active != null || legacyActive)) return
+        active = null
+        legacyActive = true
+        activeGeneration = generation
+        legacyLoads += LegacyLoad(source, startPositionMs.coerceAtLeast(0), generation)
+        positionMs = startPositionMs.coerceAtLeast(0)
+        durationMs = source.durationMs
+        channel.send(EngineEvent.Ready(generation, durationMs, source.seekableHint ?: true))
     }
 
     override suspend fun prepare(source: AcquisitionPlaybackSource, selection: PlaybackSelection,
         startPositionMs: Long, generation: Long) {
         NativePlaybackSource.Acquired(source, selection).validateSelection()
         val load = Load(source, selection, startPositionMs.coerceAtLeast(0), generation)
+        legacyActive = false
         active = load
         activeGeneration = generation
         positionMs = load.startPositionMs
@@ -464,7 +626,7 @@ internal class SavedPlaybackEngine : AudioEngine {
     }
 
     override suspend fun play(generation: Long) {
-        if (generation != activeGeneration || active == null) return
+        if (generation != activeGeneration || (active == null && !legacyActive)) return
         channel.send(EngineEvent.StateChanged(generation, EnginePhase.PLAYING, true, 1f))
         channel.send(EngineEvent.Position(generation, positionMs, durationMs, seekSequence))
     }
@@ -474,7 +636,7 @@ internal class SavedPlaybackEngine : AudioEngine {
     }
 
     override suspend fun pause(generation: Long) {
-        if (generation != activeGeneration || active == null) return
+        if (generation != activeGeneration || (active == null && !legacyActive)) return
         channel.send(EngineEvent.StateChanged(generation, EnginePhase.PAUSED, false, 1f))
     }
 
@@ -490,6 +652,7 @@ internal class SavedPlaybackEngine : AudioEngine {
     override suspend fun stop(generation: Long) {
         if (generation < activeGeneration) return
         active = null
+        legacyActive = false
         activeGeneration = generation
         positionMs = 0
         durationMs = null
@@ -500,6 +663,7 @@ internal class SavedPlaybackEngine : AudioEngine {
 
     override suspend fun close() {
         active = null
+        legacyActive = false
         channel.close()
     }
 }

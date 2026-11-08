@@ -84,7 +84,12 @@ sealed interface PodcastAction {
     data class SetShowListOptions(val showId: String, val options: PodcastListOptions) : PodcastAction
     data class PlayEpisode(val mediaId: String) : PodcastAction
     /** Exact current/queued occurrence resume; never a fresh catalogue Play. */
-    data class ResumeEpisode(val mediaId: String, val bindingId: String? = null) : PodcastAction
+    data class ResumeEpisode(
+        val mediaId: String,
+        val bindingId: String? = null,
+        val occurrenceId: String? = null,
+        val expectedQueueRevision: Long? = null,
+    ) : PodcastAction
     /** Explicit exact saved-R1 episode action; owner revalidates all identity/readiness fences. */
     data class PlaySavedEpisode(val mediaId: String, val bindingId: String) : PodcastAction
     data class StartOver(val mediaId: String) : PodcastAction
@@ -122,6 +127,8 @@ data class PodcastEpisodeUiState(
     val downloadedBinding: PlaybackBinding? = null,
     /** Canonical paired playback evidence; null keeps the legacy snapshot fallback. */
     val progressView: PodcastProgressView? = null,
+    /** Unambiguous saved typed binding from the full download projection, never newest-row. */
+    val savedPlayBindingId: String? = null,
 ) {
     val listingDurationMs: Long? get() = episode.durationMs?.takeIf { it > 0L }
     val canonicalProgress: PodcastEpisodeProgress? get() = progressView?.forEpisode(episode.id)
@@ -130,10 +137,6 @@ data class PodcastEpisodeUiState(
     val historicalPositionMs: Long get() = canonicalProgress?.positionMs ?: progress?.positionMs?.coerceAtLeast(0L) ?: 0L
     /** The one row the existing download controls operate, by its actual physical job id. */
     val activeDownload: DownloadSurfaceEntry? get() = typedDownload ?: download?.toDownloadSurfaceEntry()
-    /** Exact typed catalogue R1 from a currently verified ready row; never a legacy receipt. */
-    val savedPlayBindingId: String? get() = typedDownload
-        ?.takeIf { it.ready && it.origin == DownloadSurfaceOrigin.TYPED_CATALOGUE }
-        ?.bindingId?.takeIf { it.isNotBlank() }
     // PlayEpisode is a fresh Play, not a request to resume the displayed current binding.
     // The resolver prefers a completed local artifact; without one, a fresh online first-result
     // search is still unknown. Neither CURRENT nor the newest historical receipt pins that search.
@@ -184,19 +187,33 @@ data class PodcastEpisodeUiState(
     val canPlay: Boolean get() = downloaded || (!offlineOnly && hasAudioSource)
     val canResume: Boolean get() = inProgress && progressRecording == PodcastProgressRecording.MATCHED
     /**
-     * Resume is actionable only when the displayed matched progress belongs to the exact current
-     * canonical occurrence or the exact legacy downloaded target whose recording matches that
-     * progress. A different current disclosure never borrows the historical resume position.
+     * Exact displayed target. Canonical current progress uses the PODCAST queue cursor even when
+     * MUSIC is the active native context; legacy progress requires one queued occurrence with the
+     * exact downloaded binding/recording. No same-media, newest, or current-music substitute.
      */
-    val resumeActionable: Boolean get() = canResume &&
-        (progressView?.currentEpisodeId == episode.id || nextPlayBinding != null)
-    val resumeBindingId: String? get() = when {
-        !resumeActionable -> null
-        // Canonical current resumes the controller's exact current occurrence; do not expose an
-        // unrelated legacy display receipt as the target.
-        progressView?.currentEpisodeId == episode.id -> null
-        else -> nextPlayBinding?.id
+    private val canonicalResumeTarget: PodcastResumeTarget? get() {
+        val view = progressView ?: return null
+        if (view.currentEpisodeId != episode.id) return null
+        val occurrenceId = view.currentOccurrenceId ?: return null
+        val bindingId = view.currentBindingId ?: return null
+        val recordingId = view.currentRecordingId ?: return null
+        val revision = view.queueRevision ?: return null
+        return PodcastResumeTarget(occurrenceId, bindingId, recordingId, queueRevision = revision)
     }
+    private val legacyResumeTarget: PodcastResumeTarget? get() {
+        val binding = nextPlayBinding ?: return null
+        val recording = binding.recordingIdFor(episode.id) ?: return null
+        return progressView?.queuedTargets?.get(episode.id).orEmpty()
+            .filter { it.bindingId == binding.id && it.legacyRecordingId == recording }
+            .singleOrNull()
+    }
+    val resumeActionable: Boolean get() = canResume &&
+        (canonicalResumeTarget != null || legacyResumeTarget != null)
+    val resumeTarget: PodcastResumeTarget?
+        get() = if (!resumeActionable) null else canonicalResumeTarget ?: legacyResumeTarget
+    val resumeOccurrenceId: String? get() = resumeTarget?.occurrenceId
+    val resumeBindingId: String? get() = resumeTarget?.bindingId
+    val resumeQueueRevision: Long? get() = resumeTarget?.queueRevision
     val noLongerInFeed: Boolean get() = show?.let {
         it.lastRefreshEpochMs != null && episode.id !in it.episodeIds
     } ?: false
@@ -236,6 +253,7 @@ fun AppSnapshot.podcastEpisodeUiState(episode: MediaItem, currentBinding: Playba
         progressBinding = progressBinding,
         downloadedBinding = downloadedBinding,
         progressView = progressView,
+        savedPlayBindingId = downloadSurface?.unambiguousCatalogueBinding(episode.id),
     )
 }
 

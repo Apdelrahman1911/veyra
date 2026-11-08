@@ -61,6 +61,68 @@ class PodcastProgressAppJourneyTest {
         SourceRef(SourceProvider.RSS, "journey-episode", feedUrl = show.feedUrl), showId = show.id)
 
     @Test
+    fun canonicalResumeActivatesPodcastQueueWhileMusicIsActive() = runBlocking {
+        withTimeout(180_000L) {
+            val initial = CoreShellTestFixture.snapshot(navigation = AppNavigation(destination = AppDestination.PODCASTS,
+                details = listOf(AppDetail(DetailKind.SHOW, CoreShellTestFixture.show.id))))
+            val fixture = CoreShellTestFixture.create(initial)
+            var mounted by mutableStateOf(true)
+            try {
+                compose.setContent {
+                    CompositionLocalProvider(LocalDensity provides Density(1f, 1f)) {
+                        Box(Modifier.size(900.dp, 720.dp)) { if (mounted) VeyraApp(fixture.container) }
+                    }
+                }
+                compose.onNodeWithTag("podcast-show-screen").assertIsDisplayed()
+                val episode = CoreShellTestFixture.episode
+                fixture.container.onMusicAction(MusicUiAction.PlayQueueEntry(QueueContext.PODCAST, "episode-now"))
+                withTimeout(20_000L) {
+                    fixture.container.playback.state.first {
+                        it.isPlaying && it.currentSelection?.catalogMedia?.id == episode.id
+                    }
+                }
+                val podcastBinding = requireNotNull(fixture.container.playback.state.value.currentSelection?.bindingId)
+                val podcastOccurrence = requireNotNull(fixture.container.playback.state.value.currentSelection?.occurrenceId)
+                val generation = fixture.engine.loads.single().generation
+                fixture.engine.sendPosition(generation, 45_000L, 900_000L)
+                withTimeout(20_000L) { fixture.container.playback.state.first { it.positionMs == 45_000L } }
+                fixture.container.playback.dispatch(PlaybackCommand.FlushProgress).playbackResultGetOrThrow()
+                withTimeout(20_000L) {
+                    fixture.container.podcastProgress.first { it?.forEpisode(episode.id)?.positionMs == 45_000L }
+                }
+
+                // A normal cross-media browsing state: MUSIC is the active native context while the
+                // PODCAST queue still names the checkpointed occurrence.
+                fixture.container.onMusicAction(MusicUiAction.PlayQueueEntry(QueueContext.MUSIC, "music-now"))
+                withTimeout(20_000L) {
+                    fixture.container.playback.state.first {
+                        it.isPlaying && it.activeContext == QueueContext.MUSIC
+                    }
+                }
+                val beforeLoads = fixture.engine.loads.size
+                val beforeQueries = fixture.gateway.queries.toList()
+                fixture.container.onPodcastAction(PodcastAction.OpenEpisode(episode.id))
+                withTimeout(20_000L) { fixture.container.navigation.first { it.detail?.kind == DetailKind.EPISODE } }
+                compose.onNodeWithTag("podcast-episode-detail").performScrollToNode(hasTestTag("podcast-detail-play"))
+                compose.onNodeWithTag("podcast-detail-play").assertIsDisplayed().performClick()
+                withTimeout(20_000L) { while (fixture.engine.loads.size <= beforeLoads) delay(20) }
+                val resumed = fixture.engine.loads.last()
+                assertEquals(45_000L, resumed.startPositionMs)
+                val state = fixture.container.playback.state.value
+                assertEquals(QueueContext.PODCAST, state.activeContext)
+                assertEquals(podcastBinding, state.currentSelection?.bindingId)
+                assertEquals(podcastOccurrence, state.currentSelection?.occurrenceId)
+                assertEquals(beforeQueries, fixture.gateway.queries.toList(),
+                    "Cross-context exact resume must not create a new title query")
+            } finally {
+                mounted = false
+                compose.waitForIdle()
+                fixture.close()
+            }
+        }
+    }
+
+    @Test
     fun canonicalMarkPlayedReachesTheExistingShowAndEpisodeSurfaces() = runBlocking {
         withTimeout(120_000L) {
             val support = TypedDownloadPresentationSupport(TypedDownloadPresentationSupport.workDirectory())

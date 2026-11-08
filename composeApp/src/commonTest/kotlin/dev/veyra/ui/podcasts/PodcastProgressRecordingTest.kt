@@ -20,6 +20,9 @@ import dev.veyra.model.SourceProvider
 import dev.veyra.model.SourceRef
 import dev.veyra.ui.design.AppStrings
 import dev.veyra.ui.design.TextKey
+import dev.veyra.ui.downloads.DownloadSurface
+import dev.veyra.ui.downloads.DownloadSurfaceEntry
+import dev.veyra.ui.downloads.DownloadSurfaceOrigin
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -58,6 +61,52 @@ class PodcastProgressRecordingTest {
         savedEpisodeIds = setOf(episode.id), followedShowIds = setOf(show.id),
         queues = mapOf(QueueContext.PODCAST to queue), settings = AppSettings(offlineOnly = true),
     )
+
+    @Test
+    fun podcastSavedChoiceIsUnambiguousAndNeverOverridesCanonicalResume() {
+        fun entry(id: String, binding: String, time: Long) = DownloadSurfaceEntry(
+            id = id, origin = DownloadSurfaceOrigin.TYPED_CATALOGUE, mediaId = episode.id,
+            status = DownloadStatus.COMPLETE, bytesDownloaded = 10L, hasOwnedBytes = true,
+            ready = true, bindingId = binding, updatedEpochMs = time,
+        )
+        val twoReady = DownloadSurface(listOf(entry("ready-A", "binding-A", 1L), entry("ready-B", "binding-B", 2L)))
+        assertNull(snapshot().copy(progress = emptyMap()).podcastEpisodeUiState(episode,
+            downloadSurface = twoReady).savedPlayBindingId,
+            "Two ready recordings must not collapse to the newest saved binding")
+
+        val canonical = PodcastEpisodeProgress(
+            mediaId = episode.id, positionMs = 45_000L, durationMs = 180_000L, played = false,
+            updatedEpochMs = 40L, bindingId = "canonical-binding-B", recordingId = "lmnopqrstuv",
+            occurrenceId = "occ-B", source = PodcastProgressSource.CANONICAL, bindingValid = true,
+        )
+        val view = PodcastProgressView(mapOf(episode.id to canonical), currentEpisodeId = episode.id,
+            currentRecordingId = "lmnopqrstuv", currentOccurrenceId = "occ-B",
+            currentBindingId = "canonical-binding-B", queueRevision = 9L,
+            queuedTargets = mapOf(episode.id to listOf(PodcastResumeTarget(
+                "occ-B", "canonical-binding-B", "lmnopqrstuv", queueRevision = 9L))))
+        val canonicalState = snapshot().copy(progress = emptyMap()).podcastEpisodeUiState(episode,
+            downloadSurface = DownloadSurface(listOf(entry("ready-A", "binding-A", 1L))), progressView = view)
+        assertEquals("binding-A", canonicalState.savedPlayBindingId)
+        assertTrue(canonicalState.resumeActionable)
+        assertEquals("canonical-binding-B", canonicalState.resumeBindingId)
+        assertEquals("occ-B", canonicalState.resumeOccurrenceId)
+        assertEquals(9L, canonicalState.resumeQueueRevision)
+
+        val legacyView = PodcastProgressView(mapOf(episode.id to PodcastEpisodeProgress(
+            mediaId = episode.id, positionMs = 45_000L, durationMs = 180_000L, played = false,
+            updatedEpochMs = 40L, bindingId = selected.id, recordingId = "lmnopqrstuv",
+            occurrenceId = "queued-legacy", source = PodcastProgressSource.LEGACY, bindingValid = true,
+        )), queuedTargets = mapOf(episode.id to listOf(PodcastResumeTarget(
+            occurrenceId = "queued-legacy", bindingId = selected.id, recordingId = "schema2:lmnopqrstuv",
+            legacyRecordingId = "lmnopqrstuv", queueRevision = 5L,
+        ))))
+        val legacyState = snapshot().copy(progress = mapOf(episode.id to progress.copy(executionBindingId = selected.id)))
+            .podcastEpisodeUiState(episode, progressView = legacyView)
+        assertTrue(legacyState.resumeActionable)
+        assertEquals(selected.id, legacyState.resumeBindingId)
+        assertEquals("queued-legacy", legacyState.resumeOccurrenceId)
+        assertEquals(5L, legacyState.resumeQueueRevision)
+    }
 
     @Test
     fun changedDownloadedRecordingRetainsHistoryButNeverBorrowsItsResumeTimeline() {

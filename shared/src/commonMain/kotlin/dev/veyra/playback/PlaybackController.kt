@@ -22,6 +22,14 @@ import kotlin.random.Random
 private const val GRACEFUL_SHUTDOWN_TIMEOUT_MS = 5_000L
 
 /**
+ * Deterministic test-only observation seam between a successful fresh-Room preflight and the
+ * following queue activation. Production uses the default no-op instance.
+ */
+class PlaybackTestHooks {
+    @Volatile var beforeActivate: (suspend () -> Unit)? = null
+}
+
+/**
  * Single application-lifetime owner of two saved queue contexts and one native transport.
  * Network resolution is cancellable and outside the command loop. Native operations are ordered;
  * their callbacks must carry the originating load token. Only this owner writes queue/progress fields.
@@ -36,6 +44,7 @@ class PlaybackController(
     private val random: Random = Random.Default,
     private val checkpointIntervalMs: Long = 5_000,
     private val acquisition: PlaybackAcquisitionServices? = null,
+    private val testHooks: PlaybackTestHooks = PlaybackTestHooks(),
 ) {
     // Reject a composition error before attaching any child Job or accepting a resource owner.
     init {
@@ -1887,6 +1896,19 @@ class PlaybackController(
             if (command.localOnly) {
                 services.resolver.requireExactLocalAuthority(selection.bindingId ?: invalid("saved_local_binding_missing"))
             }
+            val sameCurrent = old.activeContext == command.context &&
+                queue.currentOccurrenceId == command.occurrenceId &&
+                old.currentEntryId == command.occurrenceId.value &&
+                old.currentSelection?.bindingId == selection.bindingId
+            if (sameCurrent) {
+                // Re-tapping the already-current exact occurrence is a reload, not a new queue edit.
+                // Preserve the occurrence and queue revision while refreshing the native load.
+                checkpoint(force = true)
+                start(view, true, true, AcquisitionPosition.RESUME, command.expectedBindingId,
+                    localOnly = command.localOnly)
+                return
+            }
+            testHooks.beforeActivate?.invoke()
             val updated = apply(AcquisitionPlaybackCommand.Activate(expected(queue), command.occurrenceId,
                 command.expectedBindingId, old.activeContext, 0, rateFor(selection, queue), false,
                 clock.epochMs(), checkpointWrite()))
