@@ -74,6 +74,25 @@ class DownloadPhysicalRecoveryCorrectionsTest {
         assertNull(runtime.drainCheckpointFailure(),
             "A newer completed cancellation generation still proves this older finalizer was superseded")
 
+        // A rollback finalizer can carry no admitted claims; the durable CANCELLED row and its
+        // CANCELLED claims are still exact proof that the stale finish lost to cancellation.
+        repository.state.value = repository.state.value.copy(
+            physicalDownloads = mapOf(PhysicalRuntimeFixture.JOB to original.copy(
+                status = DownloadStatus.CANCELLED, cleanupPending = true, leaseOwner = null,
+                leaseExpiresEpochMs = null, maintenanceKind = PhysicalDownloadMaintenanceKind.CLEANUP,
+                ownershipGeneration = 2)),
+            claims = mapOf(cancelled.id to cancelled.copy(generation = cancelled.generation + 1)))
+        val noClaim = runtime.epochs.begin(PhysicalRuntimeFixture.JOB, producer(contextR1),
+            1, null, null, null)
+        val noClaimCleanup = DownloadPhysicalCleanup(runtime, noClaim, emptyList(),
+            acceptedDurableOwner = true) { AcquisitionDownloadDurableSettlement.Stale }
+        host.cleanupRegistry.register(noClaimCleanup)
+        runtime.epochs.retain(noClaim, noClaimCleanup.token, noClaimCleanup, completesAcquisition = true)
+        runtime.epochs.finishAdmission(noClaim)
+        runtime.attemptCleanup(noClaimCleanup, report = false)
+        assertNull(runtime.drainCheckpointFailure(),
+            "A claim-less rollback against an already CANCELLED cleanup intent is still exact supersession")
+
         // The SAME stale settlement remains fatal while the exact generation is still active.
         repository.state.value = repository.state.value.copy(
             physicalDownloads = mapOf(PhysicalRuntimeFixture.JOB to original.copy(

@@ -1009,9 +1009,14 @@ internal class DownloadPhysicalRuntime(
         val relevant = before.scheduleRecord()
         if (kind != PhysicalDownloadMaintenanceKind.CLEANUP && DownloadPhysicalClaimRules.backgroundBlocked(before.job) ||
             before.job.livePhysicalLease(clock.epochMs()) ||
-            !explicitLocalRevalidation && (before.job.nextRetryEpochMs ?: 0) > clock.epochMs() ||
+            // An accepted removal intent owns cleanup regardless of a local validation recheck
+            // deadline; waiting for that deadline would leave the removal forever pending.
+            kind != PhysicalDownloadMaintenanceKind.CLEANUP &&
+                !explicitLocalRevalidation && (before.job.nextRetryEpochMs ?: 0) > clock.epochMs() ||
             !explicitLocalRevalidation &&
-                (physicalClaimDeferredUntil(relevant, kind.physicalClaimKind(), claimDeferrals.value) ?: 0) > clock.epochMs()) return null
+                (physicalClaimDeferredUntil(relevant, kind.physicalClaimKind(), claimDeferrals.value) ?: 0) > clock.epochMs()) {
+            return null
+        }
         val intent = before.finalization
         // Explicit validate may recheck an already-checked exact asset for a new R2; it never
         // bypasses host/lease/coverage/claim/cleanup gates, only the local recheck deadline.
@@ -1035,6 +1040,11 @@ internal class DownloadPhysicalRuntime(
         var lease: DownloadFileLease? = null
         var handedOff = false
         var acceptedDurableOwner = false
+        // A Committed claim may reveal a newer exact fence/claim set than the pre-read snapshot.
+        // Rollback must settle THAT committed identity; using the pre-claim identity leaves the
+        // canonical maintenance lease live forever and blocks every later cleanup pass.
+        var rollbackFence = proposedFence
+        var rollbackClaims = before.claims
         try {
             val paths = maintenancePaths(before, kind)
             lease = files.tryLeasePaths(paths, partial) ?: return null
@@ -1046,6 +1056,8 @@ internal class DownloadPhysicalRuntime(
             }
             if (claimed !is PhysicalDownloadCommit.Committed) return null
             acceptedDurableOwner = true
+            rollbackFence = claimed.value.fence
+            rollbackClaims = claimed.value.physical.claims
             if (claimed.value.fence != proposedFence || maintenancePaths(claimed.value.physical, kind) != paths ||
                 expectedOwner != null && claimed.value.physical.claims.toSet() != expectedOwner.claims.toSet())
                 fail(FailureCode.RECOVERY_REQUIRED, "download_maintenance_join_changed")
@@ -1060,11 +1072,16 @@ internal class DownloadPhysicalRuntime(
         } finally {
             if (!handedOff) withContext(NonCancellable) {
                 rollback(epoch, partial, listOfNotNull(lease), acceptedDurableOwner) {
-                    settle { repository.finishPhysicalDownloadMaintenance(FinishPhysicalDownloadMaintenance(proposedFence,
-                        kind, before.claims, false, null, clock.epochMs())) }
+                    settle { repository.finishPhysicalDownloadMaintenance(FinishPhysicalDownloadMaintenance(rollbackFence,
+                        kind, rollbackClaims, false, null, clock.epochMs())) }
                 }
                 epochs.finishAdmission(epoch)
-                deferClaim(id, kind.physicalClaimKind())
+                // A committed cleanup claim/rollback already made durable progress and released
+                // its exact lease. Re-deferring it behind a virtual/real recheck deadline can
+                // leave an accepted removal pending forever; let the scheduler retry promptly.
+                if (kind == PhysicalDownloadMaintenanceKind.CLEANUP && acceptedDurableOwner)
+                    clearClaimDeferrals(id, kind.physicalClaimKind())
+                else deferClaim(id, kind.physicalClaimKind())
             }
         }
     }
@@ -1660,20 +1677,20 @@ internal class DownloadPhysicalRuntime(
             val superseded = cleanup.epoch.revoked || currentJob == null ||
                 currentJob.ownershipGeneration != cleanup.epoch.physicalOwnershipGeneration ||
                 currentJob.producer != cleanup.epoch.producer || claimsChanged
-            // A late execution finalizer may lose the durable finish race to the foreign
-            // cancellation that already completed cleanup (possibly through a newer maintenance
-            // generation). Exact proof that THIS producer is terminally cancelled with no cleanup
-            // pending and only CANCELLED claims: the stale write was rejected, nothing is left to
-            // drain, so it is not an unknown checkpoint. An unchanged/active or non-cancelled
-            // generation, a pending cleanup, or a still-active claim stays fatal.
-            val terminalCancelled = currentJob != null &&
-                currentJob.status == DownloadStatus.CANCELLED && !currentJob.cleanupPending &&
+            // A late execution/rollback finalizer may lose the durable finish race to the foreign
+            // cancellation that already owns or completed cleanup (possibly through a newer
+            // maintenance generation). Exact proof that THIS producer is terminally cancelled:
+            // the current row is CANCELLED at this or a newer generation and every surviving claim
+            // is CANCELLED. The stale write was rejected, nothing active remains, so it is not an
+            // unknown checkpoint. An unchanged/non-cancelled generation or an ACTIVE claim stays
+            // fatal.
+            val cancelledSuperseded = currentJob != null &&
+                currentJob.status == DownloadStatus.CANCELLED &&
                 currentJob.producer == cleanup.epoch.producer &&
                 currentJob.ownershipGeneration >= cleanup.epoch.physicalOwnershipGeneration &&
-                currentClaims.all { it.intent == DownloadBatchIntent.CANCELLED } &&
-                (claimsChanged || cleanup.expectedClaims.isEmpty())
+                (currentClaims.isEmpty() || currentClaims.all { it.intent == DownloadBatchIntent.CANCELLED })
             val benignStale = cleanup.acceptedDurableOwner && durable == AcquisitionDownloadDurableSettlement.Stale &&
-                (cleanup.maintenanceKind != null && superseded || terminalCancelled ||
+                (cleanup.maintenanceKind != null && superseded || cancelledSuperseded ||
                     currentJob?.cleanupPending == true && (cleanup.epoch.revoked || claimsChanged ||
                         currentJob?.ownershipGeneration != cleanup.epoch.physicalOwnershipGeneration) ||
                     cleanup.epoch.revoked && currentJob?.status == DownloadStatus.CANCELLED)

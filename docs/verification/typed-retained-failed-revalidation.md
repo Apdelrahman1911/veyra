@@ -195,20 +195,24 @@ adjudications applied:
   the caller waits up to 5 s of real handoff time for an actual cleanup owner or a terminal
   pending/observation transition, then fails bounded; once an owner is present, its durable
   pending/observation settlement is awaited. Observations are generation-scoped, so a previous
-  removal can never settle a newer one. A consumed/failed Stale observation returns a bounded
+  removal can never settle a newer one. Explicit cleanup is not blocked by a local validation
+  recheck deadline; a committed maintenance claim whose post-read identity/paths changed rolls
+  back with the exact committed fence/claims and is not re-deferred, avoiding an orphaned
+  maintenance lease. A consumed/failed Stale observation returns a bounded
   `BACKGROUND_RESTRICTED`/exact recovery failure; a successful foreground retry can complete and
   return normally. The gate-expiry catch uses the same bounded observation when the caller remains
   active. The general public `remove(Unit)` contract still has the inherited healthy-external-writer
   intent-only case; this is retained and reported, not labelled completed for every external-writer
   scenario.
 - **F5 snapshot.** Job and claims for stale-supersession classification are read from one
-  `repository.state` snapshot. A late stale finalizer is benign only with exact evidence: the same
-  producer is terminally `CANCELLED` at this or a newer ownership generation, `cleanupPending` is
-  false, every remaining claim for that job is `CANCELLED`, and the admitted claim set changed (or
-  the owner admitted none). That covers a foreign cancellation completing cleanup before the
-  original execution finalizer loses its durable finish race. The same stale settlement remains
-  fatal when the exact generation is still active (`cleanupPending` true, `QUEUED`/non-cancelled
-  job, unchanged claims); the pre-existing active-stale assertions remain.
+  `repository.state` snapshot. A late execution/rollback stale finalizer is benign only with exact
+  evidence: the same producer is terminally `CANCELLED` at this or a newer ownership generation,
+  and every surviving claim for that job is `CANCELLED` (or no claim survives). This covers a
+  foreign cancellation owning or completing cleanup before the original finalizer loses the
+  durable finish race, including a maintenance generation advance and a rollback finalizer that
+  admitted no claim set. The same stale settlement remains fatal when the exact generation is
+  still active or non-cancelled (`QUEUED`/running, pending work, `ACTIVE` claims); the pre-existing
+  active-stale assertions remain.
 - **Policy measurement.** `DownloadPolicyRoomTest.twoRealRoomSchedulersRespectOneTwoAndFourGlobalSlotsAndLoweredLimit`
   has only the publication synchronization repaired: awaiting `inFlight == limit` now also
   requires the published `maximum >= limit`; the original `assertEquals(limit, maximum)` and all
