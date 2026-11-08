@@ -15,9 +15,10 @@ acceptance is claimed. Frozen PR4/PR17/PR20/PR22/PR23 refs stay unchanged.
   including an external/scheduler-owned cleanup, rather than accepting intent;
 - success requires the durable row to have no pending cleanup, live asset, staging path,
   finalization, cleanup reservation, maintenance lease or active attempt;
-- an unstarted/suspended/failed host, missing/consumed owner, terminal failed observation or
-  expired bounded handoff returns the existing truthful `BACKGROUND_RESTRICTED` while preserving
-  intent, assets, reservations and locks;
+- an unstarted/suspended/failed host, a missing owner after the bounded handoff, a terminal failed
+  observation or an expired bounded handoff returns the existing truthful `BACKGROUND_RESTRICTED`
+  while preserving intent, assets, reservations and locks; a consumed owner with cleanup still
+  pending is not terminal by itself;
 - a detached observation epoch with null durable settlement is never interpreted as completion;
 - caller cancellation still propagates. An active caller whose child cleanup was cancelled may
   observe a controlled foreground retry. Once an owner has been observed, later owner-registry
