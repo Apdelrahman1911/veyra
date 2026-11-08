@@ -222,3 +222,24 @@ adjudications applied:
 New successor evidence uses `.work/verification/pr20-final-recovery-corrections/attempts/` with
 actual argv/before/XML seal/after/drain captured inside the vps-build gate and project-lock
 lifetime. Frozen PR20 evidence remains immutable.
+
+### Final successor source evidence
+
+Tested source commit `88505eff4b432b5bbfc4f264fd0bcb2dfaf2ce52` (this section is a docs-only
+successor, mirroring the frozen PR20 pattern):
+
+- `final-focused-gated-8`: **51 tests / 6 suites / 0 failures / 0 errors / 0 skips**, exit 0.
+- `final-full-gated-6`: **1,183 tests / 100 suites / 0 failures / 0 errors / 0 skips**, exit 0.
+- `final-full-gated-7` confirmation: **1,183 tests / 100 suites / 0 failures / 0 errors /
+  0 skips**, exit 0.
+
+Each attempt under `.work/verification/pr20-final-recovery-corrections/attempts/` retains the
+in-gate `command.argv` (inner argv, `scripts/gradle.sh --offline`, max workers 1 and the exact
+bounded JVM argument), `before.json`, `before.inputs.sha256`, `after.json`,
+`after.inputs.sha256`, `inputs.equal.txt`, `xml.sha256`, `attempt.sha256`, and drain files.
+Tracked-input manifests are equal and the final drain shows no owned Java/Kotlin process.
+
+Earlier failures are preserved rather than backfilled: `full-shared-gated-2` failed one
+ownership teardown; `full-diag-5` timed out one removal test; diagnostic attempts exposed and
+drove the maintenance-lease and cleanup-deadline fixes above. They are not acceptance evidence.
+Frozen PR20's `full-shared-5` remains 1,181/100 with one policy-slot failure and is not rewritten.
