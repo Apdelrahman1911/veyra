@@ -52,6 +52,9 @@ import dev.veyra.ui.design.LocalStrings
 import dev.veyra.ui.design.MetadataText
 import dev.veyra.ui.design.TextKey
 import dev.veyra.ui.design.VeyraIcons
+import dev.veyra.ui.downloads.DownloadSurface
+import dev.veyra.ui.downloads.DownloadSurfaceEntry
+import dev.veyra.ui.downloads.legacyDownloadSurface
 
 /** Read-only details until an explicit action. Opening a track never starts or replaces audio. */
 @OptIn(ExperimentalLayoutApi::class)
@@ -84,8 +87,8 @@ fun TrackDetailScreen(
                         EmptyState(strings.text(TextKey.InformationUnavailable), strings.text(TextKey.NotFound), modifier = Modifier.testTag("track-missing"))
                     }
                 } else {
-                    val presentation = trackDetailPresentation(item, snapshot, playback)
-                    val ready = presentation.download.isReady()
+                    val presentation = trackDetailPresentation(item, snapshot, playback, options.downloads)
+                    val ready = presentation.ready
                     val current = presentation.isCurrent
                     val failure = options.unavailableItems[item.id] ?: playback.failure.takeIf { current }
                     item(key = "hero") { TrackHero(item, snapshot) }
@@ -130,7 +133,13 @@ fun TrackDetailScreen(
                     if (ready) item(key = "downloaded-audio") {
                         Column(Modifier.testTag("track-downloaded-audio"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             TrackDuration(TextKey.DownloadedAudioDuration, presentation.downloadedDurationMs)
-                            TrackResolution(item, presentation.downloadedBinding, PlaybackProvenanceContext.DOWNLOADED, snapshot.settings.offlineOnly, onAction)
+                            if (presentation.downloadedBinding != null) {
+                                TrackResolution(item, presentation.downloadedBinding, PlaybackProvenanceContext.DOWNLOADED, snapshot.settings.offlineOnly, onAction)
+                            } else {
+                                // Typed downloads have exact execution/recording lineage, never a
+                                // fabricated legacy PlaybackBinding or source-url disclosure.
+                                Text(strings.text(TextKey.Downloaded), style = MaterialTheme.typography.bodyMedium)
+                            }
                         }
                     }
                     presentation.previousBinding?.let { binding -> item(key = "previous-audio") {
@@ -139,7 +148,7 @@ fun TrackDetailScreen(
                     if (!current && !ready && presentation.previousBinding == null) item(key = "audio-policy") {
                         PlaybackProvenanceCard(item, null)
                     }
-                    item(key = "download") { TrackDownloadSection(item, presentation.download, snapshot.settings.offlineOnly, onAction, options) }
+                    item(key = "download") { TrackDownloadSection(item, presentation.downloadEntry, snapshot.settings.offlineOnly, onAction, options) }
                     if (item.description.isNotBlank()) item(key = "description") {
                         Column(Modifier.testTag("track-description"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text(strings.text(TextKey.AboutTrack), style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
@@ -206,17 +215,17 @@ private fun TrackDuration(label: TextKey, durationMs: Long?) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun TrackDownloadSection(item: MediaItem, record: DownloadRecord?, offline: Boolean, onAction: (MusicUiAction) -> Unit, options: MusicUiOptions) {
+private fun TrackDownloadSection(item: MediaItem, record: DownloadSurfaceEntry?, offline: Boolean, onAction: (MusicUiAction) -> Unit, options: MusicUiOptions) {
     val strings = LocalStrings.current
-    val ready = record.isReady()
-    val rechecking = record.isRecheckingAsset()
+    val ready = record?.ready == true
+    val rechecking = record?.checking == true
     val supported = item.source.provider in options.downloadableProviders
     var remove by remember(record?.id) { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().testTag("track-download"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(strings.text(TextKey.Downloads), style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
         if (record != null) {
             Text(
-                if (record.status == DownloadStatus.COMPLETE && !ready) strings.text(TextKey.FileUnavailable) else strings.downloadStatus(record.status),
+                record.statusText(strings),
                 modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
                 style = MaterialTheme.typography.bodyMedium,
             )
@@ -288,6 +297,8 @@ private fun TrackResolution(item: MediaItem, binding: PlaybackBinding?, context:
 internal data class TrackDetailPresentation(
     val isCurrent: Boolean,
     val download: DownloadRecord?,
+    val downloadEntry: DownloadSurfaceEntry?,
+    val ready: Boolean,
     val currentBinding: PlaybackBinding?,
     val downloadedBinding: PlaybackBinding?,
     val previousBinding: PlaybackBinding?,
@@ -295,18 +306,28 @@ internal data class TrackDetailPresentation(
     val downloadedDurationMs: Long?,
 )
 
-/** A receipt can describe the current session or a file only through its owner's explicit ID. */
-internal fun trackDetailPresentation(item: MediaItem, snapshot: AppSnapshot, playback: PlaybackState): TrackDetailPresentation {
+/**
+ * A receipt can describe the current session or a file only through its owner's explicit ID.
+ * Typed readiness comes from the paired download surface; a typed binding/recording is never
+ * turned into an invented legacy PlaybackBinding. The legacy fields below are retained for
+ * existing schema2 histories and their exact receipt disclosure.
+ */
+internal fun trackDetailPresentation(item: MediaItem, snapshot: AppSnapshot, playback: PlaybackState,
+    downloads: DownloadSurface? = null): TrackDetailPresentation {
     val current = playback.currentItem?.id == item.id && playback.currentEntryId != null
+    val surface = downloads ?: legacyDownloadSurface(snapshot)
     val download = snapshot.downloadFor(item.id)
+    val entry = surface.forMedia(item.id)
+    val readyEntry = surface.readyEntryFor(item.id)
+    val ready = readyEntry != null
     val currentBinding = playback.executionBinding?.takeIf { current && it.mediaId == item.id }
     val asset = download?.takeIf { it.isReady() }?.asset
     val downloadedBinding = asset?.executionBindingId?.let(snapshot.playbackBindings::get)?.takeIf { it.mediaId == item.id }
     val previous = snapshot.playbackBindings.values
         .filter { it.mediaId == item.id && it.id != currentBinding?.id && it.id != downloadedBinding?.id }
         .maxWithOrNull(compareBy<PlaybackBinding> { it.resolvedEpochMs }.thenBy { it.id })
-    return TrackDetailPresentation(current, download, currentBinding, downloadedBinding, previous,
-        playback.durationMs?.takeIf { current && it > 0L }, asset?.measuredDurationMs?.takeIf { it > 0L })
+    return TrackDetailPresentation(current, download, entry, ready, currentBinding, downloadedBinding, previous,
+        playback.durationMs?.takeIf { current && it > 0L }, readyEntry?.measuredDurationMs?.takeIf { it > 0L })
 }
 
 /** Attribution display only. Never expose a private path, credential, query, or local filename. */

@@ -49,11 +49,16 @@ import dev.veyra.model.MediaKind
 import dev.veyra.model.Playlist
 import dev.veyra.model.SourceProvider
 import dev.veyra.ui.design.Artwork
+import dev.veyra.ui.design.AppStrings
 import dev.veyra.ui.design.LocalStrings
 import dev.veyra.ui.design.MetadataText
 import dev.veyra.ui.design.TextKey
 import dev.veyra.ui.design.VeyraIconButton
 import dev.veyra.ui.design.VeyraIcons
+import dev.veyra.ui.downloads.DownloadSurface
+import dev.veyra.ui.downloads.DownloadSurfaceOrigin
+import dev.veyra.ui.downloads.DownloadSurfaceEntry
+import dev.veyra.ui.downloads.legacyDownloadSurface
 
 @Composable
 internal fun SectionTitle(title: String, modifier: Modifier = Modifier, description: String? = null) {
@@ -101,6 +106,13 @@ internal fun DownloadRecord?.isReady(): Boolean = this != null && status == Down
 /** A materialized file awaiting a session integrity check is not an active transfer or Ready. */
 internal fun DownloadRecord?.isRecheckingAsset(): Boolean = this != null && asset != null && !cleanupPending &&
     status in setOf(DownloadStatus.VERIFYING, DownloadStatus.NEEDS_FOREGROUND)
+internal fun MusicUiOptions.downloadSurface(snapshot: AppSnapshot): DownloadSurface =
+    downloads ?: legacyDownloadSurface(snapshot)
+internal fun DownloadSurfaceEntry.statusText(strings: AppStrings): String = when {
+    status == DownloadStatus.COMPLETE && !ready && origin != DownloadSurfaceOrigin.TYPED_SOURCE ->
+        strings.text(TextKey.FileUnavailable)
+    else -> strings.downloadStatus(status)
+}
 internal fun AppSnapshot.isSaved(item: MediaItem): Boolean =
     if (item.kind == MediaKind.EPISODE) item.id in savedEpisodeIds else item.id in favoriteIds
 
@@ -116,8 +128,9 @@ fun MusicMediaRow(
     showFavorite: Boolean = false,
 ) {
     val strings = LocalStrings.current
-    val download = snapshot.downloadFor(item.id)
-    val ready = download.isReady()
+    val surface = options.downloadSurface(snapshot)
+    val download = surface.forMedia(item.id)
+    val ready = surface.isDownloaded(item.id)
     val unavailable = options.unavailableItems[item.id]
     Surface(modifier = modifier.fillMaxWidth().testTag("media-row-${item.id}"), color = if (isCurrent) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
@@ -137,8 +150,8 @@ fun MusicMediaRow(
                             item.durationMs?.takeIf { it >= 0 }?.let { Text(strings.mediaTime(it), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                             if (ready) Icon(VeyraIcons.Check, strings.text(TextKey.ReadyOffline), Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
                         }
-                        if (download != null && !ready && download.status != DownloadStatus.CANCELLED) Text(
-                            if (download.status == DownloadStatus.COMPLETE) strings.text(TextKey.FileUnavailable) else strings.downloadStatus(download.status),
+                        if (download != null && !download.ready && download.status != DownloadStatus.CANCELLED) Text(
+                            download.statusText(strings),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -171,7 +184,8 @@ internal fun MediaActionsMenu(
     var menu by remember(item.id) { mutableStateOf(false) }
     var picker by remember(item.id) { mutableStateOf(false) }
     var removeDownload by remember(item.id) { mutableStateOf(false) }
-    val download = snapshot.downloadFor(item.id)
+    val surface = options.downloadSurface(snapshot)
+    val download = surface.forMedia(item.id)
     Box(modifier) {
         ActionIcon(VeyraIcons.MoreOptions, strings.format(TextKey.MoreActionsFor, item.title), { menu = true })
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
@@ -180,8 +194,8 @@ internal fun MediaActionsMenu(
             DropdownMenuItem(text = { Text(strings.text(TextKey.AddToEnd)) }, onClick = { dispatch(MusicUiAction.Enqueue(item, playNext = false)) })
             DropdownMenuItem(text = { Text(strings.text(savedActionLabel(item, snapshot.isSaved(item)))) }, onClick = { dispatch(MusicUiAction.ToggleFavorite(item)) })
             if (item.kind == MediaKind.MUSIC) DropdownMenuItem(text = { Text(strings.text(TextKey.AddToPlaylist)) }, onClick = { menu = false; picker = true })
-            if (download != null && (download.isReady() || download.isRecheckingAsset())) {
-                if (download.isRecheckingAsset()) DropdownMenuItem(text = { Text(strings.downloadStatus(download.status)) }, onClick = {},
+            if (download != null && (download.ready || download.checking)) {
+                if (download.checking) DropdownMenuItem(text = { Text(strings.downloadStatus(download.status)) }, onClick = {},
                     modifier = Modifier.testTag("menu-download-status-${item.id}"), enabled = false)
                 DropdownMenuItem(text = { Text(strings.text(TextKey.RemoveDownload)) }, onClick = { menu = false; removeDownload = true })
             } else if (download != null && download.status !in setOf(DownloadStatus.CANCELLED, DownloadStatus.COMPLETE)) {

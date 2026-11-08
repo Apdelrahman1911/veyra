@@ -61,9 +61,11 @@ fun CollectionDetailScreen(
     val tracks = state.page.items.filter { it.kind == MediaKind.MUSIC }
     val complete = state.loaded && !state.loading && state.page.nextPageToken == null
     val allFavorite = tracks.isNotEmpty() && tracks.all { it.id in snapshot.favoriteIds }
+    val surface = options.downloadSurface(snapshot)
     val downloadable = tracks.distinctBy { it.id }.filter { item ->
-        item.source.provider in options.downloadableProviders && snapshot.downloadFor(item.id)?.let { record ->
-            record.status in setOf(DownloadStatus.FAILED, DownloadStatus.CANCELLED) || record.status == DownloadStatus.COMPLETE && !record.isReady()
+        item.source.provider in options.downloadableProviders && surface.forMedia(item.id)?.let { entry ->
+            entry.status in setOf(DownloadStatus.FAILED, DownloadStatus.CANCELLED) ||
+                entry.status == DownloadStatus.COMPLETE && !entry.ready
         } != false
     }
     var query by rememberSaveable(collection.id) { mutableStateOf("") }

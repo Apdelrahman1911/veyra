@@ -145,8 +145,8 @@ fun SearchScreen(
     options: MusicUiOptions = MusicUiOptions(),
 ) {
     val strings = LocalStrings.current
-    val local = remember(snapshot, state.query, state.kind) {
-        libraryMedia(snapshot).filter { matchesSearchKind(it, state.kind) && matchesMediaQuery(it, state.query) }
+    val local = remember(snapshot, state.query, state.kind, options.downloads) {
+        libraryMedia(snapshot, options.downloads).filter { matchesSearchKind(it, state.kind) && matchesMediaQuery(it, state.query) }
     }
     val localPlaylists = remember(snapshot.playlists, state.query, state.kind) {
         if (state.kind == SearchKind.PODCASTS) emptyList() else snapshot.playlists.filter { mediaSearchKey(state.query.trim()) in mediaSearchKey(it.name) }

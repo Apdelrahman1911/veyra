@@ -55,6 +55,8 @@ import dev.veyra.ui.design.TextKey
 import dev.veyra.ui.design.VeyraIconButton
 import dev.veyra.ui.design.VeyraIcons
 import dev.veyra.ui.design.VeyraSpacing
+import dev.veyra.ui.downloads.DownloadSurfaceEntry
+import dev.veyra.ui.downloads.toDownloadSurfaceEntry
 import dev.veyra.ui.music.PlaybackProvenanceCard
 import dev.veyra.ui.music.PlaybackProvenanceContext
 
@@ -210,12 +212,11 @@ internal fun PodcastEpisodeStatus(state: PodcastEpisodeUiState, modifier: Modifi
         }
         if (state.saved) PodcastStatusLabel(strings.text(TextKey.SavedForLater))
         if (state.queued) PodcastStatusLabel(strings.text(TextKey.InQueue))
-        if (state.downloaded) {
-            PodcastStatusLabel(strings.text(TextKey.Downloaded))
-        } else {
-            state.download?.takeIf { it.status != DownloadStatus.COMPLETE && it.status != DownloadStatus.CANCELLED }?.let {
-                PodcastStatusLabel(strings.downloadStatus(it.status))
-            }
+        if (state.downloaded) PodcastStatusLabel(strings.text(TextKey.Downloaded))
+        // A newer typed job can be active while an older schema2 asset remains Ready for the
+        // same catalogue item. Never make the active job invisible behind the Ready badge.
+        state.activeDownload?.takeIf { !it.ready && it.status != DownloadStatus.COMPLETE && it.status != DownloadStatus.CANCELLED }?.let {
+            PodcastStatusLabel(strings.downloadStatus(it.status))
         }
         if (state.noLongerInFeed) PodcastStatusLabel(strings.text(TextKey.NoLongerInFeed))
     }
@@ -306,7 +307,7 @@ fun PodcastEpisodeMenu(
                     },
                 )
             }
-            state.download?.takeIf(::podcastCanCancelDownload)?.let { download ->
+            state.activeDownload?.takeIf(::podcastCanCancelDownload)?.let { download ->
                 if (downloadAction.action !is PodcastAction.CancelDownload) {
                     DropdownMenuItem(text = { PodcastActionText(strings.text(TextKey.CancelDownload)) },
                         onClick = { dispatch(PodcastAction.CancelDownload(download.id)) })
@@ -337,7 +338,7 @@ fun PodcastEpisodeMenu(
             onDismiss = { confirmRemoveDownload = false },
             onConfirm = {
                 confirmRemoveDownload = false
-                state.download?.let { onAction(PodcastAction.RemoveDownload(it.id)) }
+                state.activeDownload?.let { onAction(PodcastAction.RemoveDownload(it.id)) }
             },
         )
     }
@@ -405,7 +406,7 @@ internal fun PodcastDownloadButton(state: PodcastEpisodeUiState, onAction: (Podc
             if (offered.requiresRemovalConfirmation) confirmRemoval = true else offered.action?.let(onAction)
         }, enabled = offered.enabled, modifier = Modifier.podcastActionTarget().testTag(
             if (index == 0) "podcast-detail-download" else "podcast-detail-remove-download")) {
-            Icon(if (state.downloaded) VeyraIcons.Check else VeyraIcons.Download, null, modifier = Modifier.size(20.dp))
+            Icon(if (state.activeDownload?.ready == true) VeyraIcons.Check else VeyraIcons.Download, null, modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(8.dp))
             PodcastActionText(strings.text(offered.label))
         }
@@ -415,14 +416,14 @@ internal fun PodcastDownloadButton(state: PodcastEpisodeUiState, onAction: (Podc
             onDismiss = { confirmRemoval = false },
             onConfirm = {
                 confirmRemoval = false
-                state.download?.let { onAction(PodcastAction.RemoveDownload(it.id)) }
+                state.activeDownload?.let { onAction(PodcastAction.RemoveDownload(it.id)) }
             })
     }
 }
 
 /** The byte counter is download progress, not proof that a staged file is ready offline. */
 @Composable
-internal fun PodcastDownloadProgress(download: DownloadRecord, modifier: Modifier = Modifier) {
+internal fun PodcastDownloadProgress(download: DownloadSurfaceEntry, modifier: Modifier = Modifier) {
     if (download.status !in cancellableDownloadStatuses && download.status != DownloadStatus.FAILED) return
     val strings = LocalStrings.current
     val downloadedBytes = download.bytesDownloaded.coerceAtLeast(0L)
@@ -513,15 +514,10 @@ internal val cancellableDownloadStatuses = setOf(
     DownloadStatus.WAITING_NETWORK, DownloadStatus.NEEDS_FOREGROUND, DownloadStatus.VERIFYING,
 )
 
-// A committed file may be projected as checking/restricted until the current host validates it.
-// Cancel/resume of the durable COMPLETE record are no-ops; file ownership is not proof of Ready.
-private fun DownloadRecord.isCheckingExistingAsset(): Boolean = asset != null && !cleanupPending &&
-    status in setOf(DownloadStatus.VERIFYING, DownloadStatus.NEEDS_FOREGROUND)
-
 /** Explain retained-file checks without changing playback eligibility or claiming the asset is Ready. */
 internal fun podcastUnavailablePlaybackNotice(state: PodcastEpisodeUiState): TextKey? {
     if (state.canPlay) return null
-    val checking = state.download?.takeIf { it.isCheckingExistingAsset() }
+    val checking = state.activeDownload?.takeIf { it.checking }
     if (checking != null) {
         return if (checking.status == DownloadStatus.VERIFYING)
             TextKey.DownloadVerifying else TextKey.DownloadNeedsForeground
@@ -529,15 +525,20 @@ internal fun podcastUnavailablePlaybackNotice(state: PodcastEpisodeUiState): Tex
     return if (state.offlineOnly && state.hasAudioSource) TextKey.NotDownloaded else TextKey.EpisodeUnavailable
 }
 
+internal fun podcastCanCancelDownload(download: DownloadSurfaceEntry): Boolean =
+    download.status in cancellableDownloadStatuses && !download.checking
+
+/** Existing direct-call compatibility for legacy fixtures; the screen path uses the checked entry. */
 internal fun podcastCanCancelDownload(download: DownloadRecord): Boolean =
-    download.status in cancellableDownloadStatuses && !download.isCheckingExistingAsset()
+    download.toDownloadSurfaceEntry().let(::podcastCanCancelDownload)
 
 internal fun podcastRetainedAssetRemovalAction(state: PodcastEpisodeUiState): PodcastDownloadAction? {
     // Failed validation can retain owned bytes. Removing those bytes is a separate local action,
     // not a retry, and must remain available offline through the coordinator's confirmed cleanup.
-    val download = state.download?.takeIf {
-        it.asset != null && !it.cleanupPending &&
-            it.status in setOf(DownloadStatus.VERIFYING, DownloadStatus.NEEDS_FOREGROUND, DownloadStatus.FAILED)
+    val download = state.activeDownload?.takeIf {
+        it.hasOwnedBytes && !it.cleanupPending && (it.status in setOf(DownloadStatus.VERIFYING,
+            DownloadStatus.NEEDS_FOREGROUND, DownloadStatus.FAILED) ||
+            it.status == DownloadStatus.COMPLETE && !it.ready)
     } ?: return null
     return PodcastDownloadAction(TextKey.RemoveDownload, PodcastAction.RemoveDownload(download.id),
         requiresRemovalConfirmation = true)
@@ -546,12 +547,12 @@ internal fun podcastRetainedAssetRemovalAction(state: PodcastEpisodeUiState): Po
 internal fun podcastDownloadAction(state: PodcastEpisodeUiState): PodcastDownloadAction {
     fun newDownload() = PodcastDownloadAction(TextKey.Download, PodcastAction.Download(state.episode.id),
         enabled = !state.offlineOnly && state.hasAudioSource)
-    val download = state.download ?: return newDownload()
-    if (state.downloaded) {
+    val download = state.activeDownload ?: return newDownload()
+    if (download.ready) {
         return PodcastDownloadAction(TextKey.RemoveDownload, PodcastAction.RemoveDownload(download.id),
             requiresRemovalConfirmation = true)
     }
-    if (download.isCheckingExistingAsset()) {
+    if (download.checking) {
         return PodcastDownloadAction(
             if (download.status == DownloadStatus.VERIFYING) TextKey.DownloadVerifying else TextKey.DownloadNeedsForeground,
             action = null, enabled = false)
