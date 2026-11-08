@@ -8,6 +8,7 @@ import dev.veyra.artwork.ArtworkCache
 import dev.veyra.artwork.ArtworkFiles
 import dev.veyra.data.CatalogLibraryUndo
 import dev.veyra.data.LibraryStore
+import dev.veyra.data.PlaybackAcquisitionView
 import dev.veyra.data.StoreStatus
 import dev.veyra.data.getOrThrow
 import dev.veyra.downloads.DownloadCoordinator
@@ -146,6 +147,9 @@ class AppContainer(
     val collections = mutableCollections.asStateFlow()
     private val mutablePodcasts = MutableStateFlow(PodcastsUiState())
     val podcasts = mutablePodcasts.asStateFlow()
+    /** Paired canonical playback projection; null until the first post-initialize read barrier. */
+    private val mutablePodcastProgress = MutableStateFlow<PodcastProgressView?>(null)
+    val podcastProgress = mutablePodcastProgress.asStateFlow()
     private val mutablePodcastDetails = MutableStateFlow(PodcastDetailStatus())
     val podcastDetails = mutablePodcastDetails.asStateFlow()
     private val mutableNotice = MutableStateFlow<AppNotice?>(null)
@@ -286,6 +290,16 @@ class AppContainer(
                 )
             })
             playback.initialize().getOrThrow()
+            effects.launch {
+                // The canonical playback view is the only source for typed progress/checkpoints;
+                // the legacy snapshot.progress remains a fallback for genuine schema2 history.
+                // Every update is a fresh same-revision Room read barrier, not a merge of delayed maps.
+                store.state.collect {
+                    try { publishPodcastProgress(store.acquisition.playbackView()) }
+                    catch (cancelled: CancellationException) { throw cancelled }
+                    catch (error: Exception) { report(error) }
+                }
+            }
             effects.launch {
                 for (action in actions) {
                     try { action() }
@@ -715,6 +729,12 @@ class AppContainer(
             is MusicUiAction.UndoQueue -> command(PlaybackCommand.UndoQueueEdit(action.context))
             is MusicUiAction.OpenSourcePage -> openExternalInBackground(action.url)
         }
+    }
+
+    private fun publishPodcastProgress(view: PlaybackAcquisitionView?) {
+        val projection = podcastProgressView(view)
+        mutablePodcastProgress.value = projection
+        mutablePodcasts.update { it.copy(progressView = projection) }
     }
 
     private suspend fun handlePodcast(action: PodcastAction) {

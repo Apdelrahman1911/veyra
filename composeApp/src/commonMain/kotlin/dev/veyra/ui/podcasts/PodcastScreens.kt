@@ -86,9 +86,9 @@ fun PodcastsScreen(
     modifier: Modifier = Modifier,
 ) {
     val strings = LocalStrings.current
-    val continuing = remember(state.snapshot.media, state.snapshot.progress) { state.continueEpisodes() }
+    val continuing = remember(state.snapshot.media, state.snapshot.progress, state.progressView) { state.continueEpisodes() }
     val newEpisodes = remember(state.snapshot.media, state.snapshot.shows, state.snapshot.progress,
-        state.snapshot.followedShowIds) { state.newEpisodes() }
+        state.snapshot.followedShowIds, state.progressView) { state.newEpisodes() }
     val following = remember(state.snapshot.shows, state.snapshot.followedShowIds) { state.followedShows() }
     var showAllContinuing by rememberSaveable { mutableStateOf(false) }
     var showAllNew by rememberSaveable { mutableStateOf(false) }
@@ -148,7 +148,7 @@ fun PodcastsScreen(
                         onToggle = { showAllContinuing = !showAllContinuing })
                 }
                 items(if (showAllContinuing) continuing else continuing.take(3), key = { "continue-${it.id}" }) { episode ->
-                    PodcastEpisodeRow(state.snapshot.podcastEpisodeUiState(episode, downloadSurface = state.downloads), onAction)
+                    PodcastEpisodeRow(state.snapshot.podcastEpisodeUiState(episode, downloadSurface = state.downloads, progressView = state.progressView), onAction)
                 }
             }
             if (following.isNotEmpty()) {
@@ -163,7 +163,7 @@ fun PodcastsScreen(
                     }
                 } else {
                     items(if (showAllNew) newEpisodes else newEpisodes.take(5), key = { "new-${it.id}" }) { episode ->
-                        PodcastEpisodeRow(state.snapshot.podcastEpisodeUiState(episode, downloadSurface = state.downloads), onAction)
+                        PodcastEpisodeRow(state.snapshot.podcastEpisodeUiState(episode, downloadSurface = state.downloads, progressView = state.progressView), onAction)
                     }
                 }
                 item(key = "following-heading") {
@@ -201,7 +201,7 @@ fun PodcastShowScreen(
 ) {
     val strings = LocalStrings.current
     val show = state.show
-    val episodes = remember(state.showId, state.snapshot.media, state.snapshot.progress, state.snapshot.downloads, state.downloads, state.options) {
+    val episodes = remember(state.showId, state.snapshot.media, state.snapshot.progress, state.snapshot.downloads, state.downloads, state.options, state.progressView) {
         state.visibleEpisodes()
     }
     val allCount = remember(state.showId, state.snapshot.media) {
@@ -283,7 +283,7 @@ fun PodcastShowScreen(
                     }
                 } else {
                     items(episodes, key = { it.id }) { episode ->
-                        PodcastEpisodeRow(state.snapshot.podcastEpisodeUiState(episode, downloadSurface = state.downloads), onAction, showPublisher = false)
+                        PodcastEpisodeRow(state.snapshot.podcastEpisodeUiState(episode, downloadSurface = state.downloads, progressView = state.progressView), onAction, showPublisher = false)
                     }
                 }
             }
@@ -313,7 +313,7 @@ fun EpisodeDetailScreen(
                     )
                 }
             } else {
-                val row = state.snapshot.podcastEpisodeUiState(episode, state.currentBinding, state.downloads)
+                val row = state.snapshot.podcastEpisodeUiState(episode, state.currentBinding, state.downloads, state.progressView)
                 item(key = "episode-hero") {
                     PodcastHero(episode.title, row.show?.title ?: episode.creator,
                         episode.artworkUrl ?: row.show?.artworkUrl, state.snapshot.settings.offlineOnly,
