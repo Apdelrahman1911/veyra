@@ -83,6 +83,8 @@ sealed interface PodcastAction {
     data class SetFollowed(val showId: String, val followed: Boolean) : PodcastAction
     data class SetShowListOptions(val showId: String, val options: PodcastListOptions) : PodcastAction
     data class PlayEpisode(val mediaId: String) : PodcastAction
+    /** Exact current/queued occurrence resume; never a fresh catalogue Play. */
+    data class ResumeEpisode(val mediaId: String, val bindingId: String? = null) : PodcastAction
     /** Explicit exact saved-R1 episode action; owner revalidates all identity/readiness fences. */
     data class PlaySavedEpisode(val mediaId: String, val bindingId: String) : PodcastAction
     data class StartOver(val mediaId: String) : PodcastAction
@@ -181,6 +183,20 @@ data class PodcastEpisodeUiState(
     } else episode.title.isNotBlank()
     val canPlay: Boolean get() = downloaded || (!offlineOnly && hasAudioSource)
     val canResume: Boolean get() = inProgress && progressRecording == PodcastProgressRecording.MATCHED
+    /**
+     * Resume is actionable only when the displayed matched progress belongs to the exact current
+     * canonical occurrence or the exact legacy downloaded target whose recording matches that
+     * progress. A different current disclosure never borrows the historical resume position.
+     */
+    val resumeActionable: Boolean get() = canResume &&
+        (progressView?.currentEpisodeId == episode.id || nextPlayBinding != null)
+    val resumeBindingId: String? get() = when {
+        !resumeActionable -> null
+        // Canonical current resumes the controller's exact current occurrence; do not expose an
+        // unrelated legacy display receipt as the target.
+        progressView?.currentEpisodeId == episode.id -> null
+        else -> nextPlayBinding?.id
+    }
     val noLongerInFeed: Boolean get() = show?.let {
         it.lastRefreshEpochMs != null && episode.id !in it.episodeIds
     } ?: false

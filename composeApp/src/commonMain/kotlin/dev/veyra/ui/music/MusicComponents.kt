@@ -110,10 +110,15 @@ internal fun MusicUiOptions.downloadSurface(snapshot: AppSnapshot): DownloadSurf
     downloads ?: legacyDownloadSurface(snapshot)
 
 /** Exact typed catalogue R1 from a currently verified ready row; never a title/media lookup. */
-internal fun DownloadSurface?.savedCatalogueBinding(mediaId: String): String? =
-    this?.readyEntryFor(mediaId)
-        ?.takeIf { it.origin == DownloadSurfaceOrigin.TYPED_CATALOGUE && it.ready }
-        ?.bindingId?.takeIf { it.isNotBlank() }
+internal fun DownloadSurface?.savedCatalogueBinding(mediaId: String): String? {
+    val ready = this?.entries.orEmpty()
+        .filter { it.mediaId == mediaId && it.ready && it.origin == DownloadSurfaceOrigin.TYPED_CATALOGUE }
+        .mapNotNull { it.bindingId?.takeIf(String::isNotBlank) }
+        .distinct()
+    // Only an unambiguous single recording is a truthful media-row/detail target. Ambiguity is
+    // resolved explicitly on the Downloads rows, never by max(updatedEpochMs).
+    return ready.singleOrNull()
+}
 internal fun DownloadSurfaceEntry.statusText(strings: AppStrings): String = when {
     status == DownloadStatus.COMPLETE && !ready && origin != DownloadSurfaceOrigin.TYPED_SOURCE ->
         strings.text(TextKey.FileUnavailable)

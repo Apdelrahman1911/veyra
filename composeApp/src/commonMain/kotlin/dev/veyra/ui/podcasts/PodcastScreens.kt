@@ -335,7 +335,7 @@ fun EpisodeDetailScreen(
                 item(key = "audio-policy") {
                     if (row.binding == null) PodcastAudioResolutionNotice() else PodcastEpisodeProvenance(row, onAction)
                 }
-                if (row.canResume) item(key = "episode-progress") {
+                if (row.resumeActionable) item(key = "episode-progress") {
                     Column(modifier = Modifier.testTag("podcast-progress-current"),
                         verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(strings.format(TextKey.ResumeAt, strings.mediaTime(row.positionMs)),

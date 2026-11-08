@@ -37,6 +37,7 @@ import dev.veyra.ui.podcasts.PodcastProgressRecording
 import dev.veyra.ui.podcasts.podcastEpisodeUiState
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -149,6 +150,19 @@ class PodcastProgressAppJourneyTest {
                     .performScrollToNode(hasTestTag("podcast-progress-current"))
                 compose.onNodeWithText(strings.format(TextKey.ResumeAt, strings.mediaTime(45_000L)))
                     .assertIsDisplayed()
+                val binding = requireNotNull(fixture.container.playback.state.value.currentSelection?.bindingId)
+                val savedCheckpoint = fixture.container.store.acquisition.playbackView().checkpoints.values
+                    .single { it.bindingId == binding }
+                assertEquals(45_000L, savedCheckpoint.positionMs)
+                val beforeResume = fixture.engine.loads.size
+                val queriesBeforeResume = fixture.gateway.queries.toList()
+                compose.onNodeWithTag("podcast-episode-detail").performScrollToNode(hasTestTag("podcast-detail-play"))
+                compose.onNodeWithTag("podcast-detail-play").performClick()
+                withTimeout(20_000L) { while (fixture.engine.loads.size <= beforeResume) delay(20) }
+                assertEquals(45_000L, fixture.engine.loads.last().startPositionMs)
+                assertEquals(binding, fixture.container.playback.state.value.currentSelection?.bindingId)
+                assertEquals(queriesBeforeResume, fixture.gateway.queries.toList(),
+                    "Exact resume must not create a fresh title query")
                 Unit
             } finally {
                 mounted = false

@@ -484,7 +484,7 @@ class PodcastScreensTest {
         compose.onNodeWithTag("podcast-detail-play").assertIsEnabled()
             .assertTextEquals(english.format(TextKey.ResumeAt, english.mediaTime(45_000L))).performClick()
         compose.runOnIdle {
-            assertEquals(listOf<PodcastAction>(PodcastAction.PlayEpisode(episode.id)), actions)
+            assertEquals(listOf<PodcastAction>(PodcastAction.ResumeEpisode(episode.id, target.id)), actions)
             assertEquals(target, original.podcastEpisodeUiState(correctedEpisode, current).nextPlayBinding)
             assertEquals(45_000L, original.progress.getValue(episode.id).positionMs)
         }

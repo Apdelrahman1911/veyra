@@ -525,6 +525,35 @@ class AppContainer(
     }
 
     /**
+     * Exact podcast resume. Only a currently selected bound occurrence or an exact queued
+     * occurrence naming the displayed legacy/current binding may be resumed; no fresh request or
+     * online fallback is manufactured. Stale queue/occurrence identity fails closed.
+     */
+    private suspend fun resumeEpisode(mediaId: String, bindingIdValue: String?) {
+        val state = playback.state.value
+        val selected = state.currentSelection
+        val view = store.acquisitionView()
+        val queue = view.acquisition.queues[QueueContext.PODCAST]
+            ?: throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "resume_queue_missing"))
+        if (selected != null && selected.controlsMode == PlaybackControlsMode.PODCAST &&
+            selected.catalogMedia?.id == mediaId && selected.selectionState == OccurrenceSelectionState.BOUND &&
+            queue.currentOccurrenceId == selected.occurrenceId &&
+            (bindingIdValue.isNullOrBlank() || selected.bindingId?.value == bindingIdValue)) {
+            command(PlaybackCommand.ResumeOccurrence(QueueContext.PODCAST, queue.editRevision,
+                selected.occurrenceId, selected.bindingId))
+            return
+        }
+        val bindingId = bindingIdValue?.takeIf { it.isNotBlank() }
+            ?: throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "resume_target_unavailable"))
+        val occurrence = queue.displayedOrder.asSequence()
+            .mapNotNull(view.acquisition.occurrences::get)
+            .firstOrNull { it.controlsMode == PlaybackControlsMode.PODCAST && it.bindingId?.value == bindingId }
+            ?: throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "resume_target_unavailable"))
+        command(PlaybackCommand.ResumeOccurrence(QueueContext.PODCAST, queue.editRevision,
+            occurrence.id, occurrence.bindingId))
+    }
+
+    /**
      * Explicit saved-R1 play. The UI supplies only the visible media identity and the exact
      * binding ID from a ready download row. All authority is revalidated here against one paired
      * canonical download view: the binding's subject/request/receipt/recording must name this
@@ -576,8 +605,8 @@ class AppContainer(
                     )
             }
         if (existing != null) {
-            command(PlaybackCommand.PlayOccurrence(context, queue.editRevision, existing.id,
-                expectedBindingId = existing.bindingId?.let { bindingId }))
+            command(PlaybackCommand.ResumeOccurrence(context, queue.editRevision, existing.id,
+                expectedBindingId = existing.bindingId?.let { bindingId }, localOnly = true))
         } else {
             // A new occurrence for the SAME accepted request/outcome; resolution attaches R1,
             // never a new title capture. One atomic queue admission+activation, no arbitrary ID.
@@ -585,7 +614,7 @@ class AppContainer(
                 expectedCatalogRevision = view.snapshot.revision)
             command(PlaybackCommand.AdmitAcquisition(prepared, context, queue.editRevision,
                 QueueAdmissionOperation.REPLACE, activate = true,
-                startOccurrenceId = prepared.occurrences.single().id))
+                startOccurrenceId = prepared.occurrences.single().id, localOnly = true))
         }
         cacheArtwork(listOf(media))
     }
@@ -895,6 +924,7 @@ class AppContainer(
                 mutablePodcastDetails.update { it.copy(options = it.options + (action.showId to action.options)) }
             }
             is PodcastAction.PlayEpisode -> play(listOf(episode(action.mediaId)))
+            is PodcastAction.ResumeEpisode -> resumeEpisode(action.mediaId, action.bindingId)
             is PodcastAction.PlaySavedEpisode -> playSaved(episode(action.mediaId), action.bindingId)
             is PodcastAction.ValidateRetainedDownload -> validateRetainedDownload(action.downloadId, action.bindingId)
             is PodcastAction.StartOver -> if (!restartCurrentPodcast(action.mediaId)) {
