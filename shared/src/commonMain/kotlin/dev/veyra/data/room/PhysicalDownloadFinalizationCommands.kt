@@ -90,19 +90,29 @@ internal fun AcquisitionGraph.applyFinishAttempt(command: FinishPhysicalDownload
 internal fun AcquisitionGraph.applyClaimMaintenance(command: ClaimPhysicalDownloadMaintenance): AcquisitionMutation<PhysicalDownloadCommit<ClaimedPhysicalDownload>> {
     val join = physicalJoin(command.downloadId) ?: return physicalStale()
     val job = join.job
+    val explicitValidate = command.explicitLocalRevalidation
     if (job.producer != command.expectedProducer || job.ownershipGeneration != command.expectedOwnershipGeneration ||
         job.leaseOwner != null && (job.leaseExpiresEpochMs ?: 0) > command.nowEpochMs ||
-        (job.nextRetryEpochMs ?: 0) > command.nowEpochMs) return physicalStale()
+        !explicitValidate && (job.nextRetryEpochMs ?: 0) > command.nowEpochMs) return physicalStale()
+    require(!explicitValidate || command.kind == PhysicalDownloadMaintenanceKind.VALIDATE &&
+        command.requestedBindingId != null)
     require(command.owner.isNotBlank() && command.leaseDurationMs in 1_000..600_000 && command.nowEpochMs >= job.updatedEpochMs &&
         command.nowEpochMs <= Long.MAX_VALUE - command.leaseDurationMs && job.ownershipGeneration < Long.MAX_VALUE)
     val eligible = when (command.kind) {
         PhysicalDownloadMaintenanceKind.CLEANUP -> job.cleanupPending
         PhysicalDownloadMaintenanceKind.RECOVER_FINALIZATION -> !job.cleanupPending && !job.userPaused && join.finalization != null &&
             join.demand() == DownloadClaimDemand.CONTINUE && job.producer.recordingId != null && job.failure?.code !in terminalLocalFailures
-        PhysicalDownloadMaintenanceKind.VALIDATE -> !job.cleanupPending && job.status == DownloadStatus.COMPLETE &&
-            join.asset != null && job.producer.recordingId != null
+        PhysicalDownloadMaintenanceKind.VALIDATE -> !job.cleanupPending && join.asset != null && job.producer.recordingId != null &&
+            (job.status == DownloadStatus.COMPLETE || explicitValidate && job.status == DownloadStatus.FAILED) &&
+            (!explicitValidate || join.claims.any { claim ->
+                (claim.requestedBindingId == command.requestedBindingId ||
+                    claim.owner is DownloadClaimOwner.Standalone ||
+                    claim.owner is DownloadClaimOwner.Schema2Standalone) &&
+                    (claim.intent != DownloadBatchIntent.CANCELLED || claim.retainCompletedAsset)
+            })
     }
-    if (!eligible || job.status == DownloadStatus.NEEDS_FOREGROUND || job.failure?.code == FailureCode.BACKGROUND_RESTRICTED ||
+    if (!eligible || command.kind != PhysicalDownloadMaintenanceKind.CLEANUP &&
+        (job.status == DownloadStatus.NEEDS_FOREGROUND || job.failure?.code == FailureCode.BACKGROUND_RESTRICTED) ||
         job.maintenanceKind == PhysicalDownloadMaintenanceKind.CLEANUP && command.kind != PhysicalDownloadMaintenanceKind.CLEANUP) return physicalStale()
     val changed = job.copy(ownershipGeneration = job.ownershipGeneration + 1, leaseOwner = command.owner,
         leaseExpiresEpochMs = command.nowEpochMs + command.leaseDurationMs, maintenanceKind = command.kind,
@@ -128,6 +138,23 @@ internal fun AcquisitionGraph.applyFinishMaintenance(command: FinishPhysicalDown
     if (!join.matches(command.fence) || join.job.maintenanceKind != command.kind || !join.matchesClaims(command.expectedClaims)) return physicalStale()
     require(command.nowEpochMs >= join.job.updatedEpochMs && (command.nextRetryEpochMs == null || command.nextRetryEpochMs >= command.nowEpochMs))
     require(!command.cleanupCompleted || command.kind == PhysicalDownloadMaintenanceKind.CLEANUP && command.failure == null)
+    command.retainedValidation?.let { retained ->
+        require(command.kind == PhysicalDownloadMaintenanceKind.VALIDATE && command.failure == null &&
+            !command.cleanupCompleted && command.status == null && command.nextRetryEpochMs == null)
+        require(retained.compatibilityPolicyVersion >= 1)
+        val asset = join.asset ?: return physicalStale()
+        if (join.job.status != DownloadStatus.FAILED || join.job.cleanupPending || join.finalization != null ||
+            join.job.assetId != retained.expectedAsset.id || asset != retained.expectedAsset ||
+            join.claims.singleOrNull { it.id == retained.expectedClaim.id } != retained.expectedClaim ||
+            retained.expectedClaim.intent == DownloadBatchIntent.CANCELLED && !retained.expectedClaim.retainCompletedAsset)
+            return physicalStale()
+        val completed = join.job.copy(status = DownloadStatus.COMPLETE, failure = null, nextRetryEpochMs = null,
+            maintenanceKind = null, leaseOwner = null, leaseExpiresEpochMs = null, updatedEpochMs = command.nowEpochMs)
+        var graph = withJob(completed)
+        graph = graph.addAssetUse(requireNotNull(graph.physicalJoin(join.job.id)), retained.requestedBindingId,
+            retained.expectedAsset, retained.compatibilityPolicyVersion, command.nowEpochMs)
+        return join.committedBy(graph)
+    }
     var graph = this
     var job = join.job
     if (command.kind == PhysicalDownloadMaintenanceKind.CLEANUP && command.cleanupCompleted) {

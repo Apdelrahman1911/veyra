@@ -8,6 +8,7 @@ import dev.veyra.model.RepeatMode
 import dev.veyra.model.SourceProvider
 import dev.veyra.source.MediaCollection
 import dev.veyra.source.SourcePage
+import dev.veyra.ui.downloads.DownloadSurface
 
 enum class SearchScope { EVERYWHERE, LIBRARY }
 enum class SearchKind { ALL, MUSIC, PODCASTS }
@@ -50,6 +51,11 @@ data class MusicUiOptions(
     val supportsImport: Boolean = true,
     val minSpeed: Float = 0.5f,
     val maxSpeed: Float = 2f,
+    /**
+     * The paired typed/schema2 projection supplied by the one app composition. Null keeps the
+     * existing schema2-only snapshot behaviour for direct/standalone surface callers.
+     */
+    val downloads: DownloadSurface? = null,
 )
 
 /** Every user intent is handled by the single app controller. Nothing here starts a private engine. */
@@ -78,6 +84,12 @@ sealed interface MusicUiAction {
     data object ImportAudio : MusicUiAction
 
     data class Play(val item: MediaItem) : MusicUiAction
+    /**
+     * Explicit saved R1 action. The binding ID is user-visible exact download evidence, not an
+     * execution grant: the app owner revalidates media/subject/request/receipt/binding/recording,
+     * exact AssetUse and current verified local readiness before activation.
+     */
+    data class PlaySaved(val item: MediaItem, val bindingId: String) : MusicUiAction
     /** Emitted only after an explicit replace-and-play action when pending work exists. */
     data class PlayCollection(val items: List<MediaItem>, val shuffle: Boolean = false) : MusicUiAction
     data class EnqueueCollection(val items: List<MediaItem>) : MusicUiAction
@@ -96,6 +108,8 @@ sealed interface MusicUiAction {
     data class Download(val item: MediaItem) : MusicUiAction
     data class DownloadCollection(val items: List<MediaItem>) : MusicUiAction
     data class PauseDownload(val downloadId: String) : MusicUiAction
+    /** Explicit local validation of retained FAILED bytes under the exact persisted binding. */
+    data class ValidateRetainedDownload(val downloadId: String, val bindingId: String) : MusicUiAction
     data class ResumeDownload(val downloadId: String) : MusicUiAction
     data class CancelDownload(val downloadId: String) : MusicUiAction
     data class RemoveDownload(val downloadId: String) : MusicUiAction

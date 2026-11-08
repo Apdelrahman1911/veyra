@@ -203,7 +203,7 @@ class DownloadPolicyRoomTest {
             // recheck (5s,10s,20s,40s,60s). The fixture uses an injected clock, so deterministically
             // advance exactly that published deadline instead of inflating the wall-clock timeout.
             ids.forEach { id ->
-                withTimeout(20_000) {
+                withTimeout(15_000) {
                     while (first.store.acquisitionView().acquisition.physicalDownloads[id]?.status !=
                             DownloadStatus.COMPLETE) {
                         val plans = listOf(first.coordinator.schedulingPlan(), second.coordinator.schedulingPlan())

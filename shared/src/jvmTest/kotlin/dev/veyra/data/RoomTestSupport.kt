@@ -324,9 +324,17 @@ internal fun failureOfForTest(error: Throwable): AppFailure = when (error) {
     else -> AppFailure(FailureCode.INVALID_STATE)
 }
 
-/** Low-level physical-row writer fixture; still the same Room owner, transaction and readback. */
+/**
+ * Low-level physical-row writer fixture; still the same Room owner, transaction and readback.
+ * The optional acquisition-row transform lets a caller exercise a genuine typed saved relation
+ * (with its origin/request/binding/occurrence lineage) in the SAME rollback transaction as a
+ * conflicting legacy physical row. It is not a snapshot authority shortcut.
+ */
 internal suspend fun writerRowsUpdate(store: LibraryStore,
+    transformAcquisitionRows: (dev.veyra.data.room.AcquisitionRows) -> dev.veyra.data.room.AcquisitionRows = { it },
     transform: (dev.veyra.data.room.LibraryRows) -> dev.veyra.data.room.LibraryRows): AppSnapshot =
     store.transactAcquisition { graph ->
-        dev.veyra.data.room.AcquisitionMutation(graph.copy(library = transform(graph.library))) { it.snapshot() }
+        dev.veyra.data.room.AcquisitionMutation(graph.copy(
+            library = transform(graph.library), rows = transformAcquisitionRows(graph.rows),
+        )) { it.snapshot() }
     }

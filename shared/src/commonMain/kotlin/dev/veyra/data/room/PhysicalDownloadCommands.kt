@@ -53,7 +53,10 @@ internal fun PhysicalDownloadJoin.committedBy(graph: AcquisitionGraph): Acquisit
     graph.physicalCommitted { requireNotNull(it.physicalJoin(job.id)) }
 
 internal fun AcquisitionGraph.refreshBatchDownloadStates(id: String, now: Long): AcquisitionGraph {
-    val state = state()
+    // The intermediate graph can legitimately contain an AVAILABLE member while this same
+    // transaction changes the shared job away from COMPLETE. Project from the row graph without
+    // the committed-graph readback guard; Room/LibraryStore still validate the final graph.
+    val state = stateForBatchProjection()
     val job = state.physicalDownloads.getValue(id)
     var graph = this
     state.batches.values.filter { batch -> batch.members.any { member -> member.claimId?.let { state.claims[it]?.physicalJobId == id } == true } }
@@ -86,8 +89,21 @@ internal fun AcquisitionGraph.refreshBatchDownloadStates(id: String, now: Long):
 internal fun AcquisitionGraph.reconcileJob(join: PhysicalDownloadJoin, now: Long, allowHostResume: Boolean = false): AcquisitionGraph {
     require(now >= join.job.updatedEpochMs)
     var job = join.job
-    if (job.maintenanceKind == PhysicalDownloadMaintenanceKind.CLEANUP) return this
     var graph = this
+    if (job.maintenanceKind == PhysicalDownloadMaintenanceKind.CLEANUP) {
+        // A cleanup ownership interrupted by the host keeps its reservation but is admitted again
+        // only after an explicit foreground announcement. This is a retry of the SAME cleanup,
+        // never a status shortcut or an inferred completion.
+        if (!allowHostResume || !job.cleanupPending ||
+            job.leaseOwner != null && (job.leaseExpiresEpochMs ?: 0) > now ||
+            job.status != DownloadStatus.NEEDS_FOREGROUND && job.failure?.code != FailureCode.BACKGROUND_RESTRICTED)
+            return this
+        val hostOnly = job.failure == null || job.failure?.code == FailureCode.BACKGROUND_RESTRICTED
+        val recovered = job.copy(status = DownloadStatus.CANCELLED, leaseOwner = null, leaseExpiresEpochMs = null,
+            failure = if (hostOnly) null else job.failure,
+            nextRetryEpochMs = if (hostOnly) null else job.nextRetryEpochMs, updatedEpochMs = now)
+        return graph.withJob(recovered).refreshBatchDownloadStates(job.id, now)
+    }
     val expired = job.leaseOwner != null && (job.leaseExpiresEpochMs ?: 0) <= now
     if (expired || job.leaseOwner == null && job.status in setOf(DownloadStatus.RESOLVING, DownloadStatus.RUNNING, DownloadStatus.VERIFYING) && join.finalization == null) {
         join.activeAttempt?.takeIf { it.finishedEpochMs == null }?.let { attempt ->
@@ -97,17 +113,38 @@ internal fun AcquisitionGraph.reconcileJob(join: PhysicalDownloadJoin, now: Long
             status = if (join.finalization == null && job.assetId == null && job.status in setOf(DownloadStatus.RESOLVING, DownloadStatus.RUNNING, DownloadStatus.VERIFYING)) DownloadStatus.QUEUED else job.status)
     }
     val blocked = job.status == DownloadStatus.FAILED || job.status == DownloadStatus.NEEDS_FOREGROUND || job.failure?.code == FailureCode.BACKGROUND_RESTRICTED
+    // A complete asset's denied/interrupted recheck is allowed to be rechecked only after a real
+    // foreground return. The marker is set by the validation finalizer; a retained local failure is
+    // kept stopped rather than converted to a fake COMPLETE or a dead QUEUED transfer.
+    val completedCheckResume = job.assetId != null && join.finalization == null &&
+        job.status == DownloadStatus.NEEDS_FOREGROUND && job.failure?.code == FailureCode.BACKGROUND_RESTRICTED &&
+        job.failure?.detail == "download_completed_check_needs_foreground"
+    val retainedFailureResume = job.assetId != null && join.finalization == null &&
+        (job.status == DownloadStatus.FAILED || job.status == DownloadStatus.NEEDS_FOREGROUND) && !completedCheckResume
     job = when (join.demand()) {
         DownloadClaimDemand.CONTINUE -> if (job.cleanupPending) job else job.copy(userPaused = false, removeWhenClean = false,
             status = when {
                 job.status == DownloadStatus.COMPLETE -> DownloadStatus.COMPLETE
+                completedCheckResume && allowHostResume -> DownloadStatus.COMPLETE
+                retainedFailureResume && allowHostResume -> DownloadStatus.FAILED
                 blocked && !allowHostResume -> job.status
                 join.finalization != null -> DownloadStatus.VERIFYING
                 job.leaseOwner != null -> job.status
                 job.status in setOf(DownloadStatus.PAUSED, DownloadStatus.CANCELLED) || allowHostResume -> DownloadStatus.QUEUED
                 else -> job.status
-            }, failure = if (allowHostResume && blocked) null else job.failure,
-            nextRetryEpochMs = if (allowHostResume) null else job.nextRetryEpochMs)
+            }, failure = when {
+                completedCheckResume && allowHostResume -> null
+                retainedFailureResume && allowHostResume -> job.failure?.takeUnless {
+                    it.code == FailureCode.BACKGROUND_RESTRICTED
+                } ?: AppFailure(FailureCode.RECOVERY_REQUIRED, "download_local_validation_required")
+                allowHostResume && blocked -> null
+                else -> job.failure
+            }, nextRetryEpochMs = when {
+                completedCheckResume && allowHostResume -> null
+                retainedFailureResume && allowHostResume -> job.nextRetryEpochMs
+                allowHostResume -> null
+                else -> job.nextRetryEpochMs
+            })
         DownloadClaimDemand.PAUSE_AND_RETAIN -> job.copy(userPaused = true,
             status = if (job.status == DownloadStatus.COMPLETE) job.status else DownloadStatus.PAUSED)
         DownloadClaimDemand.CANCEL_UNFINISHED_KEEP_COMPLETE -> job.copy(userPaused = true,

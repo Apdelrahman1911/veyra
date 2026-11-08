@@ -4,9 +4,11 @@ import dev.veyra.acquisition.AcquisitionDownloadDurableSettlement
 import dev.veyra.data.*
 import dev.veyra.model.*
 import dev.veyra.playback.Clock
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
@@ -74,6 +76,10 @@ internal class DownloadPhysicalCommands(
         requireAdmission()
         val before = repository.physicalDownload(id) ?: return@withLock
         runtime.requireExecutableProducer(before)
+        // Network Retry must not consume a retained FAILED file. This used to reconcile the
+        // asset-backed job to QUEUED, which neither transfer nor local validation can admit.
+        if (before.job.assetId != null && before.job.status == DownloadStatus.FAILED)
+            fail(FailureCode.RECOVERY_REQUIRED, "download_retained_local_validation_required")
         requireAdmission()
         updateIntentLocked(before, DownloadBatchIntent.ACTIVE, retain = true, retry = true)
         changed(id)
@@ -190,6 +196,11 @@ internal class DownloadPhysicalCommands(
                     else -> Unit // A detached idle epoch has no finalizer; the intent CAS above is positive.
                 }
             }
+        } catch (error: CancellationException) {
+            // A gate expiration cancels the maintenance child after the removal intent was
+            // durably accepted. If the caller itself is still active, the retained cleanup owner
+            // and foreground retry own the physical deletion; do not report a caller failure.
+            if (pending == null || !currentCoroutineContext().isActive) throw error
         } finally { host.signalWork() }
     }
 

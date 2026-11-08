@@ -301,6 +301,11 @@ internal class CoreShellFixtureEngine : AudioEngine {
         sendReady(load)
     }
 
+    /** Authored native observation for progress/checkpoint journeys only. */
+    fun sendPosition(generation: Long, positionMs: Long, durationMs: Long?, sequence: Long = 0L) {
+        channel.trySend(EngineEvent.Position(generation, positionMs, durationMs, seekSequence = sequence))
+    }
+
     override suspend fun play(generation: Long) {
         if (generation != activeGeneration || active == null) return
         plays += generation
