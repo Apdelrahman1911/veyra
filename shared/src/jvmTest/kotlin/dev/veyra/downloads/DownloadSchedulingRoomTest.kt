@@ -1050,17 +1050,35 @@ class DownloadSchedulingRoomTest {
                 owner.repository.reconcilePhysicalDownloadIntent(ReconcilePhysicalDownloadIntent(id, updated.job.producer,
                     updated.job.ownershipGeneration, updated.claims, clock.epochMs())))
             val fault = faults(owner.store)
+            val rollbacks = AtomicInteger()
             fault.beforeCommit = { _, next ->
-                if (blocked.get() && next.state().physicalDownloads[id]?.failure != null)
-                    throw IOException("Authored rollback of cleanup error/backoff persistence")
+                // Target only the canonical maintenance finish that persists the real cleanup
+                // failure/backoff row. Room failures are typed; an unknown UDF IOException would
+                // correctly latch the runtime's fail-closed checkpoint admission instead.
+                val proposed = next.state().physicalDownloads[id]
+                if (blocked.get() && proposed?.failure?.code == FailureCode.STORAGE_IO &&
+                    proposed.cleanupPending && proposed.nextRetryEpochMs == clock.epochMs() + 5_000) {
+                    rollbacks.incrementAndGet()
+                    throw VeyraException(AppFailure(FailureCode.STORAGE_IO, "authored_cleanup_backoff_rollback"))
+                }
             }
             val scheduler = owner.coordinator
             scheduler.start(DownloadActivation.DURABLE_WORK)
+            // Causal gate: the first plan with the published local deadline can be observed
+            // before the real cleanup attempt reaches its error/backoff commit. Wait for that
+            // exact transaction to roll back, then observe the resulting plan.
+            awaitCondition("The real cleanup attempt did not reach its error/backoff commit") { rollbacks.get() == 1 }
             scheduler.awaitPlan { it.nextLocalEpochMs == clock.epochMs() + 5_000 && !it.hasDueWork }
-            // A failed error-persistence transform leaves the REAL cleanup owner retained, so the
-            // typed host first owes that owner rather than reporting legacy-style idle:
-            // the bounded local recheck still defers all source/gate work.
-            assertIs<DownloadIdleDecision.OwnedWork>(scheduler.idleDecision())
+            assertEquals(1, rollbacks.get(), "The exact error/backoff persistence commit must have rolled back")
+            // A typed Room failure in the real cleanup owner's error/backoff commit is an
+            // Unconfirmed durable settlement, not an unknown UDF failure: the durable cleanup
+            // reservation and file stay retained under the published local recheck. The
+            // in-memory finalizer may already be consumed by the time this stable plan exists,
+            // so the original Deferred expectation (not a transient in-progress registry count)
+            // is the deterministic post-state; the rollback counter above proves the real owner ran.
+            val deferred = assertIs<DownloadIdleDecision.Deferred>(scheduler.idleDecision())
+            assertEquals(clock.epochMs() + 5_000, deferred.plan.nextLocalEpochMs)
+            assertFalse(deferred.plan.hasDueWork)
             val retained = join(owner, id)
             assertTrue(retained.job.cleanupPending)
             assertTrue(retained.job.removeWhenClean)
@@ -1072,18 +1090,23 @@ class DownloadSchedulingRoomTest {
             // owner (recording its unconfirmed durable receipt) instead of inventing a success;
             // the durable cleanup reservation, asset and tombstone remain.
             assertEquals(1, deleteCalls.get())
-            scheduler.close()
+            // The typed Unconfirmed storage settlement is a truthful close diagnostic, not a
+            // fabricated success. The exact failed owner is still consumed exactly once and the
+            // host cannot claim a green release receipt through a swallowed STORAGE_IO.
+            val closeFailure = assertFailsWith<VeyraException> { scheduler.close() }.failure
+            assertEquals(FailureCode.STORAGE_IO, closeFailure.code)
             assertTrue(scheduler.dependencyReleaseSafeAfterClose)
             val retainedAfterClose = join(owner, id)
             assertTrue(retainedAfterClose.job.cleanupPending)
             assertEquals(asset, retainedAfterClose.asset)
             assertTrue(Files.exists(Path.of(asset.uri)))
             // A genuinely separate host retries the retained canonical cleanup after its exact
-            // persisted/claim backoff. Only that actual deletion may clear the reservation.
+            // published local recheck. A closed host leaves the removal job NEEDS_FOREGROUND, so
+            // the real foreground-resume path (not a fabricated background claim) is required.
             val cold = owner(owner.store)
-            val retryAt = assertNotNull(retainedAfterClose.job.nextRetryEpochMs)
-            advance((retryAt - clock.epochMs()).coerceAtLeast(1))
-            cold.coordinator.start(DownloadActivation.DURABLE_WORK)
+            advance(5_000)
+            cold.coordinator.start(DownloadActivation.USER_SESSION)
+            cold.coordinator.resumePending()
             awaitJob(cold, id) { !it.job.cleanupPending && it.asset == null }
             assertFalse(Files.exists(Path.of(asset.uri)))
             assertEquals(preparationsAfterComplete, owner.gateway.preparations.size,
