@@ -2,6 +2,10 @@ package dev.veyra.downloads
 
 import dev.veyra.data.getOrThrow
 import dev.veyra.data.AcquisitionRepositoryState
+import dev.veyra.data.ClaimPhysicalDownloadMaintenance
+import dev.veyra.data.ClaimedPhysicalDownload
+import dev.veyra.data.PhysicalDownloadJoin
+import dev.veyra.data.UpdateStandaloneDownloadIntent
 import dev.veyra.model.*
 import dev.veyra.playback.LocalMediaValidationReaderRelease
 import dev.veyra.playback.LocalMediaValidationReaderUnacknowledged
@@ -23,6 +27,69 @@ import kotlin.test.*
 
 /** REAL SQLite and OS file leases; fake native/central handles and authored NON-AUDIO bytes. */
 class DownloadCleanupRoomTest {
+    @Test fun canonicalCleanupClaimKeepsPreReadFenceAndClaimIdentity() = executorSchema3Case {
+        val owner = owner()
+        val (id, _) = enqueue(owner)
+        owner.coordinator.start(DownloadActivation.USER_SESSION)
+        complete(owner, id)
+        val deleting = barrier()
+        owner.beforeDelete = { deleting.stop() }
+        val preRead = AtomicReference<PhysicalDownloadJoin>()
+        val command = AtomicReference<ClaimPhysicalDownloadMaintenance>()
+        val committed = AtomicReference<ClaimedPhysicalDownload>()
+        val first = AtomicBoolean(true)
+        owner.repository.beforeMaintenanceClaim = { current ->
+            if (current.kind == PhysicalDownloadMaintenanceKind.CLEANUP && first.compareAndSet(true, false)) {
+                command.set(current)
+                val before = assertNotNull(owner.repository.physicalDownload(id))
+                preRead.set(before)
+                val claim = before.claims.single()
+                // A cleanup-pending claim rejects every non-CANCELLED or newly retaining intent.
+                assertIs<PhysicalDownloadCommit.Stale>(owner.repository.updateStandaloneDownloadIntent(
+                    UpdateStandaloneDownloadIntent(id, before.job.producer, before.job.ownershipGeneration,
+                        claim.id, claim.generation, claim.ownerIntentRevision, DownloadBatchIntent.PAUSED,
+                        retainCompletedAsset = true, nowEpochMs = clock.epochMs())))
+                assertIs<PhysicalDownloadCommit.Stale>(owner.repository.updateStandaloneDownloadIntent(
+                    UpdateStandaloneDownloadIntent(id, before.job.producer, before.job.ownershipGeneration,
+                        claim.id, claim.generation, claim.ownerIntentRevision, DownloadBatchIntent.CANCELLED,
+                        retainCompletedAsset = true, nowEpochMs = clock.epochMs())))
+                assertIs<PhysicalDownloadCommit.Committed<*>>(owner.repository.updateStandaloneDownloadIntent(
+                    UpdateStandaloneDownloadIntent(id, before.job.producer, before.job.ownershipGeneration,
+                        claim.id, claim.generation, claim.ownerIntentRevision, DownloadBatchIntent.CANCELLED,
+                        retainCompletedAsset = false, nowEpochMs = clock.epochMs())))
+                assertEquals(before.claims, assertNotNull(owner.repository.physicalDownload(id)).claims,
+                    "No canonical command may mutate the cleanup-pending claim set")
+            }
+        }
+        owner.repository.transformMaintenanceClaim = { current, result ->
+            if (current.kind == PhysicalDownloadMaintenanceKind.CLEANUP &&
+                result is PhysicalDownloadCommit.Committed && committed.get() == null)
+                committed.set(result.value)
+            result
+        }
+        coroutineScope {
+            val removing = async(start = CoroutineStart.UNDISPATCHED) { runCatching { owner.coordinator.remove(id) } }
+            deleting.entered.await()
+            val before = assertNotNull(preRead.get())
+            val claimed = assertNotNull(committed.get())
+            val current = assertNotNull(command.get())
+            assertEquals(before.job.ownershipGeneration + 1, claimed.fence.ownershipGeneration)
+            assertEquals(current.owner, claimed.fence.leaseOwner)
+            assertEquals(before.job.producer, claimed.fence.producer)
+            assertEquals(before.job.activeAttemptId, claimed.fence.attemptId)
+            assertEquals(before.claims.toSet(), claimed.physical.claims.toSet(),
+                "The canonical cleanup claim returns the exact pre-read claim identity")
+            assertTrue(claimed.physical.claims.all {
+                it.intent == DownloadBatchIntent.CANCELLED && !it.retainCompletedAsset
+            })
+            assertFalse(removing.isCompleted)
+            deleting.release()
+            removing.await().getOrThrow()
+        }
+        awaitJob(owner, id) { !it.job.cleanupPending && it.asset == null }
+        owner.legacy.assertUnused()
+    }
+
     @Test fun committedCleanupClaimJoinChangeRollsBackReturnedFenceAndRetriesWithoutStickyLease() = executorSchema3Case {
         val owner = owner()
         val (id, _) = enqueue(owner)
