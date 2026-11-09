@@ -69,8 +69,21 @@ class LinuxAudioTestDependencies(unittest.TestCase):
         self.assertFalse(self.destination.exists())
 
     def test_existing_library_needs_no_download_or_subprocess(self):
-        with patch.object(AUDIO.ctypes, 'CDLL'), patch.object(AUDIO.subprocess, 'check_output') as command:
+        with patch.object(AUDIO.ctypes, 'CDLL') as loader, patch.object(AUDIO.subprocess, 'check_output') as command:
             self.assertEqual('', AUDIO.prepare())
+        self.assertEqual(list(AUDIO.LIBRARIES), [call.args[0] for call in loader.call_args_list])
+        command.assert_not_called()
+
+    def test_missing_egl_is_detected_even_when_pulseaudio_loads(self):
+        def load(library):
+            if library == 'libEGL.so.1':
+                raise OSError('authored missing EGL')
+        with patch.object(AUDIO, 'LIBRARIES', ('libpulse.so.0', 'libEGL.so.1')), \
+                patch.object(AUDIO.ctypes, 'CDLL', side_effect=load) as loader, \
+                patch.object(AUDIO.Path, 'read_text', return_value='ID=authored\n'), \
+                patch.object(AUDIO.subprocess, 'check_output') as command, self.assertRaises(SystemExit):
+            AUDIO.prepare()
+        self.assertEqual(['libpulse.so.0', 'libEGL.so.1'], [call.args[0] for call in loader.call_args_list])
         command.assert_not_called()
 
     def test_missing_library_on_another_distribution_is_rejected(self):

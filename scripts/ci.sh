@@ -57,7 +57,7 @@ case "$mode" in
         # never apt. A verified private read-only mount guard gives Xorg's
         # hard-coded scratch paths repository backing; there is no fallback.
         if [ "$(uname -s)" = Linux ]; then
-            # Missing host audio client libraries are extracted under .work from
+            # Missing MPV host libraries are extracted under .work from
             # pinned Ubuntu metadata, never installed globally.
             audio_libraries="$(python3 -B "$SCRIPT_DIR/linux-audio-test-deps.py")"
             if [ -n "$audio_libraries" ]; then

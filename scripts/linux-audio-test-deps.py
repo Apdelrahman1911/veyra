@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Extract pinned Ubuntu audio client packages in .work; never install.
+"""Extract pinned Ubuntu native-test client libraries in .work; never install.
 
 Only test subprocesses receive this library path. Nothing is added to an app
 package, the system loader configuration, or the host package database.
@@ -17,8 +17,23 @@ import tempfile
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
-PACKAGES = ('libpulse0', 'libasyncns0', 'libsndfile1', 'libflac12t64', 'libogg0',
-            'libopus0', 'libvorbis0a', 'libvorbisenc2', 'libmpg123-0t64', 'libmp3lame0')
+PACKAGES = (
+    'libapparmor1', 'libasound2t64', 'libasyncns0', 'libbsd0', 'libcap2', 'libdbus-1-3', 'libdrm2',
+    'libegl1', 'libexpat1', 'libflac12t64', 'libfontconfig1', 'libgcrypt20', 'libgl1', 'libglvnd0',
+    'libglx0', 'libgpg-error0', 'liblz4-1', 'liblzma5', 'libmd0', 'libmp3lame0', 'libmpg123-0t64',
+    'libogg0', 'libopus0', 'libpulse0', 'libsndfile1', 'libsystemd0', 'libvorbis0a',
+    'libvorbisenc2', 'libvulkan1', 'libx11-6', 'libx11-xcb1', 'libxau6', 'libxcb1', 'libxdmcp6',
+    'libzstd1',
+)
+LIBRARIES = (
+    'libEGL.so.1', 'libFLAC.so.12', 'libGL.so.1', 'libGLX.so.0', 'libGLdispatch.so.0',
+    'libX11-xcb.so.1', 'libX11.so.6', 'libXau.so.6', 'libXdmcp.so.6', 'libapparmor.so.1',
+    'libasound.so.2', 'libasyncns.so.0', 'libbsd.so.0', 'libcap.so.2', 'libdbus-1.so.3',
+    'libdrm.so.2', 'libexpat.so.1', 'libfontconfig.so.1', 'libgcrypt.so.20', 'libgpg-error.so.0',
+    'liblz4.so.1', 'liblzma.so.5', 'libmd.so.0', 'libmp3lame.so.0', 'libmpg123.so.0',
+    'libogg.so.0', 'libopus.so.0', 'libpulse.so.0', 'libsndfile.so.1', 'libsystemd.so.0',
+    'libvorbis.so.0', 'libvorbisenc.so.2', 'libvulkan.so.1', 'libxcb.so.1', 'libzstd.so.1',
+)
 MAX_BYTES = 10 * 1024 * 1024
 
 
@@ -52,13 +67,14 @@ def fetch(fields: dict[str, str], destination: Path) -> None:
 
 def prepare() -> str:
     try:
-        ctypes.CDLL('libpulse.so.0')
-        return ''  # Existing host closure is already sufficient.
+        for library in LIBRARIES:
+            ctypes.CDLL(library)
+        return ''  # Every external MPV dependency already loads on this host.
     except OSError:
         pass
     release = Path('/etc/os-release').read_text()
     if not re.search(r'^ID=ubuntu$', release, re.M) or not re.search(r'^VERSION_ID="24\.04"$', release, re.M):
-        raise SystemExit('Missing libpulse.so.0: scoped extraction supports Ubuntu 24.04 only')
+        raise SystemExit('Missing native-test library: scoped extraction supports Ubuntu 24.04 only')
     if subprocess.check_output(['dpkg', '--print-architecture'], text=True).strip() != 'amd64':
         raise SystemExit('Matching amd64 Ubuntu audio packages required')
     parent = ROOT / '.work/linux-audio-tests'
@@ -90,9 +106,12 @@ def prepare() -> str:
     libraries = [sysroot / 'usr/lib/x86_64-linux-gnu', sysroot / 'usr/lib/x86_64-linux-gnu/pulseaudio',
                  sysroot / 'lib/x86_64-linux-gnu', sysroot / 'lib/x86_64-linux-gnu/pulseaudio']
     value = ':'.join(str(p) for p in libraries if p.is_dir())
-    subprocess.run(['python3', '-B', '-c', "import ctypes; ctypes.CDLL('libpulse.so.0')"], check=True,
-                   timeout=10, env=dict(os.environ, LD_LIBRARY_PATH=value))
-    (stage / 'manifest.json').write_text(json.dumps({'packages': records, 'libraryPath': value}, indent=2) + '\n')
+    subprocess.run(['python3', '-B', '-c',
+                    'import ctypes,sys; [ctypes.CDLL(name) for name in sys.argv[1:]]', *LIBRARIES],
+                   check=True, timeout=10,
+                   env=dict(os.environ, LD_LIBRARY_PATH=value + (':' + os.environ['LD_LIBRARY_PATH']
+                                                           if os.environ.get('LD_LIBRARY_PATH') else '')))
+    (stage / 'manifest.json').write_text(json.dumps({'packages': records, 'libraryPath': value, 'verifiedLibraries': list(LIBRARIES)}, indent=2) + '\n')
     return value
 
 

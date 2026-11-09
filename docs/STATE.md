@@ -4,6 +4,17 @@ Updated 2026-11-07 UTC. Formal Goal tool currently reports **blocked/incomplete*
 
 ## Current Task B continuation — 2026-11-09
 
+Run `42628939368` at `7b91522` has a successful Android lane. Linux passed all
+1,215 shared tests and built its DEB, but nine native desktop tests expose the
+next missing hosted library, `libEGL.so.1`. The lead corrected the scoped helper
+to provide the complete external MPV dependency chain, verified it in a private
+minimal root without VPS graphics/audio fallbacks, and passed all 10 native
+audio/crossfade tests plus seven helper tests locally. Windows/macOS results are
+still pending; batch the next dispatch after inspecting them. See
+`verification/task-b-linux-native-closure-42628939368.md`. No hosted successor or
+release acceptance is claimed.
+
+
 Five-platform run `42615340845` at `c4a3f1e` completed with Android and macOS x64
 passing; Linux, Windows and macOS arm64 failed. All five lane support archives,
 indexed hashes and exact unpublished draft tags independently verify. Linux now
