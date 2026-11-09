@@ -8,7 +8,7 @@ on:
       scope:
         description: Target group to verify
         type: choice
-        options: [all, desktop, android, ios]
+        options: [all, desktop, windows, android, ios]
         default: all
       package_desktop:
         description: Generate native installers (no upload or OS installation)
@@ -40,7 +40,7 @@ env:
 
 jobs:
   desktop:
-    if: ${{ github.event.repository.private == false && inputs.retention_canary != true && (inputs.scope == 'all' || inputs.scope == 'desktop') }}
+    if: ${{ github.event.repository.private == false && inputs.retention_canary != true && (inputs.scope == 'all' || inputs.scope == 'desktop' || inputs.scope == 'windows') }}
     name: Desktop (${{ matrix.label }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
@@ -50,11 +50,7 @@ jobs:
       fail-fast: false
       max-parallel: 2
       matrix:
-        include:
-          - {label: Linux x64, runner: ubuntu-24.04, system: Linux, arch: x64, platform: desktop-linux-x64}
-          - {label: Windows x64, runner: windows-2022, system: Windows, arch: x64, platform: desktop-windows-x64}
-          - {label: macOS arm64, runner: macos-15, system: Darwin, arch: arm64, platform: desktop-macos-arm64}
-          - {label: macOS x64, runner: macos-15-intel, system: Darwin, arch: x64, platform: desktop-macos-x64}
+        include: ${{ fromJSON(inputs.scope == 'windows' && '[{"label":"Windows x64","runner":"windows-2022","system":"Windows","arch":"x64","platform":"desktop-windows-x64"}]' || '[{"label":"Linux x64","runner":"ubuntu-24.04","system":"Linux","arch":"x64","platform":"desktop-linux-x64"},{"label":"Windows x64","runner":"windows-2022","system":"Windows","arch":"x64","platform":"desktop-windows-x64"},{"label":"macOS arm64","runner":"macos-15","system":"Darwin","arch":"arm64","platform":"desktop-macos-arm64"},{"label":"macOS x64","runner":"macos-15-intel","system":"Darwin","arch":"x64","platform":"desktop-macos-x64"}]') }}
     env:
       VEYRA_EXPECTED_OS: ${{ matrix.system }}
       VEYRA_EXPECTED_ARCH: ${{ matrix.arch }}
@@ -665,6 +661,8 @@ jobs:
           platforms = []
           if scope in ("all", "desktop") and package:
               platforms += ["desktop-linux-x64", "desktop-windows-x64", "desktop-macos-arm64", "desktop-macos-x64"]
+          if scope == "windows" and package:
+              platforms += ["desktop-windows-x64"]
           if scope in ("all", "android"):
               platforms += ["android"]
           if scope in ("all", "ios"):

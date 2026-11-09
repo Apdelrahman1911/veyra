@@ -262,3 +262,17 @@ This is diagnostic evidence, not a sealed clean-final-source run. XML/log/source
 a later Java-executable/cwd/fd sample found **0** owned JVM processes. That later sample does
 not establish an in-lock drain. The first sample incorrectly matched the shell text and is
 retained separately as a false positive. Earlier bounded diagnostic hangs remain preserved.
+
+
+## First production dispatch and Windows bootstrap correction
+
+Run `42560795834` was dispatched at `2026-11-09T04:15:28Z` from exact source
+`b1828cf3fcd2a2f01c4110a40787db293aa7932e`, scope all, desktop packages and retention enabled.
+Windows stopped at bootstrap before compiling; the original guard had no failure diagnostic.
+An authored local Git fixture reproduced a dirty markdown/JSON checkout when checkout used
+`core.autocrlf=true` and validation used the scoped configuration with conversion disabled.
+Adding `* text=auto eol=lf` preserves exact source bytes and makes that fixture clean. Every
+tracked CRLF text file already has a deliberate `-text` exception, including retained notices
+and `gradlew.bat`; those bytes remain unchanged. Bootstrap now reports source identity failures.
+A `windows` dispatch scope permits a single-lane retry without repeating healthy platform lanes.
+The other original jobs continue; this record does not claim their outcome or Windows success.

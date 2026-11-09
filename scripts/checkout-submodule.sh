@@ -9,8 +9,10 @@ cd "$VEYRA_PROJECT_ROOT"
 # Hosted builds must describe exactly the checked-out source. Local development
 # still permits reviewable working edits; GitHub dispatches require clean inputs.
 if [ -n "${GITHUB_SHA:-}" ]; then
-    test "$(git -c safe.directory="$VEYRA_PROJECT_ROOT" rev-parse HEAD)" = "$GITHUB_SHA"
-    test -z "$(git -c safe.directory="$VEYRA_PROJECT_ROOT" status --porcelain=v1)"
+    actual_head="$(git -c safe.directory="$VEYRA_PROJECT_ROOT" rev-parse HEAD)"
+    [ "$actual_head" = "$GITHUB_SHA" ] || { printf '%s\n' 'Hosted source HEAD differs from GITHUB_SHA.' >&2; exit 1; }
+    source_status="$(git -c safe.directory="$VEYRA_PROJECT_ROOT" status --porcelain=v1)"
+    [ -z "$source_status" ] || { printf 'Hosted source is dirty before bootstrap:\n%s\n' "$source_status" >&2; exit 1; }
     python3 -B - <<'IDENTITY'
 from pathlib import Path
 import hashlib

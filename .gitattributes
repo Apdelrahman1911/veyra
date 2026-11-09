@@ -1,3 +1,5 @@
+# Keep text bytes stable when the scoped environment disables host Git settings.
+* text=auto eol=lf
 # Source/scripts must remain runnable from Windows checkouts too.
 *.kt text eol=lf
 *.kts text eol=lf
