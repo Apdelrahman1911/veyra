@@ -18,7 +18,9 @@ import java.security.MessageDigest
 import org.gradle.api.GradleException
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier
 import org.gradle.api.artifacts.component.ProjectComponentIdentifier
+import org.gradle.api.artifacts.type.ArtifactTypeDefinition
 import org.gradle.api.artifacts.result.ResolvedArtifactResult
+import org.gradle.api.artifacts.result.UnresolvedComponentResult
 import org.gradle.api.artifacts.result.UnresolvedDependencyResult
 import org.gradle.maven.MavenModule
 import org.gradle.maven.MavenPomArtifact
@@ -115,7 +117,15 @@ gradle.projectsEvaluated {
                     components[id] = [id: id, kind: 'project', projectPath: component.id.projectPath]
                 }
             }
-            def artifacts = configuration.incoming.artifacts.artifacts.collect { artifact ->
+            // AGP publishes several artifact kinds on each Android variant. Select its
+            // runtime class JAR view explicitly; an untyped view is ambiguous.
+            // This remains a classpath inventory, not packaged-resource/native closure.
+            def artifactCollection = platform.startsWith('android-')
+                ? configuration.incoming.artifactView {
+                    attributes.attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, 'android-classes-jar')
+                }.artifacts
+                : configuration.incoming.artifacts
+            def artifacts = artifactCollection.artifacts.collect { artifact ->
                 def attributes = new TreeMap<String, String>()
                 artifact.variant.attributes.keySet().each { key ->
                     attributes[key.name] = String.valueOf(artifact.variant.attributes.getAttribute(key))
@@ -156,7 +166,9 @@ gradle.projectsEvaluated {
                         if (parent != null && parent != 'unresolved-parent-coordinates') pomParents.add(parent)
                     }
                 }
-                result.unresolvedComponents.each { component -> pomFailures.add(componentId(component.id)) }
+                result.components.findAll { it instanceof UnresolvedComponentResult }.each { component ->
+                    pomFailures.add(componentId(component.id))
+                }
             }
             if (!externalIds.isEmpty()) {
                 collectPoms(app.dependencies.createArtifactResolutionQuery().forComponents(externalIds))

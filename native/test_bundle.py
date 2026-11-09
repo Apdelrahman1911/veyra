@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Native staging/build-wiring regressions; no compiler, media or network runs."""
+import contextlib
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -92,6 +94,45 @@ class NativeBundleTest(unittest.TestCase):
             self.assertEqual(directory, BUNDLE.stage_resources("linux-x64", sources, root=self.root))
             run.assert_not_called()
         self.assertEqual(before, {str(p): p.stat().st_mtime_ns for p in directory.rglob("*")})
+
+    def test_gradle_created_empty_output_directory_is_replaced(self):
+        destination = self.root / ".work/desktop-native/resources/linux-x64"
+        destination.mkdir(parents=True)
+        self.assertEqual([], list(destination.iterdir()))
+        directory, sources = self.stage()
+        self.assertEqual(destination, directory)
+        self.assertEqual(set(sources), set(BUNDLE.read_manifest(directory, self.root)["files"]))
+
+    def test_nonempty_unrecognized_output_directory_is_refused_and_preserved(self):
+        destination = self.root / ".work/desktop-native/resources/linux-x64"
+        destination.mkdir(parents=True)
+        sentinel = destination / "owner-file"
+        sentinel.write_text("preserve me")
+        with self.assertRaises(ValueError):
+            BUNDLE.stage_resources("linux-x64", self.sources(), root=self.root)
+        self.assertEqual("preserve me", sentinel.read_text())
+        self.assertFalse((destination / BUNDLE.MANIFEST).exists())
+
+    @unittest.skipIf(os.name == "nt", "Requires unprivileged symlink support")
+    def test_linked_output_destination_is_refused_not_removed(self):
+        base = self.root / ".work/desktop-native/resources"
+        base.mkdir(parents=True)
+        outside = self.root / ".work/outside-destination"
+        outside.mkdir()
+        (base / "linux-x64").symlink_to(outside, target_is_directory=True)
+        with self.assertRaises(ValueError):
+            BUNDLE.stage_resources("linux-x64", self.sources(), root=self.root)
+        self.assertTrue(outside.is_dir())
+
+    def test_empty_output_placeholder_does_not_block_verified_backup_recovery(self):
+        directory, sources = self.stage()
+        original = BUNDLE.read_manifest(directory, self.root)
+        previous = directory.with_name(".old-linux-x64-authored-interruption")
+        directory.rename(previous)
+        directory.mkdir()  # Gradle-created empty declared output.
+        self.assertEqual(directory, BUNDLE.stage_resources("linux-x64", sources, root=self.root))
+        self.assertFalse(previous.exists())
+        self.assertEqual(original, BUNDLE.read_manifest(directory, self.root))
 
     def test_valid_stale_stage_is_replaced_and_only_old_generated_files_are_removed(self):
         directory, sources = self.stage()
@@ -209,6 +250,47 @@ class NativeBundleTest(unittest.TestCase):
         self.assertEqual(log, run.call_args.kwargs["log"])
         self.assertEqual(3, run.call_args.kwargs["timeout"])
         self.assertEqual(b"preserve diagnostic output", log.read_bytes())
+
+    def test_failed_owned_build_retains_bounded_safe_compiler_diagnostic(self):
+        log = self.inputs / "build.log"
+        original = (
+            "authored setup\n"
+            "/src/authored.c:7:3: error: use of undeclared identifier 'sentinel_error'\n"
+            "  sentinel_error = 1;\n"
+            "  ^\n"
+            "CMake Error at CMakeLists.txt:4 (message):\n"
+            "  authored cmake sentinel\n"
+            "fatal error: Authorization: Bearer gho_authoredcredential\n"
+            "error: fetch https://example.invalid/object?X-Amz-Signature=authoredsignature failed\n"
+            + "".join("error: repeated authored diagnostic %d\n" % index for index in range(100))
+        ).encode()
+        log.write_bytes(original)
+        failure = BUNDLE.owned_process.OwnedProcessError("command_failed", cleanup_complete=True, returncode=1)
+        output = io.StringIO()
+        with patch.object(BUNDLE.owned_process, "run", side_effect=failure), contextlib.redirect_stderr(output):
+            with self.assertRaises(BUNDLE.owned_process.OwnedProcessError) as raised:
+                BUNDLE.run(["authored-tool"], self.root, log, 3, root=self.root)
+        self.assertIs(failure, raised.exception)
+        self.assertEqual(original, log.read_bytes())
+        record = json.loads((self.root / BUNDLE.DIAGNOSTIC).read_text())
+        text = "\n".join(record["lines"])
+        self.assertIn("sentinel_error", text)
+        self.assertIn("authored cmake sentinel", text)
+        self.assertNotIn("gho_authoredcredential", text)
+        self.assertNotIn("authoredsignature", text)
+        self.assertNotIn("Authorization", text)
+        self.assertNotIn("authored setup", text)
+        self.assertLessEqual(len(record["lines"]), BUNDLE.DIAGNOSTIC_MAX_LINES)
+        self.assertLessEqual(len(text.encode()), BUNDLE.DIAGNOSTIC_MAX_BYTES)
+        self.assertTrue(record["truncated"])
+        self.assertGreaterEqual(record["suppressedLines"], 2)
+        self.assertTrue(record["logAvailable"])
+        console = output.getvalue()
+        self.assertIn("sentinel_error", console)
+        self.assertNotIn("gho_authoredcredential", console)
+        self.assertNotIn("authoredsignature", console)
+        self.assertNotIn("authored setup", console)
+        self.assertIn("Preserved log:", console)
 
     def test_changed_or_unmanaged_stage_is_preserved_not_silently_cleaned(self):
         directory, sources = self.stage()

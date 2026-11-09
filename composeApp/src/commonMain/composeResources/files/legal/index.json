@@ -70,8 +70,8 @@
   "platforms": [],
   "schemaVersion": 1,
   "source": {
-    "kmpytNoticeRevision": "c0a08090fe7dbd76e20216559b8184ad2cccde63",
-    "kmpytPin": "c0a08090fe7dbd76e20216559b8184ad2cccde63",
+    "kmpytNoticeRevision": "6805d4db8077650992d342e5395b1f0d7c80e984",
+    "kmpytPin": "6805d4db8077650992d342e5395b1f0d7c80e984",
     "mode": "actual-pinned-checkout",
     "publicationVerified": false
   },

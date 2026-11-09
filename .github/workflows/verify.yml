@@ -395,7 +395,7 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git status --porcelain=v1)"
-          test "$(cat gradle/kmpyt.commit)" = "c0a08090fe7dbd76e20216559b8184ad2cccde63"
+          test "$(cat gradle/kmpyt.commit)" = "6805d4db8077650992d342e5395b1f0d7c80e984"
           test "$(sha256sum shared/schemas/dev.veyra.data.room.VeyraDatabase/3.json | cut -d' ' -f1)" \
             = "aab30e43a35a431a25a7ecbb7ebccefd849811f688957054304b02d3caf6d367"
           python3 -B scripts/tests/test_retention_packet.py
@@ -549,7 +549,7 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git status --porcelain=v1)"
-          test "$(cat gradle/kmpyt.commit)" = "c0a08090fe7dbd76e20216559b8184ad2cccde63"
+          test "$(cat gradle/kmpyt.commit)" = "6805d4db8077650992d342e5395b1f0d7c80e984"
           test "$(sha256sum shared/schemas/dev.veyra.data.room.VeyraDatabase/3.json | cut -d' ' -f1)" \
             = "aab30e43a35a431a25a7ecbb7ebccefd849811f688957054304b02d3caf6d367"
       - name: Download the draft assets independently
@@ -701,7 +701,7 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git status --porcelain=v1)"
-          test "$(cat gradle/kmpyt.commit)" = "c0a08090fe7dbd76e20216559b8184ad2cccde63"
+          test "$(cat gradle/kmpyt.commit)" = "6805d4db8077650992d342e5395b1f0d7c80e984"
           test "$(sha256sum shared/schemas/dev.veyra.data.room.VeyraDatabase/3.json | cut -d' ' -f1)" \
             = "aab30e43a35a431a25a7ecbb7ebccefd849811f688957054304b02d3caf6d367"
       - name: Independently download and verify every lane draft release

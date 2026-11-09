@@ -16,7 +16,7 @@ if [ -n "${GITHUB_SHA:-}" ]; then
     python3 -B - <<'IDENTITY'
 from pathlib import Path
 import hashlib
-assert Path("gradle/kmpyt.commit").read_text().strip() == "c0a08090fe7dbd76e20216559b8184ad2cccde63", "Unexpected source dependency pin"
+assert Path("gradle/kmpyt.commit").read_text().strip() == "6805d4db8077650992d342e5395b1f0d7c80e984", "Unexpected source dependency pin"
 schema = Path("shared/schemas/dev.veyra.data.room.VeyraDatabase/3.json")
 assert hashlib.sha256(schema.read_bytes()).hexdigest() == "aab30e43a35a431a25a7ecbb7ebccefd849811f688957054304b02d3caf6d367", "Unexpected schema3 source"
 IDENTITY

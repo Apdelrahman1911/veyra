@@ -67,10 +67,13 @@ from pathlib import Path
 for path in sorted(Path(sys.argv[1]).iterdir()):
     if path.is_symlink() or not path.is_file():
         raise SystemExit("unsafe lane asset")
-    print(path)
+    print(path.as_posix())
 PY
 assets=()
-while IFS= read -r value; do assets+=("$value"); done < "$retention_root/lane-assets-${platform}.list"
+while IFS= read -r value; do
+  value="${value%$'\r'}"
+  [ -n "$value" ] && assets+=("$value")
+done < "$retention_root/lane-assets-${platform}.list"
 [ "${#assets[@]}" -gt 0 ] || { echo 'No lane assets' >&2; exit 1; }
 gh release upload "$tag" "${assets[@]}" --repo "$GITHUB_REPOSITORY"
 gh api "repos/$GITHUB_REPOSITORY/releases/$release_id/assets" > "$retention_root/lane-assets-${platform}.json"

@@ -13,23 +13,6 @@ package=false
 if [ "${1:-}" = --package ]; then package=true; shift; fi
 [ "$#" -eq 0 ] || { printf '%s\n' 'Unexpected CI argument.' >&2; exit 2; }
 
-# Select only a native-architecture existing JDK. Do not accidentally choose
-# an Intel JDK on an Apple Silicon runner that happens to offer both.
-case "$(uname -m)" in
-    arm64|aarch64) candidates=("${JAVA_HOME_21_ARM64:-}" "${JAVA_HOME_21_arm64:-}" "${JAVA_HOME:-}") ;;
-    *) candidates=("${JAVA_HOME_21_X64:-}" "${JAVA_HOME:-}") ;;
-esac
-for candidate in "${candidates[@]}"; do
-    [ -n "$candidate" ] || continue
-    if command -v cygpath >/dev/null 2>&1; then candidate="$(cygpath -m "$candidate")"; fi
-    if [ -x "$candidate/bin/java" ] || [ -f "$candidate/bin/java.exe" ]; then
-        export JAVA_HOME="$candidate"
-        java_bin="$candidate/bin"
-        if command -v cygpath >/dev/null 2>&1; then java_bin="$(cygpath -u "$java_bin")"; fi
-        export PATH="$java_bin:$PATH"
-        break
-    fi
-done
 command -v java >/dev/null 2>&1 || { printf '%s\n' 'No existing JDK; no global installation is permitted.' >&2; exit 1; }
 version="$(java -XshowSettings:properties -version 2>&1 | sed -n 's/^[[:space:]]*java.specification.version = //p')"
 [ "$version" = 21 ] || { printf 'Expected existing JDK 21, got %s.\n' "$version" >&2; exit 1; }
@@ -69,9 +52,9 @@ case "$mode" in
         # never apt. A verified private read-only mount guard gives Xorg's
         # hard-coded scratch paths repository backing; there is no fallback.
         if [ "$(uname -s)" = Linux ]; then
-            "$SCRIPT_DIR/with-display.sh" "$SCRIPT_DIR/gradle.sh" :shared:jvmTest :composeApp:desktopTest
+            "$SCRIPT_DIR/with-display.sh" "$SCRIPT_DIR/gradle.sh" --continue :shared:jvmTest :composeApp:desktopTest
         else
-            "$SCRIPT_DIR/gradle.sh" :shared:jvmTest :composeApp:desktopTest
+            "$SCRIPT_DIR/gradle.sh" --continue :shared:jvmTest :composeApp:desktopTest
         fi
         python3 -B scripts/verification-summary.py --phase desktop --require-tests shared composeApp
         if [ "$package" = true ]; then "$SCRIPT_DIR/package.sh"; fi

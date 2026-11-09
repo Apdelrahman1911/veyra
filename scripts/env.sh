@@ -4,6 +4,7 @@
 
 _veyra_prepare_environment() {
     local root python native_root native_home native_tmp native_prefs native_daemon display_authority
+    local candidates candidate native_java_bin bash_path bash_win bash_prefix expected_java_arch
     root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)" || return 1
     if command -v python3 >/dev/null 2>&1; then
         python=python3
@@ -125,6 +126,55 @@ PY
     # os.tmpdir(). Keep ALL four settings identical, including on Windows.
     # Do not carry arbitrary inherited Java options (or secrets) into logs.
     unset _JAVA_OPTIONS JDK_JAVA_OPTIONS
+    # Select the existing matching-architecture JDK21 once for every scoped
+    # Gradle/Java child, including independent package and inventory steps.
+    # No download, system install, parent-shell or global configuration change.
+    case "$(uname -m)" in
+        arm64|aarch64) expected_java_arch=aarch64; candidates=("${JAVA_HOME_21_ARM64:-}" "${JAVA_HOME_21_arm64:-}" "${JAVA_HOME:-}") ;;
+        *) expected_java_arch=x86_64; candidates=("${JAVA_HOME_21_X64:-}" "${JAVA_HOME:-}") ;;
+    esac
+    local found_jdk=0 candidate_unix
+    for candidate in "${candidates[@]}"; do
+        [ -n "$candidate" ] || continue
+        candidate_unix="$candidate"
+        if command -v cygpath >/dev/null 2>&1; then
+            candidate="$(cygpath -m "$candidate")"
+            candidate_unix="$(cygpath -u "$candidate")"
+        fi
+        if { [ -x "$candidate_unix/bin/java" ] || [ -f "$candidate_unix/bin/java.exe" ]; } &&
+            grep -Eq '^JAVA_VERSION="21([."]|$)' "$candidate_unix/release" 2>/dev/null &&
+            grep -q "^OS_ARCH=\"$expected_java_arch\"" "$candidate_unix/release"; then
+            export JAVA_HOME="$candidate"
+            native_java_bin="$candidate_unix/bin"
+            export PATH="$native_java_bin:$PATH"
+            found_jdk=1
+            break
+        fi
+    done
+    if [ "$found_jdk" -ne 1 ]; then
+        printf '%s\n' 'No existing matching-architecture JDK21 was found; no download or global installation is permitted.' >&2
+        return 1
+    fi
+
+    # Hosted Windows Python/native children must resolve the existing Git Bash,
+    # never C:\Windows\System32\bash.exe (WSL shim). Prefer the exact bash that
+    # launched the scoped environment; no install or global PATH mutation.
+    bash_path="${BASH:-}"
+    [ -x "$bash_path" ] || bash_path="$(command -v bash 2>/dev/null || true)"
+    if [ -n "$bash_path" ]; then
+        if command -v cygpath >/dev/null 2>&1; then
+            bash_win="$(cygpath -w "$bash_path")"
+            case "$bash_win" in
+                *\\[Ss]ystem32\\*) printf '%s\n' 'Refusing the Windows WSL bash shim.' >&2; return 1 ;;
+            esac
+            bash_prefix="$(dirname "$bash_path")"
+            export VEYRA_TRUSTED_BASH="$bash_win"
+            export PATH="$bash_prefix:$PATH"
+        else
+            export VEYRA_TRUSTED_BASH="$bash_path"
+        fi
+    fi
+
     export JAVA_TOOL_OPTIONS="-XX:-UsePerfData -Duser.home=\"$native_home\" -Djava.io.tmpdir=\"$native_tmp\" -Djava.util.prefs.userRoot=\"$native_prefs/user\" -Djava.util.prefs.systemRoot=\"$native_prefs/system\" -Dkotlin.daemon.runFilesPath=\"$native_daemon\" -Djna.tmpdir=\"$native_tmp\""
     export JAVA_OPTS=""
     export GRADLE_OPTS="-Dorg.gradle.java.installations.auto-download=false"

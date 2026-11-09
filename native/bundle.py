@@ -11,11 +11,13 @@ from __future__ import annotations
 
 import argparse
 from contextlib import contextmanager
+from datetime import datetime, timezone
 import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
 import platform
+import re
 import shutil
 import stat
 import struct
@@ -32,6 +34,24 @@ MAX_FILE = 64 * 1024 * 1024
 MAX_SESSION_HELPER = 16 * 1024 * 1024
 MANIFEST = "veyra-native-bundle.json"
 FFMPEG_NOTICES = ("COPYING.LGPLv2.1", "COPYING.LGPLv3", "COPYING.GPLv2", "COPYING.GPLv3", "LICENSE.md", "CREDITS")
+DIAGNOSTIC = ".work/verification/native-build-diagnostic.json"
+DIAGNOSTIC_LOG_BYTES = 2 * 1024 * 1024
+DIAGNOSTIC_MAX_LINES = 20
+DIAGNOSTIC_MAX_LINE = 400
+DIAGNOSTIC_MAX_BYTES = 8 * 1024
+_DIAGNOSTIC_LINE = re.compile(
+    r"(?i)(?:\berror\b|\bfatal\b|cmake error|undefined (?:reference|symbol)|"
+    r"\bld:\s|\bcollect2:\s|ninja: build stopped|make(?:\[\d+\])?: \*\*\*|"
+    r"clang(?:-\d+)?: error|gcc: error)"
+)
+_SENSITIVE_LINE = re.compile(
+    r"(?i)(?:https?://|authorization\s*:|bearer\s+\S+|password\s*[=:]|"
+    r"passwd\s*[=:]|secret\s*[=:]|token\s*[=:]|api[_-]?key\s*[=:]|"
+    r"access[_-]?key\s*[=:]|private key|-----begin|"
+    r"(?:gh[pousr]|github_pat)_[a-z0-9_]+|x-access-token|"
+    r"[?&](?:x-amz-signature|x-amz-credential|signature|sig|expires)=)"
+)
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 
 
 def owned(path: Path, root: Path = ROOT) -> Path:
@@ -191,6 +211,23 @@ def recover_previous_stage(target: str, base: Path, root: Path = ROOT) -> None:
         previous.rename(destination)
 
 
+def discard_empty_stage_placeholder(destination: Path, root: Path = ROOT) -> None:
+    """Remove only Gradle's pristine, empty declared Exec output directory.
+
+    Gradle creates an Exec task's declared output directory before the task
+    runs. That empty real directory is not a native inventory, so it may be
+    removed without recursion. Any entry, link, wrong type or rmdir failure is
+    left untouched for the existing inventory/recovery checks to refuse.
+    """
+    work(destination, root)
+    if destination.is_symlink() or getattr(destination, "is_junction", lambda: False)() or not destination.is_dir():
+        return
+    try:
+        destination.rmdir()  # Succeeds only when empty; never recursive.
+    except OSError:
+        pass
+
+
 def stage_resources(target: str, sources: dict[str, Path], *, root: Path = ROOT) -> Path:
     if target not in TARGETS or set(sources) != required_resources(target):
         raise ValueError("Invalid native resource set")
@@ -201,6 +238,10 @@ def stage_resources(target: str, sources: dict[str, Path], *, root: Path = ROOT)
         raise ValueError("Reserved native resource name")
     record = {"schema": 1, "target": target, "files": hashes,
               "releaseReady": False, "remainingGates": ["full binary notices/source closure", "clean-machine execution", "physical audio"]}
+    # Gradle declares the output directory and creates it before this Exec
+    # runs. Remove only that pristine empty placeholder before recovery, so an
+    # interrupted verified backup can still be restored into place.
+    discard_empty_stage_placeholder(destination, root)
     recover_previous_stage(target, base, root)
     old = None
     if destination.exists() or destination.is_symlink():
@@ -282,6 +323,153 @@ def preparation_lock(base: Path):
                 fcntl.flock(stream, fcntl.LOCK_UN)
 
 
+def _clean_diagnostic_line(value: str) -> str:
+    value = _ANSI_ESCAPE.sub("", value)
+    value = "".join(char if char == "\t" or 32 <= ord(char) < 127 else " " for char in value)
+    return value.rstrip()
+
+
+def _read_log_tail(path: Path, root: Path = ROOT) -> tuple[str, bool]:
+    """Read a bounded tail of the already-preserved owned build log."""
+    work(path, root)
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0))
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise ValueError("Native build log is not an exclusively owned regular file")
+        start = max(0, info.st_size - DIAGNOSTIC_LOG_BYTES)
+        os.lseek(descriptor, start, os.SEEK_SET)
+        data = bytearray()
+        while len(data) <= DIAGNOSTIC_LOG_BYTES:
+            block = os.read(descriptor, min(65_536, DIAGNOSTIC_LOG_BYTES + 1 - len(data)))
+            if not block:
+                break
+            data.extend(block)
+        return data[:DIAGNOSTIC_LOG_BYTES].decode("utf-8", errors="replace"), start > 0
+    finally:
+        os.close(descriptor)
+
+
+def _extract_diagnostics(text: str, drop_first_line: bool = False) -> tuple[list[str], int, bool]:
+    """Select bounded compiler/build error lines and their essential context.
+
+    Credential and URL-like lines are suppressed rather than copied. The caller
+    must not infer causality beyond the lines actually retained here.
+    """
+    raw = text.splitlines()
+    if drop_first_line and raw:
+        raw = raw[1:]
+    selected: list[str] = []
+    used = 0
+    suppressed = 0
+    truncated = False
+    index = 0
+    while index < len(raw):
+        line = _clean_diagnostic_line(raw[index])
+        if not _DIAGNOSTIC_LINE.search(line):
+            index += 1
+            continue
+        group = [line]
+        lookahead = index + 1
+        while lookahead < len(raw) and len(group) < 3:
+            candidate = _clean_diagnostic_line(raw[lookahead])
+            if not candidate or not (candidate[:1].isspace() or candidate.startswith(("|", "^"))):
+                break
+            group.append(candidate)
+            lookahead += 1
+        if any(_SENSITIVE_LINE.search(candidate) for candidate in group):
+            suppressed += len(group)
+            index = lookahead
+            continue
+        for candidate in group:
+            if len(candidate) > DIAGNOSTIC_MAX_LINE:
+                candidate = candidate[:DIAGNOSTIC_MAX_LINE - 3] + "..."
+                truncated = True
+            encoded = (candidate + "\n").encode("utf-8")
+            if len(selected) >= DIAGNOSTIC_MAX_LINES or used + len(encoded) > DIAGNOSTIC_MAX_BYTES:
+                return selected, suppressed, True
+            selected.append(candidate)
+            used += len(encoded)
+        index = lookahead
+    return selected, suppressed, truncated
+
+
+def _write_diagnostic(path: Path, record: dict) -> None:
+    payload = json.dumps(record, sort_keys=True, indent=2) + "\n"
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", prefix=".native-build-diagnostic-",
+                                     dir=path.parent, delete=False) as stream:
+        temporary = Path(stream.name)
+        stream.write(payload)
+    try:
+        os.replace(temporary, path)
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def report_build_failure(log: Path, failure: owned_process.OwnedProcessError, root: Path = ROOT) -> None:
+    """Retain a small safe diagnostic without deleting or dumping the raw log."""
+    lines: list[str] = []
+    suppressed = 0
+    truncated = False
+    tail_truncated = False
+    available = False
+    relative = None
+    try:
+        relative = log.resolve().relative_to(root.resolve()).as_posix()
+    except (OSError, ValueError):
+        relative = log.name
+    try:
+        text, tail_truncated = _read_log_tail(log, root)
+        lines, suppressed, truncated = _extract_diagnostics(text, tail_truncated)
+        available = True
+    except (OSError, ValueError):
+        pass
+    record = {
+        "schema": 1,
+        "kind": "veyra-native-build-diagnostic",
+        "generatedAtUtc": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "reason": failure.reason,
+        "cleanupComplete": failure.cleanup_complete,
+        "returncode": failure.returncode,
+        "log": relative,
+        "logAvailable": available,
+        "logTailTruncated": tail_truncated,
+        "lines": lines,
+        "suppressedLines": suppressed,
+        "truncated": truncated,
+        "limits": {
+            "logBytes": DIAGNOSTIC_LOG_BYTES,
+            "lines": DIAGNOSTIC_MAX_LINES,
+            "lineChars": DIAGNOSTIC_MAX_LINE,
+            "bytes": DIAGNOSTIC_MAX_BYTES,
+        },
+        "releaseReady": False,
+    }
+    try:
+        path = work(root / DIAGNOSTIC, root)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _write_diagnostic(path, record)
+    except (OSError, ValueError):
+        print("Native build diagnostic could not be retained; build log: " + relative + ".", file=sys.stderr)
+        return
+    print("Native build diagnostic (bounded compiler/build output only):", file=sys.stderr)
+    for line in lines:
+        print("  " + line, file=sys.stderr)
+    if suppressed:
+        print("  [" + str(suppressed) + " sensitive line(s) suppressed]", file=sys.stderr)
+    if truncated:
+        print("  [diagnostic truncated to configured bounds]", file=sys.stderr)
+    if tail_truncated:
+        print("  [only the bounded tail of the preserved log was inspected]", file=sys.stderr)
+    if not lines:
+        print("  No compiler/build error lines retained; inspect the build log.", file=sys.stderr)
+    print("  " + ("Preserved log: " if available else "Build log not readable: ") + relative, file=sys.stderr)
+    print("  Diagnostic record: " + path.relative_to(root.resolve()).as_posix(), file=sys.stderr)
+
+
 def run(command: list[str], directory: Path, log: Path, timeout: int, *, root: Path = ROOT) -> None:
     owned(directory, root)
     work(log, root)
@@ -293,7 +481,14 @@ def run(command: list[str], directory: Path, log: Path, timeout: int, *, root: P
     # The owned runner validates the opened log and waits for the complete
     # trusted build-process tree, not only the immediate compiler/launcher.
     # Failure never grants permission to delete this work or its diagnostic log.
-    owned_process.run(command, cwd=directory, env=env, timeout=timeout, log=log)
+    try:
+        owned_process.run(command, cwd=directory, env=env, timeout=timeout, log=log)
+    except owned_process.OwnedProcessError as failure:
+        try:
+            report_build_failure(log, failure, root)
+        except Exception:
+            pass  # Diagnostic reporting must never mask the owned failure.
+        raise
 
 
 def session_helper(target: str) -> Path | None:

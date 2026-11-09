@@ -2,6 +2,20 @@
 
 Updated 2026-11-07 UTC. Formal Goal tool currently reports **blocked/incomplete**; the owner explicitly resumed this turn. The exposed tool cannot resume that stored status; do not claim an active automatic continuation. No token budget requested. Read `PLAN.md`, `DECISIONS.md`, then verify files, tests and upstream checks before continuing.
 
+## Current Task B continuation — 2026-11-09
+
+This entry supersedes historical execution status below. Task A's shared/Room/UI
+scope is lead-accepted. PR27 remains the single integration branch; final native,
+five-platform packaging, installation/audio, signing and distribution gates remain
+incomplete. Original hosted run `42560795834` built Android APK/AAB and passed
+713 shared + 160 app unit tests, but failed inventory/retention. Desktop and Apple
+failures are preserved in `verification/task-b-build-retention-preparation.md`.
+The batched correction updates only the iOS dependency bindings, common build
+shell/JDK selection, native staging/diagnostics, inventory API/artifact selection,
+retention paths/mode, and ownership-test scheduling. No shared production behavior
+is changed. Hosted Linux GUI tests remain blocked by user-namespace permissions.
+The existing checkout and PR27 are reused; no new worktree or successor PR.
+
 ## Project and ownership
 - **https://github.com/Apdelrahman1911/veyra**, public. Public branch `feat/veyra-integration` and local HEAD are at **`fa8d87c9f1aac85fefdb913cc8a1f9a6a7db4097`**, pushed and independently read back from the remote at 00:34 UTC on November 7; **not a verified release**. This 23-file UI checkpoint covers adaptive/Arabic navigation and player controls, runtime details, retained-file actions and recording-aware podcast progress. All 23 files match the retained GUI13/Podcast2/notice9 inputs (13/13, 2/2, 9/9 targeted tests); those runs also used other dirty build/runtime changes, so this isolated commit is **not** a newly tested clean/full revision and does not cover every committed test method. Earlier pushed checkpoints are `b22f2e7` (shared recovery/Room), `7ac1b27` (rejected-owner lifetime), and `1a9db04` (atomic podcast restart/current feed membership). Preserve remaining unstaged work.
 - **Veyra [PR1](https://github.com/Apdelrahman1911/veyra/pull/1) merged**, main **`304d4dcde725899d2f50c72497c624d8f416a54c`**: workflow-only bootstrap, not application integration. Sole added file `.github/workflows/verify.yml` has exact feature-matching blob `805a8f30a108c2f7f6e0d84d69d852e0bb859aa0`; workflow409222980 is active. Manual-only, pinned checkout, standard free public Ubuntu/Windows/macOS runners, no cache/upload/publish actions. No Veyra workflow has been dispatched and no Veyra release exists. Independent registration receipt: `.work/verification/veyra-ci-bootstrap/candidate-3a25414/registration-verified.json`.

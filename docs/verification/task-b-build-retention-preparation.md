@@ -281,3 +281,83 @@ Windows retry `42561342038` at `035f518` stayed pending behind the whole origina
 branch-wide concurrency group. No job started. That pending run is superseded; retained runs
 now use unique concurrency groups, so a scoped retry can proceed in its independent workspace
 without cancelling an in-flight retention run. Standard non-retention runs keep scoped groups.
+
+
+## Platform results and narrow corrections in progress
+
+The first hosted matrix exposed previously unverified paths, so it is **not green**:
+
+- Linux UI testing stopped before Gradle: `unshare` could not write `uid_map`. The repository
+  guard explicitly refuses sudo/sysctl/AppArmor workarounds. This host capability gate remains
+  blocked; no uncontained Xvfb fallback is authorized by that script.
+- macOS arm64 executed the full shared JVM set: **1,205 tests, one failure**,
+  `DownloadOwnershipRoomTest.changedOwnerAttemptAndIntentRejectStaleRecoveryAndFailureUpdates`
+  timed out. The cause is **unexplained**. This is distinct from the earlier recovery timeout.
+- iOS arm64 compiled far enough to diagnose unresolved `inet_pton`, `ntohs` and
+  `NSDate.timeIntervalSince1970` in the old dependency pin. The isolated new immutable kmpYT
+  pin `6805d4db8077650992d342e5395b1f0d7c80e984` is a direct descendant of `c0a0809` with exactly
+  one iOS file changed: explicit exported imports and CoreFoundation byte swap. It reuses the
+  narrow fix already authored upstream, without importing the broader checkpoint/runtime changes
+  on upstream PR2. JVM/common source is byte-identical. The new commit is published on public
+  branch `fix/veyra-ios-exported-bindings-20261109`; Apple compile success remains to be proven.
+- Windows retry `42561590153` proved the line-ending/bootstrap fix, then Python selected the
+  WSL shim rather than Git Bash. Independent package/inventory commands selected Java 8, and
+  the Python asset list carried CRLF/native path syntax into Bash/gh. Those script repairs are
+  batched with the retention executable-bit correction. The lead missed that executable bit
+  during review; syntax/unit passes did not establish executable launchability.
+- Desktop inventory called nonexistent Gradle `ArtifactResolutionResult.unresolvedComponents`.
+  The lead inspected the installed Gradle 8.13 primary interface with `javap`: use `components`
+  filtered by `UnresolvedComponentResult`, while preserving failed POM reporting.
+- Linux native staging reached the existing-stage manifest check after FFmpeg preparation;
+  a pristine output directory created before the Exec task is the source-supported explanation.
+  The native fix will accept only an empty owned directory, preserving unknown/nonempty files.
+  macOS native build failed with drained processes, but the original console omitted the actual
+  compiler diagnostic. Bounded safe diagnostic capture is being added before a retry.
+
+Original hosted job logs are preserved in `.work/verification/resume-20261108/task-b-*-1.log`
+and `task-b-windows-2.log`. The original run and failed draft state are retained. These are
+build findings; no existing test is weakened and no platform is claimed accepted.
+
+### Batched hosted corrections — 2026-11-09
+
+The Android job in run `42560795834` completed shared 713/713 and app 160/160
+unit tests with no failures/errors/skips, then assembled debug APK, unsigned
+release APK and release AAB. Its job remains failed: the subsequent Android
+inventory selected no artifact type and hit AGP's ambiguous secondary variants;
+retention then could not execute the nonexecutable script. The retry selects the
+explicit AGP runtime class-JAR artifact view. This is a classpath inventory, not
+binary/native/legal closure. The independent Gradle POM query now uses the actual
+`components`/`UnresolvedComponentResult` API rather than `unresolvedComponents`.
+
+Common scoped environment selection now checks an existing JDK21's version and
+architecture for every Gradle/package/inventory child. Windows native subprocesses
+receive the running Git Bash directory in PATH and its explicit native executable;
+the directory is derived before Windows backslash conversion. Retention assets
+use slash paths, strip list CR endings, and the retention script is executable.
+Desktop Gradle uses `--continue` so independent Compose tests can run following a
+shared-test failure without masking that failure.
+
+Native staging now accepts only a pristine empty owned output directory before
+staging; unknown nonempty stages remain refused. Native compiler failures retain
+a bounded, filtered diagnostic at `.work/verification/native-build-diagnostic.json`
+and print the same safe excerpt. The old Mac compiler failure remains unexplained.
+
+The Mac ownership test now holds CLEANUP before its canonical lease claim, then
+releases that barrier after the original old-finalizer settlement assertions.
+The existing later allowance barrier, failures, history, claim, journal, deletion
+and dependency assertions remain. This eliminates a source-reachable observation
+race in the test; no retained stage trace establishes that it caused the original
+Mac timeout. Production shared source is unchanged.
+
+The dependency pin `6805d4db8077650992d342e5395b1f0d7c80e984` is a direct descendant
+of `c0a08090`, changing only Apple's exported-binding imports and network-order
+port conversion in one iOS file. JVM/common source and schema are unchanged.
+Candidate legal metadata was regenerated; source-only legal coverage remains open.
+All fixes stay in PR27 and the existing checkout. Hosted retry/native/package
+success will be assessed separately from the cheap authored checks and local
+focused ownership run.
+
+Cheap checks for this batch: tooling 16/16, native bundle 25/25, build retention
+14/14, workflow invariants 10/10, retention packet 7/7, package manifest 7/7,
+package notices 72/72, verification summary 6/6; shell syntax and YAML parse pass.
+These do not establish Windows/Apple execution or close the hosted Linux boundary.
