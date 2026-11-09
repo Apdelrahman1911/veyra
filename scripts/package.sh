@@ -10,6 +10,9 @@ case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*) task=packageMsi ;;
     *) printf '%s\n' 'No supported native installer for this host.' >&2; exit 1 ;;
 esac
+marker="$(mktemp "$VEYRA_WORK_ROOT/tmp/package-started.XXXXXX")"
+trap 'rm -f "$marker"' EXIT
 "$SCRIPT_DIR/gradle.sh" ":composeApp:$task"
-python3 -B scripts/package-manifest.py
+python3 -B scripts/package-manifest.py --newer-than "$marker" \
+    --expected-source-sha "${GITHUB_SHA:-}" --repository "${GITHUB_REPOSITORY:-}" --task "$task"
 printf '%s\n' 'Package generation is not installation or signing verification. No release was published.'
