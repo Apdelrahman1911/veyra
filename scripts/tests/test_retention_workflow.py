@@ -19,7 +19,8 @@ class RetentionWorkflowTest(unittest.TestCase):
 
     def test_canary_uses_exact_sha_and_unique_run_tag(self):
         self.assertIn("veyra-draft-canary-${{ github.run_id }}-${{ github.run_attempt }}", WORKFLOW)
-        self.assertIn('--target "$GITHUB_SHA"', WORKFLOW)
+        self.assertIn('-f sha="$GITHUB_SHA"', WORKFLOW)
+        self.assertIn('test "$(gh api "repos/$REPO/git/ref/tags/$TAG" --jq .object.sha)" = "$GITHUB_SHA"', WORKFLOW)
         self.assertIn("test \"$(git rev-parse HEAD)\" = \"$GITHUB_SHA\"", WORKFLOW)
         self.assertIn("c0a08090fe7dbd76e20216559b8184ad2cccde63", WORKFLOW)
         self.assertIn("aab30e43a35a431a25a7ecbb7ebccefd849811f688957054304b02d3caf6d367", WORKFLOW)
@@ -33,6 +34,9 @@ class RetentionWorkflowTest(unittest.TestCase):
         self.assertIn("Refusing to reuse an existing release/tag", WORKFLOW)
         self.assertIn('if gh api "repos/$REPO/git/ref/tags/$TAG" >/dev/null 2>&1; then', WORKFLOW)
         self.assertNotIn("--jq .object.sha 2>/dev/null || true", WORKFLOW)
+        self.assertIn('gh api --method POST "repos/$REPO/git/refs"', WORKFLOW)
+        self.assertIn("--verify-tag", WORKFLOW)
+        self.assertNotIn("--target \"$GITHUB_SHA\"", WORKFLOW)
 
     def test_no_artifact_or_cache_storage_and_no_paid_runner(self):
         self.assertNotIn("upload-artifact", WORKFLOW)
