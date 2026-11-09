@@ -7,15 +7,73 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = (ROOT / ".github/workflows/verify.yml").read_text()
+BUILD_RETENTION = (ROOT / "scripts/build-retention.sh").read_text()
 
 class RetentionWorkflowTest(unittest.TestCase):
     def test_canary_is_manual_and_public_only(self):
         self.assertIn("workflow_dispatch:", WORKFLOW)
         self.assertIn("retention_canary:", WORKFLOW)
+        self.assertIn("retain_builds:", WORKFLOW)
         self.assertIn("github.event.repository.private == false", WORKFLOW)
         self.assertIn("inputs.retention_canary == true", WORKFLOW)
+        self.assertIn("inputs.retain_builds == true", WORKFLOW)
         self.assertNotIn("pull_request_target:", WORKFLOW)
         self.assertNotIn("self-hosted", WORKFLOW)
+        self.assertNotIn("RUNNER_TEMP", WORKFLOW)
+        self.assertNotIn("RUNNER_TEMP", BUILD_RETENTION)
+        self.assertIn(".work/verification", WORKFLOW)
+
+    def test_production_lanes_are_unique_per_run_attempt_and_platform(self):
+        self.assertIn('tag="veyra-draft-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${platform}"', BUILD_RETENTION)
+        self.assertIn("retention-plan", WORKFLOW)
+        self.assertIn("production-retention-readback", WORKFLOW)
+        self.assertIn("scripts/build-retention.sh", WORKFLOW)
+        self.assertIn("scripts/build-retention.py verify", WORKFLOW)
+        self.assertIn("desktop-linux-x64", WORKFLOW)
+        self.assertIn("desktop-windows-x64", WORKFLOW)
+        self.assertIn("desktop-macos-arm64", WORKFLOW)
+        self.assertIn("desktop-macos-x64", WORKFLOW)
+        self.assertIn("android-debug", WORKFLOW)
+        self.assertIn("ios-simulator-arm64", WORKFLOW)
+        self.assertIn("ios-simulator-x64", WORKFLOW)
+        self.assertIn("ios-device-arm64", WORKFLOW)
+
+    def test_production_build_and_retention_steps_are_separate(self):
+        desktop = WORKFLOW.split("  desktop:", 1)[1].split("  android:", 1)[0]
+        self.assertIn("id: desktop_tests", desktop)
+        self.assertIn("id: desktop_package", desktop)
+        self.assertIn("id: desktop_inventory", desktop)
+        self.assertIn("id: retain", desktop)
+        self.assertIn("continue-on-error: true", desktop)
+        self.assertIn("if: ${{ always() }}", desktop)
+        android = WORKFLOW.split("  android:", 1)[1].split("  ios:", 1)[0]
+        self.assertIn("id: android_tests", android)
+        self.assertIn("id: android_package", android)
+        self.assertIn("id: retain", android)
+        ios = WORKFLOW.split("  ios:", 1)[1].split("  # Nonproduction canary", 1)[0]
+        self.assertIn("id: ios_tests", ios)
+        self.assertIn("id: ios_build", ios)
+        self.assertIn("id: retain_simulator", ios)
+        self.assertIn("id: retain_device", ios)
+
+    def test_build_and_test_steps_do_not_receive_the_token(self):
+        for name in ("Run bounded desktop tests", "Build APK and execute JVM Android tests",
+                     "Compile native tests and full unsigned simulator/device applications"):
+            block = WORKFLOW.split("name: " + name, 1)[1].split("- name:", 1)[0]
+            self.assertNotIn("GH_TOKEN", block)
+            self.assertNotIn("github.token", block)
+        for name in ("Retain this desktop lane", "Retain Android lane",
+                     "Retain iOS simulator lane", "Retain iOS device arm64 lane"):
+            block = WORKFLOW.split("name: " + name, 1)[1].split("- name:", 1)[0]
+            self.assertIn("GH_TOKEN: ${{ github.token }}", block)
+
+    def test_production_readback_uses_release_id_not_tag_download(self):
+        readback = WORKFLOW.split("name: Independent production lane readback", 1)[1]
+        self.assertNotIn("gh release download", readback)
+        self.assertIn("releases/$release_id/assets", readback)
+        self.assertIn("releases/assets/$asset_id", readback)
+        self.assertIn("expected-platform", readback)
+        self.assertIn("published_at", readback)
 
     def test_canary_uses_exact_sha_and_unique_run_tag(self):
         self.assertIn("veyra-draft-canary-${{ github.run_id }}-${{ github.run_attempt }}", WORKFLOW)

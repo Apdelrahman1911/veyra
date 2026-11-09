@@ -38,9 +38,11 @@ desktop/Android/iOS matrix jobs are skipped and two canary jobs run:
    - uploads the four assets directly with `gh release upload` (no clobber);
    - verifies draft/prerelease state, exact tag target and remote asset sizes/digests;
    - writes only a sanitized step summary. No release body contains credentials or signed URLs.
-2. **`retention-readback`** (fresh `ubuntu-24.04`, `contents: read`):
+2. **`retention-readback`** (fresh `ubuntu-24.04`, `contents: write` visibility because GitHub
+   hides draft releases from read-only tokens; the job only reads):
    - checks out the exact SHA and rechecks pin/schema;
-   - downloads the draft assets with `gh release download`;
+   - lists/downloads the draft assets through the release-id asset API (not the published-only
+     tag endpoint and not `gh release download`);
    - verifies the release id/state, exact tag target, exact asset set, sizes, `SHA256SUMS`,
      manifest, identity fields and independently recomputed SHA-256 hashes;
    - writes a sanitized readback receipt. It never uses `upload-artifact`, cache, or `--clobber`.
@@ -73,6 +75,10 @@ review; no tag is moved or overwritten.
   SHA-256 `0dc6e4c5c536bc0d7cf872ad54b3f9c95b6fc4f2227a03602c901c61bca316f1`.
 - The draft release is intentionally unpublished. It is not a release, package, signature or
   acceptance claim.
+- Historical note: canary `42557930270` used `RUNNER_TEMP` for its transient packet/readback
+  paths. Current workflow source now uses task-specific
+  `$GITHUB_WORKSPACE/.work/verification/...` roots for canary, production lane packeting and
+  readback. The historical run was not rerun for this destination-only workflow change.
 
 Earlier canary attempts are preserved as failed evidence:
 
@@ -156,29 +162,51 @@ under `composeApp/build/outputs/apk/debug/`; package provenance lands at
   evidence. This is a local cache limitation, not a package result.
 - `fakeroot` absence independently blocks the DEB route locally.
 
-## Production retention extension (for lead review; not dispatched)
+## Production retention extension (implemented; not dispatched)
 
-The canary proves the free draft-Release route. Production packages cannot be moved between
-ephemeral jobs without artifact storage, so the smallest direct extension is one final retention
-step in each platform job after its build/package step:
+The canary proves the free draft-Release route. The production extension is now implemented behind
+the manual `retain_builds` input:
 
-1. keep build/test steps without `GH_TOKEN`;
-2. set `permissions: contents: write` only on the job that must retain, and expose
-   `GH_TOKEN: ${{ github.token }}` only in the retention step;
-3. create the same unique tag/release id flow, but include approved package bytes, sanitized
-   logs/XML, `packages.json`, native inventory and legal `index.json`/notices in the bounded
-   manifest;
-4. run a separate `contents: read` readback job that downloads and hashes the exact assets;
-5. keep the release draft and unpublished; no tag moves, clobber, artifact/cache storage or
-   signing claim.
+1. build/test steps remain without `GH_TOKEN`; only the final retention step receives
+   `GH_TOKEN: ${{ github.token }}` (job permission `contents: write` is required for draft
+   visibility/creation);
+2. `scripts/build-retention.sh` creates one unique immutable tag/release per
+   run/attempt/platform (`veyra-draft-<run_id>-<run_attempt>-<platform>`), uploads bounded actual
+   package bytes and a support archive, and verifies remote names/sizes/digests;
+3. `scripts/build-retention.py` collects only allowlisted package/application files, sanitized
+   JUnit XML (system-out/system-err/properties removed; failure/error text and messages removed
+   while retaining testcase/class/method/time, counts and failure/error type), generated
+   legal/native inventory, package provenance and a failed-lane diagnostic summary into a bounded
+   support archive plus manifest. Desktop packages come only from `packages.json` exact
+   path/size/hash records tied to the same source/pin/schema, never from a package-tree scan. It
+   rejects symlinks/aliased ancestors, escaping paths, oversized files, credential-like support
+   text and duplicate asset names. Directory archives are streamed to disk after stat bounds.
+4. desktop test and package generation are separate steps; a test failure/timeout still permits
+   independent package generation and retention. Android gets an independent debug-APK rebuild and
+   retains the APK at minimum. iOS retention records unsigned app/framework outputs with honest
+   compile-only classification; device arm64 is retained once from the arm64 host;
+5. a `retention-plan` job computes the exact expected lane set, and a fresh
+   `retention-readback` job downloads every lane via the release-id asset API, verifies the exact
+   tag commit/draft state/asset hashes and fails on a missing or malformed lane.
 
-This extension is **not** part of the current workflow until the lead reviews the concrete diff.
-No production matrix dispatch has occurred and no package has been retained.
+The ready production command (NOT executed; requires lead review) is:
+
+```sh
+gh workflow run verify.yml \
+  --ref t3/task-a-ui-recovery-integration \
+  -f scope=all -f package_desktop=true -f retain_builds=true \
+  -f retention_canary=false
+```
+
+No production matrix dispatch has occurred and no production package has been retained. The
+collateral expectations remain: known desktop test hangs/timeouts fail the job truthfully while
+package generation and failed-lane diagnostics remain retained; no release is published.
 
 ## Checks performed
 
 - `python3 -B scripts/tests/test_retention_packet.py` — 7/7.
-- `python3 -B scripts/tests/test_retention_workflow.py` — 6/6 static workflow invariants.
+- `python3 -B scripts/tests/test_build_retention.py` — 13/13.
+- `python3 -B scripts/tests/test_retention_workflow.py` — 10/10 static workflow invariants.
 - `python3 -B scripts/tests/test_package_manifest.py` — 7/7.
 - `python3 -B scripts/tests/test_tooling.py` — 10/10.
 - Workflow YAML parsed successfully; final canary run `42557930270` passed the canary job and the

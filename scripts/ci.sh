@@ -51,6 +51,7 @@ python3 -B scripts/tests/test_verification.py
 python3 -B scripts/tests/test_package_notices.py
 python3 -B scripts/tests/test_package_manifest.py
 python3 -B scripts/tests/test_retention_packet.py
+python3 -B scripts/tests/test_build_retention.py
 python3 -B scripts/tests/test_retention_workflow.py
 # Authored Python-only safety regressions; neither Android Stage 0 nor its
 # separately approved strace/fork experiment runs automatically in CI.
