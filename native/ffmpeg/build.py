@@ -266,7 +266,7 @@ def run(command: list[str], cwd: Path, env: dict[str, str], timeout: int, log: P
                 # configure output, separate from the console build log.
                 probe_log = cwd / "ffbuild/config.log"
                 if probe_log.is_file():
-                    report_build_failure(probe_log, failure, ROOT, invocation=invocation)
+                    report_build_failure(probe_log, failure, ROOT, invocation=invocation, configure_log=True)
         except Exception as diagnostic_error:
             print("Bounded FFmpeg diagnostic failed (" + type(diagnostic_error).__name__ + ").", file=sys.stderr)
         raise
@@ -429,7 +429,11 @@ def build(source_argument: Path | None, jobs: str, *, verify_only: bool = False)
     configure = expected["configure"]
     started = time.monotonic()
     log = work / "build.log"
-    run(["bash", (source / "configure").as_posix(), *configure], build_directory, env, 600, log)
+    # The hosted Windows configure hit its ten-minute cap. MSYS/MSVC probes
+    # receive a bounded twenty-minute budget; diagnostics retain the last probe
+    # kind, so another timeout cannot be mistaken for a compiler rejection.
+    configure_seconds = 1200 if target == "windows-x64" else 600
+    run(["bash", (source / "configure").as_posix(), *configure], build_directory, env, configure_seconds, log)
     name = executable_name(target)
     run(make_command(target, jobs), build_directory, env, 1800, log)
     executable = build_directory / name

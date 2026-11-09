@@ -305,6 +305,45 @@ class NativeBundleTest(unittest.TestCase):
         self.assertIn("configure sentinel", record["previousReports"][0]["lines"][0])
         self.assertIn("probe sentinel", record["previousReports"][1]["lines"][0])
 
+    def test_configure_report_excludes_shell_dump_and_keeps_last_actual_probe(self):
+        log = self.inputs / "config.log"
+        raw = ("PRIVATE_VALUE='authored private environment'\n"
+               "test_shell_value='error: authored fake declaration'\n"
+               "test_cc () \n{\n    die 'ERROR: authored function definition';\n}\n"
+               "HELP='--fatal-warnings\nerror: authored help text'\n"
+               "check_cc first_probe\ntest_cc\nprobe.c:1: error: old expected probe rejection\n"
+               "test_cc second_probe\ncheck_ld cc\ntest_cc\n"
+               "probe.c:9: fatal error: actual final probe discriminator\n"
+               "error: https://example.invalid/?token=authored-private\n")
+        log.write_bytes(raw.encode())
+        failure = BUNDLE.owned_process.OwnedProcessError("timeout", cleanup_complete=True)
+        invocation = "d" * 32
+        with contextlib.redirect_stderr(io.StringIO()):
+            BUNDLE.report_build_failure(log, failure, self.root, invocation=invocation,
+                                        configure_log=True)
+            outer = self.inputs / "outer.log"
+            outer.write_bytes(b"Native FFmpeg configure command failed.\n")
+            BUNDLE.report_build_failure(outer, failure, self.root, invocation=invocation)
+        record = json.loads((self.root / BUNDLE.DIAGNOSTIC).read_text())
+        probe = record["previousReports"][0]
+        self.assertEqual("FFmpeg configure probe progress: observed=5 last=test_cc.", probe["lines"][0])
+        self.assertIn("actual final probe discriminator", "\n".join(probe["lines"]))
+        for forbidden in ("authored private", "fake declaration", "function definition",
+                          "help text", "old expected", "authored-private"):
+            self.assertNotIn(forbidden, json.dumps(record))
+        self.assertEqual(raw.encode(), log.read_bytes())
+        self.assertEqual("timeout", probe["reason"])
+
+    def test_configure_report_without_actual_probes_does_not_quote_shell_dump(self):
+        log = self.inputs / "config.log"
+        log.write_bytes(b"PRIVATE='fatal error: authored secret'\ntest_cc () \n{\n echo 'error';\n}\n")
+        failure = BUNDLE.owned_process.OwnedProcessError("timeout", cleanup_complete=True)
+        with contextlib.redirect_stderr(io.StringIO()):
+            BUNDLE.report_build_failure(log, failure, self.root, configure_log=True)
+        record = json.loads((self.root / BUNDLE.DIAGNOSTIC).read_text())
+        self.assertEqual(["FFmpeg configure probe progress: observed=0 last=none."], record["lines"])
+        self.assertNotIn("authored secret", json.dumps(record))
+
     def test_prior_native_diagnostic_must_be_fresh_and_safe(self):
         invocation = "b" * 32
         log = self.inputs / "first.log"

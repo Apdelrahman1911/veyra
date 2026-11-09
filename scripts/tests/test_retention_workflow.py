@@ -36,6 +36,26 @@ class RetentionWorkflowTest(unittest.TestCase):
         self.assertIn("ubuntu-24.04", combined)
         self.assertIn("VEYRA_LINUX_NAMESPACE_LAUNCHER:", WORKFLOW)
 
+    def test_android_desktop_scope_includes_both_mac_architectures_without_ios(self):
+        marker = "      - name: Compute exact expected lane set"
+        code = textwrap.dedent(WORKFLOW.split(marker, 1)[1].split("<<'PY'\n", 1)[1].split("          PY", 1)[0])
+        with tempfile.TemporaryDirectory(dir=ROOT / ".work/tmp", prefix="all-desktop-plan-") as tmp:
+            for package, expected in (("true", ["desktop-linux-x64", "desktop-windows-x64",
+                                              "desktop-macos-arm64", "desktop-macos-x64", "android"]),
+                                      ("false", ["android"])):
+                result = subprocess.run([__import__("sys").executable, "-B", "-c", code],
+                    env=dict(os.environ, SCOPE="android-desktop", PACKAGE_DESKTOP=package,
+                             GITHUB_OUTPUT=str(Path(tmp) / "output")),
+                    capture_output=True, text=True, timeout=10)
+                self.assertEqual(0, result.returncode, result.stderr)
+                self.assertEqual(expected, json.loads(result.stdout))
+        self.assertIn("android-desktop", WORKFLOW.split("options:", 1)[1].split("\n", 1)[0])
+        for job in ("desktop", "android"):
+            condition = WORKFLOW.split("  " + job + ":\n", 1)[1].split("    name:", 1)[0]
+            self.assertIn("inputs.scope == 'android-desktop'", condition)
+        ios_condition = WORKFLOW.split("  ios:\n", 1)[1].split("    name:", 1)[0]
+        self.assertNotIn("android-desktop", ios_condition)
+
     def test_canary_is_manual_and_public_only(self):
         self.assertIn("workflow_dispatch:", WORKFLOW)
         self.assertIn("retention_canary:", WORKFLOW)

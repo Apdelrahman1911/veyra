@@ -467,7 +467,7 @@ def _previous_diagnostic_reports(path: Path, invocation: str | None) -> list[dic
 
 
 def report_build_failure(log: Path, failure: owned_process.OwnedProcessError, root: Path = ROOT,
-                         *, invocation: str | None = None) -> None:
+                         *, invocation: str | None = None, configure_log: bool = False) -> None:
     """Retain a small safe diagnostic without deleting or dumping the raw log."""
     lines: list[str] = []
     suppressed = 0
@@ -482,7 +482,24 @@ def report_build_failure(log: Path, failure: owned_process.OwnedProcessError, ro
         relative = log.name
     try:
         text, tail_truncated = _read_log_tail(log, root)
-        lines, suppressed, truncated = _extract_diagnostics(text, tail_truncated)
+        progress = None
+        if configure_log:
+            # FFmpeg starts config.log with shell `set`: environment values and
+            # function definitions are not compiler diagnostics. Select only
+            # actual, unindented probe calls after that dump; never retain argv.
+            probes = []
+            for match in re.finditer(r"^((?:check|test)_[a-z0-9_]{1,64})([ \t][^\n]*)?$", text, re.MULTILINE):
+                if not (match[2] or "").lstrip().startswith("()"):
+                    probes.append(match)
+            progress = ("FFmpeg configure probe progress: observed=" + str(len(probes))
+                        + " last=" + (probes[-1][1] if probes else "none") + ".")
+            text = text[probes[max(0, len(probes) - 3)].start():] if probes else ""
+        lines, suppressed, truncated = _extract_diagnostics(text, tail_truncated and not configure_log)
+        if progress is not None:
+            lines.insert(0, progress)
+            while len(lines) > DIAGNOSTIC_MAX_LINES or sum(len((line + "\n").encode("utf-8")) for line in lines) > DIAGNOSTIC_MAX_BYTES:
+                lines.pop()
+                truncated = True
         available = True
     except (OSError, ValueError) as error:
         read_failure = type(error).__name__

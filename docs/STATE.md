@@ -4,6 +4,24 @@ Updated 2026-11-07 UTC. Formal Goal tool currently reports **blocked/incomplete*
 
 ## Current Task B continuation — 2026-11-09
 
+Combined run `42610626351` at `c552395` completed: Android again passed
+873 tests, lint and APK/AAB generation; the three lane packets and independent
+readback verify. Linux built and retained its DEB and inventory, but GUI tests
+stopped before Gradle because the runner lacks `xdpyinfo`. Lead independently
+reopened the exact DEB: its app JAR and all 35 embedded legal resources match
+`packages.json` (161 components, 2 coverage issues; no release acceptance).
+The display authentication check now uses the existing Java-required Xlib
+instead of that extra executable; actual guarded Xvfb positive and two refusal
+checks pass locally. Windows stopped on an unisolated authored fake-tool test;
+independent packaging then hit FFmpeg configure's exact 600-second timeout.
+The fake is now host-independent; Windows gets a bounded 1200-second configure
+budget and sanitized last-probe diagnostics that exclude the shell `set` dump.
+The timeout's underlying cause and real Windows WAL regression remain unverified.
+94 focused script/workflow tests pass. Per owner request, the next `android-desktop`
+scope includes Android and Linux/Windows/macOS arm64/macOS x64, with independent
+failed-lane retention. No iOS lane is added to that scope. See
+`verification/task-b-combined-run-corrections.md`.
+
 Combined run `42605023132` at `29f6477` completed: Android passed 873 tests,
 lint and APK/AAB builds. Linux GUI tests did **not** run: Podman's owned runroot
 exceeded 50 characters. Linux DEB generation succeeded, then app-image legal

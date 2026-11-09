@@ -76,3 +76,66 @@ Primary references:
 - https://sqlite.org/src/info/7c103a0b7d
 - https://docs.python.org/3/library/subprocess.html
 - https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createprocessw
+
+
+## Combined run 42610626351 and the macOS-inclusive successor
+
+At exact source `c552395a895a6875839ea0fe4a6a5050ebf3d34d`, Android passed
+873 tests with zero failures/errors/skips and generated debug APK, unsigned
+release APK and AAB. Linux and Windows failed. All three draft lane tags,
+support archive hashes and 169 total indexed entries were independently read
+back by the lead; Android XML accounts for the 873 tests. The separate hosted
+production readback also succeeded.
+
+Linux's shortened Podman path passed its former failure point. The next
+prerequisite failed: `Existing xdpyinfo required`. No Kotlin test XML was produced.
+Independent packaging and inventory succeeded and retained the 113,069,614-byte
+DEB, SHA-256 `262278365fe870d4505ec24dce57697bd14a45dd3d37cb9cd090dc01e0231f2c`.
+The lead downloaded, rehashed and reopened that installer without installing it:
+the contained app JAR matches `packages.json`, including all 35 legal resources,
+161 components and index `a797feb7d45d6989e922dc3fb198e1acb54f959c674ba4fb75174cc083771d89`.
+Two legal coverage issues remain. This proves installer byte embedding, not
+installation, execution of this installer or redistribution readiness.
+
+The display wrapper now calls the installed X11 library through a ten-second
+awaited Python child instead of requiring the separate `xdpyinfo` executable.
+XOpenDisplay authentication, XSync and XCloseDisplay preserve the actual
+protocol/authentication check. A real local private read-only mount guard and
+owned Xvfb passed correct-cookie access, empty-cookie refusal and unavailable
+display refusal. No system package was installed; no cookie was logged.
+Actual hosted entry and Kotlin tests remain the successor's proof step.
+
+Windows's source-only owner-failure regression attempted to resolve its fictional
+`authored-tool` after the new Windows executable guard. The test now explicitly
+selects its synthetic Linux path; separate Windows path-resolution tests remain.
+This stopped the targeted Room tests before Gradle, so this run offers no new
+Windows WAL recovery result. Independent packaging reached FFmpeg configure and
+hit its exact 600-second owned timeout, with cleanup confirmed. That is the
+observed failure; the earlier command-failed hypothesis is superseded for this
+attempt. Its filtered config report selected function/help definitions from
+FFmpeg's initial shell `set` dump, so it did not identify the last real probe.
+The reporter now excludes that dump, emits only bounded actual probe kinds and
+the final three probes' credential-filtered diagnostics, and preserves the
+original log. Windows configure receives a bounded 1200-second budget; other
+platform budgets and the outer deadline are unchanged. This may accommodate a
+slow configure, but does not diagnose or prove resolution of a stalled compiler.
+
+Local checks on the successor diff: native bundle 35/35, FFmpeg recipe 26/26,
+workflow 16/16 and tooling 17/17 (94 authored checks); Python parsing, shell syntax,
+YAML parsing and diff whitespace pass. The three real display checks pass.
+No Kotlin/application behavior changed in this correction, and no broad Gradle
+or native rebuild was repeated for these tooling-only changes.
+
+The owner's requested `android-desktop` scope plans exactly five production lanes:
+Android, Linux x64, Windows x64, macOS arm64 and macOS x64. The desktop matrix has
+`fail-fast: false`; independent package, inventory, retention and fresh readback
+steps remain, including diagnostic retention on failure. iOS keeps its separate
+scope. Both macOS architectures run full desktop tests; Windows in this new scope
+also uses full desktop tests rather than the earlier targeted recovery subset.
+No unchanged workflow retry was dispatched.
+
+Evidence: `.work/verification/task-b-combined-42610626351/`, including original
+job logs, three packets/manifests, `readback.json`, `deb-readback.json`,
+`display-live.json` and the four focused test logs. These are separate from the
+previous attempt's sealed evidence. No signing, publication, installation,
+physical audio, native/JDK/source legal closure or final acceptance claim.

@@ -56,7 +56,7 @@ class ProductionFfmpegBuildTest(unittest.TestCase):
         log.write_text("authored failed configure summary\n")
         probe = self.work / "ffbuild/config.log"
         probe.parent.mkdir()
-        probe.write_text("probe.c:1: error: authored compiler-probe discriminator\n")
+        probe.write_text("check_cc authored_probe\ntest_cc\nprobe.c:1: error: authored compiler-probe discriminator\n")
         failure = BUILD.owned_process.OwnedProcessError("command_failed", returncode=1,
                                                        cleanup_complete=True)
         with patch.object(BUILD, "ROOT", self.root), \
@@ -375,6 +375,7 @@ class ProductionFfmpegBuildTest(unittest.TestCase):
         log.write_bytes(b"authored retained log")
         failure = BUILD.owned_process.OwnedProcessError("cleanup_failed", cleanup_complete=False)
         with patch.object(BUILD, "ROOT", self.root), \
+                patch.object(BUILD.platform, "system", return_value="Linux"), \
                 patch.object(BUILD.owned_process, "run", side_effect=failure) as run, \
                 contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(BUILD.owned_process.OwnedProcessError) as raised:
