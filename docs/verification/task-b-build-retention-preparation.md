@@ -1,24 +1,34 @@
 # Task B build, retention and five-platform preparation
 
-Status: **run `42569788087` at `ceced9a` retained verified Linux and macOS arm64
-packages; the macOS x64 lane is still building. Other completed lanes failed as
-recorded below. The fresh unpacked Linux package passed silent native self-test.
+Status: **run `42569788087` at `ceced9a` completed with overall failure.
+macOS x64 passed tests, installer and inventory; Linux and macOS arm64 also retained
+verified packages. Independent readback passed for all eight lanes, including failed-lane
+diagnostics. The fresh unpacked Linux package passed silent native self-test.
 Task B, installation, physical audio, signing and distribution remain incomplete.**
 This note is the current-candidate Task B operating record. Older entries remain historical.
 
 ## Hosted retry findings and package execution — 2026-11-09
 
 PR checks remain empty because verification is manual; inspect Actions run
-`42569788087` directly. At this checkpoint macOS x64 reached installer generation;
-its final result and the aggregate fresh-runner readback are pending.
+`42569788087` directly. The run completed: macOS x64 succeeded, while the other
+platform jobs failed as classified below. Independent production readback succeeded
+for all eight expected lane packets; this verifies their recorded failed/successful
+outcomes and asset integrity, not successful builds for every platform.
 
 | Lane | Verified result / remaining failure |
 |---|---|
+| macOS x64 | All 1,205 shared tests passed; desktop 484 tests, zero failures/errors and one skip. Installer and inventory succeeded. |
 | Linux | Installer and inventory succeeded; GUI tests refused the required user namespace. Containment was preserved. |
 | macOS arm64 | Desktop tests, installer and inventory succeeded. Shared tests: 1,205 methods, one failure in `cleanupExpirationRetainsAllReferencesThroughNoncancellableUnwindAndOldEpochCallback`. |
 | Windows | The raw-backslash ZIP negative failed; dependency resolution returned HTTP 504. Native preparation separately failed without a retained compiler diagnosis; its cause remains unknown. |
 | Android | Pinned Gradle distribution download returned HTTP 504 before compilation. Scoped retry `42570333742` repeated that failure; its diagnostic-only retention/readback succeeded. Further unchanged retries are held. |
 | iOS x64 / arm64 | Gradle / Kotlin-Native distribution downloads respectively returned HTTP 504 before compilation. These are infrastructure failures, not new compiler diagnostics. |
+
+macOS x64 draft release `438801437` contains a 153,906,710-byte DMG plus manifest
+and support archive. Lead download, packet verification and exact tag-target lookup
+passed at `ceced9a`. This Linux lead cannot execute a macOS installer; hosted tests
+and build success do not establish macOS installation or physical audio.
+Completion receipt: `.work/verification/task-b-hosted-fixes/lead-hosted-completion-receipt.json`.
 
 The ZIP failure exposed both a fixture and scanner issue: Windows `ZipInfo` normalizes
 backslashes. The fixture now writes the exact unsafe header name, and the scanner
@@ -49,6 +59,34 @@ the zstd payload directly; `-003` explicitly decompresses it with the installed 
 This proves unpacked-package native execution, not audible playback or installation.
 Evidence: `.work/verification/task-b-hosted-fixes/retained-42569788087/`,
 `linux-package-selftest-003/` and `lead-hosted-retry-receipt.json`.
+
+## Scoped Windows toolchain correction — 2026-11-09
+
+The Windows native build now obtains an existing x64 Visual Studio developer
+environment for each native child that needs it. It uses the installed `vswhere`
+with UTF-8 output and `VsDevCmd.bat`, requires matching x64 compiler/library tools
+and nonempty SDK include/library paths, and preserves repository-scoped home,
+temporary/cache variables and trusted Git Bash precedence. Locator/setup children
+have bounded output and deadlines through the existing owned-process runner.
+No compiler/SDK is installed, no substitute binary is selected, and the parent or
+GitHub environment is not mutated. Setup failures prevent the native command.
+
+Lead review corrected a first-use defect: the real locator capture needs its
+scratch working directory before starting, rather than waiting for batch creation.
+A default-capture regression checks that exact boundary. The command uses `cmd /u
+/d /c call` before the quoted batch path to avoid leading-path quote stripping.
+The private batch is removed after capture. Existing diagnostic filtering now
+also retains the two exact safe FFmpeg prerequisite messages; arbitrary log text
+and sensitive lines remain excluded.
+
+Authored Linux checks pass: native bundle **28/28**, Windows helper **10/10**,
+tooling **16/16**, shell syntax and `git diff --check`. Desktop CI now executes
+both native Python suites before Gradle. These checks establish authored seams,
+including Unicode/path quoting construction, first-child cwd, environment scope
+and failure cleanup. They do **not** establish real Windows command parsing,
+Visual Studio setup, native compilation or the cause of run `42569788087`'s
+separate native-preparation failure. One Windows-only retained-package retry is
+justified by these source changes; unchanged Android/network failures are held.
 
 ## Focused correction results and current dispatch — 2026-11-09
 

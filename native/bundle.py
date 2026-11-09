@@ -28,6 +28,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "native"))
 import owned_process
+import windows_toolchain
 
 TARGETS = ("linux-x64", "windows-x64", "macos-x64", "macos-arm64")
 MAX_FILE = 64 * 1024 * 1024
@@ -42,7 +43,9 @@ DIAGNOSTIC_MAX_BYTES = 8 * 1024
 _DIAGNOSTIC_LINE = re.compile(
     r"(?i)(?:\berror\b|\bfatal\b|cmake error|undefined (?:reference|symbol)|"
     r"\bld:\s|\bcollect2:\s|ninja: build stopped|make(?:\[\d+\])?: \*\*\*|"
-    r"clang(?:-\d+)?: error|gcc: error)"
+    r"clang(?:-\d+)?: error|gcc: error|"
+    r"^scoped production ffmpeg build failed \(valueerror\)\. no global install or substitute binary\.$|"
+    r"^existing matching-host compiler/make/bash tools are required; nothing is installed$)"
 )
 _SENSITIVE_LINE = re.compile(
     r"(?i)(?:https?://|authorization\s*:|bearer\s+\S+|password\s*[=:]|"
@@ -478,6 +481,11 @@ def run(command: list[str], directory: Path, log: Path, timeout: int, *, root: P
     env = dict(os.environ, LC_ALL="C", TZ="UTC")
     for key in ("CFLAGS", "CXXFLAGS", "CPPFLAGS", "LDFLAGS", "CC", "CXX", "CMAKE_TOOLCHAIN_FILE"):
         env.pop(key, None)
+    if platform.system() == "Windows":
+        # Existing VS/vswhere is used for this native child only. The parent
+        # process environment and hosted GITHUB_ENV/GITHUB_PATH are unchanged.
+        env = windows_toolchain.child_environment(
+            env, scratch=work(root / ".work/desktop-native/windows-toolchain", root))
     # The owned runner validates the opened log and waits for the complete
     # trusted build-process tree, not only the immediate compiler/launcher.
     # Failure never grants permission to delete this work or its diagnostic log.

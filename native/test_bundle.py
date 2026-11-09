@@ -251,6 +251,45 @@ class NativeBundleTest(unittest.TestCase):
         self.assertEqual(3, run.call_args.kwargs["timeout"])
         self.assertEqual(b"preserve diagnostic output", log.read_bytes())
 
+    def test_windows_native_run_prepares_only_the_child_environment(self):
+        log = self.inputs / "build.log"
+        process_environment = dict(os.environ)
+        prepared = {"PATH": "authored-x64-msvc", "VEYRA_SCOPED_ENV": "1"}
+        with patch.dict(os.environ, {"CC": "authored-fallback-compiler", "HOME": "authored-home"}):
+            with patch.object(BUNDLE.platform, "system", return_value="Windows"), \
+                    patch.object(BUNDLE.windows_toolchain, "child_environment",
+                                 return_value=prepared) as helper, \
+                    patch.object(BUNDLE.owned_process, "run") as run:
+                BUNDLE.run(["authored-tool.exe", "arg with spaces"], self.root, log, 7, root=self.root)
+            helper.assert_called_once()
+            child = helper.call_args.args[0]
+            self.assertNotIn("CC", child)
+            self.assertNotIn("CXX", child)
+            self.assertEqual("authored-home", child["HOME"])
+            self.assertEqual(self.root, run.call_args.kwargs["cwd"])
+            self.assertEqual(prepared, run.call_args.kwargs["env"])
+            scratch = helper.call_args.kwargs["scratch"]
+            self.assertTrue(scratch.is_relative_to(self.root / ".work"))
+        self.assertEqual(process_environment, dict(os.environ))
+
+        with patch.object(BUNDLE.platform, "system", return_value="Linux"), \
+                patch.object(BUNDLE.windows_toolchain, "child_environment") as helper, \
+                patch.object(BUNDLE.owned_process, "run") as run:
+            BUNDLE.run(["authored-tool"], self.root, log, 7, root=self.root)
+        helper.assert_not_called()
+        self.assertEqual(os.environ.get("HOME"), run.call_args.kwargs["env"]["HOME"])
+
+    def test_windows_toolchain_failure_stops_before_any_native_command(self):
+        log = self.inputs / "build.log"
+        with patch.object(BUNDLE.platform, "system", return_value="Windows"), \
+                patch.object(BUNDLE.windows_toolchain, "child_environment",
+                             side_effect=ValueError("Existing x64 MSVC compiler tools are required; no substitute compiler is used.")), \
+                patch.object(BUNDLE.owned_process, "run") as run:
+            with self.assertRaisesRegex(ValueError, "no substitute compiler is used"):
+                BUNDLE.run(["authored-tool"], self.root, log, 7, root=self.root)
+        run.assert_not_called()
+        self.assertFalse(log.exists())
+
     def test_failed_owned_build_retains_bounded_safe_compiler_diagnostic(self):
         log = self.inputs / "build.log"
         original = (
@@ -291,6 +330,30 @@ class NativeBundleTest(unittest.TestCase):
         self.assertNotIn("authoredsignature", console)
         self.assertNotIn("authored setup", console)
         self.assertIn("Preserved log:", console)
+
+    def test_ffmpeg_prerequisite_headline_and_message_are_retained_without_log_dump(self):
+        text = (
+            "authored unrelated setup\n"
+            "Scoped production FFmpeg build failed (ValueError). No global install or substitute binary.\n"
+            "Existing matching-host compiler/make/bash tools are required; nothing is installed\n"
+            "authored unrelated detail\n"
+            "ValueError: not a known prerequisite headline\n"
+        )
+        lines, suppressed, truncated = BUNDLE._extract_diagnostics(text)
+        self.assertEqual([
+            "Scoped production FFmpeg build failed (ValueError). No global install or substitute binary.",
+            "Existing matching-host compiler/make/bash tools are required; nothing is installed",
+        ], lines)
+        self.assertEqual(0, suppressed)
+        self.assertFalse(truncated)
+
+        # Only the exact known-safe forms are retained; a URL appended to one is
+        # not copied into the diagnostic at all.
+        sensitive = ("Scoped production FFmpeg build failed (ValueError). No global install or substitute binary. "
+                     "https://example.invalid/authored-secret")
+        lines, suppressed, _ = BUNDLE._extract_diagnostics(sensitive)
+        self.assertEqual([], lines)
+        self.assertEqual(0, suppressed)
 
     def test_changed_or_unmanaged_stage_is_preserved_not_silently_cleaned(self):
         directory, sources = self.stage()

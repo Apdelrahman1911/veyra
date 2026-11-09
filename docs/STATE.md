@@ -10,8 +10,13 @@ self-test operations, TLS verification and owned shutdown. macOS arm64 desktop
 tests/package/inventory passed; one shared cleanup assertion remains unexplained
 and passes unchanged locally. Windows ZIP-name validation is corrected with a
 Windows-normalization regression (74 notice tests pass); shared test logs now retain
-full failure stacks. No cleanup semantics or timeouts changed. macOS x64 is still
-building; final run/readback results are pending. Android and iOS stopped on pinned
+full failure stacks. No cleanup semantics or timeouts changed. macOS x64 completed:
+1,205 shared tests passed; desktop 484 tests, zero failures and one skip; installer
+and inventory succeeded. Its DMG passed lead packet/hash/tag verification. Independent
+readback passed for all eight lanes, including failed-lane diagnostics. The overall run
+remains failed. A scoped Windows native-toolchain correction is source-reviewed and passes
+28 bundle, 10 helper and 16 tooling authored tests; the next dispatch is Windows-only.
+Windows runtime behavior is unverified and the original native failure remains undiagnosed. Android and iOS stopped on pinned
 distribution HTTP 504 responses; one Android retry repeated the failure. Windows
 also has dependency/network and undiagnosed native-preparation failures. Linux GUI
 namespace containment remains blocked. No repeated full matrix was dispatched.

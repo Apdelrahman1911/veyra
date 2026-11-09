@@ -48,6 +48,8 @@ python3 -B scripts/verify-design-resources.py
 
 case "$mode" in
     desktop)
+        python3 -B native/test_bundle.py
+        python3 -B native/test_windows_toolchain.py
         # Compose tests need a display on Linux; use already installed Xvfb,
         # never apt. A verified private read-only mount guard gives Xorg's
         # hard-coded scratch paths repository backing; there is no fallback.
