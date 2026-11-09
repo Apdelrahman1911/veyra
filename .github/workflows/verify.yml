@@ -322,7 +322,24 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/readback"
-          gh release download "$TAG" --repo "$REPO" --dir "$RUNNER_TEMP/readback"
+          # Draft releases are not addressable via the published tag endpoint, and
+          # `gh release download` uses that path. Fetch the exact release-id assets
+          # through the API with the octet-stream media type instead.
+          gh api "repos/$REPO/releases/$EXPECTED_RELEASE_ID/assets" > "$RUNNER_TEMP/assets-list.json"
+          for name in payload.bin identity.json manifest.json SHA256SUMS; do
+            asset_id="$(python3 -B - "$RUNNER_TEMP/assets-list.json" "$name" <<'PY'
+          import json, sys
+          items = json.load(open(sys.argv[1]))
+          matches = [item for item in items if item.get("name") == sys.argv[2]]
+          if len(matches) != 1:
+              raise SystemExit("expected exactly one asset named " + sys.argv[2])
+          print(matches[0]["id"])
+          PY
+          )"
+            test -n "$asset_id"
+            gh api -H "Accept: application/octet-stream" \
+              "repos/$REPO/releases/assets/$asset_id" > "$RUNNER_TEMP/readback/$name"
+          done
           test "$(find "$RUNNER_TEMP/readback" -maxdepth 1 -type f | wc -l)" -eq 4
       - name: Verify remote draft identity, exact tag target and independent hashes
         run: |

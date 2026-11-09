@@ -56,6 +56,8 @@ class RetentionWorkflowTest(unittest.TestCase):
         readback = WORKFLOW.split("  retention-readback:", 1)[1]
         self.assertIn("gh release download", readback)
         self.assertIn("scripts/retention-packet.py verify", readback)
+        self.assertIn("releases/$EXPECTED_RELEASE_ID/assets", readback)
+        self.assertIn("releases/assets/$asset_id", readback)
         self.assertIn("sha256sum shared/schemas/dev.veyra.data.room.VeyraDatabase/3.json", readback)
         self.assertIn('release.get("draft") is not True', readback)
         self.assertIn("published_at", readback)
