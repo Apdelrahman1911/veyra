@@ -207,7 +207,7 @@ jobs:
           gh release create "$TAG" --repo "$REPO" --verify-tag --draft --prerelease \
             --title "Veyra draft retention canary $TAG" \
             --notes "Nonproduction retention canary at exact commit $GITHUB_SHA (run $GITHUB_RUN_ID/$GITHUB_RUN_ATTEMPT). Authored non-audio bytes and provenance only. Draft and unpublished; not a release or verification claim."
-          release_id="$(gh api "repos/$REPO/releases/tags/$TAG" --jq .id)"
+          release_id="$(gh release view "$TAG" --repo "$REPO" --json databaseId --jq .databaseId)"
           test -n "$release_id"
           printf 'tag=%s\nrelease_id=%s\n' "$TAG" "$release_id" >> "$GITHUB_OUTPUT"
       - name: Upload bounded packet assets directly to the draft release
@@ -238,9 +238,9 @@ jobs:
       - name: Verify draft state, exact tag target and remote asset identities
         run: |
           set -euo pipefail
-          release_id="$(gh api "repos/$REPO/releases/tags/$TAG" --jq .id)"
-          test "$release_id" = "${{ steps.publish.outputs.release_id }}"
-          gh api "repos/$REPO/releases/tags/$TAG" > "$RUNNER_TEMP/release.json"
+          release_id="${{ steps.publish.outputs.release_id }}"
+          test -n "$release_id"
+          gh api "repos/$REPO/releases/$release_id" > "$RUNNER_TEMP/release.json"
           gh release view "$TAG" --repo "$REPO" --json assets > "$RUNNER_TEMP/assets.json"
           python3 -B - "$RUNNER_TEMP/release.json" "$RUNNER_TEMP/assets.json" \
             "$RUNNER_TEMP/retention-packet" "$TAG" <<'PY'
@@ -327,7 +327,7 @@ jobs:
       - name: Verify remote draft identity, exact tag target and independent hashes
         run: |
           set -euo pipefail
-          gh api "repos/$REPO/releases/tags/$TAG" > "$RUNNER_TEMP/release.json"
+          gh api "repos/$REPO/releases/$EXPECTED_RELEASE_ID" > "$RUNNER_TEMP/release.json"
           gh release view "$TAG" --repo "$REPO" --json assets > "$RUNNER_TEMP/assets.json"
           python3 -B - "$RUNNER_TEMP/release.json" "$TAG" "$EXPECTED_RELEASE_ID" <<'PY'
           import json, sys

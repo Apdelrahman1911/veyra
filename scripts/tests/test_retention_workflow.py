@@ -59,6 +59,8 @@ class RetentionWorkflowTest(unittest.TestCase):
         self.assertIn("sha256sum shared/schemas/dev.veyra.data.room.VeyraDatabase/3.json", readback)
         self.assertIn('release.get("draft") is not True', readback)
         self.assertIn("published_at", readback)
+        self.assertNotIn("releases/tags/$TAG", WORKFLOW)
+        self.assertIn('gh release view "$TAG" --repo "$REPO" --json databaseId', WORKFLOW)
 
 
 if __name__ == "__main__":
