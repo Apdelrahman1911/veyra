@@ -86,7 +86,7 @@ object DesktopSelfTest {
             if (!config.silentTestOutput) check(native["current-ao"] != "null") { "Real-output self-test selected a silent sink" }
             engine.stop(2)
             operations += "stop"
-            "{\"success\":true,\"silentAudio\":${config.silentTestOutput},\"physicalAudioVerified\":false,\"operations\":[${operations.joinToString(",") { quote(it) }}],\"native\":{\"mpvVersion\":${quote(native["mpv-version"])},\"ffmpegVersion\":${quote(native["ffmpeg-version"])},\"tlsVerify\":${quote(native["tls-verify"])},\"audioOutput\":${quote(native["current-ao"])}}"
+            "{\"success\":true,\"silentAudio\":${config.silentTestOutput},\"physicalAudioVerified\":false,\"operations\":[${operations.joinToString(",") { quote(it) }}],\"native\":{\"mpvVersion\":${quote(native["mpv-version"])},\"ffmpegVersion\":${quote(native["ffmpeg-version"])},\"tlsVerify\":${quote(native["tls-verify"])},\"audioOutput\":${quote(native["current-ao"])}}}"
         } finally {
             collector.cancel()
             withContext(NonCancellable) { engine.close() }
