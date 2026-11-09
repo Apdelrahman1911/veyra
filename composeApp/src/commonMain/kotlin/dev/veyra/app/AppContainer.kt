@@ -7,6 +7,7 @@ import dev.veyra.data.StoreStatus
 import dev.veyra.data.getOrThrow
 import dev.veyra.downloads.DownloadCoordinator
 import dev.veyra.downloads.DownloadFiles
+import dev.veyra.downloads.DownloadActivation
 import dev.veyra.model.*
 import dev.veyra.playback.*
 import dev.veyra.source.*
@@ -72,6 +73,18 @@ class AppContainer(
         set(value) { closedState.value = value }
     // Guarded by lifecycleLock. A second close must not falsely certify released owners.
     private var closeFailure: AppFailure? = null
+    private var closePreludeAttempted = false
+    private var dependentCloseAttempted = false
+    private var dependentOwnerCloseFailed = false
+    /** A process-lifetime pin, not a claim that native cleanup has succeeded. */
+    internal val retainedForCleanup: Boolean get() = AppCleanupOwners.contains(this)
+    private val dependencyReleaseAcknowledged = MutableStateFlow(false)
+    /**
+     * Positive host handoff receipt. False before close and while any application-owned cleanup
+     * is unacknowledged; neither an empty pin registry nor a returned exception proves release.
+     * Historical persistence failures may remain sticky after all dependent owners are consumed.
+     */
+    internal val dependencyReleaseSafeAfterClose: Boolean get() = dependencyReleaseAcknowledged.value
     private val rejectedResourceLock = Mutex()
     private val rejectedResources = mutableListOf<PlaybackResource>()
     private var rejectedResourceFailure: AppFailure? = null
@@ -121,7 +134,8 @@ class AppContainer(
     val playback = PlaybackController(store, platform.engine, resolver, scope, clock)
     val downloads = DownloadCoordinator(store, files, resolver, executionGateway, platform.validator,
         platform.engine.capabilities, scope, platform.downloadExecution, clock,
-        beforePhysicalDelete = { asset -> playback.releaseForAssetRemoval(asset.mediaId).getOrThrow() })
+        beforePhysicalDelete = { asset -> playback.releaseForAssetRemoval(asset.mediaId).getOrThrow() },
+        networkState = platform.downloadNetworkState)
     /** UI projection only: durable completion is not proof that this process checked the file. */
     val library: StateFlow<AppSnapshot> = downloads.presentation
     private val podcastsSource = PodcastSource(http, nowMs = clock::epochMs)
@@ -145,6 +159,11 @@ class AppContainer(
     val podcastDetails = mutablePodcastDetails.asStateFlow()
     private val mutableNotice = MutableStateFlow<AppNotice?>(null)
     val notice = mutableNotice.asStateFlow()
+    // Null means a user session has ACKed native coverage and activated the sole coordinator.
+    // Never persist this process-local assertion, or turn a rejected tap into a delayed intent.
+    private val mutableDownloadRestriction = MutableStateFlow<AppFailure?>(
+        AppFailure(FailureCode.BACKGROUND_RESTRICTED, "download_activation_required"))
+    val downloadRestriction: StateFlow<AppFailure?> = mutableDownloadRestriction.asStateFlow()
     private val undoLibrary = MutableStateFlow<LibraryUndo?>(null)
     private val mutableStorageBytes = MutableStateFlow<Long?>(null)
     val storageBytes = mutableStorageBytes.asStateFlow()
@@ -197,6 +216,60 @@ class AppContainer(
 
     suspend fun initialize() = lifecycleLock.withLock { initializeLocked() }
 
+    /**
+     * A native wake may open Room to repair schedules, but must not open a user session. In
+     * particular this does not create media/artwork directories, validate historical assets,
+     * restore playback/navigation, look up a saved collection, or request a native execution gate.
+     */
+    suspend fun initializeScheduling() = lifecycleLock.withLock {
+        check(!closed)
+        try { downloads.initializeScheduling() }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (error: Exception) {
+            val failure = failureOf(error)
+            if (mutableInitialization.value !is AppInitialization.Ready) {
+                mutableInitialization.value = AppInitialization.Failed(failure)
+            }
+            throw VeyraException(failure)
+        }
+    }
+
+    /** Explicit visible-session activation/retry. This never replays rejected enqueue/resume taps. */
+    suspend fun activateUserDownloads(): Boolean = lifecycleLock.withLock {
+        check(!closed)
+        if (mutableInitialization.value !is AppInitialization.Ready) return@withLock false
+        activateUserDownloadsLocked()
+    }
+
+    private suspend fun activateUserDownloadsLocked(): Boolean {
+        try {
+            // A stuck external scheduler must not keep shutdown/another visible retry waiting
+            // indefinitely. Ready library/playback state is published BEFORE this bounded step.
+            withTimeout(10_000L) {
+                platform.ensureDownloadScheduling()
+                downloads.start(DownloadActivation.USER_SESSION)
+                // Foreground activation may restore OS-expired work, but preserves user pauses
+                // and future retry deadlines. Native callers await their expiration barrier first.
+                downloads.resumePending()
+            }
+            mutableDownloadRestriction.value = null
+            return true
+        } catch (cancelled: CancellationException) {
+            currentCoroutineContext().ensureActive()
+            // Only the bounded child operation/local cancellation is converted to a restriction.
+            // Real caller cancellation propagates; it is never a falsely successful activation.
+            val failure = AppFailure(FailureCode.BACKGROUND_RESTRICTED, "download_activation_incomplete")
+            mutableDownloadRestriction.value = failure
+            fail(failure)
+            return false
+        } catch (error: Exception) {
+            val failure = failureOf(error)
+            mutableDownloadRestriction.value = failure
+            fail(failure)
+            return false
+        }
+    }
+
     private suspend fun initializeLocked() {
         check(!closed)
         if (mutableInitialization.value is AppInitialization.Ready) return
@@ -215,7 +288,6 @@ class AppContainer(
                 )
             })
             playback.initialize().getOrThrow()
-            downloads.start()
             effects.launch {
                 for (action in actions) {
                     try { action() }
@@ -251,6 +323,9 @@ class AppContainer(
             // Cold launch is usable immediately from Room. Network discovery is an explicit
             // request from Listen/Search, never a dependency of opening a local library.
             navigationWrites.trySend(Unit)
+            // Download coverage/activation failures are a typed feature restriction, not a failed
+            // library bootstrap. The UI/action consumers above are already ready during the ACK.
+            activateUserDownloadsLocked()
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
@@ -310,8 +385,28 @@ class AppContainer(
         }
     }
 
-    fun onMusicAction(action: MusicUiAction) = submit { handleMusic(action) }
-    fun onPodcastAction(action: PodcastAction) = submit { handlePodcast(action) }
+    fun onMusicAction(action: MusicUiAction) {
+        if (action is MusicUiAction.Download || action is MusicUiAction.DownloadCollection ||
+            action is MusicUiAction.ResumeDownload) {
+            if (rejectUncoveredDownloadIntent()) return
+        }
+        submit { handleMusic(action) }
+    }
+
+    fun onPodcastAction(action: PodcastAction) {
+        if (action is PodcastAction.Download || action is PodcastAction.ResumeDownload) {
+            if (rejectUncoveredDownloadIntent()) return
+        }
+        submit { handlePodcast(action) }
+    }
+
+    private fun rejectUncoveredDownloadIntent(): Boolean {
+        val restriction = mutableDownloadRestriction.value ?: return false
+        // The action channel can be waiting on an unrelated long command. Reject at the actual
+        // tap, not just when the consumer eventually executes after an intervening coverage ACK.
+        fail(restriction)
+        return true
+    }
 
     /** Transform the latest transactional settings, never save a stale screen's whole settings. */
     fun changeSettings(transform: (AppSettings) -> AppSettings) = submit {
@@ -371,7 +466,7 @@ class AppContainer(
         val selected = current(item)
         // Capture the recording displayed at the intent, not after later track switches.
         val bindingId = playback.state.value.executionBinding?.takeIf { it.mediaId == selected.id }?.id
-        return downloadEffect {
+        return downloadEffect(requiresCoverage = true) {
             downloads.enqueue(selected, reuseBindingId = bindingId)
             cacheArtwork(listOf(selected))
             selected.showId?.let { id -> store.state.value.shows[id]?.let { cacheArtwork(emptyList(), listOf(it)) } }
@@ -383,8 +478,16 @@ class AppContainer(
      * native/file cleanup. Enter that ordering point immediately, but never make playback,
      * navigation or an offline-policy change wait for a download's release/validation barrier.
      */
-    private fun downloadEffect(action: suspend () -> Unit): Deferred<Boolean> = effects.async(start = CoroutineStart.UNDISPATCHED) {
-        try { action(); true }
+    private fun downloadEffect(requiresCoverage: Boolean = false, action: suspend () -> Unit): Deferred<Boolean> =
+        effects.async(start = CoroutineStart.UNDISPATCHED) {
+        try {
+            // This synchronous check precedes the coordinator's first suspension/admission point.
+            // NEVER await ensureDownloadScheduling here: Pause/Cancel could overtake that wait
+            // and a late ACK would resurrect the older enqueue/resume action.
+            if (requiresCoverage) mutableDownloadRestriction.value?.let { throw VeyraException(it) }
+            action()
+            true
+        }
         catch (cancelled: CancellationException) {
             currentCoroutineContext().ensureActive()
             fail(AppFailure(if (store.state.value.settings.offlineOnly) FailureCode.OFFLINE_POLICY else FailureCode.CANCELLED))
@@ -513,7 +616,7 @@ class AppContainer(
                 effects.launch { if (pending.isNotEmpty() && pending.awaitAll().all { it }) inform(TextKey.DownloadsQueued) }
             }
             is MusicUiAction.PauseDownload -> downloadEffect { downloads.pause(action.downloadId) }
-            is MusicUiAction.ResumeDownload -> downloadEffect { downloads.resume(action.downloadId) }
+            is MusicUiAction.ResumeDownload -> downloadEffect(requiresCoverage = true) { downloads.resume(action.downloadId) }
             is MusicUiAction.CancelDownload -> downloadEffect { downloads.cancel(action.downloadId) }
             is MusicUiAction.RemoveDownload -> downloadEffect { removeDownload(action.downloadId) }
             MusicUiAction.ManageStorage -> selectDestination(AppDestination.SETTINGS)
@@ -587,7 +690,7 @@ class AppContainer(
             PodcastAction.OpenQueue -> navigate { it.copy(queueOpen = true, viewedQueue = QueueContext.PODCAST) }
             is PodcastAction.Download -> download(episode(action.mediaId))
             is PodcastAction.PauseDownload -> downloadEffect { downloads.pause(action.downloadId) }
-            is PodcastAction.ResumeDownload -> downloadEffect { downloads.resume(action.downloadId) }
+            is PodcastAction.ResumeDownload -> downloadEffect(requiresCoverage = true) { downloads.resume(action.downloadId) }
             is PodcastAction.CancelDownload -> downloadEffect { downloads.cancel(action.downloadId) }
             is PodcastAction.RemoveDownload -> downloadEffect { removeDownload(action.downloadId) }
             is PodcastAction.OpenPublisher -> openExternalInBackground(action.url)
@@ -852,43 +955,78 @@ class AppContainer(
 
     suspend fun close(): Unit = withContext(NonCancellable) {
         lifecycleLock.withLock {
-            if (closed) {
-                try { drainRejectedResources() }
-                catch (error: Throwable) { if (closeFailure == null) closeFailure = failureOf(error) }
-                closeFailure?.let { throw VeyraException(it) }
-                return@withLock
+            if (!closed) {
+                // Publish ownership before any fallible native release. A host may drop its
+                // AppContainer reference after a failed close; retained callbacks/locks and
+                // their dependencies must not then become eligible for collection.
+                AppCleanupOwners.retain(this)
+                closed = true
+                actions.close()
+                navigationWrites.close()
             }
-            closed = true
-            actions.close()
-            navigationWrites.close()
-            // Stop app effects before their dependencies. Player/download owners have their own
-            // completion barriers and close checkpointed state before Room is closed.
-            var failure: AppFailure? = null
-            suspend fun release(block: suspend () -> Unit) {
-                try { block() } catch (error: Throwable) { if (failure == null) failure = failureOf(error) }
+            var failure = closeFailure
+            suspend fun release(owner: Boolean = false, block: suspend () -> Unit) {
+                try { block() } catch (error: Throwable) {
+                    if (failure == null) failure = failureOf(error)
+                    if (owner) dependentOwnerCloseFailed = true
+                }
             }
-            release { effectsLifetime.cancelAndJoin() }
-            release { downloads.close() }
-            release { playback.close() }
-            // Also cover explicitly awaited resolver calls (such as verification clients) that
-            // were admitted before closing but aren't children of the playback/download actors.
-            release { activeAcquisitions.value.forEach { it.await() } }
+            if (!closePreludeAttempted) {
+                closePreludeAttempted = true
+                // Stop admission/effects first. A download cleanup failure must not prevent
+                // stopping audible playback and joining other already-admitted requests.
+                release(owner = true) { effectsLifetime.cancelAndJoin() }
+                release { downloads.close() }
+                release(owner = true) { playback.close() }
+                release(owner = true) { activeAcquisitions.value.forEach { it.await() } }
+            } else if (!downloads.dependencyReleaseSafeAfterClose) {
+                // Each explicit close may retry retained idempotent cleanup once. Never replay
+                // a download, or infer consumption from job.join/zero native leases/empty maps.
+                release { downloads.close() }
+            }
             release { drainRejectedResources() }
-            release { artwork.close() }
-            release { platform.closeMediaRuntime() }
-            release { platform.youtube.close() }
-            release { http.close() }
-            if (mutableInitialization.value is AppInitialization.Ready) {
-                release { persistNavigationOrThrow() }
-                release { store.flush().getOrThrow() }
-                release { store.backup().getOrThrow() }
+            val rejectedDrained = rejectedResourceLock.withLock { rejectedResources.isEmpty() }
+            if (!downloads.dependencyReleaseSafeAfterClose || !rejectedDrained) {
+                // Room, source clients, runtime and the parent lifetime are dependencies of
+                // retained cleanup. Keep the complete graph pinned until an acknowledged drain.
+                if (failure == null) failure = AppFailure(FailureCode.BACKGROUND_RESTRICTED,
+                    "download_owner_drain_failed_restart_required")
+                closeFailure = failure
+                throw VeyraException(checkNotNull(failure))
             }
-            release { store.close() }
-            release { lifetime.cancelAndJoin() }
+            if (!dependentCloseAttempted) {
+                dependentCloseAttempted = true
+                release(owner = true) { artwork.close() }
+                release(owner = true) { platform.closeMediaRuntime() }
+                release(owner = true) { platform.youtube.close() }
+                release(owner = true) { http.close() }
+                if (mutableInitialization.value is AppInitialization.Ready) {
+                    release { persistNavigationOrThrow() }
+                    release { store.flush().getOrThrow() }
+                    release { store.backup().getOrThrow() }
+                }
+                release(owner = true) { store.close() }
+                release(owner = true) { lifetime.cancelAndJoin() }
+            }
             closeFailure = failure
+            // A known historical/checkpoint failure remains observable after successful drain,
+            // but need not leak already-consumed owners. Unknown failed dependency closes remain
+            // process-owned; their previous best-effort/no-repeat policy is not silently changed.
+            if (!dependentOwnerCloseFailed) {
+                AppCleanupOwners.release(this)
+                dependencyReleaseAcknowledged.value = true
+            }
             failure?.let { throw VeyraException(it) }
         }
     }
+}
+
+/** No I/O, jobs or retry loop. Only an explicit close can release a retained application graph. */
+private object AppCleanupOwners {
+    private val retained = MutableStateFlow<Set<AppContainer>>(emptySet())
+    fun retain(owner: AppContainer) { retained.update { it + owner } }
+    fun release(owner: AppContainer) { retained.update { it - owner } }
+    fun contains(owner: AppContainer): Boolean = owner in retained.value
 }
 
 fun createAppContainer(platform: PlatformServices, parentScope: CoroutineScope): AppContainer = AppContainer(platform, parentScope)

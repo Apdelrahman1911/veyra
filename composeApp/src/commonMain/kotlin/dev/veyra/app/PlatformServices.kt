@@ -2,7 +2,9 @@ package dev.veyra.app
 
 import dev.veyra.data.LibraryStore
 import dev.veyra.downloads.DownloadExecutionGate
+import dev.veyra.downloads.DownloadNetworkState
 import dev.veyra.downloads.ProcessLifetimeDownloadGate
+import dev.veyra.downloads.alwaysConnectedDownloadNetwork
 import dev.veyra.model.LanguagePreference
 import dev.veyra.model.AppFailure
 import dev.veyra.playback.AssetValidator
@@ -32,6 +34,14 @@ interface PlatformServices {
     val systemLanguage: LanguagePreference
     val systemDarkTheme: Boolean get() = false
     val downloadExecution: DownloadExecutionGate get() = ProcessLifetimeDownloadGate
+    val downloadNetworkState: StateFlow<DownloadNetworkState> get() = alwaysConnectedDownloadNetwork
+    /**
+     * ACK durable scheduling coverage before autonomous execution. A native host may orchestrate
+     * kmpYT with OS workers, never implement another acquisition engine. Throw a typed failure if
+     * coverage is unavailable; the application must keep its local library/playback usable.
+     * Process-lifetime hosts require no external scheduler, hence the default no-op.
+     */
+    suspend fun ensureDownloadScheduling() = Unit
     val mediaRuntimeStatus: StateFlow<MediaRuntimeStatus> get() = readyRuntime
     /** Cancellable installation/verification of app-owned extraction tools, never media bytes. */
     suspend fun prepareMediaRuntime() = Unit

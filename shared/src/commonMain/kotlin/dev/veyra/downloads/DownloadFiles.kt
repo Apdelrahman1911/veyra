@@ -29,18 +29,14 @@ internal inline fun <T> storageOperation(block: () -> T): T = try { block() }
 catch (cancelled: CancellationException) { throw cancelled }
 catch (error: Exception) { throw failureFromStorage(error) }
 
-/** Idempotent close; a best-effort release of one lock must never skip the remaining locks. */
+/** Successful close is idempotent. Unknown native failure is sticky, never a consumption ACK. */
 internal interface DownloadFileLease { fun close() }
-
-private fun closeDownloadLeases(leases: Iterable<DownloadFileLease>) {
-    var failure: Exception? = null
-    for (lease in leases) try { lease.close() }
-    catch (error: Exception) { if (failure == null) failure = error else failure.addSuppressed(error) }
-    failure?.let { throw it }
-}
 
 /** Nonblocking OS advisory locks; contention is null, an actual I/O error is not contention. */
 internal expect fun tryAcquireDownloadFileLease(path: String): DownloadFileLease?
+
+/** Internal seam for decorating real leases in fault tests; production always uses the OS port. */
+internal fun interface DownloadFileLeaseFactory { fun acquire(path: String): DownloadFileLease? }
 
 internal class DownloadTransferSlot(val index: Int, private val lease: DownloadFileLease) : DownloadFileLease {
     override fun close() = lease.close()
@@ -54,11 +50,18 @@ internal class DownloadTransferSlot(val index: Int, private val lease: DownloadF
  * not a writer join. Stable lock files are never unlinked, which would break inode fencing.
  * The configured parent must be app-owned and not concurrently replaceable by an attacker.
  */
-class DownloadFiles(directory: String, val fileSystem: FileSystem = FileSystem.SYSTEM) {
+class DownloadFiles internal constructor(directory: String, val fileSystem: FileSystem,
+    private val leaseFactory: DownloadFileLeaseFactory) {
+    constructor(directory: String, fileSystem: FileSystem = FileSystem.SYSTEM) :
+        this(directory, fileSystem, DownloadFileLeaseFactory { tryAcquireDownloadFileLease(it) })
+
     val root: Path = directory.toPath(normalize = true)
     private val stagingRoot = root / ".partial"
     private val finalRoot = root / "files"
     private val lockRoot = root / ".locks"
+    // Direct internal callers (mostly OS-lock tests) still retain failed compensation. Production
+    // passes its coordinator's per-operation scope instead of sharing this fallback registry.
+    private val standaloneCleanup = DownloadCleanupRegistry()
 
     init {
         require(root.isAbsolute && root.parent != null) { "Owned media directory must be absolute and not a filesystem root" }
@@ -149,51 +152,49 @@ class DownloadFiles(directory: String, val fileSystem: FileSystem = FileSystem.S
         return "path-${identity.encodeUtf8().sha256().hex()}"
     }
 
-    /** Acquire in deterministic order, without waiting or leaving a partially acquired set. */
-    internal fun tryLeasePaths(values: Collection<String>): DownloadFileLease? = storageOperation {
+    /** Nonblocking ordered acquisition; failed partial release remains explicitly owned. */
+    internal fun tryLeasePaths(values: Collection<String>,
+        cleanup: DownloadLeaseCleanupScope = DownloadLeaseCleanupScope(standaloneCleanup)): DownloadFileLease? = storageOperation {
         initialize()
         val acquired = mutableListOf<DownloadFileLease>()
+        var handedOff = false
         try {
             for (name in values.map(::lockName).distinct().sorted()) {
-                val lock = tryAcquireDownloadFileLease(ownedPath((lockRoot / name).toString()).toString())
-                if (lock == null) { closeDownloadLeases(acquired.asReversed()); return@storageOperation null }
+                val lock = cleanup.acquire(leaseFactory, ownedPath((lockRoot / name).toString()).toString())
+                if (lock == null) return@storageOperation null
                 acquired += lock
             }
-            object : DownloadFileLease {
-                override fun close() { closeDownloadLeases(acquired.asReversed()) }
-            }
-        } catch (error: Exception) {
-            acquired.asReversed().forEach { runCatching { it.close() } }
-            throw error
+            DownloadLeaseCleanup(acquired.asReversed().toList()).also { handedOff = true }
+        } finally {
+            if (!handedOff) cleanup.releaseTemporary(acquired.asReversed().toList())
         }
     }
 
     /** Global slots include expired-but-live writers and retired high slots after a limit reduction. */
-    internal fun tryTransferSlot(parallelism: Int): DownloadTransferSlot? = storageOperation {
+    internal fun tryTransferSlot(parallelism: Int,
+        cleanup: DownloadLeaseCleanupScope = DownloadLeaseCleanupScope(standaloneCleanup)): DownloadTransferSlot? = storageOperation {
         initialize()
         val limit = parallelism.coerceIn(1, 4)
-        val admission = tryAcquireDownloadFileLease(ownedPath((lockRoot / "slot-admission").toString()).toString())
+        val admission = cleanup.acquire(leaseFactory, ownedPath((lockRoot / "slot-admission").toString()).toString())
             ?: return@storageOperation null
         val probes = mutableListOf<DownloadFileLease>()
         var selected: DownloadTransferSlot? = null
         try {
             for (index in limit until 4) {
-                val probe = tryAcquireDownloadFileLease(ownedPath((lockRoot / "slot-$index").toString()).toString())
+                val probe = cleanup.acquire(leaseFactory, ownedPath((lockRoot / "slot-$index").toString()).toString())
                     ?: return@storageOperation null
                 probes += probe
             }
             for (index in 0 until limit) {
-                val lease = tryAcquireDownloadFileLease(ownedPath((lockRoot / "slot-$index").toString()).toString()) ?: continue
+                val lease = cleanup.acquire(leaseFactory, ownedPath((lockRoot / "slot-$index").toString()).toString()) ?: continue
                 selected = DownloadTransferSlot(index, lease)
                 return@storageOperation selected
             }
             null
         } finally {
-            try { closeDownloadLeases(probes.asReversed() + admission) }
-            catch (error: Exception) {
-                try { selected?.close() } catch (closeError: Exception) { error.addSuppressed(closeError) }
-                throw error
-            }
+            // If any probe/admission close throws, the not-yet-handed-off slot stays with that
+            // exact cleanup record. Do not automatically retry or discard a dependent handle.
+            cleanup.releaseTemporary(probes.asReversed() + admission, listOfNotNull(selected))
         }
     }
 

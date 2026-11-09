@@ -78,6 +78,7 @@ import java.awt.geom.Path2D
 import java.awt.image.BufferedImage
 import java.nio.file.Path
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.system.exitProcess
@@ -295,7 +296,14 @@ internal class DesktopLifetime(
     @Volatile var verification: AutoCloseable? = null
     val startupJobs = DesktopStartupJobs()
     private val closing = AtomicBoolean()
-    private val closed = CompletableDeferred<Unit>()
+    // callbackAdmission selects one owner per close attempt. Concurrent callers share that
+    // attempt; only a later explicit call may retry an unacknowledged application drain.
+    private var closeAttempt: CompletableDeferred<Throwable?>? = null
+    // Written only by the selected owner, before publishing its completed attempt.
+    private var retirementAttempted = false
+    private var hostCloseAttempted = false
+    private var closeFailure: Throwable? = null
+    internal val retainedForCleanup: Boolean get() = DesktopCleanupOwners.contains(this)
 
     /** Native/tray callbacks only enqueue here; they never synchronously wait for work or close.
      * Quit deliberately uses the host scope instead, so it cannot join its own callback job. */
@@ -320,36 +328,82 @@ internal class DesktopLifetime(
     suspend fun close(): Unit = withContext(NonCancellable) {
         // Retire callback admission before the first dispatcher switch. The same gate covers
         // child attachment, so cancelAndJoin below cannot miss a successfully admitted child.
-        val ownsClose = synchronized(callbackAdmission) { closing.compareAndSet(false, true) }
-        withContext(Dispatchers.IO) finishClose@{
-            if (!ownsClose) { closed.await(); return@finishClose }
-            var failure: Throwable? = null
-            suspend fun release(action: suspend () -> Unit) {
-                try { action() } catch (error: Throwable) { if (failure == null) failure = error }
+        val (completion, ownsClose) = synchronized(callbackAdmission) {
+            closing.set(true)
+            val previous = closeAttempt
+            if (previous != null && (!previous.isCompleted || hostCloseAttempted)) previous to false
+            else {
+                // The app's own pin cannot keep this host or its process lock alive. Publish
+                // our strong owner before the first fallible/suspending cleanup operation.
+                DesktopCleanupOwners.retain(this)
+                CompletableDeferred<Throwable?>().also { closeAttempt = it } to true
             }
+        }
+        if (ownsClose) {
             try {
-                // Retire both admissions before awaiting either job. A late Compose
-                // effect must not allocate an owner after this close took its snapshot.
-                for (job in startupJobs.retire()) release { job.cancel(); job.join() }
-                // Includes suspended callbacks and their non-cancellable finalizers. Keep
-                // session/engine/source/store/context owners alive until every callback ends.
-                release { callbackJob.cancelAndJoin() }
-                release { session?.close() }
-                release { container?.close() }
-                // Also protect partial initialization; every owner close is idempotent. Attempt all
-                // cleanup even if an earlier owner failed, retaining the first failure for every waiter.
-                release { services?.closeAcquiredResources() }
-                release { verification?.close() }
+                withContext(Dispatchers.IO) { finishCloseAttempt() }
+            } catch (error: Throwable) {
+                if (closeFailure == null) closeFailure = error
             } finally {
-                release { context.close() }
-                val error = failure
-                if (error == null) closed.complete(Unit) else closed.completeExceptionally(error)
-                scope.cancel()
+                synchronized(callbackAdmission) { completion.complete(closeFailure) }
             }
-            failure?.let { throw it }
+        }
+        // Store the outcome as data so every caller observes the same sticky failure, even
+        // if its own Job was cancelled before admission or while another attempt drained.
+        completion.await()?.let { throw it }
+    }
+
+    private suspend fun finishCloseAttempt() {
+        suspend fun release(action: suspend () -> Unit) {
+            try { action() } catch (error: Throwable) { if (closeFailure == null) closeFailure = error }
+        }
+        if (!retirementAttempted) {
+            retirementAttempted = true
+            // Retire both admissions before awaiting either job. A late Compose
+            // effect must not allocate an owner after this close took its snapshot.
+            for (job in startupJobs.retire()) release { job.cancel(); job.join() }
+            // Includes suspended callbacks and their non-cancellable finalizers. Keep
+            // session/engine/source/store/context owners alive until every callback ends.
+            release { callbackJob.cancelAndJoin() }
+            release { session?.close() }
+        }
+        val app = container
+        if (app != null) {
+            release { app.close() }
+            if (!app.dependencyReleaseSafeAfterClose || app.retainedForCleanup) {
+                // An exception (or its absence) is not a dependency handoff. Retained cleanup
+                // may still use Room, runtime clients, the parent scope and this process lock.
+                // No automatic retry loop: the next explicit close shares/retries only the app.
+                if (closeFailure == null) closeFailure = DesktopCleanupNotAcknowledged()
+                return
+            }
+        }
+        // No app was published, or its positive receipt certifies consumption. Keep the
+        // existing one-shot policy for independent/partial-startup owners, including failures.
+        // In particular a verification-only failure does not retain an unrelated process lock.
+        hostCloseAttempted = true
+        try {
+            release { services?.closeAcquiredResources() }
+            release { verification?.close() }
+        } finally {
+            release { context.close() }
+            release { scope.cancel() }
+            DesktopCleanupOwners.release(this)
         }
     }
 }
+
+/** Strong process pin only; no I/O, timer, finalizer or implicit cleanup retry. */
+private object DesktopCleanupOwners {
+    private val retained = ConcurrentHashMap.newKeySet<DesktopLifetime>()
+    fun retain(owner: DesktopLifetime) { retained.add(owner) }
+    fun release(owner: DesktopLifetime) { retained.remove(owner) }
+    fun contains(owner: DesktopLifetime): Boolean = owner in retained
+}
+
+private class DesktopCleanupNotAcknowledged(
+    val reason: String = "desktop_application_cleanup_not_acknowledged",
+) : IllegalStateException(reason)
 
 private fun installTray(arabic: Boolean, show: () -> Unit, playPause: () -> Unit, quit: () -> Unit): TrayIcon? = runCatching {
     val image = BufferedImage(32, 32, BufferedImage.TYPE_INT_ARGB)
