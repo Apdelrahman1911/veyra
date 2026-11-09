@@ -440,6 +440,105 @@ class WindowsJobPolicyTest(unittest.TestCase):
         self.assertNotIn(("image", 22), events)
         self.assertEqual([11, 22, 33], [item[1] for item in events if item[0] == "close"])
 
+    def test_completed_telemetry_termination_requires_exact_image_and_job_membership(self):
+        events = []
+        expected = "C:/authored-msvc/Hostx64/x64/vctip.exe"
+        def query(handle, kind, pointer, size, returned):
+            members = ctypes.cast(pointer, ctypes.POINTER(OWNED._JobProcessIds)).contents
+            members.listed = members.assigned = 4
+            members.ids[:4] = (11, 22, 33, 44)
+            return 1
+        def member(process, job, pointer):
+            ctypes.cast(pointer, ctypes.POINTER(ctypes.c_int)).contents.value = process != 22
+            return 1
+        def image(process, flags, buffer, capacity):
+            events.append(("image", process))
+            buffer.value = expected if process in (11, 22) else (
+                "C:/unrelated/vctip.exe" if process == 33 else "C:/authored-msvc/Hostx64/x64/cl.exe")
+            return 1
+        def opened(access, inherit, pid):
+            self.assertEqual(0x00101001, access)
+            return pid
+        api = object.__new__(OWNED._WindowsApi)
+        api.dll = SimpleNamespace(QueryInformationJobObject=query, OpenProcess=opened,
+            IsProcessInJob=member, QueryFullProcessImageNameW=image,
+            WaitForSingleObject=lambda process, timeout: events.append(("wait", process, timeout)) or (0 if timeout else 258),
+            TerminateProcess=lambda process, code: events.append(("terminate", process, code)) or 1,
+            CloseHandle=lambda process: events.append(("close", process)) or 1)
+        self.assertEqual(1, api.finish_telemetry(91, expected.upper()))
+        self.assertEqual([("terminate", 11, 0)], [e for e in events if e[0] == "terminate"])
+        self.assertIn(("wait", 11, 1000), events)
+        self.assertNotIn(("image", 22), events)
+        self.assertEqual([11, 22, 33, 44], [e[1] for e in events if e[0] == "close"])
+
+    def test_telemetry_termination_failure_closes_handle_and_cannot_claim_success(self):
+        for wait_result in (258, 0xffffffff):
+            closed = []
+            def query(handle, kind, pointer, size, returned):
+                members = ctypes.cast(pointer, ctypes.POINTER(OWNED._JobProcessIds)).contents
+                members.listed = members.assigned = 1
+                members.ids[0] = 11
+                return 1
+            def member(process, job, pointer):
+                ctypes.cast(pointer, ctypes.POINTER(ctypes.c_int)).contents.value = 1
+                return 1
+            def image(process, flags, buffer, capacity):
+                buffer.value = "C:/authored/vctip.exe"
+                return 1
+            api = object.__new__(OWNED._WindowsApi)
+            api.dll = SimpleNamespace(QueryInformationJobObject=query, OpenProcess=lambda *args: 81,
+                IsProcessInJob=member, QueryFullProcessImageNameW=image,
+                WaitForSingleObject=lambda *args: wait_result,
+                TerminateProcess=lambda *args: 0,
+                CloseHandle=lambda handle: closed.append(handle) or 1)
+            with self.subTest(wait_result=wait_result), self.assertRaises(OSError):
+                api.finish_telemetry(91, "C:/authored/vctip.exe")
+            self.assertEqual([81], closed)
+
+    def test_telemetry_completion_rule_requires_successful_exited_command_and_empty_job(self):
+        image = "C:/authored/vctip.exe"
+        for case in ("success", "command-running", "command-failed", "gate-failed", "unrecognized-child", "disabled", "cleanup-failed"):
+            calls = []
+            class Job:
+                count = 1
+                def active(inner): return inner.count
+                def finish_telemetry(inner, expected):
+                    calls.append(expected)
+                    if case == "cleanup-failed":
+                        raise OSError("authored private detail")
+                    if case == "success":
+                        inner.count = 0
+                        return 1
+                    return 0
+            job = Job()
+            message = {"event": "complete", "returncode": 7 if case == "command-failed" else 0, "drained": False}
+            control = SimpleNamespace(take=lambda: [] if case == "command-running" else [message],
+                                      failed=threading.Event(), done=threading.Event())
+            control.done.set()
+            process = SimpleNamespace(poll=lambda: None if case == "command-running" else 3 if case == "gate-failed" else 0)
+            with self.subTest(case=case), patch("sys.stderr", new_callable=io.StringIO) as output:
+                if case == "success":
+                    self.assertEqual(0, OWNED._monitor(process, job, control, None, time.monotonic()+.1, None, image))
+                    self.assertEqual([image], calls)
+                    self.assertEqual(0, job.count)
+                    self.assertIn("owned MSVC telemetry", output.getvalue())
+                else:
+                    with self.assertRaises(OWNED._Stop) as raised:
+                        OWNED._monitor(process, job, control, None, time.monotonic()+.035, None,
+                                       None if case == "disabled" else image)
+                    expected = {"command-failed": "command_failed", "gate-failed": "owner_failed",
+                                "cleanup-failed": "telemetry_cleanup_failed"}.get(case, "timeout")
+                    self.assertEqual(expected, raised.exception.reason)
+                    if case in ("command-running", "command-failed", "gate-failed", "disabled"):
+                        self.assertEqual([], calls)
+                    self.assertNotIn("private", output.getvalue())
+
+    def test_invalid_telemetry_policy_is_refused_before_any_launch(self):
+        with patch.object(OWNED, "_spawn", side_effect=AssertionError("No process may start")):
+            for image in ("vctip.exe", "C:/authored/cl.exe", "C:/authored/../vctip.exe", 42):
+                with self.subTest(image=image), self.assertRaises(ValueError):
+                    OWNED._execute(python("pass"), cwd=ROOT, env={}, timeout=1, completed_telemetry_image=image)
+
     def test_job_has_kill_on_close_without_either_breakaway_flag(self):
         api = self.Api()
         job = OWNED._WindowsJob(api)

@@ -4,6 +4,17 @@ Updated 2026-11-07 UTC. Formal Goal tool currently reports **blocked/incomplete*
 
 ## Current Task B continuation — 2026-11-09
 
+Corrected short probe `42672976807` at `7052b0f` passed Windows process/bundle
+tests, then established **CMake exit 0 with one owned `vctip.exe` still alive**.
+The wrapper timed out awaiting that telemetry helper; a stuck CMake command is
+not the cause in this attempt. The next correction permits stopping only the
+exact existing telemetry image beside selected MSVC, via a pinned process handle
+rechecked against the command's Job, after command and gate exit zero. Full Job
+drain remains mandatory; unknown children and failures remain failures. Local:
+37 process tests discovered / 35 passed / two Windows-only skips; bundle 41/41.
+A fresh short probe is required; Windows installer readiness remains open.
+
+
 First short Windows probe `42669996782` at `0e5c9a8` failed before CMake:
 the new Windows test referenced a helper from the wrong class, and an existing
 termination assertion observed a fixture PID still live. Shared fixture

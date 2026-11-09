@@ -20,6 +20,7 @@ from __future__ import annotations
 import ctypes
 import json
 import math
+import ntpath
 import os
 from pathlib import Path
 import queue
@@ -158,6 +159,8 @@ class _WindowsApi:
             "OpenProcess": ([ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32], ctypes.c_void_p),
             "IsProcessInJob": ([ctypes.c_void_p, ctypes.c_void_p, ctypes.POINTER(ctypes.c_int)], ctypes.c_int),
             "QueryFullProcessImageNameW": ([ctypes.c_void_p, ctypes.c_uint32, ctypes.c_wchar_p, ctypes.POINTER(ctypes.c_uint32)], ctypes.c_int),
+            "TerminateProcess": ([ctypes.c_void_p, ctypes.c_uint32], ctypes.c_int),
+            "WaitForSingleObject": ([ctypes.c_void_p, ctypes.c_uint32], ctypes.c_uint32),
             "TerminateJobObject": ([ctypes.c_void_p, ctypes.c_uint32], ctypes.c_int),
             "CloseHandle": ([ctypes.c_void_p], ctypes.c_int),
         }
@@ -212,6 +215,44 @@ class _WindowsApi:
                 self.close(process)
         return {"listed": members.listed, "truncated": members.listed > 16, "members": result}
 
+    def finish_telemetry(self, handle, expected_image):
+        """Stop only the exact optional tool remaining after a successful command."""
+        members = _JobProcessIds()
+        self._check(self.dll.QueryInformationJobObject(handle, 3, ctypes.byref(members), ctypes.sizeof(members), None))
+        if members.listed > len(members.ids):
+            raise ValueError("Invalid owned-job process count")
+        stopped = 0
+        for pid in list(members.ids)[:members.listed]:
+            # Pin the process object; never terminate a name or a recycled PID.
+            process = self.dll.OpenProcess(0x00100000 | 0x1000 | 1, False, pid)
+            if not process:
+                continue
+            try:
+                member = ctypes.c_int()
+                self._check(self.dll.IsProcessInJob(process, handle, ctypes.byref(member)))
+                if not member.value:
+                    continue
+                capacity = ctypes.c_uint32(32768)
+                image = ctypes.create_unicode_buffer(capacity.value)
+                self._check(self.dll.QueryFullProcessImageNameW(process, 0, image, ctypes.byref(capacity)))
+                if ntpath.normcase(ntpath.normpath(image.value)) != ntpath.normcase(ntpath.normpath(expected_image)):
+                    continue
+                state = self.dll.WaitForSingleObject(process, 0)
+                if state == 0:  # Already terminated.
+                    continue
+                if state != 258:
+                    raise OSError("Cannot verify owned telemetry state")
+                if not self.dll.TerminateProcess(process, 0):
+                    if self.dll.WaitForSingleObject(process, 0) == 0:
+                        continue  # Exited between the wait and termination request.
+                    raise OSError("Owned telemetry termination failed")
+                if self.dll.WaitForSingleObject(process, 1000) != 0:
+                    raise OSError("Owned telemetry termination was not confirmed")
+                stopped += 1
+            finally:
+                self.close(process)
+        return stopped
+
     def terminate(self, handle):
         self._check(self.dll.TerminateJobObject(handle, 1))
 
@@ -248,6 +289,9 @@ class _WindowsJob:
         except Exception as error:
             state["snapshotError"] = type(error).__name__
         return state
+
+    def finish_telemetry(self, expected_image):
+        return self.api.finish_telemetry(self.handle, expected_image)
 
     def terminate(self):
         self.api.terminate(self.handle)
@@ -370,7 +414,7 @@ class _Capture:
             self.done.set()
 
 
-def _monitor(process, job, control, captured, deadline, cancel):
+def _monitor(process, job, control, captured, deadline, cancel, completed_telemetry_image=None):
     completed = None
     while True:
         for message in control.take():
@@ -396,6 +440,14 @@ def _monitor(process, job, control, captured, deadline, cancel):
             if job is not None:
                 if job.active() == 0:
                     return completed["returncode"]
+                if completed_telemetry_image is not None:
+                    try:
+                        stopped = job.finish_telemetry(completed_telemetry_image)
+                    except Exception:
+                        raise _Stop("telemetry_cleanup_failed") from None
+                    if stopped:
+                        print(f"Stopped {stopped} owned MSVC telemetry helper(s) after successful command completion.",
+                              file=sys.stderr, flush=True)
             elif completed["drained"]:
                 return completed["returncode"]
             else:
@@ -449,7 +501,8 @@ def _drain_posix(process, control, deadline):
     return False
 
 
-def _execute(command, *, cwd, env, timeout, log=None, max_output_bytes=1024 * 1024, cancel=None):
+def _execute(command, *, cwd, env, timeout, log=None, max_output_bytes=1024 * 1024, cancel=None,
+             completed_telemetry_image=None):
     if sys.version_info < (3, 11):
         raise ValueError("Managed build tools require Python 3.11 or newer")
     if isinstance(command, (str, bytes)):
@@ -459,6 +512,13 @@ def _execute(command, *, cwd, env, timeout, log=None, max_output_bytes=1024 * 10
         raise ValueError("A nonempty direct argument list is required")
     if not math.isfinite(timeout) or timeout <= 0 or type(max_output_bytes) is not int or not 0 < max_output_bytes <= _MAX_CAPTURE_BYTES:
         raise ValueError("A finite positive timeout and bounded capture size are required")
+    if completed_telemetry_image is not None:
+        if (os.name != "nt" or not isinstance(completed_telemetry_image, str)
+                or not ntpath.isabs(completed_telemetry_image)
+                or ntpath.basename(completed_telemetry_image).casefold() != "vctip.exe"
+                or ".." in completed_telemetry_image.replace("/", "\\").split("\\")
+                or "\0" in completed_telemetry_image):
+            raise ValueError("Only an exact absolute Windows MSVC telemetry image is permitted")
     if cancel is not None and cancel.is_set():
         raise OwnedProcessError("cancelled", cleanup_complete=True)
     log_path = Path(os.path.abspath(log)) if log is not None else None
@@ -485,7 +545,7 @@ def _execute(command, *, cwd, env, timeout, log=None, max_output_bytes=1024 * 10
             # write must never justify treating a possibly running tool as gated.
             released = True
             _send(process.stdin, b"start\n")
-            _monitor(process, job, control, captured, deadline, cancel)
+            _monitor(process, job, control, captured, deadline, cancel, completed_telemetry_image)
             if captured is not None:
                 if not captured.done.wait(_CLEANUP_SECONDS) or captured.failed.is_set():
                     raise _Stop("owner_io_failed")
@@ -550,9 +610,11 @@ def _execute(command, *, cwd, env, timeout, log=None, max_output_bytes=1024 * 10
 
 
 def run(command: Sequence[str], *, cwd: Path, env: dict[str, str], timeout: float,
-        log: Path, cancel: threading.Event | None = None) -> None:
-    """Append combined command output to a checked ordinary log; await all owners."""
-    _execute(command, cwd=cwd, env=env, timeout=timeout, log=log, cancel=cancel)
+        log: Path, cancel: threading.Event | None = None,
+        completed_telemetry_image: str | None = None) -> None:
+    """Await all owners; optionally close exact owned MSVC telemetry after success."""
+    _execute(command, cwd=cwd, env=env, timeout=timeout, log=log, cancel=cancel,
+             completed_telemetry_image=completed_telemetry_image)
 
 
 def capture(command: Sequence[str], *, cwd: Path, env: dict[str, str], timeout: float = 20,

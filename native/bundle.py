@@ -560,12 +560,18 @@ def run(command: list[str], directory: Path, log: Path, timeout: int, *, root: P
     env = dict(os.environ, LC_ALL="C", TZ="UTC")
     for key in ("CFLAGS", "CXXFLAGS", "CPPFLAGS", "LDFLAGS", "CC", "CXX", "CMAKE_TOOLCHAIN_FILE"):
         env.pop(key, None)
+    completed_telemetry_image = None
     if platform.system() == "Windows":
         # Existing VS/vswhere is used for this native child only. The parent
         # process environment and hosted GITHUB_ENV/GITHUB_PATH are unchanged.
         env = dict(windows_toolchain.child_environment(
             env, scratch=work(root / ".work/desktop-native/windows-toolchain", root)),
             MSBUILDDISABLENODEREUSE="1")
+        compiler = shutil.which("cl.exe", path=env.get("PATH"))
+        if compiler:
+            telemetry = Path(compiler).resolve().with_name("vctip.exe")
+            if telemetry.is_file():
+                completed_telemetry_image = str(telemetry)
         # The Windows Job owner waits for every descendant. MSBuild workers
         # must exit with this invocation rather than stay idle for later builds.
     # The owned runner validates the opened log and waits for the complete
@@ -574,7 +580,9 @@ def run(command: list[str], directory: Path, log: Path, timeout: int, *, root: P
     invocation = uuid.uuid4().hex
     env["VEYRA_NATIVE_DIAGNOSTIC_INVOCATION"] = invocation
     try:
-        owned_process.run(command, cwd=directory, env=env, timeout=timeout, log=log)
+        options = {} if completed_telemetry_image is None else {
+            "completed_telemetry_image": completed_telemetry_image}
+        owned_process.run(command, cwd=directory, env=env, timeout=timeout, log=log, **options)
     except owned_process.OwnedProcessError as failure:
         try:
             report_build_failure(log, failure, root, invocation=invocation)

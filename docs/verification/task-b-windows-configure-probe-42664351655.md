@@ -65,3 +65,43 @@ Local corrected result: **33 process tests discovered, 31 passed, two Windows-on
 skips** (`process-tests-probe-fix-final.log`). Bundle/workflow sources were not
 changed, so their previously passing local checks were not repeated. A fresh
 Windows probe remains necessary; no native-helper or installer pass is claimed.
+
+
+## Successful configure with surviving owned telemetry
+
+Corrected probe `42672976807` at
+`7052b0f1a399eb33ca00b3e16230b24a2dfb03b0` passed the actual Windows
+process tests (**33 discovered, 27 passed, six platform skips**) and bundle tests
+(**40 discovered, 37 passed, three platform skips**). CMake configuration then
+reached the unchanged 180-second deadline. The captured state was:
+
+```json
+{"commandCompleted":true,"commandReturncode":0,"jobActiveBeforeCleanup":1,"processes":{"listed":1,"members":[{"image":"vctip.exe","pid":2364}],"truncated":false}}
+```
+
+This establishes that CMake finished successfully in this attempt and that one
+owned `vctip.exe` remained. It does not reconstruct older attempts' process state.
+The normal failure path drained that owned job. No native compile or installer
+success is established by this failed probe.
+
+The correction keeps the generic owner strict by default. The Windows native
+bundle caller derives the exact existing `vctip.exe` path beside its selected,
+scoped x64 `cl.exe`. Only after the requested command and its gate both exit zero
+may the owner inspect its own Job members and stop that optional telemetry image.
+It pins a process handle, rechecks exact Job membership and compares the full
+image path, then terminates and waits on that same handle. A matching basename
+elsewhere, a recycled PID outside the Job, a compiler or an unknown process grants
+no termination authority. Stop/wait failures fail the command; a success still
+requires the complete Job to reach zero active processes. Cancellation, nonzero
+commands, unknown children and the original deadlines remain failures. No global
+process lookup/kill, compiler flag guess, installation or host configuration is
+used. A concise count of stopped owned telemetry helpers is printed without
+paths, command lines or environment.
+
+Local correction evidence: **37 process tests discovered, 35 passed, two
+Windows-only skips**; **41/41 bundle tests**. Tests cover exact image/membership,
+same-handle termination/wait/closure, failed wait/termination, command/gate success
+requirements, unknown-child timeout, disabled policy, invalid inputs and selected
+compiler-directory wiring. A new short Windows probe is required before retrying
+installer generation. Workflow sources are unchanged from the parsed/tested probe.
+Logs are retained alongside both failed probes under the existing evidence root.

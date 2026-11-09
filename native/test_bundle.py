@@ -285,6 +285,23 @@ class NativeBundleTest(unittest.TestCase):
         helper.assert_not_called()
         self.assertEqual(os.environ.get("HOME"), run.call_args.kwargs["env"]["HOME"])
 
+    def test_windows_native_run_limits_optional_telemetry_to_selected_compiler_directory(self):
+        compiler = self.inputs / "cl.exe"
+        telemetry = compiler.with_name("vctip.exe")
+        compiler.write_bytes(b"authored-not-executed")
+        telemetry.write_bytes(b"authored-not-executed")
+        prepared = {"PATH": "authored-scoped-msvc"}
+        with patch.object(BUNDLE.platform, "system", return_value="Windows"), \
+             patch.object(BUNDLE.windows_toolchain, "child_environment", return_value=prepared), \
+             patch.object(BUNDLE.shutil, "which", return_value=str(compiler)) as which, \
+             patch.object(BUNDLE.owned_process, "run") as run:
+            BUNDLE.run(["authored-cmake"], self.root, self.inputs / "build.log", 7, root=self.root)
+            self.assertEqual(str(telemetry.resolve()), run.call_args.kwargs["completed_telemetry_image"])
+            which.assert_called_once_with("cl.exe", path="authored-scoped-msvc")
+            telemetry.unlink()
+            BUNDLE.run(["authored-cmake"], self.root, self.inputs / "build.log", 7, root=self.root)
+            self.assertNotIn("completed_telemetry_image", run.call_args.kwargs)
+
     def test_session_helper_uses_phase_logs_and_windows_nonreusing_build(self):
         for target in ("windows-x64", "macos-arm64"):
             with self.subTest(target=target):
