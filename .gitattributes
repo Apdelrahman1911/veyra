@@ -14,6 +14,7 @@ composeApp/src/commonMain/composeResources/files/licenses/ibm_plex_sans_arabic_o
 # The legal bundle contains verbatim upstream notices, not whitespace-normalized copies.
 composeApp/src/commonMain/composeResources/files/legal/THIRD_PARTY_NOTICES.txt -text whitespace=-blank-at-eol,-blank-at-eof,cr-at-eol
 composeApp/src/commonMain/composeResources/files/legal/notices/*.txt -text whitespace=-blank-at-eol,-blank-at-eof,cr-at-eol
+third_party/notices/texts/*.txt -text whitespace=-blank-at-eol,-blank-at-eof,cr-at-eol
 *.ttf binary
 *.jar binary
 *.mp3 binary

@@ -126,6 +126,8 @@ jobs:
             args+=(--legal ".work/verification/legal-inventory/$VEYRA_INVENTORY_PLATFORM")
           inventory=".work/verification/runtime-inventory/$VEYRA_INVENTORY_PLATFORM.json"
           [ -f "$inventory" ] && args+=(--inventory "$inventory")
+          [ -f .work/verification/native-build-diagnostic.json ] && \
+            args+=(--native-diagnostic .work/verification/native-build-diagnostic.json)
           # Only packages.json's exact fresh paths/hashes are retained; never scan
           # the package tree for arbitrary older files.
           [ -f .work/verification/packages.json ] && args+=(--packages-json .work/verification/packages.json)

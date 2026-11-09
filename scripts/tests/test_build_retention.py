@@ -38,8 +38,10 @@ class BuildRetentionTest(unittest.TestCase):
         self.schema.write_text("{}\n")
         self.legal = self.root / "legal"
         self.legal.mkdir()
-        (self.legal / "index.json").write_text('{"source":"authored"}\n')
         (self.legal / "THIRD_PARTY_NOTICES.txt").write_text("Authored notice\n")
+        (self.legal / "index.json").write_text(json.dumps({"fileHashes": {
+            "THIRD_PARTY_NOTICES.txt": hashlib.sha256(
+                (self.legal / "THIRD_PARTY_NOTICES.txt").read_bytes()).hexdigest()}}) + "\n")
         self.inventory = self.root / "inventory.json"
         self.inventory.write_text('{"authored":true}\n')
         self.packages_json = self.root / "packages.json"
@@ -106,6 +108,63 @@ class BuildRetentionTest(unittest.TestCase):
             self.assertIn("diagnostic.txt", archive.namelist())
             self.assertIn("legal/0/index.json", archive.namelist())
             self.assertIn("inventory/inventory.json", archive.namelist())
+
+    def test_all_indexed_legal_texts_are_retained_and_unlisted_files_are_excluded(self):
+        text = b"Authored complete license text\n"
+        sha = hashlib.sha256(text).hexdigest()
+        name = "notices/" + sha + ".txt"
+        (self.legal / "notices").mkdir()
+        (self.legal / name).write_bytes(text)
+        (self.legal / "LICENSE").write_bytes(text)
+        (self.legal / "unlisted.txt").write_text("authored unlisted sentinel\n")
+        value = json.loads((self.legal / "index.json").read_text())
+        value["fileHashes"].update({name: sha, "LICENSE": sha})
+        (self.legal / "index.json").write_text(json.dumps(value))
+        self.run_create("--package", str(self.package))
+        self.run_verify()
+        with zipfile.ZipFile(self.packet / "support.zip") as archive:
+            self.assertEqual(text, archive.read("legal/0/" + name))
+            self.assertEqual(text, archive.read("legal/0/LICENSE"))
+            self.assertNotIn("legal/0/unlisted.txt", archive.namelist())
+
+    def test_missing_or_changed_indexed_legal_text_prevents_a_partial_packet(self):
+        for state in ("missing", "changed"):
+            with self.subTest(state=state):
+                path = self.legal / "THIRD_PARTY_NOTICES.txt"
+                if state == "missing":
+                    path.unlink()
+                else:
+                    path.write_text("authored modified license\n")
+                result = self.run_create("--package", str(self.package), ok=False)
+                self.assertFalse(self.packet.exists())
+                if state == "changed":
+                    self.assertIn("hash mismatch", result.stderr)
+
+    def test_indexed_legal_paths_cannot_escape_the_supplied_legal_directory(self):
+        sentinel = self.root / "authored-private.txt"
+        sentinel.write_text("authored outside legal root\n")
+        for name in ("../authored-private.txt", "notices/../../authored-private.txt",
+                     "notices\\authored-private.txt", str(sentinel)):
+            with self.subTest(name=name):
+                (self.legal / "index.json").write_text(json.dumps({"fileHashes": {
+                    name: hashlib.sha256(sentinel.read_bytes()).hexdigest()}}))
+                result = self.run_create("--package", str(self.package), ok=False)
+                self.assertIn("indexed legal path", result.stderr)
+                self.assertFalse(self.packet.exists())
+        self.assertEqual("authored outside legal root\n", sentinel.read_text())
+
+    def test_explicit_native_diagnostic_is_retained_and_secret_checked(self):
+        diagnostic = self.root / "native-build-diagnostic.json"
+        data = b'{"kind":"veyra-native-build-failure","lines":["authored.c:9: error: sentinel"]}\n'
+        diagnostic.write_bytes(data)
+        self.run_create("--native-diagnostic", str(diagnostic), lane_outcome="failed")
+        self.run_verify()
+        with zipfile.ZipFile(self.packet / "support.zip") as archive:
+            self.assertEqual(data, archive.read("native/build-diagnostic.json"))
+        shutil.rmtree(self.packet)
+        diagnostic.write_text('{"lines":["gho_authoredSecret"]}\n')
+        self.run_create("--native-diagnostic", str(diagnostic), lane_outcome="failed", ok=False)
+        self.assertFalse(self.packet.exists())
 
     def test_manifest_bound_fresh_package_is_used(self):
         self.run_create("--packages-json", str(self.packages_json))
@@ -204,7 +263,7 @@ class BuildRetentionTest(unittest.TestCase):
         manifest = json.loads((self.packet / "manifest.json").read_text())
         self.assertIn("app.zip", manifest["packages"])
         with zipfile.ZipFile(self.packet / "app.zip") as archive:
-            self.assertEqual(["Contents/Info.plist", "Contents/empty-marker"], archive.namelist())
+            self.assertCountEqual(["Contents/Info.plist", "Contents/empty-marker"], archive.namelist())
             self.assertEqual(b"", archive.read("Contents/empty-marker"))
 
     def test_identity_or_platform_mismatch_is_rejected(self):

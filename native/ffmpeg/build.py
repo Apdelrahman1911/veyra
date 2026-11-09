@@ -242,7 +242,24 @@ def write_sidecar(path: Path, digest: str) -> None:
 
 
 def run(command: list[str], cwd: Path, env: dict[str, str], timeout: int, log: Path) -> None:
-    owned_process.run(command, cwd=owned(cwd), env=env, timeout=timeout, log=writable(log))
+    try:
+        owned_process.run(command, cwd=owned(cwd), env=env, timeout=timeout, log=writable(log))
+    except owned_process.OwnedProcessError as failure:
+        try:
+            # Reuse the orchestrator's bounded credential-filtered reporter on
+            # the actual configure/make log before the outer owner summarizes
+            # this child. Reporting is optional and cannot mask the failure.
+            from bundle import report_build_failure
+            report_build_failure(log, failure, ROOT)
+            if len(command) > 1 and Path(command[1]).name == "configure":
+                # FFmpeg keeps the compiler probe itself in this explicit
+                # configure output, separate from the console build log.
+                probe_log = cwd / "ffbuild/config.log"
+                if probe_log.is_file():
+                    report_build_failure(probe_log, failure, ROOT)
+        except Exception:
+            pass
+        raise
 
 
 def capture(command: list[str], cwd: Path, env: dict[str, str], timeout: int = 20) -> str:

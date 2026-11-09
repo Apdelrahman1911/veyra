@@ -29,6 +29,7 @@ MAX_SUPPORT_TOTAL = 64 * 1024 * 1024
 MAX_PACKAGE = 1_900_000_000
 MAX_TOTAL = 4_000_000_000
 MAX_XML_FILES = 2_000
+MAX_LEGAL_FILES = 2_000
 HEX40 = re.compile(r"[0-9a-f]{40}")
 HEX64 = re.compile(r"[0-9a-f]{64}")
 SECRET = re.compile(r"gho_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|x-access-token|Authorization:|-----BEGIN [A-Z ]+PRIVATE KEY-----")
@@ -273,10 +274,33 @@ def gather_support(args: argparse.Namespace, root: Path) -> tuple[dict[str, byte
             entries[f"xml/{index}/{relative}"] = sanitized
     for index, value in enumerate(args.legal):
         legal = checked_path(Path(value), root, directory=True)
-        for name in ("index.json", "NOTICE.md", "THIRD_PARTY_NOTICES.txt", "kmpYT-LICENSE"):
-            path = legal / name
-            if path.is_file() and not path.is_symlink():
-                entries[f"legal/{index}/{name}"] = read_support(path, root)
+        index_bytes = read_support(legal / "index.json", root)
+        legal_index = json.loads(index_bytes)
+        hashes = legal_index.get("fileHashes") if isinstance(legal_index, dict) else None
+        if not isinstance(hashes, dict) or not hashes or len(hashes) > MAX_LEGAL_FILES:
+            raise LaneError("Legal index requires a bounded nonempty fileHashes map")
+        entries[f"legal/{index}/index.json"] = index_bytes
+        legal_total = sum(len(data) for data in entries.values())
+        for name, expected in sorted(hashes.items()):
+            # Generated legal outputs have a fixed set of root documents and
+            # content-addressed notices. Never scan the directory or follow an
+            # arbitrary index path into other repository files.
+            if name not in ("INDEX.txt", "LICENSE", "NOTICE.md", "THIRD_PARTY_NOTICES.txt",
+                            "kmpYT-LICENSE", "kmpYT-THIRD_PARTY_NOTICES.md") and not (
+                    isinstance(name, str) and re.fullmatch(r"notices/[0-9a-f]{64}\.txt", name)):
+                raise LaneError("Unsafe or unsupported indexed legal path")
+            exact_hex(expected, "indexed legal SHA-256", 64)
+            if legal_total >= MAX_SUPPORT_TOTAL:
+                raise LaneError("Legal support files exceed the total bound")
+            data = read_support(legal / name, legal,
+                                min(MAX_SUPPORT_FILE, MAX_SUPPORT_TOTAL - legal_total))
+            if digest(data) != expected:
+                raise LaneError("Indexed legal file hash mismatch: " + name)
+            entries[f"legal/{index}/{name}"] = data
+            legal_total += len(data)
+    if args.native_diagnostic:
+        entries["native/build-diagnostic.json"] = read_support(
+            Path(args.native_diagnostic), root, 64 * 1024)
     if args.inventory:
         path = Path(args.inventory)
         entries["inventory/" + safe_name(path.name, "inventory name")] = read_support(path, root)
@@ -519,6 +543,7 @@ def main() -> int:
     create_parser.add_argument("--xml-root", action="append", default=[])
     create_parser.add_argument("--legal", action="append", default=[])
     create_parser.add_argument("--inventory")
+    create_parser.add_argument("--native-diagnostic")
     create_parser.add_argument("--packages-json")
     create_parser.set_defaults(func=create)
     verify_parser = sub.add_parser("verify")

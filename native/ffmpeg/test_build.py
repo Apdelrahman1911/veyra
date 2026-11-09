@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import contextlib
 import io
 import json
 import os
@@ -27,6 +28,45 @@ class ProductionFfmpegBuildTest(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.work = self.root / ".work"
         self.work.mkdir()
+
+    def test_inner_compile_failure_reports_the_actual_log_without_leaking_or_masking(self):
+        log = self.work / "build.log"
+        original = (b"authored.c:9: error: authored compiler discriminator\n"
+                    b"error: https://example.invalid/?token=authored-private\n")
+        log.write_bytes(original)
+        failure = BUILD.owned_process.OwnedProcessError("command_failed", returncode=1,
+                                                       cleanup_complete=True)
+        console = io.StringIO()
+        with patch.object(BUILD, "ROOT", self.root), \
+                patch.object(BUILD.owned_process, "run", side_effect=failure), \
+                contextlib.redirect_stderr(console):
+            with self.assertRaises(BUILD.owned_process.OwnedProcessError) as caught:
+                BUILD.run(["authored-not-executed"], self.work, {}, 10, log)
+        self.assertIs(failure, caught.exception)
+        record = json.loads((self.work / "verification/native-build-diagnostic.json").read_text())
+        self.assertIn("authored compiler discriminator", "\n".join(record["lines"]))
+        self.assertNotIn("authored-private", json.dumps(record) + console.getvalue())
+        self.assertEqual(".work/build.log", record["log"])
+        self.assertTrue(record["cleanupComplete"])
+        self.assertEqual(original, log.read_bytes())
+
+    def test_configure_failure_reports_the_explicit_compiler_probe_log(self):
+        log = self.work / "build.log"
+        log.write_text("authored failed configure summary\n")
+        probe = self.work / "ffbuild/config.log"
+        probe.parent.mkdir()
+        probe.write_text("probe.c:1: error: authored compiler-probe discriminator\n")
+        failure = BUILD.owned_process.OwnedProcessError("command_failed", returncode=1,
+                                                       cleanup_complete=True)
+        with patch.object(BUILD, "ROOT", self.root), \
+                patch.object(BUILD.owned_process, "run", side_effect=failure), \
+                contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(BUILD.owned_process.OwnedProcessError) as caught:
+                BUILD.run(["bash", "authored/configure"], self.work, {}, 10, log)
+        self.assertIs(failure, caught.exception)
+        record = json.loads((self.work / "verification/native-build-diagnostic.json").read_text())
+        self.assertEqual(".work/ffbuild/config.log", record["log"])
+        self.assertIn("authored compiler-probe discriminator", "\n".join(record["lines"]))
 
     def archive(self, entries):
         archive = self.work / "source.tar.gz"
@@ -311,7 +351,9 @@ class ProductionFfmpegBuildTest(unittest.TestCase):
         log = self.work / "build.log"
         log.write_bytes(b"authored retained log")
         failure = BUILD.owned_process.OwnedProcessError("cleanup_failed", cleanup_complete=False)
-        with patch.object(BUILD.owned_process, "run", side_effect=failure) as run:
+        with patch.object(BUILD, "ROOT", self.root), \
+                patch.object(BUILD.owned_process, "run", side_effect=failure) as run, \
+                contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(BUILD.owned_process.OwnedProcessError) as raised:
                 BUILD.run(["authored-tool"], self.work, {}, 5, log)
         self.assertIs(failure, raised.exception)

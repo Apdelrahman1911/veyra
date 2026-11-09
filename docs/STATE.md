@@ -14,12 +14,20 @@ full failure stacks. No cleanup semantics or timeouts changed. macOS x64 complet
 1,205 shared tests passed; desktop 484 tests, zero failures and one skip; installer
 and inventory succeeded. Its DMG passed lead packet/hash/tag verification. Independent
 readback passed for all eight lanes, including failed-lane diagnostics. The overall run
-remains failed. A scoped Windows native-toolchain correction is source-reviewed and passes
-28 bundle, 10 helper and 16 tooling authored tests; the next dispatch is Windows-only.
-Windows runtime behavior is unverified and the original native failure remains undiagnosed. Android and iOS stopped on pinned
-distribution HTTP 504 responses; one Android retry repeated the failure. Windows
-also has dependency/network and undiagnosed native-preparation failures. Linux GUI
-namespace containment remains blocked. No repeated full matrix was dispatched.
+remains failed. Windows-only run `42576296745` at `fb9a0b8` also failed: an
+authored archive-order assertion stopped the common checks, then independent
+packaging reached Kotlin compilation but failed native preparation. Inventory,
+diagnostic retention and independent readback passed; no Windows installer exists.
+Lead downloaded and hash/tag-verified the diagnostic-only draft packet. The native
+cause remains unknown. A batched correction removes the test's host-order assumption,
+exposes the inner FFmpeg/configure diagnostic, and retains all indexed legal texts
+with exact hashes. Authored checks: retention 18/18, FFmpeg recipe 24/24, workflow
+10/10, tooling 16/16. The reviewed notice registry covers 81 union coordinates;
+a harness Linux projection reduces 85 issues to six, with both readiness flags
+false. Package embedding, native transitive/JDK/source coverage remain open.
+Android and iOS stopped on pinned distribution HTTP 504 responses; one Android
+retry repeated the failure. Linux GUI namespace containment remains blocked.
+No repeated full matrix was dispatched.
 The live source still refuses playback preparation with
 `PROVIDER_ACCESS_REQUIRED / YOUTUBE_ACCESS_REQUIRED`; no media transfer or offline
 proof occurred. Installation, physical audio, five-platform success, signing and

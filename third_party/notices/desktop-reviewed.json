@@ -1,0 +1,872 @@
+{
+  "components": {
+    "androidx.annotation:annotation-jvm:1.9.1": [
+      {
+        "bytes": 10175,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0.txt",
+        "provenance": "Artifact-embedded full terms retained verbatim; artifact SHA-256=1e343917ebf27ba96fe4dc52b1cad7fd32b738fbc6355bb6cd5b3b305d7212d0, entry=META-INF/androidx/annotation/annotation/LICENSE.txt. Complete terms checked on 2026-11-09; this verifies retained text only. Native/corresponding-source and redistribution readiness remain unverified.",
+        "role": "license",
+        "sha256": "809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0"
+      }
+    ],
+    "androidx.collection:collection-jvm:1.5.0": [
+      {
+        "bytes": 10175,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0.txt",
+        "provenance": "Artifact-embedded full terms retained verbatim; artifact SHA-256=70b35924e4babcdffa37d0e575ee039c56a2d97123342624c48b603233704341, entry=META-INF/androidx/collection/collection/LICENSE.txt. Complete terms checked on 2026-11-09; this verifies retained text only. Native/corresponding-source and redistribution readiness remain unverified.",
+        "role": "license",
+        "sha256": "809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0"
+      }
+    ],
+    "androidx.compose.runtime:runtime-annotation-jvm:1.9.4": [
+      {
+        "bytes": 10175,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0.txt",
+        "provenance": "Artifact-embedded full terms retained verbatim; artifact SHA-256=989b2da28bf5ba7966c08ca2db3f48a607e684e4ab4ff0de80e9cd5ec663c076, entry=META-INF/androidx/compose/runtime/runtime-annotation/LICENSE.txt. Complete terms checked on 2026-11-09; this verifies retained text only. Native/corresponding-source and redistribution readiness remain unverified.",
+        "role": "license",
+        "sha256": "809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0"
+      }
+    ],
+    "androidx.compose.runtime:runtime-desktop:1.9.4": [
+      {
+        "bytes": 10175,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0.txt",
+        "provenance": "Artifact-embedded full terms retained verbatim; artifact SHA-256=b5639b2df04087287b5886d47db1ef791c279c1074ee628481726ed90cff03e7, entry=META-INF/androidx/compose/runtime/runtime/LICENSE.txt. Complete terms checked on 2026-11-09; this verifies retained text only. Native/corresponding-source and redistribution readiness remain unverified.",
+        "role": "license",
+        "sha256": "809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0"
+      }
+    ],
+    "androidx.compose.runtime:runtime-saveable-desktop:1.9.4": [
+      {
+        "bytes": 10175,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0.txt",
+        "provenance": "Artifact-embedded full terms retained verbatim; artifact SHA-256=df9907a3e672c3fa9da7e880313679cdb07e80a7f3141f54ac1ec8149d0c5be6, entry=META-INF/androidx/compose/runtime/runtime-saveable/LICENSE.txt. Complete terms checked on 2026-11-09; this verifies retained text only. Native/corresponding-source and redistribution readiness remain unverified.",
+        "role": "license",
+        "sha256": "809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0"
+      }
+    ],
+    "androidx.lifecycle:lifecycle-common-jvm:2.9.4": [
+      {
+        "bytes": 10175,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0.txt",
+        "provenance": "Artifact-embedded full terms retained verbatim; artifact SHA-256=37d89b2101f074ac6c260917dabb185607645ee200aa3018c7c5bde70edcf184, entry=META-INF/androidx/lifecycle/lifecycle-common/LICENSE.txt. Complete terms checked on 2026-11-09; this verifies retained text only. Native/corresponding-source and redistribution readiness remain unverified.",
+        "role": "license",
+        "sha256": "809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0"
+      }
+    ],
+    "androidx.lifecycle:lifecycle-runtime-compose-desktop:2.9.4": [
+      {
+        "bytes": 10175,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0.txt",
+        "provenance": "Artifact-embedded full terms retained verbatim; artifact SHA-256=d25c083df93da718a1876a3293bd15f7dc7a811e998735943bce590683a57835, entry=META-INF/androidx/lifecycle/lifecycle-runtime-compose/LICENSE.txt. Complete terms checked on 2026-11-09; this verifies retained text only. Native/corresponding-source and redistribution readiness remain unverified.",
+        "role": "license",
+        "sha256": "809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0"
+      }
+    ],
+    "androidx.lifecycle:lifecycle-runtime-desktop:2.9.4": [
+      {
+        "bytes": 10175,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0.txt",
+        "provenance": "Artifact-embedded full terms retained verbatim; artifact SHA-256=2fb49f76d1021792fb359e0a9246c1509f2f5b555f0a46591d24d58deb68bd5c, entry=META-INF/androidx/lifecycle/lifecycle-runtime/LICENSE.txt. Complete terms checked on 2026-11-09; this verifies retained text only. Native/corresponding-source and redistribution readiness remain unverified.",
+        "role": "license",
+        "sha256": "809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0"
+      }
+    ],
+    "androidx.lifecycle:lifecycle-viewmodel-desktop:2.9.4": [
+      {
+        "bytes": 10175,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0.txt",
+        "provenance": "Artifact-embedded full terms retained verbatim; artifact SHA-256=98f816be6869407c87d46058756f97780fa6c6cf61acdba97216f413731af15d, entry=META-INF/androidx/lifecycle/lifecycle-viewmodel/LICENSE.txt. Complete terms checked on 2026-11-09; this verifies retained text only. Native/corresponding-source and redistribution readiness remain unverified.",
+        "role": "license",
+        "sha256": "809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0"
+      }
+    ],
+    "androidx.lifecycle:lifecycle-viewmodel-savedstate-desktop:2.9.4": [
+      {
+        "bytes": 10175,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0.txt",
+        "provenance": "Artifact-embedded full terms retained verbatim; artifact SHA-256=3e0b44e2514eafdd6938d5457d9f46e4785077c45d3b4364b5c23c4dcb93efd3, entry=META-INF/androidx/lifecycle/lifecycle-viewmodel-savedstate/LICENSE.txt. Complete terms checked on 2026-11-09; this verifies retained text only. Native/corresponding-source and redistribution readiness remain unverified.",
+        "role": "license",
+        "sha256": "809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0"
+      }
+    ],
+    "androidx.room:room-common-jvm:2.8.5": [
+      {
+        "bytes": 10175,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0.txt",
+        "provenance": "Artifact-embedded full terms retained verbatim; artifact SHA-256=dc7b4e1a75a790f29c97afd5516b8bf8002d9b6e83e295bc569b33566f3b1ec0, entry=META-INF/androidx/room/room-common/LICENSE.txt. Complete terms checked on 2026-11-09; this verifies retained text only. Native/corresponding-source and redistribution readiness remain unverified.",
+        "role": "license",
+        "sha256": "809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0"
+      }
+    ],
+    "androidx.room:room-runtime-jvm:2.8.5": [
+      {
+        "bytes": 10175,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0.txt",
+        "provenance": "Artifact-embedded full terms retained verbatim; artifact SHA-256=b320c93bc97cbe75a997eb2107aaacd6964c0411c8a5873f0128fbabbee03fbc, entry=META-INF/androidx/room/room-runtime/LICENSE.txt. Complete terms checked on 2026-11-09; this verifies retained text only. Native/corresponding-source and redistribution readiness remain unverified.",
+        "role": "license",
+        "sha256": "809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0"
+      }
+    ],
+    "androidx.savedstate:savedstate-compose-desktop:1.3.3": [
+      {
+        "bytes": 10175,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0.txt",
+        "provenance": "Artifact-embedded full terms retained verbatim; artifact SHA-256=4a94787a6e5bcfe143390a4f2737d4425d2ea867f2b34a847de6cda3c6ccc58a, entry=META-INF/androidx/savedstate/savedstate-compose/LICENSE.txt. Complete terms checked on 2026-11-09; this verifies retained text only. Native/corresponding-source and redistribution readiness remain unverified.",
+        "role": "license",
+        "sha256": "809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0"
+      }
+    ],
+    "androidx.savedstate:savedstate-desktop:1.3.3": [
+      {
+        "bytes": 10175,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0.txt",
+        "provenance": "Artifact-embedded full terms retained verbatim; artifact SHA-256=c5c89062ba8402b8f8657efd54db1ff192f91ca95fae59c3b418fbc477c3e3ea, entry=META-INF/androidx/savedstate/savedstate/LICENSE.txt. Complete terms checked on 2026-11-09; this verifies retained text only. Native/corresponding-source and redistribution readiness remain unverified.",
+        "role": "license",
+        "sha256": "809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0"
+      }
+    ],
+    "androidx.sqlite:sqlite-bundled-jvm:2.6.2": [
+      {
+        "bytes": 10175,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0.txt",
+        "provenance": "Artifact-embedded full terms retained verbatim; artifact SHA-256=e61efb0647288b486e595950724cc53c4f15eeeca03ce2184751d02de3cfaa17, entry=META-INF/androidx/sqlite/sqlite-bundled/LICENSE.txt. Complete terms checked on 2026-11-09; this verifies retained text only. Native/corresponding-source and redistribution readiness remain unverified.",
+        "role": "license",
+        "sha256": "809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0"
+      }
+    ],
+    "androidx.sqlite:sqlite-jvm:2.6.2": [
+      {
+        "bytes": 10175,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0.txt",
+        "provenance": "Artifact-embedded full terms retained verbatim; artifact SHA-256=53b050b80e666228a12a0ae72d49531b3d69615ba8fb62733f697f8fdc7fd6f3, entry=META-INF/androidx/sqlite/sqlite/LICENSE.txt. Complete terms checked on 2026-11-09; this verifies retained text only. Native/corresponding-source and redistribution readiness remain unverified.",
+        "role": "license",
+        "sha256": "809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0"
+      }
+    ],
+    "com.github.hypfvieh:dbus-java-core:5.2.2": [
+      {
+        "bytes": 1109,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/d14b6f26eaa5b4cf0060d243fffb2600d9c7c36b1085c2ad61cf095db50c9840.txt",
+        "provenance": "license from hypfvieh/dbus-java at release tag dbus-java-parent-5.2.2 (commit 37d6c62403e0d4a30aab8ba044784eefa26d7260); url=https://raw.githubusercontent.com/hypfvieh/dbus-java/37d6c62403e0d4a30aab8ba044784eefa26d7260/LICENSE; sha256=d14b6f26eaa5b4cf0060d243fffb2600d9c7c36b1085c2ad61cf095db50c9840; bytes=1109; exact-version mapping: Maven com.github.hypfvieh dbus-java-* 5.2.2 equals the numeric part of the dbus-java-parent-5.2.2 release tag. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "d14b6f26eaa5b4cf0060d243fffb2600d9c7c36b1085c2ad61cf095db50c9840"
+      }
+    ],
+    "com.github.hypfvieh:dbus-java-transport-native-unixsocket:5.2.2": [
+      {
+        "bytes": 1109,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/d14b6f26eaa5b4cf0060d243fffb2600d9c7c36b1085c2ad61cf095db50c9840.txt",
+        "provenance": "license from hypfvieh/dbus-java at release tag dbus-java-parent-5.2.2 (commit 37d6c62403e0d4a30aab8ba044784eefa26d7260); url=https://raw.githubusercontent.com/hypfvieh/dbus-java/37d6c62403e0d4a30aab8ba044784eefa26d7260/LICENSE; sha256=d14b6f26eaa5b4cf0060d243fffb2600d9c7c36b1085c2ad61cf095db50c9840; bytes=1109; exact-version mapping: Maven com.github.hypfvieh dbus-java-* 5.2.2 equals the numeric part of the dbus-java-parent-5.2.2 release tag. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "d14b6f26eaa5b4cf0060d243fffb2600d9c7c36b1085c2ad61cf095db50c9840"
+      }
+    ],
+    "com.squareup.okio:okio-jvm:3.15.0": [
+      {
+        "bytes": 11358,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+        "provenance": "license from square/okio at release tag parent-3.15.0 (commit 2af3bb8caecd89fb168388d1b3974df415536a5e); url=https://raw.githubusercontent.com/square/okio/2af3bb8caecd89fb168388d1b3974df415536a5e/LICENSE.txt; sha256=cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30; bytes=11358; exact-version mapping: Maven okio-jvm 3.15.0 equals the numeric part of the Okio parent-3.15.0 release tag. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+      }
+    ],
+    "commons-codec:commons-codec:1.19.0": [
+      {
+        "bytes": 11359,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/b1d2870f1a00e4d7f56576e5f0870cba109e041f8af66866cf5b499478e654e7.txt",
+        "provenance": "Artifact-embedded full terms retained verbatim; artifact SHA-256=5c3881e4f556855e9c532927ee0c9dfde94cc66760d5805c031a59887070af5f, entry=META-INF/LICENSE.txt. Complete terms checked on 2026-11-09; this verifies retained text only. Native/corresponding-source and redistribution readiness remain unverified.",
+        "role": "license",
+        "sha256": "b1d2870f1a00e4d7f56576e5f0870cba109e041f8af66866cf5b499478e654e7"
+      }
+    ],
+    "commons-io:commons-io:2.20.0": [
+      {
+        "bytes": 11360,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/c1d1a38c99c48ccad170890ade6066e2e240bb6ce59861d4eb7f672eddd2a4c6.txt",
+        "provenance": "Artifact-embedded full terms retained verbatim; artifact SHA-256=df90bba0fe3cb586b7f164e78fe8f8f4da3f2dd5c27fa645f888100ccc25dd72, entry=META-INF/LICENSE.txt. Complete terms checked on 2026-11-09; this verifies retained text only. Native/corresponding-source and redistribution readiness remain unverified.",
+        "role": "license",
+        "sha256": "c1d1a38c99c48ccad170890ade6066e2e240bb6ce59861d4eb7f672eddd2a4c6"
+      }
+    ],
+    "io.coil-kt.coil3:coil-compose-core-jvm:3.3.0": [
+      {
+        "bytes": 11347,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/5ade6484903351f6661e791504c50ad1a24cab3a75950c1b2a7be3eb336b6ba9.txt",
+        "provenance": "license from coil-kt/coil at release tag 3.3.0 (commit 1731511f0c12ef556db7822a91b6ea03fa3f95a1); url=https://raw.githubusercontent.com/coil-kt/coil/1731511f0c12ef556db7822a91b6ea03fa3f95a1/LICENSE.txt; sha256=5ade6484903351f6661e791504c50ad1a24cab3a75950c1b2a7be3eb336b6ba9; bytes=11347; exact-version mapping: Maven group io.coil-kt.coil3 version 3.3.0 equals release tag 3.3.0; the six JVM modules are released together. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "5ade6484903351f6661e791504c50ad1a24cab3a75950c1b2a7be3eb336b6ba9"
+      }
+    ],
+    "io.coil-kt.coil3:coil-compose-jvm:3.3.0": [
+      {
+        "bytes": 11347,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/5ade6484903351f6661e791504c50ad1a24cab3a75950c1b2a7be3eb336b6ba9.txt",
+        "provenance": "license from coil-kt/coil at release tag 3.3.0 (commit 1731511f0c12ef556db7822a91b6ea03fa3f95a1); url=https://raw.githubusercontent.com/coil-kt/coil/1731511f0c12ef556db7822a91b6ea03fa3f95a1/LICENSE.txt; sha256=5ade6484903351f6661e791504c50ad1a24cab3a75950c1b2a7be3eb336b6ba9; bytes=11347; exact-version mapping: Maven group io.coil-kt.coil3 version 3.3.0 equals release tag 3.3.0; the six JVM modules are released together. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "5ade6484903351f6661e791504c50ad1a24cab3a75950c1b2a7be3eb336b6ba9"
+      }
+    ],
+    "io.coil-kt.coil3:coil-core-jvm:3.3.0": [
+      {
+        "bytes": 11347,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/5ade6484903351f6661e791504c50ad1a24cab3a75950c1b2a7be3eb336b6ba9.txt",
+        "provenance": "license from coil-kt/coil at release tag 3.3.0 (commit 1731511f0c12ef556db7822a91b6ea03fa3f95a1); url=https://raw.githubusercontent.com/coil-kt/coil/1731511f0c12ef556db7822a91b6ea03fa3f95a1/LICENSE.txt; sha256=5ade6484903351f6661e791504c50ad1a24cab3a75950c1b2a7be3eb336b6ba9; bytes=11347; exact-version mapping: Maven group io.coil-kt.coil3 version 3.3.0 equals release tag 3.3.0; the six JVM modules are released together. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "5ade6484903351f6661e791504c50ad1a24cab3a75950c1b2a7be3eb336b6ba9"
+      }
+    ],
+    "io.coil-kt.coil3:coil-jvm:3.3.0": [
+      {
+        "bytes": 11347,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/5ade6484903351f6661e791504c50ad1a24cab3a75950c1b2a7be3eb336b6ba9.txt",
+        "provenance": "license from coil-kt/coil at release tag 3.3.0 (commit 1731511f0c12ef556db7822a91b6ea03fa3f95a1); url=https://raw.githubusercontent.com/coil-kt/coil/1731511f0c12ef556db7822a91b6ea03fa3f95a1/LICENSE.txt; sha256=5ade6484903351f6661e791504c50ad1a24cab3a75950c1b2a7be3eb336b6ba9; bytes=11347; exact-version mapping: Maven group io.coil-kt.coil3 version 3.3.0 equals release tag 3.3.0; the six JVM modules are released together. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "5ade6484903351f6661e791504c50ad1a24cab3a75950c1b2a7be3eb336b6ba9"
+      }
+    ],
+    "io.coil-kt.coil3:coil-network-core-jvm:3.3.0": [
+      {
+        "bytes": 11347,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/5ade6484903351f6661e791504c50ad1a24cab3a75950c1b2a7be3eb336b6ba9.txt",
+        "provenance": "license from coil-kt/coil at release tag 3.3.0 (commit 1731511f0c12ef556db7822a91b6ea03fa3f95a1); url=https://raw.githubusercontent.com/coil-kt/coil/1731511f0c12ef556db7822a91b6ea03fa3f95a1/LICENSE.txt; sha256=5ade6484903351f6661e791504c50ad1a24cab3a75950c1b2a7be3eb336b6ba9; bytes=11347; exact-version mapping: Maven group io.coil-kt.coil3 version 3.3.0 equals release tag 3.3.0; the six JVM modules are released together. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "5ade6484903351f6661e791504c50ad1a24cab3a75950c1b2a7be3eb336b6ba9"
+      }
+    ],
+    "io.coil-kt.coil3:coil-network-ktor3-jvm:3.3.0": [
+      {
+        "bytes": 11347,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/5ade6484903351f6661e791504c50ad1a24cab3a75950c1b2a7be3eb336b6ba9.txt",
+        "provenance": "license from coil-kt/coil at release tag 3.3.0 (commit 1731511f0c12ef556db7822a91b6ea03fa3f95a1); url=https://raw.githubusercontent.com/coil-kt/coil/1731511f0c12ef556db7822a91b6ea03fa3f95a1/LICENSE.txt; sha256=5ade6484903351f6661e791504c50ad1a24cab3a75950c1b2a7be3eb336b6ba9; bytes=11347; exact-version mapping: Maven group io.coil-kt.coil3 version 3.3.0 equals release tag 3.3.0; the six JVM modules are released together. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "5ade6484903351f6661e791504c50ad1a24cab3a75950c1b2a7be3eb336b6ba9"
+      }
+    ],
+    "io.ktor:ktor-client-cio-jvm:3.2.3": [
+      {
+        "bytes": 11351,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/883b820629750db15375940d0581ea74bad8b685c8b0ef5b098c3cc631c74515.txt",
+        "provenance": "license from ktorio/ktor at release tag 3.2.3 (commit dfbeb283641ddb74fd90c5fcbc9f0b12aa8dbaf1); url=https://raw.githubusercontent.com/ktorio/ktor/dfbeb283641ddb74fd90c5fcbc9f0b12aa8dbaf1/LICENSE; sha256=883b820629750db15375940d0581ea74bad8b685c8b0ef5b098c3cc631c74515; bytes=11351; exact-version mapping: Maven group io.ktor version 3.2.3 equals release tag 3.2.3; Ktor publishes these JVM artifacts from this repository release. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "883b820629750db15375940d0581ea74bad8b685c8b0ef5b098c3cc631c74515"
+      }
+    ],
+    "io.ktor:ktor-client-core-jvm:3.2.3": [
+      {
+        "bytes": 11351,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/883b820629750db15375940d0581ea74bad8b685c8b0ef5b098c3cc631c74515.txt",
+        "provenance": "license from ktorio/ktor at release tag 3.2.3 (commit dfbeb283641ddb74fd90c5fcbc9f0b12aa8dbaf1); url=https://raw.githubusercontent.com/ktorio/ktor/dfbeb283641ddb74fd90c5fcbc9f0b12aa8dbaf1/LICENSE; sha256=883b820629750db15375940d0581ea74bad8b685c8b0ef5b098c3cc631c74515; bytes=11351; exact-version mapping: Maven group io.ktor version 3.2.3 equals release tag 3.2.3; Ktor publishes these JVM artifacts from this repository release. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "883b820629750db15375940d0581ea74bad8b685c8b0ef5b098c3cc631c74515"
+      }
+    ],
+    "io.ktor:ktor-client-encoding-jvm:3.2.3": [
+      {
+        "bytes": 11351,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/883b820629750db15375940d0581ea74bad8b685c8b0ef5b098c3cc631c74515.txt",
+        "provenance": "license from ktorio/ktor at release tag 3.2.3 (commit dfbeb283641ddb74fd90c5fcbc9f0b12aa8dbaf1); url=https://raw.githubusercontent.com/ktorio/ktor/dfbeb283641ddb74fd90c5fcbc9f0b12aa8dbaf1/LICENSE; sha256=883b820629750db15375940d0581ea74bad8b685c8b0ef5b098c3cc631c74515; bytes=11351; exact-version mapping: Maven group io.ktor version 3.2.3 equals release tag 3.2.3; Ktor publishes these JVM artifacts from this repository release. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "883b820629750db15375940d0581ea74bad8b685c8b0ef5b098c3cc631c74515"
+      }
+    ],
+    "io.ktor:ktor-events-jvm:3.2.3": [
+      {
+        "bytes": 11351,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/883b820629750db15375940d0581ea74bad8b685c8b0ef5b098c3cc631c74515.txt",
+        "provenance": "license from ktorio/ktor at release tag 3.2.3 (commit dfbeb283641ddb74fd90c5fcbc9f0b12aa8dbaf1); url=https://raw.githubusercontent.com/ktorio/ktor/dfbeb283641ddb74fd90c5fcbc9f0b12aa8dbaf1/LICENSE; sha256=883b820629750db15375940d0581ea74bad8b685c8b0ef5b098c3cc631c74515; bytes=11351; exact-version mapping: Maven group io.ktor version 3.2.3 equals release tag 3.2.3; Ktor publishes these JVM artifacts from this repository release. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "883b820629750db15375940d0581ea74bad8b685c8b0ef5b098c3cc631c74515"
+      }
+    ],
+    "io.ktor:ktor-http-cio-jvm:3.2.3": [
+      {
+        "bytes": 11351,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/883b820629750db15375940d0581ea74bad8b685c8b0ef5b098c3cc631c74515.txt",
+        "provenance": "license from ktorio/ktor at release tag 3.2.3 (commit dfbeb283641ddb74fd90c5fcbc9f0b12aa8dbaf1); url=https://raw.githubusercontent.com/ktorio/ktor/dfbeb283641ddb74fd90c5fcbc9f0b12aa8dbaf1/LICENSE; sha256=883b820629750db15375940d0581ea74bad8b685c8b0ef5b098c3cc631c74515; bytes=11351; exact-version mapping: Maven group io.ktor version 3.2.3 equals release tag 3.2.3; Ktor publishes these JVM artifacts from this repository release. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "883b820629750db15375940d0581ea74bad8b685c8b0ef5b098c3cc631c74515"
+      }
+    ],
+    "io.ktor:ktor-http-jvm:3.2.3": [
+      {
+        "bytes": 11351,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/883b820629750db15375940d0581ea74bad8b685c8b0ef5b098c3cc631c74515.txt",
+        "provenance": "license from ktorio/ktor at release tag 3.2.3 (commit dfbeb283641ddb74fd90c5fcbc9f0b12aa8dbaf1); url=https://raw.githubusercontent.com/ktorio/ktor/dfbeb283641ddb74fd90c5fcbc9f0b12aa8dbaf1/LICENSE; sha256=883b820629750db15375940d0581ea74bad8b685c8b0ef5b098c3cc631c74515; bytes=11351; exact-version mapping: Maven group io.ktor version 3.2.3 equals release tag 3.2.3; Ktor publishes these JVM artifacts from this repository release. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "883b820629750db15375940d0581ea74bad8b685c8b0ef5b098c3cc631c74515"
+      }
+    ],
+    "io.ktor:ktor-io-jvm:3.2.3": [
+      {
+        "bytes": 11351,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/883b820629750db15375940d0581ea74bad8b685c8b0ef5b098c3cc631c74515.txt",
+        "provenance": "license from ktorio/ktor at release tag 3.2.3 (commit dfbeb283641ddb74fd90c5fcbc9f0b12aa8dbaf1); url=https://raw.githubusercontent.com/ktorio/ktor/dfbeb283641ddb74fd90c5fcbc9f0b12aa8dbaf1/LICENSE; sha256=883b820629750db15375940d0581ea74bad8b685c8b0ef5b098c3cc631c74515; bytes=11351; exact-version mapping: Maven group io.ktor version 3.2.3 equals release tag 3.2.3; Ktor publishes these JVM artifacts from this repository release. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "883b820629750db15375940d0581ea74bad8b685c8b0ef5b098c3cc631c74515"
+      }
+    ],
+    "io.ktor:ktor-network-jvm:3.2.3": [
+      {
+        "bytes": 11351,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/883b820629750db15375940d0581ea74bad8b685c8b0ef5b098c3cc631c74515.txt",
+        "provenance": "license from ktorio/ktor at release tag 3.2.3 (commit dfbeb283641ddb74fd90c5fcbc9f0b12aa8dbaf1); url=https://raw.githubusercontent.com/ktorio/ktor/dfbeb283641ddb74fd90c5fcbc9f0b12aa8dbaf1/LICENSE; sha256=883b820629750db15375940d0581ea74bad8b685c8b0ef5b098c3cc631c74515; bytes=11351; exact-version mapping: Maven group io.ktor version 3.2.3 equals release tag 3.2.3; Ktor publishes these JVM artifacts from this repository release. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "883b820629750db15375940d0581ea74bad8b685c8b0ef5b098c3cc631c74515"
+      }
+    ],
+    "io.ktor:ktor-network-tls-jvm:3.2.3": [
+      {
+        "bytes": 11351,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/883b820629750db15375940d0581ea74bad8b685c8b0ef5b098c3cc631c74515.txt",
+        "provenance": "license from ktorio/ktor at release tag 3.2.3 (commit dfbeb283641ddb74fd90c5fcbc9f0b12aa8dbaf1); url=https://raw.githubusercontent.com/ktorio/ktor/dfbeb283641ddb74fd90c5fcbc9f0b12aa8dbaf1/LICENSE; sha256=883b820629750db15375940d0581ea74bad8b685c8b0ef5b098c3cc631c74515; bytes=11351; exact-version mapping: Maven group io.ktor version 3.2.3 equals release tag 3.2.3; Ktor publishes these JVM artifacts from this repository release. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "883b820629750db15375940d0581ea74bad8b685c8b0ef5b098c3cc631c74515"
+      }
+    ],
+    "io.ktor:ktor-serialization-jvm:3.2.3": [
+      {
+        "bytes": 11351,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/883b820629750db15375940d0581ea74bad8b685c8b0ef5b098c3cc631c74515.txt",
+        "provenance": "license from ktorio/ktor at release tag 3.2.3 (commit dfbeb283641ddb74fd90c5fcbc9f0b12aa8dbaf1); url=https://raw.githubusercontent.com/ktorio/ktor/dfbeb283641ddb74fd90c5fcbc9f0b12aa8dbaf1/LICENSE; sha256=883b820629750db15375940d0581ea74bad8b685c8b0ef5b098c3cc631c74515; bytes=11351; exact-version mapping: Maven group io.ktor version 3.2.3 equals release tag 3.2.3; Ktor publishes these JVM artifacts from this repository release. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "883b820629750db15375940d0581ea74bad8b685c8b0ef5b098c3cc631c74515"
+      }
+    ],
+    "io.ktor:ktor-sse-jvm:3.2.3": [
+      {
+        "bytes": 11351,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/883b820629750db15375940d0581ea74bad8b685c8b0ef5b098c3cc631c74515.txt",
+        "provenance": "license from ktorio/ktor at release tag 3.2.3 (commit dfbeb283641ddb74fd90c5fcbc9f0b12aa8dbaf1); url=https://raw.githubusercontent.com/ktorio/ktor/dfbeb283641ddb74fd90c5fcbc9f0b12aa8dbaf1/LICENSE; sha256=883b820629750db15375940d0581ea74bad8b685c8b0ef5b098c3cc631c74515; bytes=11351; exact-version mapping: Maven group io.ktor version 3.2.3 equals release tag 3.2.3; Ktor publishes these JVM artifacts from this repository release. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "883b820629750db15375940d0581ea74bad8b685c8b0ef5b098c3cc631c74515"
+      }
+    ],
+    "io.ktor:ktor-utils-jvm:3.2.3": [
+      {
+        "bytes": 11351,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/883b820629750db15375940d0581ea74bad8b685c8b0ef5b098c3cc631c74515.txt",
+        "provenance": "license from ktorio/ktor at release tag 3.2.3 (commit dfbeb283641ddb74fd90c5fcbc9f0b12aa8dbaf1); url=https://raw.githubusercontent.com/ktorio/ktor/dfbeb283641ddb74fd90c5fcbc9f0b12aa8dbaf1/LICENSE; sha256=883b820629750db15375940d0581ea74bad8b685c8b0ef5b098c3cc631c74515; bytes=11351; exact-version mapping: Maven group io.ktor version 3.2.3 equals release tag 3.2.3; Ktor publishes these JVM artifacts from this repository release. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "883b820629750db15375940d0581ea74bad8b685c8b0ef5b098c3cc631c74515"
+      }
+    ],
+    "io.ktor:ktor-websocket-serialization-jvm:3.2.3": [
+      {
+        "bytes": 11351,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/883b820629750db15375940d0581ea74bad8b685c8b0ef5b098c3cc631c74515.txt",
+        "provenance": "license from ktorio/ktor at release tag 3.2.3 (commit dfbeb283641ddb74fd90c5fcbc9f0b12aa8dbaf1); url=https://raw.githubusercontent.com/ktorio/ktor/dfbeb283641ddb74fd90c5fcbc9f0b12aa8dbaf1/LICENSE; sha256=883b820629750db15375940d0581ea74bad8b685c8b0ef5b098c3cc631c74515; bytes=11351; exact-version mapping: Maven group io.ktor version 3.2.3 equals release tag 3.2.3; Ktor publishes these JVM artifacts from this repository release. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "883b820629750db15375940d0581ea74bad8b685c8b0ef5b098c3cc631c74515"
+      }
+    ],
+    "io.ktor:ktor-websockets-jvm:3.2.3": [
+      {
+        "bytes": 11351,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/883b820629750db15375940d0581ea74bad8b685c8b0ef5b098c3cc631c74515.txt",
+        "provenance": "license from ktorio/ktor at release tag 3.2.3 (commit dfbeb283641ddb74fd90c5fcbc9f0b12aa8dbaf1); url=https://raw.githubusercontent.com/ktorio/ktor/dfbeb283641ddb74fd90c5fcbc9f0b12aa8dbaf1/LICENSE; sha256=883b820629750db15375940d0581ea74bad8b685c8b0ef5b098c3cc631c74515; bytes=11351; exact-version mapping: Maven group io.ktor version 3.2.3 equals release tag 3.2.3; Ktor publishes these JVM artifacts from this repository release. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "883b820629750db15375940d0581ea74bad8b685c8b0ef5b098c3cc631c74515"
+      }
+    ],
+    "net.java.dev.jna:jna:5.19.1": [
+      {
+        "bytes": 10174,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594.txt",
+        "provenance": "Artifact-embedded full terms retained verbatim; artifact SHA-256=4fb141dd8ef6b0585ffceea4bc49602fbc6312fa977e2c488794ea3e6aafecae, entry=META-INF/AL2.0. Complete terms checked on 2026-11-09; this verifies retained text only. Native/corresponding-source and redistribution readiness remain unverified.",
+        "role": "license",
+        "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
+      },
+      {
+        "bytes": 24389,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/eea173a556abac0370461e57e12aab266894ea6be3874c2be05fd87871f75449.txt",
+        "provenance": "Artifact-embedded full terms retained verbatim; artifact SHA-256=4fb141dd8ef6b0585ffceea4bc49602fbc6312fa977e2c488794ea3e6aafecae, entry=META-INF/LGPL2.1. Complete terms checked on 2026-11-09; this verifies retained text only. Native/corresponding-source and redistribution readiness remain unverified.",
+        "role": "license",
+        "sha256": "eea173a556abac0370461e57e12aab266894ea6be3874c2be05fd87871f75449"
+      }
+    ],
+    "org.apache.commons:commons-compress:1.28.0": [
+      {
+        "bytes": 11358,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/51b88fd3e9e24edcdce1dd145a4fca2dcd12911407f00b06dfa6ff600f9733c1.txt",
+        "provenance": "Artifact-embedded full terms retained verbatim; artifact SHA-256=e1522945218456f3649a39bc4afd70ce4bd466221519dba7d378f2141a4642ca, entry=META-INF/LICENSE.txt. Complete terms checked on 2026-11-09; this verifies retained text only. Native/corresponding-source and redistribution readiness remain unverified.",
+        "role": "license",
+        "sha256": "51b88fd3e9e24edcdce1dd145a4fca2dcd12911407f00b06dfa6ff600f9733c1"
+      }
+    ],
+    "org.apache.commons:commons-lang3:3.18.0": [
+      {
+        "bytes": 11359,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/b1d2870f1a00e4d7f56576e5f0870cba109e041f8af66866cf5b499478e654e7.txt",
+        "provenance": "Artifact-embedded full terms retained verbatim; artifact SHA-256=4eeeae8d20c078abb64b015ec158add383ac581571cddc45c68f0c9ae0230720, entry=META-INF/LICENSE.txt. Complete terms checked on 2026-11-09; this verifies retained text only. Native/corresponding-source and redistribution readiness remain unverified.",
+        "role": "license",
+        "sha256": "b1d2870f1a00e4d7f56576e5f0870cba109e041f8af66866cf5b499478e654e7"
+      }
+    ],
+    "org.jetbrains.compose.animation:animation-core-desktop:1.9.3": [
+      {
+        "bytes": 11394,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50.txt",
+        "provenance": "license from JetBrains/compose-multiplatform at release tag v1.9.3 (commit 110ea3937e6edf1b0290d5a132dab5d520b80372); url=https://raw.githubusercontent.com/JetBrains/compose-multiplatform/110ea3937e6edf1b0290d5a132dab5d520b80372/LICENSE.txt; sha256=f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50; bytes=11394; exact-version mapping: Maven org.jetbrains.compose.* version 1.9.3 equals release tag v1.9.3; Compose Multiplatform publishes this artifact family from the tagged release. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50"
+      }
+    ],
+    "org.jetbrains.compose.animation:animation-desktop:1.9.3": [
+      {
+        "bytes": 11394,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50.txt",
+        "provenance": "license from JetBrains/compose-multiplatform at release tag v1.9.3 (commit 110ea3937e6edf1b0290d5a132dab5d520b80372); url=https://raw.githubusercontent.com/JetBrains/compose-multiplatform/110ea3937e6edf1b0290d5a132dab5d520b80372/LICENSE.txt; sha256=f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50; bytes=11394; exact-version mapping: Maven org.jetbrains.compose.* version 1.9.3 equals release tag v1.9.3; Compose Multiplatform publishes this artifact family from the tagged release. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50"
+      }
+    ],
+    "org.jetbrains.compose.components:components-resources-desktop:1.9.3": [
+      {
+        "bytes": 11394,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50.txt",
+        "provenance": "license from JetBrains/compose-multiplatform at release tag v1.9.3 (commit 110ea3937e6edf1b0290d5a132dab5d520b80372); url=https://raw.githubusercontent.com/JetBrains/compose-multiplatform/110ea3937e6edf1b0290d5a132dab5d520b80372/LICENSE.txt; sha256=f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50; bytes=11394; exact-version mapping: Maven org.jetbrains.compose.* version 1.9.3 equals release tag v1.9.3; Compose Multiplatform publishes this artifact family from the tagged release. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50"
+      }
+    ],
+    "org.jetbrains.compose.desktop:desktop-jvm:1.9.3": [
+      {
+        "bytes": 11394,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50.txt",
+        "provenance": "license from JetBrains/compose-multiplatform at release tag v1.9.3 (commit 110ea3937e6edf1b0290d5a132dab5d520b80372); url=https://raw.githubusercontent.com/JetBrains/compose-multiplatform/110ea3937e6edf1b0290d5a132dab5d520b80372/LICENSE.txt; sha256=f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50; bytes=11394; exact-version mapping: Maven org.jetbrains.compose.* version 1.9.3 equals release tag v1.9.3; Compose Multiplatform publishes this artifact family from the tagged release. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50"
+      }
+    ],
+    "org.jetbrains.compose.foundation:foundation-desktop:1.9.3": [
+      {
+        "bytes": 11394,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50.txt",
+        "provenance": "license from JetBrains/compose-multiplatform at release tag v1.9.3 (commit 110ea3937e6edf1b0290d5a132dab5d520b80372); url=https://raw.githubusercontent.com/JetBrains/compose-multiplatform/110ea3937e6edf1b0290d5a132dab5d520b80372/LICENSE.txt; sha256=f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50; bytes=11394; exact-version mapping: Maven org.jetbrains.compose.* version 1.9.3 equals release tag v1.9.3; Compose Multiplatform publishes this artifact family from the tagged release. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50"
+      }
+    ],
+    "org.jetbrains.compose.foundation:foundation-layout-desktop:1.9.3": [
+      {
+        "bytes": 11394,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50.txt",
+        "provenance": "license from JetBrains/compose-multiplatform at release tag v1.9.3 (commit 110ea3937e6edf1b0290d5a132dab5d520b80372); url=https://raw.githubusercontent.com/JetBrains/compose-multiplatform/110ea3937e6edf1b0290d5a132dab5d520b80372/LICENSE.txt; sha256=f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50; bytes=11394; exact-version mapping: Maven org.jetbrains.compose.* version 1.9.3 equals release tag v1.9.3; Compose Multiplatform publishes this artifact family from the tagged release. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50"
+      }
+    ],
+    "org.jetbrains.compose.material:material-desktop:1.9.3": [
+      {
+        "bytes": 11394,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50.txt",
+        "provenance": "license from JetBrains/compose-multiplatform at release tag v1.9.3 (commit 110ea3937e6edf1b0290d5a132dab5d520b80372); url=https://raw.githubusercontent.com/JetBrains/compose-multiplatform/110ea3937e6edf1b0290d5a132dab5d520b80372/LICENSE.txt; sha256=f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50; bytes=11394; exact-version mapping: Maven org.jetbrains.compose.* version 1.9.3 equals release tag v1.9.3; Compose Multiplatform publishes this artifact family from the tagged release. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50"
+      }
+    ],
+    "org.jetbrains.compose.material:material-ripple-desktop:1.9.3": [
+      {
+        "bytes": 11394,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50.txt",
+        "provenance": "license from JetBrains/compose-multiplatform at release tag v1.9.3 (commit 110ea3937e6edf1b0290d5a132dab5d520b80372); url=https://raw.githubusercontent.com/JetBrains/compose-multiplatform/110ea3937e6edf1b0290d5a132dab5d520b80372/LICENSE.txt; sha256=f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50; bytes=11394; exact-version mapping: Maven org.jetbrains.compose.* version 1.9.3 equals release tag v1.9.3; Compose Multiplatform publishes this artifact family from the tagged release. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50"
+      }
+    ],
+    "org.jetbrains.compose.runtime:runtime-desktop:1.9.3": [
+      {
+        "bytes": 11394,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50.txt",
+        "provenance": "license from JetBrains/compose-multiplatform at release tag v1.9.3 (commit 110ea3937e6edf1b0290d5a132dab5d520b80372); url=https://raw.githubusercontent.com/JetBrains/compose-multiplatform/110ea3937e6edf1b0290d5a132dab5d520b80372/LICENSE.txt; sha256=f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50; bytes=11394; exact-version mapping: Maven org.jetbrains.compose.* version 1.9.3 equals release tag v1.9.3; Compose Multiplatform publishes this artifact family from the tagged release. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50"
+      }
+    ],
+    "org.jetbrains.compose.runtime:runtime-saveable-desktop:1.9.3": [
+      {
+        "bytes": 11394,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50.txt",
+        "provenance": "license from JetBrains/compose-multiplatform at release tag v1.9.3 (commit 110ea3937e6edf1b0290d5a132dab5d520b80372); url=https://raw.githubusercontent.com/JetBrains/compose-multiplatform/110ea3937e6edf1b0290d5a132dab5d520b80372/LICENSE.txt; sha256=f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50; bytes=11394; exact-version mapping: Maven org.jetbrains.compose.* version 1.9.3 equals release tag v1.9.3; Compose Multiplatform publishes this artifact family from the tagged release. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50"
+      }
+    ],
+    "org.jetbrains.compose.ui:ui-backhandler-desktop:1.9.3": [
+      {
+        "bytes": 11394,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50.txt",
+        "provenance": "license from JetBrains/compose-multiplatform at release tag v1.9.3 (commit 110ea3937e6edf1b0290d5a132dab5d520b80372); url=https://raw.githubusercontent.com/JetBrains/compose-multiplatform/110ea3937e6edf1b0290d5a132dab5d520b80372/LICENSE.txt; sha256=f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50; bytes=11394; exact-version mapping: Maven org.jetbrains.compose.* version 1.9.3 equals release tag v1.9.3; Compose Multiplatform publishes this artifact family from the tagged release. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50"
+      }
+    ],
+    "org.jetbrains.compose.ui:ui-desktop:1.9.3": [
+      {
+        "bytes": 11394,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50.txt",
+        "provenance": "license from JetBrains/compose-multiplatform at release tag v1.9.3 (commit 110ea3937e6edf1b0290d5a132dab5d520b80372); url=https://raw.githubusercontent.com/JetBrains/compose-multiplatform/110ea3937e6edf1b0290d5a132dab5d520b80372/LICENSE.txt; sha256=f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50; bytes=11394; exact-version mapping: Maven org.jetbrains.compose.* version 1.9.3 equals release tag v1.9.3; Compose Multiplatform publishes this artifact family from the tagged release. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50"
+      }
+    ],
+    "org.jetbrains.compose.ui:ui-geometry-desktop:1.9.3": [
+      {
+        "bytes": 11394,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50.txt",
+        "provenance": "license from JetBrains/compose-multiplatform at release tag v1.9.3 (commit 110ea3937e6edf1b0290d5a132dab5d520b80372); url=https://raw.githubusercontent.com/JetBrains/compose-multiplatform/110ea3937e6edf1b0290d5a132dab5d520b80372/LICENSE.txt; sha256=f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50; bytes=11394; exact-version mapping: Maven org.jetbrains.compose.* version 1.9.3 equals release tag v1.9.3; Compose Multiplatform publishes this artifact family from the tagged release. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50"
+      }
+    ],
+    "org.jetbrains.compose.ui:ui-graphics-desktop:1.9.3": [
+      {
+        "bytes": 11394,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50.txt",
+        "provenance": "license from JetBrains/compose-multiplatform at release tag v1.9.3 (commit 110ea3937e6edf1b0290d5a132dab5d520b80372); url=https://raw.githubusercontent.com/JetBrains/compose-multiplatform/110ea3937e6edf1b0290d5a132dab5d520b80372/LICENSE.txt; sha256=f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50; bytes=11394; exact-version mapping: Maven org.jetbrains.compose.* version 1.9.3 equals release tag v1.9.3; Compose Multiplatform publishes this artifact family from the tagged release. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50"
+      }
+    ],
+    "org.jetbrains.compose.ui:ui-text-desktop:1.9.3": [
+      {
+        "bytes": 11394,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50.txt",
+        "provenance": "license from JetBrains/compose-multiplatform at release tag v1.9.3 (commit 110ea3937e6edf1b0290d5a132dab5d520b80372); url=https://raw.githubusercontent.com/JetBrains/compose-multiplatform/110ea3937e6edf1b0290d5a132dab5d520b80372/LICENSE.txt; sha256=f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50; bytes=11394; exact-version mapping: Maven org.jetbrains.compose.* version 1.9.3 equals release tag v1.9.3; Compose Multiplatform publishes this artifact family from the tagged release. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50"
+      }
+    ],
+    "org.jetbrains.compose.ui:ui-tooling-preview-desktop:1.9.3": [
+      {
+        "bytes": 11394,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50.txt",
+        "provenance": "license from JetBrains/compose-multiplatform at release tag v1.9.3 (commit 110ea3937e6edf1b0290d5a132dab5d520b80372); url=https://raw.githubusercontent.com/JetBrains/compose-multiplatform/110ea3937e6edf1b0290d5a132dab5d520b80372/LICENSE.txt; sha256=f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50; bytes=11394; exact-version mapping: Maven org.jetbrains.compose.* version 1.9.3 equals release tag v1.9.3; Compose Multiplatform publishes this artifact family from the tagged release. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50"
+      }
+    ],
+    "org.jetbrains.compose.ui:ui-unit-desktop:1.9.3": [
+      {
+        "bytes": 11394,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50.txt",
+        "provenance": "license from JetBrains/compose-multiplatform at release tag v1.9.3 (commit 110ea3937e6edf1b0290d5a132dab5d520b80372); url=https://raw.githubusercontent.com/JetBrains/compose-multiplatform/110ea3937e6edf1b0290d5a132dab5d520b80372/LICENSE.txt; sha256=f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50; bytes=11394; exact-version mapping: Maven org.jetbrains.compose.* version 1.9.3 equals release tag v1.9.3; Compose Multiplatform publishes this artifact family from the tagged release. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50"
+      }
+    ],
+    "org.jetbrains.compose.ui:ui-util-desktop:1.9.3": [
+      {
+        "bytes": 11394,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50.txt",
+        "provenance": "license from JetBrains/compose-multiplatform at release tag v1.9.3 (commit 110ea3937e6edf1b0290d5a132dab5d520b80372); url=https://raw.githubusercontent.com/JetBrains/compose-multiplatform/110ea3937e6edf1b0290d5a132dab5d520b80372/LICENSE.txt; sha256=f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50; bytes=11394; exact-version mapping: Maven org.jetbrains.compose.* version 1.9.3 equals release tag v1.9.3; Compose Multiplatform publishes this artifact family from the tagged release. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50"
+      }
+    ],
+    "org.jetbrains.kotlin:kotlin-stdlib-jdk7:2.1.21": [
+      {
+        "bytes": 11358,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+        "provenance": "license from JetBrains/kotlin at release tag v2.1.21 (commit f59375aebc65b867f1d9f50038fc8878f3f686d3); url=https://raw.githubusercontent.com/JetBrains/kotlin/f59375aebc65b867f1d9f50038fc8878f3f686d3/license/LICENSE.txt; sha256=cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30; bytes=11358; exact-version mapping: Maven org.jetbrains.kotlin kotlin-stdlib-jdk7/jdk8 2.1.21 equals release tag v2.1.21; stdlib variant artifacts are released from the Kotlin repository. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+      }
+    ],
+    "org.jetbrains.kotlin:kotlin-stdlib-jdk8:2.1.21": [
+      {
+        "bytes": 11358,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+        "provenance": "license from JetBrains/kotlin at release tag v2.1.21 (commit f59375aebc65b867f1d9f50038fc8878f3f686d3); url=https://raw.githubusercontent.com/JetBrains/kotlin/f59375aebc65b867f1d9f50038fc8878f3f686d3/license/LICENSE.txt; sha256=cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30; bytes=11358; exact-version mapping: Maven org.jetbrains.kotlin kotlin-stdlib-jdk7/jdk8 2.1.21 equals release tag v2.1.21; stdlib variant artifacts are released from the Kotlin repository. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+      }
+    ],
+    "org.jetbrains.kotlin:kotlin-stdlib:2.2.21": [
+      {
+        "bytes": 11358,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+        "provenance": "license from JetBrains/kotlin at release tag v2.2.21 (commit 2146684dcba708e5a304758b41a9e4ec9c7eff71); url=https://raw.githubusercontent.com/JetBrains/kotlin/2146684dcba708e5a304758b41a9e4ec9c7eff71/license/LICENSE.txt; sha256=cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30; bytes=11358; exact-version mapping: Maven org.jetbrains.kotlin kotlin-stdlib 2.2.21 equals release tag v2.2.21. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+      }
+    ],
+    "org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm:1.10.2": [
+      {
+        "bytes": 11398,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/b1febe6399dffb10d19d35e7663ab16300c93cb0476a94115df1cc0097a8ffd8.txt",
+        "provenance": "license from Kotlin/kotlinx.coroutines at release tag 1.10.2 (commit 5f8900478a8e20c073145b1608fbc71fe3d7378b); url=https://raw.githubusercontent.com/Kotlin/kotlinx.coroutines/5f8900478a8e20c073145b1608fbc71fe3d7378b/LICENSE.txt; sha256=b1febe6399dffb10d19d35e7663ab16300c93cb0476a94115df1cc0097a8ffd8; bytes=11398; exact-version mapping: Maven org.jetbrains.kotlinx kotlinx-coroutines-* 1.10.2 equals release tag 1.10.2. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "b1febe6399dffb10d19d35e7663ab16300c93cb0476a94115df1cc0097a8ffd8"
+      }
+    ],
+    "org.jetbrains.kotlinx:kotlinx-coroutines-slf4j:1.10.2": [
+      {
+        "bytes": 11398,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/b1febe6399dffb10d19d35e7663ab16300c93cb0476a94115df1cc0097a8ffd8.txt",
+        "provenance": "license from Kotlin/kotlinx.coroutines at release tag 1.10.2 (commit 5f8900478a8e20c073145b1608fbc71fe3d7378b); url=https://raw.githubusercontent.com/Kotlin/kotlinx.coroutines/5f8900478a8e20c073145b1608fbc71fe3d7378b/LICENSE.txt; sha256=b1febe6399dffb10d19d35e7663ab16300c93cb0476a94115df1cc0097a8ffd8; bytes=11398; exact-version mapping: Maven org.jetbrains.kotlinx kotlinx-coroutines-* 1.10.2 equals release tag 1.10.2. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "b1febe6399dffb10d19d35e7663ab16300c93cb0476a94115df1cc0097a8ffd8"
+      }
+    ],
+    "org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.10.2": [
+      {
+        "bytes": 11398,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/b1febe6399dffb10d19d35e7663ab16300c93cb0476a94115df1cc0097a8ffd8.txt",
+        "provenance": "license from Kotlin/kotlinx.coroutines at release tag 1.10.2 (commit 5f8900478a8e20c073145b1608fbc71fe3d7378b); url=https://raw.githubusercontent.com/Kotlin/kotlinx.coroutines/5f8900478a8e20c073145b1608fbc71fe3d7378b/LICENSE.txt; sha256=b1febe6399dffb10d19d35e7663ab16300c93cb0476a94115df1cc0097a8ffd8; bytes=11398; exact-version mapping: Maven org.jetbrains.kotlinx kotlinx-coroutines-* 1.10.2 equals release tag 1.10.2. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "b1febe6399dffb10d19d35e7663ab16300c93cb0476a94115df1cc0097a8ffd8"
+      }
+    ],
+    "org.jetbrains.kotlinx:kotlinx-datetime-jvm:0.7.1": [
+      {
+        "bytes": 11358,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+        "provenance": "license from Kotlin/kotlinx-datetime at release tag v0.7.1 (commit 1ee0daac9fc4c22a7da33b830c7cc60e625c49bb); url=https://raw.githubusercontent.com/Kotlin/kotlinx-datetime/1ee0daac9fc4c22a7da33b830c7cc60e625c49bb/LICENSE.txt; sha256=cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30; bytes=11358; exact-version mapping: Maven kotlinx-datetime-jvm 0.7.1 equals release tag v0.7.1. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+      }
+    ],
+    "org.jetbrains.kotlinx:kotlinx-io-bytestring-jvm:0.7.0": [
+      {
+        "bytes": 11358,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/9e29096c161f416b13ff13696307880761a7f43aee10ca2823f8ba17c708f4ed.txt",
+        "provenance": "license from Kotlin/kotlinx-io at release tag 0.7.0 (commit 0329b9d0ebbf614634f48d9f69b1e14350d4d7e2); url=https://raw.githubusercontent.com/Kotlin/kotlinx-io/0329b9d0ebbf614634f48d9f69b1e14350d4d7e2/LICENSE; sha256=9e29096c161f416b13ff13696307880761a7f43aee10ca2823f8ba17c708f4ed; bytes=11358; exact-version mapping: Maven kotlinx-io-core-jvm/bytestring-jvm 0.7.0 equals release tag 0.7.0. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "9e29096c161f416b13ff13696307880761a7f43aee10ca2823f8ba17c708f4ed"
+      },
+      {
+        "bytes": 486,
+        "completeTextVerified": false,
+        "path": "third_party/notices/texts/a126623d2c0c1ca21814828749243869ae2c44c7f6a56ef6074bb87f430b659e.txt",
+        "provenance": "notice from Kotlin/kotlinx-io at release tag 0.7.0 (commit 0329b9d0ebbf614634f48d9f69b1e14350d4d7e2); url=https://raw.githubusercontent.com/Kotlin/kotlinx-io/0329b9d0ebbf614634f48d9f69b1e14350d4d7e2/NOTICE; sha256=a126623d2c0c1ca21814828749243869ae2c44c7f6a56ef6074bb87f430b659e; bytes=486; exact-version mapping: Maven kotlinx-io-core-jvm/bytestring-jvm 0.7.0 equals release tag 0.7.0. Retained byte-for-byte on 2026-11-09. Complete notice text retained; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "notice",
+        "sha256": "a126623d2c0c1ca21814828749243869ae2c44c7f6a56ef6074bb87f430b659e"
+      }
+    ],
+    "org.jetbrains.kotlinx:kotlinx-io-core-jvm:0.7.0": [
+      {
+        "bytes": 11358,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/9e29096c161f416b13ff13696307880761a7f43aee10ca2823f8ba17c708f4ed.txt",
+        "provenance": "license from Kotlin/kotlinx-io at release tag 0.7.0 (commit 0329b9d0ebbf614634f48d9f69b1e14350d4d7e2); url=https://raw.githubusercontent.com/Kotlin/kotlinx-io/0329b9d0ebbf614634f48d9f69b1e14350d4d7e2/LICENSE; sha256=9e29096c161f416b13ff13696307880761a7f43aee10ca2823f8ba17c708f4ed; bytes=11358; exact-version mapping: Maven kotlinx-io-core-jvm/bytestring-jvm 0.7.0 equals release tag 0.7.0. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "9e29096c161f416b13ff13696307880761a7f43aee10ca2823f8ba17c708f4ed"
+      },
+      {
+        "bytes": 486,
+        "completeTextVerified": false,
+        "path": "third_party/notices/texts/a126623d2c0c1ca21814828749243869ae2c44c7f6a56ef6074bb87f430b659e.txt",
+        "provenance": "notice from Kotlin/kotlinx-io at release tag 0.7.0 (commit 0329b9d0ebbf614634f48d9f69b1e14350d4d7e2); url=https://raw.githubusercontent.com/Kotlin/kotlinx-io/0329b9d0ebbf614634f48d9f69b1e14350d4d7e2/NOTICE; sha256=a126623d2c0c1ca21814828749243869ae2c44c7f6a56ef6074bb87f430b659e; bytes=486; exact-version mapping: Maven kotlinx-io-core-jvm/bytestring-jvm 0.7.0 equals release tag 0.7.0. Retained byte-for-byte on 2026-11-09. Complete notice text retained; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "notice",
+        "sha256": "a126623d2c0c1ca21814828749243869ae2c44c7f6a56ef6074bb87f430b659e"
+      }
+    ],
+    "org.jetbrains.kotlinx:kotlinx-serialization-core-jvm:1.9.0": [
+      {
+        "bytes": 11356,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/c5accbbd8546e94c34aed24afe689a617627d18eed5a6c48277e48db57c23851.txt",
+        "provenance": "license from Kotlin/kotlinx.serialization at release tag v1.9.0 (commit 16306f4c97e21e4d134bf1bb95fc20a61927f6b0); url=https://raw.githubusercontent.com/Kotlin/kotlinx.serialization/16306f4c97e21e4d134bf1bb95fc20a61927f6b0/LICENSE.txt; sha256=c5accbbd8546e94c34aed24afe689a617627d18eed5a6c48277e48db57c23851; bytes=11356; exact-version mapping: Maven kotlinx-serialization-core/json-jvm 1.9.0 equals release tag v1.9.0. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "c5accbbd8546e94c34aed24afe689a617627d18eed5a6c48277e48db57c23851"
+      }
+    ],
+    "org.jetbrains.kotlinx:kotlinx-serialization-json-jvm:1.9.0": [
+      {
+        "bytes": 11356,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/c5accbbd8546e94c34aed24afe689a617627d18eed5a6c48277e48db57c23851.txt",
+        "provenance": "license from Kotlin/kotlinx.serialization at release tag v1.9.0 (commit 16306f4c97e21e4d134bf1bb95fc20a61927f6b0); url=https://raw.githubusercontent.com/Kotlin/kotlinx.serialization/16306f4c97e21e4d134bf1bb95fc20a61927f6b0/LICENSE.txt; sha256=c5accbbd8546e94c34aed24afe689a617627d18eed5a6c48277e48db57c23851; bytes=11356; exact-version mapping: Maven kotlinx-serialization-core/json-jvm 1.9.0 equals release tag v1.9.0. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "c5accbbd8546e94c34aed24afe689a617627d18eed5a6c48277e48db57c23851"
+      }
+    ],
+    "org.jetbrains.runtime:jbr-api:1.5.0": [
+      {
+        "bytes": 11357,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd.txt",
+        "provenance": "license from JetBrains/JetBrainsRuntimeApi at release tag v1.5.0 (commit ed86bdce3817abf63acdb17e5297d9d63111e20e); url=https://raw.githubusercontent.com/JetBrains/JetBrainsRuntimeApi/ed86bdce3817abf63acdb17e5297d9d63111e20e/LICENSE; sha256=58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd; bytes=11357; exact-version mapping: Maven org.jetbrains.runtime:jbr-api 1.5.0 equals release tag v1.5.0; this is the small API JAR, not the bundled JDK runtime. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd"
+      }
+    ],
+    "org.jetbrains.skiko:skiko-awt-runtime-linux-x64:0.9.22.2": [
+      {
+        "bytes": 11357,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4.txt",
+        "provenance": "license from JetBrains/skiko at release tag v0.9.22.2 (commit 2f621572270c28052549ff4678b762c3fea09fa5); url=https://raw.githubusercontent.com/JetBrains/skiko/2f621572270c28052549ff4678b762c3fea09fa5/LICENSE; sha256=c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4; bytes=11357; exact-version mapping: Maven org.jetbrains.skiko:skiko-awt* 0.9.22.2 equals release tag v0.9.22.2; platform runtime JARs are published from this tag. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+      },
+      {
+        "bytes": 197,
+        "completeTextVerified": false,
+        "path": "third_party/notices/texts/35dd077c24768b53625101cfcc0ad853ae7e2abc08bd2a111a0267760d1406d8.txt",
+        "provenance": "notice from JetBrains/skiko at release tag v0.9.22.2 (commit 2f621572270c28052549ff4678b762c3fea09fa5); url=https://raw.githubusercontent.com/JetBrains/skiko/2f621572270c28052549ff4678b762c3fea09fa5/NOTICE; sha256=35dd077c24768b53625101cfcc0ad853ae7e2abc08bd2a111a0267760d1406d8; bytes=197; exact-version mapping: Maven org.jetbrains.skiko:skiko-awt* 0.9.22.2 equals release tag v0.9.22.2; platform runtime JARs are published from this tag. Retained byte-for-byte on 2026-11-09. Complete notice text retained; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "notice",
+        "sha256": "35dd077c24768b53625101cfcc0ad853ae7e2abc08bd2a111a0267760d1406d8"
+      }
+    ],
+    "org.jetbrains.skiko:skiko-awt-runtime-macos-arm64:0.9.22.2": [
+      {
+        "bytes": 11357,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4.txt",
+        "provenance": "license from JetBrains/skiko at release tag v0.9.22.2 (commit 2f621572270c28052549ff4678b762c3fea09fa5); url=https://raw.githubusercontent.com/JetBrains/skiko/2f621572270c28052549ff4678b762c3fea09fa5/LICENSE; sha256=c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4; bytes=11357; exact-version mapping: Maven org.jetbrains.skiko:skiko-awt* 0.9.22.2 equals release tag v0.9.22.2; platform runtime JARs are published from this tag. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+      },
+      {
+        "bytes": 197,
+        "completeTextVerified": false,
+        "path": "third_party/notices/texts/35dd077c24768b53625101cfcc0ad853ae7e2abc08bd2a111a0267760d1406d8.txt",
+        "provenance": "notice from JetBrains/skiko at release tag v0.9.22.2 (commit 2f621572270c28052549ff4678b762c3fea09fa5); url=https://raw.githubusercontent.com/JetBrains/skiko/2f621572270c28052549ff4678b762c3fea09fa5/NOTICE; sha256=35dd077c24768b53625101cfcc0ad853ae7e2abc08bd2a111a0267760d1406d8; bytes=197; exact-version mapping: Maven org.jetbrains.skiko:skiko-awt* 0.9.22.2 equals release tag v0.9.22.2; platform runtime JARs are published from this tag. Retained byte-for-byte on 2026-11-09. Complete notice text retained; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "notice",
+        "sha256": "35dd077c24768b53625101cfcc0ad853ae7e2abc08bd2a111a0267760d1406d8"
+      }
+    ],
+    "org.jetbrains.skiko:skiko-awt-runtime-macos-x64:0.9.22.2": [
+      {
+        "bytes": 11357,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4.txt",
+        "provenance": "license from JetBrains/skiko at release tag v0.9.22.2 (commit 2f621572270c28052549ff4678b762c3fea09fa5); url=https://raw.githubusercontent.com/JetBrains/skiko/2f621572270c28052549ff4678b762c3fea09fa5/LICENSE; sha256=c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4; bytes=11357; exact-version mapping: Maven org.jetbrains.skiko:skiko-awt* 0.9.22.2 equals release tag v0.9.22.2; platform runtime JARs are published from this tag. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+      },
+      {
+        "bytes": 197,
+        "completeTextVerified": false,
+        "path": "third_party/notices/texts/35dd077c24768b53625101cfcc0ad853ae7e2abc08bd2a111a0267760d1406d8.txt",
+        "provenance": "notice from JetBrains/skiko at release tag v0.9.22.2 (commit 2f621572270c28052549ff4678b762c3fea09fa5); url=https://raw.githubusercontent.com/JetBrains/skiko/2f621572270c28052549ff4678b762c3fea09fa5/NOTICE; sha256=35dd077c24768b53625101cfcc0ad853ae7e2abc08bd2a111a0267760d1406d8; bytes=197; exact-version mapping: Maven org.jetbrains.skiko:skiko-awt* 0.9.22.2 equals release tag v0.9.22.2; platform runtime JARs are published from this tag. Retained byte-for-byte on 2026-11-09. Complete notice text retained; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "notice",
+        "sha256": "35dd077c24768b53625101cfcc0ad853ae7e2abc08bd2a111a0267760d1406d8"
+      }
+    ],
+    "org.jetbrains.skiko:skiko-awt:0.9.22.2": [
+      {
+        "bytes": 11357,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4.txt",
+        "provenance": "license from JetBrains/skiko at release tag v0.9.22.2 (commit 2f621572270c28052549ff4678b762c3fea09fa5); url=https://raw.githubusercontent.com/JetBrains/skiko/2f621572270c28052549ff4678b762c3fea09fa5/LICENSE; sha256=c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4; bytes=11357; exact-version mapping: Maven org.jetbrains.skiko:skiko-awt* 0.9.22.2 equals release tag v0.9.22.2; platform runtime JARs are published from this tag. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+      },
+      {
+        "bytes": 197,
+        "completeTextVerified": false,
+        "path": "third_party/notices/texts/35dd077c24768b53625101cfcc0ad853ae7e2abc08bd2a111a0267760d1406d8.txt",
+        "provenance": "notice from JetBrains/skiko at release tag v0.9.22.2 (commit 2f621572270c28052549ff4678b762c3fea09fa5); url=https://raw.githubusercontent.com/JetBrains/skiko/2f621572270c28052549ff4678b762c3fea09fa5/NOTICE; sha256=35dd077c24768b53625101cfcc0ad853ae7e2abc08bd2a111a0267760d1406d8; bytes=197; exact-version mapping: Maven org.jetbrains.skiko:skiko-awt* 0.9.22.2 equals release tag v0.9.22.2; platform runtime JARs are published from this tag. Retained byte-for-byte on 2026-11-09. Complete notice text retained; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "notice",
+        "sha256": "35dd077c24768b53625101cfcc0ad853ae7e2abc08bd2a111a0267760d1406d8"
+      }
+    ],
+    "org.jetbrains:annotations:23.0.0": [
+      {
+        "bytes": 11352,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/8c1e966c7855fb54027bcaf6ebe7a43abe4785791e8cf9148c363761d493d097.txt",
+        "provenance": "license from JetBrains/java-annotations at release tag 23.0.0 (commit 5d06c0c48e0a4fe44b2bc0d5d3e8b113c7a57de2); url=https://raw.githubusercontent.com/JetBrains/java-annotations/5d06c0c48e0a4fe44b2bc0d5d3e8b113c7a57de2/LICENSE.txt; sha256=8c1e966c7855fb54027bcaf6ebe7a43abe4785791e8cf9148c363761d493d097; bytes=11352; exact-version mapping: Maven org.jetbrains:annotations 23.0.0 equals release tag 23.0.0. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "8c1e966c7855fb54027bcaf6ebe7a43abe4785791e8cf9148c363761d493d097"
+      }
+    ],
+    "org.jspecify:jspecify:1.0.0": [
+      {
+        "bytes": 11358,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+        "provenance": "license from jspecify/jspecify at release tag v1.0.0 (commit b2a10e14bb81c1b7cb6e488c112fe55cb2218d7d); url=https://raw.githubusercontent.com/jspecify/jspecify/b2a10e14bb81c1b7cb6e488c112fe55cb2218d7d/LICENSE; sha256=cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30; bytes=11358; exact-version mapping: Maven org.jspecify:jspecify 1.0.0 equals release tag v1.0.0. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
+        "role": "license",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+      }
+    ],
+    "org.slf4j:slf4j-api:2.0.17": [
+      {
+        "bytes": 1178,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/4e7f90c86ab51278228bce153122f1d8df30149d13ce9ef524c8444a84c32dcc.txt",
+        "provenance": "Artifact-embedded full terms retained verbatim; artifact SHA-256=7b751d952061954d5abfed7181c1f645d336091b679891591d63329c622eb832, entry=META-INF/LICENSE.txt. Complete terms checked on 2026-11-09; this verifies retained text only. Native/corresponding-source and redistribution readiness remain unverified.",
+        "role": "license",
+        "sha256": "4e7f90c86ab51278228bce153122f1d8df30149d13ce9ef524c8444a84c32dcc"
+      }
+    ]
+  },
+  "reviewScope": "Complete retained license terms and available NOTICE texts for exact component/version coordinates. Source-to-binary correspondence, transitive native notices, JDK runtime coverage and compatibility/redistribution readiness remain unverified. No blanket license assignment.",
+  "schemaVersion": 1
+}

@@ -7,6 +7,61 @@ diagnostics. The fresh unpacked Linux package passed silent native self-test.
 Task B, installation, physical audio, signing and distribution remain incomplete.**
 This note is the current-candidate Task B operating record. Older entries remain historical.
 
+## Windows scoped retry and notice packet correction — 2026-11-09
+
+Windows-only run `42576296745` at clean `fb9a0b8a774a0e5633bc061651ff15a8d4f48c05`
+completed with overall failure. Common authored checks stopped on an archive test
+that assumed Linux filename ordering; no JVM test execution is established by this
+run. Independent package generation compiled the included/shared/application Kotlin
+sources but failed native preparation. The Visual Studio bootstrap did not report a
+setup rejection, but native compilation/setup acceptance is not established. The
+inner FFmpeg build log was not exposed by the outer bounded diagnostic, so its cause
+remains unknown. Inventory, draft retention and independent readback succeeded.
+Step conclusions marked success under `continue-on-error` do not mean their actual
+outcomes passed; final enforcement correctly failed the desktop job.
+
+Lead separately downloaded draft release `438824689` (unpublished prerelease),
+verified its exact `fb9a0b8` tag target and the complete two-asset diagnostic packet.
+It contains **no installer**. Support ZIP: 68,934 bytes, SHA-256
+`e240cface36e8c81cb87b06568a34e282e16acf15523b762dd4f80c0c420020b`.
+Evidence: `task-b-hosted-fixes/windows-toolchain-hosted.log`,
+`windows-toolchain-run-state.json`, `windows-toolchain-jobs.jsonl` and
+`retained-42576296745/desktop-windows-x64/` under `.work/verification/`.
+
+The batched correction asserts exact archive membership without assuming the host's
+path ordering. FFmpeg now applies the existing bounded, sensitive-line-filtered
+reporter to the actual failed configure/make log and the explicit compiler-probe
+`ffbuild/config.log` on configure failure. The original owned-process exception,
+cleanup result and logs are preserved; reporter failure cannot mask it. Desktop
+retention includes the generated safe diagnostic JSON explicitly, without raw logs.
+The authored native regressions keep their diagnostic output inside their fixture.
+
+Support archives now retain every exact `fileHashes` entry from the supplied legal
+index, including `LICENSE`, `INDEX.txt`, pinned upstream notices and content-addressed
+notice texts. Missing, changed, linked or unsafe paths fail instead of emitting an
+incomplete legal packet. Reads retain the existing secret/size checks and total bound;
+no directory scan is introduced. An authored local packet using the generated
+161-component index retained all **34/34** indexed files with exact hashes. This is
+an authored dirty-source check, not a hosted build or a rewritten historical packet.
+
+The two notice collection reports are `task-b-notice-coverage.md` and
+`task-b-publisher-notice-coverage.md`. Lead checked text sizes/hashes, full terms,
+exact artifact origin hashes and immutable publisher tag/source records. The
+tracked `third_party/notices/desktop-reviewed.json` retains **81 exact union
+coordinates / 88 records / 20 unique text files**, scoped to retained full terms
+and available notices. A harness inventory projection (not a hosted-run reproduction)
+retains full texts for 79 Linux components and reduces issues from 85 to **6**,
+with 28 unique documents. Eight union coordinates remain open; native transitive
+coverage, JVM runtime/source mapping, source-to-binary correspondence and compatibility
+are not accepted. Both readiness flags remain false. The old installers still embed
+the source-only index; package resource embedding is the next implementation step.
+
+Cheap checks for this correction: retention **18/18**, FFmpeg recipe **24/24**,
+workflow invariants **10/10**, tooling **16/16**, source-only notice consistency,
+shell syntax and diff whitespace. No local Gradle/native compile or additional
+unchanged hosted matrix was run. New package/native success requires a later scoped
+run after the related packaging changes are integrated.
+
 ## Hosted retry findings and package execution — 2026-11-09
 
 PR checks remain empty because verification is manual; inspect Actions run
