@@ -27,7 +27,7 @@ import kotlin.test.*
 
 /** REAL SQLite and OS file leases; fake native/central handles and authored NON-AUDIO bytes. */
 class DownloadCleanupRoomTest {
-    @Test fun canonicalCleanupClaimKeepsPreReadFenceAndClaimIdentity() = executorSchema3Case {
+    @Test fun cleanupPendingRejectsNonCancelIntentAndKeepsANonRetainingClaimUnchanged() = executorSchema3Case {
         val owner = owner()
         val (id, _) = enqueue(owner)
         owner.coordinator.start(DownloadActivation.USER_SESSION)
@@ -58,7 +58,7 @@ class DownloadCleanupRoomTest {
                         claim.id, claim.generation, claim.ownerIntentRevision, DownloadBatchIntent.CANCELLED,
                         retainCompletedAsset = false, nowEpochMs = clock.epochMs())))
                 assertEquals(before.claims, assertNotNull(owner.repository.physicalDownload(id)).claims,
-                    "No canonical command may mutate the cleanup-pending claim set")
+                    "This nonretaining cleanup-pending claim rejects non-CANCELLED/retaining intent; the retaining-to-nonretaining transition is covered separately")
             }
         }
         owner.repository.transformMaintenanceClaim = { current, result ->

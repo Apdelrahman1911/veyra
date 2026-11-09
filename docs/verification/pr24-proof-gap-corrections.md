@@ -8,26 +8,36 @@ release or shared-API acceptance is claimed.
 
 ## R1 — committed cleanup identity
 
-The real-Room invariant is now explicit before the discriminator:
+The canonical fence is constrained, but the claim set is **not** immutable:
 
 - `applyClaimMaintenance` checks the exact producer and ownership generation, rejects a live lease, and
   derives the maintenance fence as `before.ownershipGeneration + 1` with the command owner and exact
-  attempt identity. No canonical command can mutate the claim set of a cleanup-pending job: a PAUSED or
-  newly retaining intent is `Stale`, a non-retaining CANCELLED intent is a no-op, and new admission is
-  rejected by `download_cleanup_reserved`.
-- `DownloadCleanupRoomTest.canonicalCleanupClaimKeepsPreReadFenceAndClaimIdentity` exercises those
-  canonical rejections/no-op between the runtime pre-read and the actual Room claim, then asserts the
-  committed fence equals the pre-read proposal and the committed claim set equals the pre-read set.
+  attempt identity. `applyStandaloneIntent` and `applyBatchIntent` both permit a legitimate CANCELLED
+  retaining→nonretaining transition while cleanup is pending and increment claim generations/revisions;
+  a new admission is still rejected by `download_cleanup_reserved`. `reconcileJob` under
+  `CANCEL_UNFINISHED_KEEP_COMPLETE` can leave a retaining claim with `cleanupPending=true` for staging
+  or finalization. Equal claim snapshots are therefore a sampled case, not an invariant.
+- `DownloadCleanupRoomTest.cleanupPendingRejectsNonCancelIntentAndKeepsANonRetainingClaimUnchanged`
+  (renamed/narrowed) samples the already-nonretaining case: non-CANCELLED/retaining intent is `Stale`,
+  CANCELLED/nonretaining is a no-op, and the committed fence follows the canonical derivation. It does
+  not claim universal claim-set immutability.
+- `DownloadRetainingCleanupIdentityRoomTest.retainingCleanupPreReadDiffersFromTheCanonicalCommittedClaimSet`
+  is the mandatory real-Room discriminator. A real in-progress staged transfer is drained without
+  deleting its bytes; a canonical CANCELLED/retain=true intent creates the retaining cleanupPending
+  state. The controlled runtime host invokes the production
+  `cleanupStoppedStandalone(expectedOwner)` path. In the existing `beforeMaintenanceClaim` hook, after
+  the runtime pre-read and before the actual Room claim, a canonical CANCELLED/retain=false command
+  drops retention and increments the claim generation/revision. The test asserts the committed claim
+  set differs from the retaining pre-read, the runtime takes its post-read mismatch rollback, the
+  finish receives exactly the returned committed fence/claims, the lease is not stranded, the
+  reservation/staging bytes/path ownership remain, and a subsequent exact cleanup deletes the staged
+  generation and releases owned resources.
 - The existing `committedCleanupClaimJoinChangeRollsBackReturnedFenceAndRetriesWithoutStickyLease` remains
-  as the reachable post-read path-change case; it holds the retry before its claim and before deletion,
-  proves the committed lease is cleared, and requires the later actual cleanup.
-- Because a canonical Room fence/claim difference is not legitimately reachable during cleanup,
-  `DownloadCommittedCleanupIdentityCorrectionsTest` is a deliberately coherent **runtime fake repository**
-  oracle: it returns a different committed fence/claim set, then asserts the rollback finish receives
-  exactly that returned identity, not the pre-read proposal. It is explicitly defensive-API evidence, not
-  a fabricated Room race. The fake also proves no orphan maintenance lease and preserved cleanup intent.
-
-This closes the earlier equal-identity test gap without fabricating an invalid Room graph.
+  as the reachable post-read path-change case.
+- `DownloadCommittedCleanupIdentityCorrectionsTest` remains a deliberately coherent **runtime fake
+  repository** oracle for the defensive exact-fence/claim rollback; it is labelled defensive-API
+  evidence, not a fabricated Room race. The canonical fence derivation is proved by the real-Room case;
+  claims are proved changeable by the retaining transition above.
 
 ## R2 — scheduler-owned schema2 adoption
 
@@ -65,7 +75,7 @@ Probe `strategy-probe-2` compiled at the current source and logged
 the test compile, with `drain.after` zero. This is configuration plus a positive process sample, not a
 full worker-exec trace. The final committed-source compile/focused/full results are recorded below.
 
-## Final same-commit evidence (source `7825b9a5adb6a9825fac81408ba98dc7a2927d3c`)
+## Previous correction evidence (source `7825b9a5adb6a9825fac81408ba98dc7a2927d3c`)
 
 All final attempts use the new exact-bounds init, the existing project lock, one worker, the single
 literal JVM argument, fresh unique directories, clean HEAD/status, complete before/after input manifests,
@@ -81,8 +91,9 @@ records its post-wrapper hash/bytes separately.
   `a19beee18b797e2d7de59f31a44c98879993d665408c2f37ab0309332b0bbefb`, admission-prefix seal
   `8b2810f77c7973328f95aa0c5007dff63942f7038faf8b94cee017ffbfdc14fb`.
 - `final3-focused-1`: exit 0; 122 tests / 13 suites / 0 failures / 0 errors / 0 skipped. Includes the
-  real committed-claim invariant, coherent runtime identity oracle, scheduler-owned adoption barrier,
-  shared-sibling removal, and all inherited cleanup/adoption/ownership/maintenance/retained classes.
+  previous nonretaining canonical-claim sampler, coherent runtime identity oracle, scheduler-owned
+  adoption barrier, shared-sibling removal, and all inherited cleanup/adoption/ownership/maintenance/
+  retained classes.
   `run.log` `1a0985ebc2185b1c3756bd81871d4571af3094e5bd8b520d31bfe2169f4f30c6`, XML seal
   `c7ad32185db5052d32a998b7f76b689b4b74a3ed55273a0bf20175b561b93c08`, attempt seal
   `144d138c9a3eea05baf8e9a1383daa2db3b5050b8d04fe0b23d2bf645be432c7`, admission-prefix seal
@@ -99,6 +110,37 @@ records its post-wrapper hash/bytes separately.
 
 The docs-only successor changes only this verification document. The tested source is `7825b9a`;
 PR24 remains frozen at `b600628` (tested `55931d5`).
+
+## Final successor evidence (source `ae28140a538bcff7dda3b05ce26d2fc145f141cf`)
+
+This successor changes only test/helper/documentation paths; accepted production source from
+`7825b9a` is unchanged. The changed test Kotlin compiled and executed under normal dependency
+execution; the accepted included-build in-process evidence remains the immutable `final3-compile-1`
+record and was not re-forced for this test-only change. The branch was created from frozen PR25
+`68ea74e` after the commits were made; the attempt `BRANCH` field still records the predecessor local
+branch name `t3/pr24-proof-gap-corrections`, while local/remote successor head is
+`t3/pr25-real-room-claim-discriminator`; the tested commit is identical.
+
+- `final4-scoped-1`: exit 0; 123 tests / 14 suites / 0 failures / 0 errors / 0 skipped; includes the
+  new retaining-to-nonretaining real-Room discriminator, the fake defensive oracle, the old
+  cleanup/fake cases, adoption, ownership, maintenance, scheduling and retained classes. The log
+  shows actual `:shared:compileKotlinJvm` and `:shared:compileTestKotlinJvm` execution with
+  `VEYRA_KOTLIN_STRATEGY ... value=in-process`. `run.log`
+  `7176691aeaa176baa06116acb638e938a101bb98e316c929e4e0ff1a1171ebd2`, XML seal
+  `9cc56f1b8fa7ad0e01addd401a1b1334ba2ab032cc2f896b22b2934cca4a6af1`, attempt seal
+  `7ba993ad93be79ede1206f58839e873b7e50c1899e4ddf1a2a4f0027adbd2605`, admission-prefix
+  `5abfe869a4b884c9cc270d3cab90a0212ab9b3c07ecb55a6dfedd7c366f0e629`.
+- `final4-full-1`: exit 0; 1,199 tests / 105 suites / 0 failures / 0 errors / 0 skipped; `run.log`
+  `957459310d702bf25afbaadca2e45896b2fe57874ca8bb384adcf4ff6d030d53`, XML seal
+  `1a1730051094d075ef61ae202032af4df13899b2b14a0f9b6dd14b621863e3ed`, attempt seal
+  `21915552a0d6891314bc0b2c45f63fb7d79c2cb8cf0da4b18eb8dc7735c3d64e`, admission-prefix
+  `3e5e60d6ef22fcf22b65ac65f2c36dd0600e30254ba86bff3cc6806a0719358f`.
+- Both attempts: clean HEAD/status, `inputs_equal=0`, pin/schema identical, actual lock
+  device:inode/holder PID/start snapshots, and zero `drain.after`/`drain.done` matches. Full outer
+  `gate.log` is outside the attempt seal; `gate.log.outside.meta` is separately timed.
+
+The docs-only successor after `ae28140` changes only this verification document. Frozen PR25
+`68ea74e` (tested `7825b9a`) and all earlier refs remain unchanged.
 
 ## Related LOW corrections
 
@@ -130,12 +172,19 @@ PR24 remains frozen at `b600628` (tested `55931d5`).
 - `r10-probe-1`: shared-sibling test red on an identity assertion; preserved.
 - `r10-probe-2`: shared-sibling/R1/R2 green.
 - `strategy-probe-2`: successful in-process-strategy compile probe; preserved.
-- `prefinal-focused-1`: 122 tests / 13 suites / 2 load-sensitive inherited failures
+- `prefinal-focused-1`: 122 tests / 13 suites / 2 unexplained inherited failures
   (`cleanupExpiration...` retry and `sqliteRollback...` timeout); preserved as pre-final evidence, not
-  acceptance.
-- `final3-compile-1`, `final3-focused-1`, `final3-full-1`: the final committed-source executed gates at
-  `7825b9a`; results, hashes, admission-prefix seals, lock holder snapshots and zero-drain evidence are
-  recorded above and in `attempts/final3-*`.
+  acceptance. No cause is claimed without the missing exact dirty bytes; lead inventory labels these
+  unexplained.
+- `final3-compile-1`, `final3-focused-1`, `final3-full-1`: the previous successor gates at `7825b9a`;
+  results/seals are recorded above.
+- `final4-scoped-1`, `final4-full-1`: the final successor test-only gates at `ae28140`; results/seals
+  are recorded above.
+- `r1-retaining-probe-1` through `r1-retaining-probe-5`: iterative scheduler/inline discriminator
+  experiments; retained. They include compile/type stops and a scheduler-owned path with no
+  expectedOwner mismatch; not acceptance evidence.
+- `r1-retain-room-1` through `r1-retain-room-6`: real-Room controlled-runtime host experiments; `-6` is
+  the green retaining-to-nonretaining discriminator. Earlier attempts retain setup/compile stops.
 
 ## Limits
 
