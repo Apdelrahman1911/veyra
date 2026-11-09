@@ -130,8 +130,8 @@ PY
     # Gradle/Java child, including independent package and inventory steps.
     # No download, system install, parent-shell or global configuration change.
     case "$(uname -m)" in
-        arm64|aarch64) expected_java_arch=aarch64; candidates=("${JAVA_HOME_21_ARM64:-}" "${JAVA_HOME_21_arm64:-}" "${JAVA_HOME:-}") ;;
-        *) expected_java_arch=x86_64; candidates=("${JAVA_HOME_21_X64:-}" "${JAVA_HOME:-}") ;;
+        arm64|aarch64) expected_java_arch='(aarch64|arm64)'; candidates=("${JAVA_HOME_21_ARM64:-}" "${JAVA_HOME_21_arm64:-}" "${JAVA_HOME:-}") ;;
+        *) expected_java_arch='(x86_64|amd64|x64)'; candidates=("${JAVA_HOME_21_X64:-}" "${JAVA_HOME:-}") ;;
     esac
     local found_jdk=0 candidate_unix
     for candidate in "${candidates[@]}"; do
@@ -143,7 +143,7 @@ PY
         fi
         if { [ -x "$candidate_unix/bin/java" ] || [ -f "$candidate_unix/bin/java.exe" ]; } &&
             grep -Eq '^JAVA_VERSION="21([."]|$)' "$candidate_unix/release" 2>/dev/null &&
-            grep -q "^OS_ARCH=\"$expected_java_arch\"" "$candidate_unix/release"; then
+            grep -Eq "^OS_ARCH=\"$expected_java_arch\"" "$candidate_unix/release"; then
             export JAVA_HOME="$candidate"
             native_java_bin="$candidate_unix/bin"
             export PATH="$native_java_bin:$PATH"

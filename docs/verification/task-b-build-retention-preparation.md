@@ -376,3 +376,14 @@ by hashing each exact regular member (bounded traversal, no linked members) rath
 than requiring every selected native artifact to be an archive file. Other kinds
 of directory artifacts remain refused. This records selected link inputs and does
 not establish final-package/native/legal closure.
+
+The local inventory probe `android-inventory-001` stopped before inventory because
+the task-owned bounds init required `VEYRA_TEST_EVIDENCE_DIR`; that omitted runner
+variable was supplied in fresh `android-inventory-002`. The latter parsed and
+executed the corrected inventory, selected the Android runtime class-JAR artifact
+without the earlier variant ambiguity, then truthfully refused the missing local
+`shared/.../bundleLibRuntimeToJarDebug/classes.jar`. This checkout had compiled
+Android Kotlin but had not assembled that library JAR. No successful local
+production inventory is claimed; the hosted retry runs assembly before inventory.
+JDK release architecture matching accepts the native x86_64/amd64/x64 and
+aarch64/arm64 spellings rather than treating equivalent spellings as a mismatch.
