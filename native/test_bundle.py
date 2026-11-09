@@ -255,7 +255,8 @@ class NativeBundleTest(unittest.TestCase):
         log = self.inputs / "build.log"
         process_environment = dict(os.environ)
         prepared = {"PATH": "authored-x64-msvc", "VEYRA_SCOPED_ENV": "1"}
-        with patch.dict(os.environ, {"CC": "authored-fallback-compiler", "HOME": "authored-home"}):
+        with patch.dict(os.environ, {"CC": "authored-fallback-compiler", "HOME": "authored-home",
+                                     "MSBUILDDISABLENODEREUSE": "0"}):
             with patch.object(BUNDLE.platform, "system", return_value="Windows"), \
                     patch.object(BUNDLE.windows_toolchain, "child_environment",
                                  return_value=prepared) as helper, \
@@ -267,7 +268,12 @@ class NativeBundleTest(unittest.TestCase):
             self.assertNotIn("CXX", child)
             self.assertEqual("authored-home", child["HOME"])
             self.assertEqual(self.root, run.call_args.kwargs["cwd"])
-            self.assertEqual(prepared, run.call_args.kwargs["env"])
+            actual_environment = dict(run.call_args.kwargs["env"])
+            self.assertRegex(actual_environment.pop("VEYRA_NATIVE_DIAGNOSTIC_INVOCATION"), r"^[0-9a-f]{32}$")
+            self.assertEqual(dict(prepared, MSBUILDDISABLENODEREUSE="1"), actual_environment)
+            self.assertNotIn("MSBUILDDISABLENODEREUSE", prepared)
+            self.assertNotIn("VEYRA_NATIVE_DIAGNOSTIC_INVOCATION", prepared)
+            self.assertEqual("0", os.environ["MSBUILDDISABLENODEREUSE"])
             scratch = helper.call_args.kwargs["scratch"]
             self.assertTrue(scratch.is_relative_to(self.root / ".work"))
         self.assertEqual(process_environment, dict(os.environ))
@@ -278,6 +284,65 @@ class NativeBundleTest(unittest.TestCase):
             BUNDLE.run(["authored-tool"], self.root, log, 7, root=self.root)
         helper.assert_not_called()
         self.assertEqual(os.environ.get("HOME"), run.call_args.kwargs["env"]["HOME"])
+
+    def test_session_helper_uses_phase_logs_and_windows_nonreusing_build(self):
+        for target in ("windows-x64", "macos-arm64"):
+            with self.subTest(target=target):
+                directory = self.root / ".work/native-session" / target
+                output = directory / "output" / ("veyra-session.dll" if target == "windows-x64"
+                                                  else "libveyra-session.dylib")
+                output.parent.mkdir(parents=True)
+                output.write_bytes(b"authored-not-executed")
+                console = io.StringIO()
+                with patch.object(BUNDLE, "ROOT", self.root), \
+                        patch.object(BUNDLE.shutil, "which", return_value="authored-cmake"), \
+                        patch.object(BUNDLE, "binary_target") as verify, \
+                        patch.object(BUNDLE, "run") as run, contextlib.redirect_stdout(console):
+                    self.assertEqual(output, BUNDLE.session_helper(target))
+                self.assertEqual(2, run.call_count)
+                configure, compile = run.call_args_list
+                self.assertEqual(directory / "configure.log", configure.args[2])
+                self.assertEqual(directory / "build.log", compile.args[2])
+                self.assertEqual(180, configure.args[3])
+                self.assertEqual(600, compile.args[3])
+                self.assertEqual(["--parallel", "1"], compile.args[0][5:7])
+                if target == "windows-x64":
+                    self.assertEqual(["--", "/nodeReuse:false"], compile.args[0][-2:])
+                    self.assertEqual(["-A", "x64"], configure.args[0][-2:])
+                else:
+                    self.assertNotIn("/nodeReuse:false", compile.args[0])
+                verify.assert_called_once_with(output, target)
+                self.assertIn("Native session configure completed: " + target, console.getvalue())
+                self.assertIn("Native session compile completed: " + target, console.getvalue())
+
+    def test_session_configure_failure_has_no_success_marker_or_compile(self):
+        console = io.StringIO()
+        with patch.object(BUNDLE, "ROOT", self.root), \
+                patch.object(BUNDLE.shutil, "which", return_value="authored-cmake"), \
+                patch.object(BUNDLE, "run", side_effect=ValueError("authored configure stop")) as run, \
+                contextlib.redirect_stdout(console):
+            with self.assertRaisesRegex(ValueError, "authored configure stop"):
+                BUNDLE.session_helper("windows-x64")
+        self.assertEqual(1, run.call_count)
+        self.assertIn("Native session configure started", console.getvalue())
+        self.assertNotIn("completed", console.getvalue())
+        self.assertNotIn("compile started", console.getvalue())
+
+    def test_windows_session_failure_precedes_ffmpeg_build(self):
+        failure = BUNDLE.owned_process.OwnedProcessError("timeout", cleanup_complete=True)
+        with patch.object(BUNDLE, "ROOT", self.root), \
+                patch.dict(os.environ, {"VEYRA_SCOPED_ENV": "1"}), \
+                patch.object(BUNDLE.platform, "system", return_value="Windows"), \
+                patch.object(BUNDLE.platform, "machine", return_value="AMD64"), \
+                patch.object(BUNDLE, "session_helper", side_effect=failure) as session, \
+                patch.object(BUNDLE, "run") as run, patch.object(BUNDLE, "stage_resources") as stage:
+            with self.assertRaises(BUNDLE.owned_process.OwnedProcessError) as raised:
+                BUNDLE.prepare("windows-x64")
+        self.assertIs(failure, raised.exception)
+        self.assertTrue(raised.exception.cleanup_complete)
+        session.assert_called_once_with("windows-x64")
+        run.assert_not_called()
+        stage.assert_not_called()
 
     def test_windows_toolchain_failure_stops_before_any_native_command(self):
         log = self.inputs / "build.log"

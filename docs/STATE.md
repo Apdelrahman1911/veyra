@@ -4,6 +4,18 @@ Updated 2026-11-07 UTC. Formal Goal tool currently reports **blocked/incomplete*
 
 ## Current Task B continuation — 2026-11-09
 
+Two-lane retry `42653628227` at `bbcc62f` completed. ARM passed all 1,216
+shared tests and 484 desktop tests (one Linux-only skip), DMG and inventory.
+Windows passed the same tests but timed out in the native media-session helper
+while preparing its installer; it got past FFmpeg. Hosted independent readback
+passed both lane packets. The retained session diagnostic has no compiler error
+and cannot distinguish configure from compile; the original worker state is
+unknown. Native Windows child builds now disable MSBuild node reuse, move session
+admission ahead of FFmpeg and preserve separate phase logs/markers. All 39 native
+bundle and 10 Windows toolchain tests pass locally. Actual Windows execution is
+pending. The next retry is Windows only; no ARM repeat is needed. See
+`verification/task-b-windows-session-timeout-42653628227.md`.
+
 Combined run `42643143184` at `baa8370` completed: Android, Linux x64 and
 macOS Intel passed. Intel passed 1,216 shared tests and 484 desktop tests with
 one Linux-only skip, then built its DMG. Independent production readback passed

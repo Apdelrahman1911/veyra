@@ -72,6 +72,12 @@ source-built FFmpeg helper; it is not a session-only build or a native test.
 Honor the repository's serialized build slot. On cleanup failure retain the
 owned work/logs for inspection; do not delete them or silently start a retry.
 
+Windows builds the session helper before the cold FFmpeg stage. Its scoped
+MSBuild children disable node reuse so they exit within the owned process tree.
+CMake configuration and compilation keep separate `configure.log` / `build.log`
+files under `.work/native-session/<target>/`, with explicit phase markers.
+The configured deadlines and complete descendant-drain requirements still apply.
+
 Fat/uber-JAR distributions are unsupported: Compose rewrites the whole-hash-pinned
 native-runtime archive. Both uber-JAR tasks fail before task execution, including
 with `--dry-run`. Use `createDistributable` or native installers instead. A plain

@@ -560,8 +560,11 @@ def run(command: list[str], directory: Path, log: Path, timeout: int, *, root: P
     if platform.system() == "Windows":
         # Existing VS/vswhere is used for this native child only. The parent
         # process environment and hosted GITHUB_ENV/GITHUB_PATH are unchanged.
-        env = windows_toolchain.child_environment(
-            env, scratch=work(root / ".work/desktop-native/windows-toolchain", root))
+        env = dict(windows_toolchain.child_environment(
+            env, scratch=work(root / ".work/desktop-native/windows-toolchain", root)),
+            MSBUILDDISABLENODEREUSE="1")
+        # The Windows Job owner waits for every descendant. MSBuild workers
+        # must exit with this invocation rather than stay idle for later builds.
     # The owned runner validates the opened log and waits for the complete
     # trusted build-process tree, not only the immediate compiler/launcher.
     # Failure never grants permission to delete this work or its diagnostic log.
@@ -591,9 +594,15 @@ def session_helper(target: str) -> Path | None:
     else:
         # An existing VS/MSVC environment; no installation or global configuration.
         args += ["-A", "x64"]
-    log = directory / "build.log"
-    run(args, ROOT, log, 180)
-    run(["cmake", "--build", str(directory), "--config", "Release", "--parallel", "1"], ROOT, log, 600)
+    print("Native session configure started: " + target + ".", flush=True)
+    run(args, ROOT, directory / "configure.log", 180)
+    print("Native session configure completed: " + target + ".", flush=True)
+    build = ["cmake", "--build", str(directory), "--config", "Release", "--parallel", "1"]
+    if target == "windows-x64":
+        build += ["--", "/nodeReuse:false"]
+    print("Native session compile started: " + target + ".", flush=True)
+    run(build, ROOT, directory / "build.log", 600)
+    print("Native session compile completed: " + target + ".", flush=True)
     name = "veyra-session.dll" if target.startswith("windows") else "libveyra-session.dylib"
     output = directory / "output" / name
     binary_target(output, target)
@@ -608,6 +617,9 @@ def prepare(target: str) -> Path:
     if target != host_target(platform.system(), platform.machine()):
         raise ValueError("Cross-labelled desktop native build rejected")
     with preparation_lock(ROOT / ".work/desktop-native"):
+        # Windows session admission is cheaper than the cold FFmpeg build.
+        # Fail here first while retaining the same build/ownership checks.
+        helper = session_helper(target) if target == "windows-x64" else None
         log = work(ROOT / ".work/desktop-native/prepare.log")
         run([sys.executable, "-B", str(ROOT / "native/ffmpeg/build.py"), "--jobs", "1"], ROOT, log, 2700)
         name = "ffmpeg.exe" if target.startswith("windows") else "ffmpeg"
@@ -622,7 +634,8 @@ def prepare(target: str) -> Path:
         # beside the native output for the separately verified source distribution.
         for notice in (output / "licenses").iterdir():
             sources[prefix + "licenses/ffmpeg/" + notice.name] = notice
-        helper = session_helper(target)
+        if target != "windows-x64":
+            helper = session_helper(target)
         if helper is not None:
             sources[prefix + helper.name] = helper
         sources[prefix + "licenses/Veyra-GPL-3.0-or-later.txt"] = ROOT / "LICENSE"
