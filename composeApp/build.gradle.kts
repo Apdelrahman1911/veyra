@@ -1,7 +1,12 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.gradle.api.tasks.PathSensitivity
+import org.gradle.language.jvm.tasks.ProcessResources
 import org.gradle.api.tasks.testing.Test
 import org.gradle.api.tasks.testing.logging.TestExceptionFormat
+import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.nio.file.Path
 import java.time.Duration
 
 plugins {
@@ -198,6 +203,85 @@ compose.resources {
     publicResClass = true
     packageOfResClass = "dev.veyra.generated.resources"
     generateResClass = always
+}
+
+// Production-only legal replacement. Ordinary source/developer builds keep the
+// tracked source-only preview under composeResources/files/legal unchanged.
+// scripts/package.sh passes the exact generate-notices output here after it has
+// exported the host runtime inventory. The prefix is the one observed in the
+// retained application JAR and produced by desktopProcessResources today; the
+// manifest verifier checks the same constant independently.
+val desktopLegalResourcePrefix = "composeResources/dev.veyra.generated.resources/files/legal"
+val desktopLegalDirectory = providers.gradleProperty("veyra.desktopLegalDir").orNull
+if (desktopLegalDirectory != null) {
+    val projectRoot = rootProject.projectDir.toPath().toAbsolutePath().normalize()
+    val realProjectRoot = rootProject.projectDir.toPath().toRealPath()
+    val supplied = rootProject.file(desktopLegalDirectory).toPath().toAbsolutePath().normalize()
+    if (!supplied.startsWith(projectRoot)) {
+        throw GradleException("veyra.desktopLegalDir escapes the repository")
+    }
+    var ancestor: Path? = supplied
+    while (true) {
+        val current = ancestor ?: break
+        if (current == projectRoot) break
+        if (Files.isSymbolicLink(current)) {
+            throw GradleException("veyra.desktopLegalDir may not contain a symlink")
+        }
+        ancestor = current.parent
+    }
+    if (!Files.isDirectory(supplied, LinkOption.NOFOLLOW_LINKS)) {
+        throw GradleException("veyra.desktopLegalDir must be an existing directory")
+    }
+    val realLegal = supplied.toRealPath()
+    if (!realLegal.startsWith(realProjectRoot) || !Files.isRegularFile(realLegal.resolve("index.json"), LinkOption.NOFOLLOW_LINKS)) {
+        throw GradleException("veyra.desktopLegalDir must contain index.json and remain inside the repository")
+    }
+    var legalFiles = 0
+    var legalBytes = 0L
+    val stream = Files.walk(realLegal)
+    try {
+        val iterator = stream.iterator()
+        while (iterator.hasNext()) {
+            val path = iterator.next()
+            if (path == realLegal) continue
+            if (Files.isSymbolicLink(path)) {
+                throw GradleException("Generated legal resources may not contain symlinks")
+            }
+            if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) continue
+            if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
+                throw GradleException("Generated legal resources must be regular files")
+            }
+            val size = Files.size(path)
+            legalFiles += 1
+            legalBytes += size
+            if (legalFiles > 512 || size > 64L * 1024 * 1024 || legalBytes > 256L * 1024 * 1024) {
+                throw GradleException("Generated legal resources exceed their bounded file/size limits")
+            }
+        }
+    } finally {
+        stream.close()
+    }
+    // Gradle copies and applies child include/exclude patterns to each spec's
+    // source-relative paths. The root exclude matches the desktopMain resource
+    // path (composeResources/.../legal/...), while the replacement from() uses
+    // the generated legal directory itself as its source root, so its entries
+    // are relative names (LICENSE, index.json, notices/...) and are retained.
+    tasks.withType<ProcessResources>().matching { it.name == "desktopProcessResources" }.configureEach {
+        exclude("$desktopLegalResourcePrefix/**")
+        from(realLegal.toFile()) {
+            into(desktopLegalResourcePrefix)
+        }
+        inputs.dir(realLegal.toFile())
+            .withPropertyName("veyraDesktopLegalResources")
+            .withPathSensitivity(PathSensitivity.RELATIVE)
+        doFirst {
+            // Do not let incremental output keep a stale source-only legal file.
+            val staged = destinationDir.resolve(desktopLegalResourcePrefix)
+            if (staged.exists() && !staged.deleteRecursively()) {
+                throw GradleException("Could not clear the previous desktop legal resource subtree")
+            }
+        }
+    }
 }
 
 compose.desktop {

@@ -89,7 +89,7 @@ jobs:
             test -d "$DEVELOPER_DIR"
           fi
           scripts/package.sh
-      - name: Generate native inventory and inventory-backed legal copy
+      - name: Verify or generate native inventory and inventory-backed legal copy
         id: desktop_inventory
         if: ${{ always() && inputs.retain_builds == true && inputs.package_desktop == true && steps.bootstrap.outcome == 'success' }}
         timeout-minutes: 20
@@ -97,12 +97,29 @@ jobs:
         env:
           VEYRA_INVENTORY_PLATFORM: ${{ matrix.platform }}
         run: |
-          scripts/gradle.sh -I scripts/runtime-inventory.init.gradle \
-            :composeApp:exportProductionInventory \
-            -Pveyra.inventory.platform="$VEYRA_INVENTORY_PLATFORM"
-          python3 -B scripts/package-notices.py \
-            --inventory ".work/verification/runtime-inventory/$VEYRA_INVENTORY_PLATFORM.json" \
-            --output ".work/verification/legal-inventory/$VEYRA_INVENTORY_PLATFORM"
+          set -euo pipefail
+          inventory=".work/verification/runtime-inventory/$VEYRA_INVENTORY_PLATFORM.json"
+          package_legal=".work/verification/desktop-legal/$VEYRA_INVENTORY_PLATFORM"
+          # A successful package path already generated and embedded this exact
+          # inventory/legal set. Re-check the bytes instead of resolving Gradle
+          # again; only an early package failure falls back to diagnostics.
+          if [ -f "$package_legal/index.json" ] && [ -f "$inventory" ]; then
+            if [ -f .work/verification/packages.json ]; then
+              python3 -B -c 'import json, os; value = json.load(open(".work/verification/packages.json")); assert value["embeddedLegal"]["verified"] is True and value["source"]["commitSha"] == os.environ["GITHUB_SHA"]'
+            fi
+            python3 -B scripts/package-notices.py \
+              --inventory "$inventory" \
+              --supplement third_party/notices/desktop-reviewed.json \
+              --output "$package_legal" --check
+          else
+            scripts/gradle.sh -I scripts/runtime-inventory.init.gradle \
+              :composeApp:exportProductionInventory \
+              -Pveyra.inventory.platform="$VEYRA_INVENTORY_PLATFORM"
+            python3 -B scripts/package-notices.py \
+              --inventory "$inventory" \
+              --supplement third_party/notices/desktop-reviewed.json \
+              --output ".work/verification/legal-inventory/$VEYRA_INVENTORY_PLATFORM"
+          fi
       - name: Retain this desktop lane in a draft prerelease
         id: retain
         if: ${{ always() && inputs.retain_builds == true && inputs.package_desktop == true && steps.bootstrap.outcome == 'success' }}
@@ -121,9 +138,18 @@ jobs:
           for results in shared/build/test-results composeApp/build/test-results; do
             [ -d "$results" ] && args+=(--xml-root "$results")
           done
-          args+=(--legal composeApp/src/commonMain/composeResources/files/legal)
-          [ -d ".work/verification/legal-inventory/$VEYRA_INVENTORY_PLATFORM" ] && \
-            args+=(--legal ".work/verification/legal-inventory/$VEYRA_INVENTORY_PLATFORM")
+          legal=""
+          # Prefer the legal set actually bound to the verified package JAR; a
+          # failed package falls back to the independent diagnostic legal copy.
+          if [ -f .work/verification/packages.json ] && \
+             python3 -B -c 'import json, os; value = json.load(open(".work/verification/packages.json")); assert value["embeddedLegal"]["verified"] is True and value["source"]["commitSha"] == os.environ["GITHUB_SHA"]'; then
+            legal=".work/verification/desktop-legal/$VEYRA_INVENTORY_PLATFORM"
+          elif [ -f ".work/verification/legal-inventory/$VEYRA_INVENTORY_PLATFORM/index.json" ]; then
+            legal=".work/verification/legal-inventory/$VEYRA_INVENTORY_PLATFORM"
+          elif [ -f ".work/verification/desktop-legal/$VEYRA_INVENTORY_PLATFORM/index.json" ]; then
+            legal=".work/verification/desktop-legal/$VEYRA_INVENTORY_PLATFORM"
+          fi
+          [ -n "$legal" ] && args+=(--legal "$legal")
           inventory=".work/verification/runtime-inventory/$VEYRA_INVENTORY_PLATFORM.json"
           [ -f "$inventory" ] && args+=(--inventory "$inventory")
           [ -f .work/verification/native-build-diagnostic.json ] && \

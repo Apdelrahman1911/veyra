@@ -62,7 +62,8 @@ class RetentionWorkflowTest(unittest.TestCase):
         self.assertIn("id: retain_device", ios)
 
     def test_build_and_test_steps_do_not_receive_the_token(self):
-        for name in ("Run bounded desktop tests", "Build APK and execute JVM Android tests",
+        for name in ("Run bounded desktop tests", "Build desktop installer independently of test outcome",
+                     "Build APK and execute JVM Android tests",
                      "Compile native tests and full unsigned simulator/device applications"):
             block = WORKFLOW.split("name: " + name, 1)[1].split("- name:", 1)[0]
             self.assertNotIn("GH_TOKEN", block)
@@ -71,6 +72,28 @@ class RetentionWorkflowTest(unittest.TestCase):
                      "Retain iOS simulator lane", "Retain iOS device arm64 lane"):
             block = WORKFLOW.split("name: " + name, 1)[1].split("- name:", 1)[0]
             self.assertIn("GH_TOKEN: ${{ github.token }}", block)
+
+    def test_desktop_inventory_reuses_the_package_generated_exact_legal_inputs(self):
+        desktop = WORKFLOW.split("  desktop:", 1)[1].split("  android:", 1)[0]
+        self.assertIn("desktop-legal/$VEYRA_INVENTORY_PLATFORM", desktop)
+        self.assertIn("--supplement third_party/notices/desktop-reviewed.json", desktop)
+        self.assertEqual(2, desktop.count("--supplement third_party/notices/desktop-reviewed.json"))
+        self.assertIn("--output \"$package_legal\" --check", desktop)
+        self.assertIn("[ -f \"$package_legal/index.json\" ]", desktop)
+        self.assertIn("embeddedLegal", desktop)
+        self.assertIn("legal-inventory/$VEYRA_INVENTORY_PLATFORM", desktop)
+        # Diagnostic fallback is allowed only in the explicit else branch.
+        self.assertIn("          else\n            scripts/gradle.sh -I scripts/runtime-inventory.init.gradle", desktop)
+
+    def test_desktop_retention_prefers_the_package_bound_legal_copy(self):
+        desktop = WORKFLOW.split("  desktop:", 1)[1].split("  android:", 1)[0]
+        retain = desktop.split("id: retain", 1)[1].split("Enforce desktop", 1)[0]
+        self.assertIn('legal=".work/verification/desktop-legal/$VEYRA_INVENTORY_PLATFORM"', retain)
+        self.assertIn('[ -f ".work/verification/legal-inventory/$VEYRA_INVENTORY_PLATFORM/index.json" ]', retain)
+        self.assertIn('elif [ -f ".work/verification/desktop-legal/$VEYRA_INVENTORY_PLATFORM/index.json" ]', retain)
+        self.assertIn('[ -n "$legal" ] && args+=(--legal "$legal")', retain)
+        self.assertNotIn("--legal composeApp/src/commonMain", retain)
+        self.assertIn("id: desktop_inventory", desktop)
 
     def test_production_readback_uses_release_id_not_tag_download(self):
         readback = WORKFLOW.split("name: Independent production lane readback", 1)[1]

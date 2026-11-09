@@ -28,6 +28,13 @@ false. Package embedding, native transitive/JDK/source coverage remain open.
 Android and iOS stopped on pinned distribution HTTP 504 responses; one Android
 retry repeated the failure. Linux GUI namespace containment remains blocked.
 No repeated full matrix was dispatched.
+The desktop legal-embedding patch now passes a gated local Gradle desktop JAR
+check: 161 components, 28 documents and all 34 indexed files match the retained
+Linux projection exactly; six legal gaps remain. This is resource-wiring proof,
+not a fresh inventory or installer gate. Two Gradle DSL errors were corrected
+before this pass. Fresh inventory/app-image/installer verification remains pending
+on the next scoped Windows run; details are in
+`verification/task-b-desktop-legal-embedding.md`.
 The live source still refuses playback preparation with
 `PROVIDER_ACCESS_REQUIRED / YOUTUBE_ACCESS_REQUIRED`; no media transfer or offline
 proof occurred. Installation, physical audio, five-platform success, signing and
