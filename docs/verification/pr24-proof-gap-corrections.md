@@ -8,26 +8,36 @@ release or shared-API acceptance is claimed.
 
 ## R1 — committed cleanup identity
 
-The real-Room invariant is now explicit before the discriminator:
+The canonical fence is constrained, but the claim set is **not** immutable:
 
 - `applyClaimMaintenance` checks the exact producer and ownership generation, rejects a live lease, and
   derives the maintenance fence as `before.ownershipGeneration + 1` with the command owner and exact
-  attempt identity. No canonical command can mutate the claim set of a cleanup-pending job: a PAUSED or
-  newly retaining intent is `Stale`, a non-retaining CANCELLED intent is a no-op, and new admission is
-  rejected by `download_cleanup_reserved`.
-- `DownloadCleanupRoomTest.canonicalCleanupClaimKeepsPreReadFenceAndClaimIdentity` exercises those
-  canonical rejections/no-op between the runtime pre-read and the actual Room claim, then asserts the
-  committed fence equals the pre-read proposal and the committed claim set equals the pre-read set.
+  attempt identity. `applyStandaloneIntent` and `applyBatchIntent` both permit a legitimate CANCELLED
+  retaining→nonretaining transition while cleanup is pending and increment claim generations/revisions;
+  a new admission is still rejected by `download_cleanup_reserved`. `reconcileJob` under
+  `CANCEL_UNFINISHED_KEEP_COMPLETE` can leave a retaining claim with `cleanupPending=true` for staging
+  or finalization. Equal claim snapshots are therefore a sampled case, not an invariant.
+- `DownloadCleanupRoomTest.cleanupPendingRejectsNonCancelIntentAndKeepsANonRetainingClaimUnchanged`
+  (renamed/narrowed) samples the already-nonretaining case: non-CANCELLED/retaining intent is `Stale`,
+  CANCELLED/nonretaining is a no-op, and the committed fence follows the canonical derivation. It does
+  not claim universal claim-set immutability.
+- `DownloadRetainingCleanupIdentityRoomTest.retainingCleanupPreReadDiffersFromTheCanonicalCommittedClaimSet`
+  is the mandatory real-Room discriminator. A real in-progress staged transfer is drained without
+  deleting its bytes; a canonical CANCELLED/retain=true intent creates the retaining cleanupPending
+  state. The controlled runtime host invokes the production
+  `cleanupStoppedStandalone(expectedOwner)` path. In the existing `beforeMaintenanceClaim` hook, after
+  the runtime pre-read and before the actual Room claim, a canonical CANCELLED/retain=false command
+  drops retention and increments the claim generation/revision. The test asserts the committed claim
+  set differs from the retaining pre-read, the runtime takes its post-read mismatch rollback, the
+  finish receives exactly the returned committed fence/claims, the lease is not stranded, the
+  reservation/staging bytes/path ownership remain, and a subsequent exact cleanup deletes the staged
+  generation and releases owned resources.
 - The existing `committedCleanupClaimJoinChangeRollsBackReturnedFenceAndRetriesWithoutStickyLease` remains
-  as the reachable post-read path-change case; it holds the retry before its claim and before deletion,
-  proves the committed lease is cleared, and requires the later actual cleanup.
-- Because a canonical Room fence/claim difference is not legitimately reachable during cleanup,
-  `DownloadCommittedCleanupIdentityCorrectionsTest` is a deliberately coherent **runtime fake repository**
-  oracle: it returns a different committed fence/claim set, then asserts the rollback finish receives
-  exactly that returned identity, not the pre-read proposal. It is explicitly defensive-API evidence, not
-  a fabricated Room race. The fake also proves no orphan maintenance lease and preserved cleanup intent.
-
-This closes the earlier equal-identity test gap without fabricating an invalid Room graph.
+  as the reachable post-read path-change case.
+- `DownloadCommittedCleanupIdentityCorrectionsTest` remains a deliberately coherent **runtime fake
+  repository** oracle for the defensive exact-fence/claim rollback; it is labelled defensive-API
+  evidence, not a fabricated Room race. The canonical fence derivation is proved by the real-Room case;
+  claims are proved changeable by the retaining transition above.
 
 ## R2 — scheduler-owned schema2 adoption
 
@@ -65,7 +75,7 @@ Probe `strategy-probe-2` compiled at the current source and logged
 the test compile, with `drain.after` zero. This is configuration plus a positive process sample, not a
 full worker-exec trace. The final committed-source compile/focused/full results are recorded below.
 
-## Final same-commit evidence (source `7825b9a5adb6a9825fac81408ba98dc7a2927d3c`)
+## Previous correction evidence (source `7825b9a5adb6a9825fac81408ba98dc7a2927d3c`)
 
 All final attempts use the new exact-bounds init, the existing project lock, one worker, the single
 literal JVM argument, fresh unique directories, clean HEAD/status, complete before/after input manifests,
