@@ -21,32 +21,53 @@ import kotlin.test.*
  * and native decoding/allowances are deliberately FAKE; bytes are authored NON-AUDIO. These
  * tests cannot establish live-source, codec, hardware/background or playable offline evidence.
  */
-internal class DownloadAcquisitionRoomFixture {
+internal class DownloadAcquisitionRoomFixture(fileSystem: FileSystem = FileSystem.SYSTEM) {
     val directory: Path = downloadTestDirectory()
     val databasePath: Path = directory.resolve("library.db")
     val events = CopyOnWriteArrayList<String>()
     val leases = PhysicalRuntimeLeaseProbe(events)
     // Do not initialize files here: Room-only cold behavior must be observable in its own test.
-    val files = DownloadFiles(directory.resolve("media").toString(), FileSystem.SYSTEM, DownloadFileLeaseFactory(leases::acquire))
+    val files = DownloadFiles(directory.resolve("media").toString(), fileSystem, DownloadFileLeaseFactory(leases::acquire))
     val clock = DownloadTestClock()
     val parent = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val owners = CopyOnWriteArrayList<DownloadAcquisitionRoomOwner>()
+    val releaseOnClose = CopyOnWriteArrayList<() -> Unit>()
     private val stores = CopyOnWriteArrayList<LibraryStore>()
     private val barriers = CopyOnWriteArrayList<DownloadBarrier>()
     private val faults = mutableMapOf<LibraryStore, DownloadRoomTransactionFaults>()
 
-    fun store(): LibraryStore {
+    fun store(suppressInvalidationHints: Boolean = false): LibraryStore {
         val room = RoomLibraryPersistence(buildVeyraDatabase(Room.databaseBuilder<VeyraDatabase>(
             databasePath.toString(), factory = VeyraDatabaseConstructor::initialize)))
-        val backend = DownloadRoomTransactionFaults(room)
+        val backend = DownloadRoomTransactionFaults(room, suppressInvalidationHints)
         return LibraryStore(backend).also { stores += it; faults[it] = backend }
     }
 
     fun faults(store: LibraryStore): DownloadRoomTransactionFaults = faults.getValue(store)
-    fun owner(store: LibraryStore = store()): DownloadAcquisitionRoomOwner =
-        DownloadAcquisitionRoomOwner(this, store).also { owners += it }
+    fun owner(store: LibraryStore = store(), files: DownloadFiles = this.files,
+        schedulerClock: Clock = clock): DownloadAcquisitionRoomOwner =
+        DownloadAcquisitionRoomOwner(this, store, files, schedulerClock).also { owners += it }
 
     fun barrier(): DownloadBarrier = DownloadBarrier().also { barriers += it }
+
+    fun advance(ms: Long) = clock.advance(ms)
+
+    suspend fun join(owner: DownloadAcquisitionRoomOwner, id: String): PhysicalDownloadJoin =
+        assertNotNull(owner.repository.physicalDownload(id))
+
+    suspend fun awaitJob(owner: DownloadAcquisitionRoomOwner, id: String,
+        predicate: (PhysicalDownloadJoin) -> Boolean): PhysicalDownloadJoin = withTimeout(15_000) {
+        var value = join(owner, id)
+        while (!predicate(value)) { delay(10); value = join(owner, id) }
+        value
+    }
+
+    /** Accepted immutable intent that has not started a native/source execution yet. */
+    suspend fun queued(owner: DownloadAcquisitionRoomOwner, label: String = newEntityId("authored-queued"),
+        video: String = "LMNOPQRSTUV"): String {
+        val accepted = acceptNeutral(owner, label, video)
+        return enqueue(owner, accepted)
+    }
 
     suspend fun awaitCondition(message: String = "Authored condition did not become true", predicate: suspend () -> Boolean) {
         withTimeout(15_000) {
@@ -111,6 +132,64 @@ internal class DownloadAcquisitionRoomFixture {
         return id to accepted
     }
 
+    /**
+     * Durable pending state produced by ONE actual typed failing transfer, never a row seed.
+     * The retry deadline is the exact bounded value published by the real canonical finish.
+     */
+    suspend fun runtimeRetry(owner: DownloadAcquisitionRoomOwner, retryAfterMs: Long = 2_000,
+        label: String = newEntityId("authored-retry-parent"), video: String = "LMNOPQRSTUV"):
+        Pair<String, AcquisitionRecord> {
+        val accepted = acceptNeutral(owner, label, video)
+        val id = enqueue(owner, accepted)
+        val originalTransfer = owner.gateway.transfer
+        owner.gateway.transfer = { prepared, path, _ ->
+            Files.write(Path.of(path), authoredBytes)
+            throw VeyraException(AppFailure(FailureCode.RATE_LIMITED, "authored_retry_setup", retryAfterMs = retryAfterMs))
+        }
+        owner.coordinator.start(DownloadActivation.DURABLE_WORK)
+        awaitState(owner.store) {
+            it.physicalDownloads[id]?.let { job ->
+                job.status == DownloadStatus.WAITING_NETWORK && job.leaseOwner == null && job.activeAttemptId == null &&
+                    job.failure?.code == FailureCode.RATE_LIMITED && job.nextRetryEpochMs != null
+            } == true
+        }
+        idle(owner)
+        owner.gateway.transfer = originalTransfer
+        return id to accepted
+    }
+
+    /**
+     * Authored canonical foreign/crash setup under real slot+generation locks; NOT an execution
+     * proof. Releasing the returned physical locks without a Room finish models process loss.
+     */
+    suspend fun foreignClaim(owner: DownloadAcquisitionRoomOwner, id: String,
+        leaseDurationMs: Long = 60_000, bytes: ByteArray = authoredBytes): DownloadExecutorForeignClaim {
+        files.initialize()
+        val before = assertNotNull(owner.repository.physicalDownload(id))
+        val attemptId = newEntityId("authored-foreign-attempt")
+        val part = files.part(before.job.producer.subjectId.value, attemptId)
+        val slot = assertNotNull(files.tryTransferSlot(1))
+        val pathLease = try { assertNotNull(files.tryLeasePaths(listOf(part.toString()))) }
+            catch (failure: Throwable) { slot.close(); throw failure }
+        try {
+            val claimed = assertIs<PhysicalDownloadCommit.Committed<ClaimedPhysicalDownload>>(
+                owner.repository.claimPhysicalDownloadAttempt(ClaimPhysicalDownloadAttempt(id, before.job.producer,
+                    before.job.ownershipGeneration, attemptId, "authored-foreign-owner", clock.epochMs(), leaseDurationMs,
+                    part.toString()))).value
+            assertIs<PhysicalDownloadCommit.Committed<PhysicalDownloadJoin>>(owner.repository.selectPhysicalDownloadRepresentation(
+                SelectPhysicalDownloadRepresentation(claimed.fence, authoredRepresentation, 1, null, null, clock.epochMs())))
+            files.prepareStagingPath(part.toString())
+            Files.write(Path.of(part.toString()), bytes)
+            assertIs<PhysicalDownloadCommit.Committed<PhysicalDownloadJoin>>(owner.repository.heartbeatPhysicalDownload(
+                HeartbeatPhysicalDownload(claimed.fence, clock.epochMs(), leaseDurationMs, bytes.size.toLong(), null)))
+            return DownloadExecutorForeignClaim(claimed.fence, part.toString(), slot, pathLease).also { claim ->
+                releaseOnClose += { claim.releasePhysicalAsAuthoredCrash() }
+            }
+        } catch (failure: Throwable) {
+            pathLease.close(); slot.close(); throw failure
+        }
+    }
+
     /** Real immutable observation/snapshot/scope graph; only the supplied source facts are authored. */
     suspend fun batch(owner: DownloadAcquisitionRoomOwner, count: Int = 1,
         mode: PlaybackControlsMode = PlaybackControlsMode.PODCAST): DownloadBatch {
@@ -146,6 +225,7 @@ internal class DownloadAcquisitionRoomFixture {
 
     suspend fun close() {
         barriers.forEach(DownloadBarrier::release)
+        releaseOnClose.forEach { it() }
         leases.beforeClose = { _, _ -> }
         faults.values.forEach { it.beforeCommit = { _, _ -> } }
         owners.forEach { owner ->
@@ -169,7 +249,8 @@ internal class DownloadAcquisitionRoomFixture {
     }
 }
 
-internal class DownloadAcquisitionRoomOwner(val fixture: DownloadAcquisitionRoomFixture, val store: LibraryStore) {
+internal class DownloadAcquisitionRoomOwner(val fixture: DownloadAcquisitionRoomFixture, val store: LibraryStore,
+    val files: DownloadFiles = fixture.files, schedulerClock: Clock = fixture.clock) {
     val events get() = fixture.events
     val repository = DownloadRoomRepositoryFaults(store.acquisition)
     val selector = DownloadRoomSelectionGateway(events)
@@ -191,30 +272,71 @@ internal class DownloadAcquisitionRoomOwner(val fixture: DownloadAcquisitionRoom
     val materializationEvidence = DownloadMaterializationEvidence(store.transactionOwner)
     val dependencies = DownloadAcquisitionDependencies(repository, gateway, localValidator, { beforeDelete(it) },
         { beforeAdoption(it) }, { coverageChecks.incrementAndGet(); admission() }, acquisition, batches, materializationEvidence)
-    val coordinator = DownloadCoordinator(store, fixture.files,
-        AppSourceResolver(store, fixture.files, legacyValidator, legacy, fixture.clock, materializationEvidence), legacy, legacyValidator,
-        EngineCapabilities(), fixture.parent, gate, fixture.clock, pollingMs = 30, leaseDurationMs = 5_000,
+    val coordinator = DownloadCoordinator(store, files,
+        AppSourceResolver(store, files, legacyValidator, legacy, schedulerClock, materializationEvidence), legacy, legacyValidator,
+        EngineCapabilities(), fixture.parent, gate, schedulerClock, pollingMs = 30, leaseDurationMs = 5_000,
         heartbeatMs = 100, networkState = network, acquisitionDependencies = dependencies)
     val adapter = AcquisitionDownloadAdapter(repository, acquisition, coordinator.acquisitionExecutor)
 }
 
 /** Both interfaces delegate to REAL Room. Transform faults happen INSIDE the rollback boundary. */
-internal class DownloadRoomTransactionFaults(private val room: RoomLibraryPersistence) :
+internal class DownloadRoomTransactionFaults(private val room: RoomLibraryPersistence,
+    private val suppressInvalidationHints: Boolean = false) :
     LibraryPersistence by room, AcquisitionPersistence by room {
     @Volatile var beforeCommit: (AcquisitionGraph, AcquisitionGraph) -> Unit = { _, _ -> }
+    @Volatile var afterRead: suspend (AcquisitionGraph) -> Unit = { }
+    override fun changes(): kotlinx.coroutines.flow.Flow<Unit> =
+        if (suppressInvalidationHints) kotlinx.coroutines.flow.emptyFlow() else room.changes()
+    override suspend fun readAcquisitionGraph(): AcquisitionGraph {
+        val actual = room.readAcquisitionGraph()
+        afterRead(actual)
+        return actual
+    }
     override suspend fun <T> transactAcquisition(transform: (AcquisitionGraph) -> AcquisitionMutation<T>): AcquisitionTransactionResult<T> =
         room.transactAcquisition { before -> transform(before).also { beforeCommit(before, it.graph) } }
+    fun clearFaults() { beforeCommit = { _, _ -> }; afterRead = { } }
 }
 
 /** Deliberately faulty returned-port seams; durable claim/finish still use canonical real Room. */
 internal class DownloadRoomRepositoryFaults(private val real: AcquisitionLibraryRepository) : AcquisitionLibraryRepository by real {
+    val claimCalls = CopyOnWriteArrayList<ClaimPhysicalDownloadAttempt>()
+    val finishCalls = CopyOnWriteArrayList<FinishPhysicalDownloadAttempt>()
+    val maintenanceFinishCalls = CopyOnWriteArrayList<FinishPhysicalDownloadMaintenance>()
     @Volatile var afterAttemptClaim: (PhysicalDownloadCommit<ClaimedPhysicalDownload>) -> PhysicalDownloadCommit<ClaimedPhysicalDownload> = { it }
     @Volatile var beforeAttemptFinish: () -> Unit = { }
-    override suspend fun claimPhysicalDownloadAttempt(command: ClaimPhysicalDownloadAttempt): PhysicalDownloadCommit<ClaimedPhysicalDownload> =
-        afterAttemptClaim(real.claimPhysicalDownloadAttempt(command))
+    @Volatile var afterAttemptClaimHook: suspend (ClaimPhysicalDownloadAttempt, PhysicalDownloadCommit<ClaimedPhysicalDownload>) -> Unit = { _, _ -> }
+    @Volatile var beforeAttemptFinishHook: suspend (FinishPhysicalDownloadAttempt) -> Unit = { }
+    @Volatile var afterAttemptFinishHook: (FinishPhysicalDownloadAttempt, PhysicalDownloadCommit<PhysicalDownloadJoin>) -> Unit = { _, _ -> }
+    @Volatile var beforeMaintenanceFinishHook: suspend (FinishPhysicalDownloadMaintenance) -> Unit = { }
+    @Volatile var afterMaintenanceFinishHook: (FinishPhysicalDownloadMaintenance, PhysicalDownloadCommit<PhysicalDownloadJoin>) -> Unit = { _, _ -> }
+    @Volatile var afterPrepareHook: (PreparePhysicalDownloadFinalization, PhysicalDownloadCommit<PhysicalDownloadJoin>) -> Unit = { _, _ -> }
+    @Volatile var afterPublishHook: (PublishPhysicalDownloadFinalization, PhysicalDownloadCommit<PhysicalDownloadJoin>) -> Unit = { _, _ -> }
+    override suspend fun claimPhysicalDownloadAttempt(command: ClaimPhysicalDownloadAttempt): PhysicalDownloadCommit<ClaimedPhysicalDownload> {
+        claimCalls += command
+        val result = afterAttemptClaim(real.claimPhysicalDownloadAttempt(command))
+        afterAttemptClaimHook(command, result)
+        return result
+    }
     override suspend fun finishPhysicalDownloadAttempt(command: FinishPhysicalDownloadAttempt): PhysicalDownloadCommit<PhysicalDownloadJoin> {
+        finishCalls += command
         beforeAttemptFinish()
-        return real.finishPhysicalDownloadAttempt(command)
+        beforeAttemptFinishHook(command)
+        return real.finishPhysicalDownloadAttempt(command).also { afterAttemptFinishHook(command, it) }
+    }
+    override suspend fun finishPhysicalDownloadMaintenance(command: FinishPhysicalDownloadMaintenance): PhysicalDownloadCommit<PhysicalDownloadJoin> {
+        maintenanceFinishCalls += command
+        beforeMaintenanceFinishHook(command)
+        return real.finishPhysicalDownloadMaintenance(command).also { afterMaintenanceFinishHook(command, it) }
+    }
+    override suspend fun preparePhysicalDownloadFinalization(command: PreparePhysicalDownloadFinalization): PhysicalDownloadCommit<PhysicalDownloadJoin> =
+        real.preparePhysicalDownloadFinalization(command).also { afterPrepareHook(command, it) }
+    override suspend fun publishPhysicalDownloadFinalization(command: PublishPhysicalDownloadFinalization): PhysicalDownloadCommit<PhysicalDownloadJoin> =
+        real.publishPhysicalDownloadFinalization(command).also { afterPublishHook(command, it) }
+    fun clearFaults() {
+        afterAttemptClaim = { it }; beforeAttemptFinish = { }
+        afterAttemptClaimHook = { _, _ -> }; beforeAttemptFinishHook = { }; afterAttemptFinishHook = { _, _ -> }
+        beforeMaintenanceFinishHook = { }; afterMaintenanceFinishHook = { _, _ -> }
+        afterPrepareHook = { _, _ -> }; afterPublishHook = { _, _ -> }
     }
 }
 
@@ -241,8 +363,9 @@ internal class DownloadRoomSelectionGateway(private val events: MutableList<Stri
         error("Download selection must not inspect/reselect an accepted member")
 }
 
-internal fun acquisitionDownloadRoomCase(block: suspend DownloadAcquisitionRoomFixture.() -> Unit) = runBlocking {
-    val fixture = DownloadAcquisitionRoomFixture()
+internal fun acquisitionDownloadRoomCase(fileSystem: FileSystem = FileSystem.SYSTEM,
+    block: suspend DownloadAcquisitionRoomFixture.() -> Unit) = runBlocking {
+    val fixture = DownloadAcquisitionRoomFixture(fileSystem)
     try { withTimeout(60_000) { fixture.block() }; fixture.assertSQLite() }
     finally { withContext(NonCancellable) { fixture.close() } }
 }
