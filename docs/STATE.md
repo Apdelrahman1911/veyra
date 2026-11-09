@@ -9,9 +9,14 @@ Run `42628939368` at `7b91522` has a successful Android lane. Linux passed all
 next missing hosted library, `libEGL.so.1`. The lead corrected the scoped helper
 to provide the complete external MPV dependency chain, verified it in a private
 minimal root without VPS graphics/audio fallbacks, and passed all 10 native
-audio/crossfade tests plus seven helper tests locally. Windows/macOS results are
-still pending; batch the next dispatch after inspecting them. See
-`verification/task-b-linux-native-closure-42628939368.md`. No hosted successor or
+audio/crossfade tests plus seven helper tests locally. Windows and macOS arm64
+then passed 1,215 shared / 484 desktop tests (one Linux-only platform skip each).
+ARM built its DMG. Windows packaging exposed an AWK syntax error after configure;
+explicit Make/Bash selection, an early upstream-AWK preflight and fuller bounded
+AWK diagnostics pass 66 affected Python checks locally. Windows runtime remains
+unverified; macOS x64 is still running. Batch the next dispatch after its result.
+See `verification/task-b-linux-native-closure-42628939368.md` and
+`verification/task-b-windows-make-shell-42628939368.md`. No hosted successor or
 release acceptance is claimed.
 
 

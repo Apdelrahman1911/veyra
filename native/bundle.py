@@ -44,7 +44,7 @@ DIAGNOSTIC_MAX_BYTES = 8 * 1024
 _DIAGNOSTIC_LINE = re.compile(
     r"(?i)(?:\berror\b|\bfatal\b|cmake error|undefined (?:reference|symbol)|"
     r"\bld:\s|\bcollect2:\s|ninja: build stopped|make(?:\[\d+\])?: \*\*\*|"
-    r"clang(?:-\d+)?: error|gcc: error|"
+    r"clang(?:-\d+)?: error|gcc: error|(?:g?awk)(?:\.exe)?: cmd\. line:\d+:|"
     r"\b(?:failed|unable|unsupported|impossible)\b|\bunknown option\b|\bcannot find\b|"
     r"\bno such file or directory\b|\bcommand not found\b|"
     r"\bnot recognized as an internal or external command\b|"

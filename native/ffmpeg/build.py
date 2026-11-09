@@ -215,12 +215,19 @@ def require_release(source: Path) -> None:
         raise ValueError("Unexpected FFmpeg source VERSION override")
 
 
-def make_command(target: str, jobs: str) -> list[str]:
+def make_command(target: str, jobs: str, *, bash: str | None = None) -> list[str]:
     if jobs not in ("1", "2"):
         raise ValueError("Native build jobs must be one or two")
     # Otherwise upstream version.sh finds the enclosing Veyra Git checkout,
     # because the official codeload archive does not include its own .git.
-    return ["make", "-j" + jobs, "REVISION=" + SOURCE_VERSION, executable_name(target)]
+    command = ["make", "-j" + jobs, "REVISION=" + SOURCE_VERSION]
+    if target == "windows-x64":
+        if not bash or any(char in bash for char in "\r\n\0"):
+            raise ValueError("An explicit existing Bash is required for Windows make recipes")
+        # A native Windows make must use the same Bash as configure. Otherwise
+        # cmd/default-shell parsing can damage MSVC dependency AWK quoting.
+        command += ["SHELL=" + bash.replace("\\", "/"), ".SHELLFLAGS=-c"]
+    return [*command, executable_name(target)]
 
 
 def build_environment(target: str, epoch: int, inherited: dict[str, str]) -> dict[str, str]:
@@ -231,9 +238,41 @@ def build_environment(target: str, epoch: int, inherited: dict[str, str]) -> dic
     # injection, or the upstream version script's ambient shell variables.
     for name in ("CFLAGS", "CPPFLAGS", "CXXFLAGS", "LDFLAGS", "CC", "CXX", "LD", "AR", "FFREPORT",
                  "MAKEFLAGS", "GNUMAKEFLAGS", "MFLAGS", "MAKEOVERRIDES", "MAKEFILES",
-                 "REVISION", "EXTRA_VERSION", "revision", "git_hash"):
+                 "REVISION", "EXTRA_VERSION", "revision", "git_hash", "SHELL", "MAKESHELL"):
         env.pop(name, None)
     return env
+
+
+# Exact MSVC dependency filter from pinned FFmpeg n8.0.1 configure (line 5193).
+WINDOWS_DEPENDENCY_AWK = r'/including/ { sub(/^.*file: */, ""); gsub(/\\/, "/"); if (!match($$0, / /)) print "$@:", $$0 }'
+
+
+def windows_make_shell(env: dict[str, str]) -> str:
+    trusted = env.get("VEYRA_TRUSTED_BASH")
+    resolved = shutil.which("bash", path=env.get("PATH"))
+    if (not trusted or not resolved or not Path(trusted).is_file()
+            or Path(trusted).resolve() != Path(resolved).resolve()):
+        raise ValueError("The existing scoped Bash must resolve exactly before Windows make")
+    return trusted
+
+
+def verify_windows_make_shell(directory: Path, env: dict[str, str], bash: str) -> None:
+    # Fail before the lengthy configure if this host's native make/Bash/AWK
+    # combination cannot preserve upstream's single quotes, backslashes and $$.
+    recipe = directory / "veyra-shell-probe.mk"
+    output = directory / "veyra-shell-probe.out"
+    recipe.write_bytes((
+        ".PHONY: veyra-shell-probe\nveyra-shell-probe:\n"
+        "\t@printf '%s\\n' 'Note: including file: C:\\veyra-authored\\header.h' "
+        "'Note: including file: C:\\Program Files\\ignored.h' | awk '"
+        + WINDOWS_DEPENDENCY_AWK + "' > veyra-shell-probe.out\n"
+    ).encode("ascii"))
+    command = [*make_command("windows-x64", "1", bash=bash)[:-1],
+               "-f", recipe.name, "veyra-shell-probe"]
+    run(command, directory, env, 30, directory / "make-shell-probe.log")
+    if output.read_text(encoding="ascii") != "veyra-shell-probe: C:/veyra-authored/header.h\n":
+        raise ValueError("Windows make/Bash/AWK dependency preflight produced invalid output")
+    print("Windows make/Bash/AWK dependency preflight passed.")
 
 
 def write_sidecar(path: Path, digest: str) -> None:
@@ -429,6 +468,10 @@ def build(source_argument: Path | None, jobs: str, *, verify_only: bool = False)
     build_directory = source if target == "windows-x64" else work / "build"
     build_directory.mkdir(exist_ok=target == "windows-x64")
     env = build_environment(target, epoch, dict(os.environ))
+    bash = None
+    if target == "windows-x64":
+        bash = windows_make_shell(env)
+        verify_windows_make_shell(work, env, bash)
     configure = expected["configure"]
     started = time.monotonic()
     log = work / "build.log"
@@ -438,7 +481,7 @@ def build(source_argument: Path | None, jobs: str, *, verify_only: bool = False)
     configure_seconds = 1200 if target == "windows-x64" else 600
     run(["bash", (source / "configure").as_posix(), *configure], build_directory, env, configure_seconds, log)
     name = executable_name(target)
-    run(make_command(target, jobs), build_directory, env, 1800, log)
+    run(make_command(target, jobs, bash=bash), build_directory, env, 1800, log)
     executable = build_directory / name
     if not executable.is_file() or not 0 < executable.stat().st_size <= MAX_EXECUTABLE_BYTES:
         raise ValueError("Native FFmpeg executable is missing or exceeds the package bound")

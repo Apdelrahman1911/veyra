@@ -305,6 +305,17 @@ class NativeBundleTest(unittest.TestCase):
         self.assertIn("configure sentinel", record["previousReports"][0]["lines"][0])
         self.assertIn("probe sentinel", record["previousReports"][1]["lines"][0])
 
+    def test_awk_diagnostic_retains_program_line_and_filters_sensitive_context(self):
+        text = ('awk: cmd. line:1: { authored_safe_program }\n'
+                'awk: cmd. line:1:                         ^ syntax error\n'
+                'awk: cmd. line:1: token=authored_private\n'
+                '  ^ syntax error\n')
+        lines, suppressed, truncated = BUNDLE._extract_diagnostics(text)
+        self.assertIn('authored_safe_program', "\n".join(lines))
+        self.assertNotIn('authored_private', "\n".join(lines))
+        self.assertEqual(2, suppressed)
+        self.assertFalse(truncated)
+
     def test_configure_report_excludes_shell_dump_and_keeps_last_actual_probe(self):
         log = self.inputs / "config.log"
         raw = ("PRIVATE_VALUE='authored private environment'\n"

@@ -48,6 +48,35 @@ class ProductionFfmpegBuildTest(unittest.TestCase):
         self.assertIn(b"authored-relative-source-ok", good.stdout)
         self.assertIn('build_directory = source if target == "windows-x64"', Path(BUILD.__file__).read_text())
 
+    def test_windows_dependency_recipe_runs_the_upstream_awk_filter_with_explicit_bash(self):
+        bash = shutil.which("bash")
+        if bash is None or shutil.which("make") is None or shutil.which("awk") is None:
+            self.skipTest("Existing Bash/make/AWK required")
+        # Real make + Bash + AWK, authored MSVC include output; no compiler.
+        BUILD.verify_windows_make_shell(self.work, dict(os.environ), bash)
+        self.assertEqual("veyra-shell-probe: C:/veyra-authored/header.h\n",
+                         (self.work / "veyra-shell-probe.out").read_text())
+
+    def test_windows_dependency_probe_refuses_incorrect_output(self):
+        (self.work / "veyra-shell-probe.out").write_text("authored damaged dependency\n")
+        with patch.object(BUILD, "run") as run, self.assertRaisesRegex(ValueError, "preflight"):
+            BUILD.verify_windows_make_shell(self.work, {}, "authored-existing-bash")
+        self.assertEqual(30, run.call_args.args[3])
+        self.assertEqual(self.work / "make-shell-probe.log", run.call_args.args[4])
+
+    def test_windows_make_shell_requires_the_exact_scoped_executable(self):
+        bash = shutil.which("bash")
+        if bash is None:
+            self.skipTest("Existing Bash required")
+        env = dict(os.environ, VEYRA_TRUSTED_BASH=bash)
+        self.assertEqual(bash, BUILD.windows_make_shell(env))
+        with patch.object(BUILD.shutil, "which", return_value=str(self.work / "different-bash")), \
+                self.assertRaises(ValueError):
+            BUILD.windows_make_shell(env)
+        env.pop("VEYRA_TRUSTED_BASH")
+        with self.assertRaises(ValueError):
+            BUILD.windows_make_shell(env)
+
     def test_inner_compile_failure_reports_the_actual_log_without_leaking_or_masking(self):
         log = self.work / "build.log"
         original = (b"authored.c:9: error: authored compiler discriminator\n"
@@ -191,7 +220,11 @@ class ProductionFfmpegBuildTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "VERSION"):
             BUILD.require_release(source)
         self.assertEqual(["make", "-j1", "REVISION=8.0.1", "ffmpeg"], BUILD.make_command("linux-x64", "1"))
-        self.assertEqual(["make", "-j2", "REVISION=8.0.1", "ffmpeg.exe"], BUILD.make_command("windows-x64", "2"))
+        self.assertEqual(["make", "-j2", "REVISION=8.0.1", "SHELL=C:/Program Files/Git/usr/bin/bash.exe",
+                          ".SHELLFLAGS=-c", "ffmpeg.exe"],
+                         BUILD.make_command("windows-x64", "2", bash=r"C:\Program Files\Git\usr\bin\bash.exe"))
+        with self.assertRaises(ValueError):
+            BUILD.make_command("windows-x64", "1")
         with self.assertRaises(ValueError):
             BUILD.make_command("linux-x64", "99")
         expected = BUILD.identity("linux-x64", [], self.work)
@@ -201,7 +234,7 @@ class ProductionFfmpegBuildTest(unittest.TestCase):
     def test_build_environment_removes_ambient_make_and_revision_injection(self):
         forbidden = ("CFLAGS", "CPPFLAGS", "CXXFLAGS", "LDFLAGS", "CC", "CXX", "LD", "AR", "FFREPORT",
                      "MAKEFLAGS", "GNUMAKEFLAGS", "MFLAGS", "MAKEOVERRIDES", "MAKEFILES",
-                     "REVISION", "EXTRA_VERSION", "revision", "git_hash")
+                     "REVISION", "EXTRA_VERSION", "revision", "git_hash", "SHELL", "MAKESHELL")
         original = {**dict.fromkeys(forbidden, "authored override"), "PATH": "existing tools", "LIB": "existing SDK"}
         environment = BUILD.build_environment("macos-arm64", 1234, original)
         self.assertTrue(all(key not in environment for key in forbidden))
