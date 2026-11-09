@@ -9,6 +9,7 @@ import dev.veyra.playback.AssetValidation
 import dev.veyra.playback.LocalMediaValidationInput
 import dev.veyra.playback.LocalMediaValidator
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.IO
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext

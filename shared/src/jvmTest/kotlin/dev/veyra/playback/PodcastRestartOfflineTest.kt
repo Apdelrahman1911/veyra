@@ -116,6 +116,10 @@ class PodcastRestartOfflineTest {
         Files.newInputStream(databasePath).use {
             assertEquals("SQLite format 3\u0000", it.readNBytes(16).decodeToString())
         }
+        // Both controllers own children of the same fixture parent. Close the reopened one before
+        // fixture teardown cancels that parent, or a late child exception can be attributed to the
+        // next test as UncaughtExceptionsBeforeTest.
+        controller.close()
     }
 
     private fun DownloadAcquisitionRoomFixture.playbackController(owner: DownloadAcquisitionRoomOwner,

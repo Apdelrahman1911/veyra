@@ -118,10 +118,12 @@ class ScopedToolingTests(unittest.TestCase):
     def test_arguments_with_spaces_survive_launcher(self) -> None:
         result = subprocess.run(
             [BASH, str(TOOLS / "dev.sh"), sys.executable, "-B", "-c",
-             "import sys; print(repr(sys.argv[1:]))", "a b", "Arabic ڤيرا", "--literal"],
-            check=True, text=True, capture_output=True,
+             "import json, sys; print(json.dumps(sys.argv[1:], ensure_ascii=True))",
+             "a b", "Arabic ڤيرا", "--literal"],
+            text=True, capture_output=True,
         )
-        self.assertEqual(result.stdout.strip(), repr(["a b", "Arabic ڤيرا", "--literal"]))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), ["a b", "Arabic ڤيرا", "--literal"])
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "Linux guarded display context")
     def test_owned_display_authentication_survives_nested_scoped_wrappers(self) -> None:

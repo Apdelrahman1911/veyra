@@ -7,6 +7,7 @@ import okio.FileSystem
 import okio.Path
 import okio.Path.Companion.toPath
 import okio.buffer
+import okio.use
 
 internal interface DatabaseLease { fun release() }
 internal expect fun acquireDatabaseLease(path: String): DatabaseLease

@@ -35,7 +35,10 @@ val prepareDesktopNativeResources by tasks.registering(Exec::class) {
     group = "distribution"
     description = "Build/verify source-pinned desktop helpers and stage exact classpath resources"
     workingDir(rootProject.projectDir)
-    commandLine("bash", rootProject.file("scripts/dev.sh").absolutePath, "python3", "-B",
+    // Resolve the exact scoped Git Bash on Windows; a bare bash can select the WSL shim.
+    val trustedBash = providers.environmentVariable("VEYRA_TRUSTED_BASH").orNull
+        ?: if (nativeOs == "windows") error("Run through scripts/gradle.sh to select Git Bash") else "bash"
+    commandLine(trustedBash, rootProject.file("scripts/dev.sh").absolutePath, "python3", "-B",
         rootProject.file("native/bundle.py").absolutePath, "--target", nativePlatform)
     inputs.files(rootProject.fileTree("native") { exclude("**/__pycache__/**") })
     inputs.file(rootProject.file("LICENSE"))

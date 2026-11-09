@@ -63,12 +63,14 @@ struct CallbackState {
 };
 
 bool mainQueue(dispatch_block_t work) noexcept {
-    __block bool succeeded = false;
+    bool succeeded = false;
+    // guarded() and dispatch_sync both finish before this stack storage expires.
+    bool* const result = &succeeded;
     const bool dispatched = attempt([&] {
         // Exceptions must be caught ON the dispatch target. A caller-thread @try does
         // not protect an Objective-C/C++ exception unwinding from a dispatch_sync block.
         dispatch_block_t guarded = ^{
-            succeeded = attempt([&] { @autoreleasepool { work(); } });
+            *result = attempt([&] { @autoreleasepool { work(); } });
         };
         if ([NSThread isMainThread]) guarded();
         else dispatch_sync(dispatch_get_main_queue(), guarded);

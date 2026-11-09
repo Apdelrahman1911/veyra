@@ -69,7 +69,8 @@ jobs:
         run: scripts/checkout-submodule.sh
       - name: Run bounded desktop tests
         id: desktop_tests
-        timeout-minutes: 20
+        # The Intel macOS cold build reached desktop test compilation at 20 min.
+        timeout-minutes: 35
         continue-on-error: true
         run: |
           if [ "$RUNNER_OS" = macOS ]; then

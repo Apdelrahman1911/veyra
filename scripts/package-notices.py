@@ -320,6 +320,11 @@ def archive_notices(path: Path, collect_documents: bool = True) -> tuple[list[di
                 raise NoticeError("Duplicate production archive entry")
             names.add(name)
             kind = stat.S_IFMT(item.external_attr >> 16)
+            # Older Maven ZIP writers emit an all-ones Unix mode for empty
+            # directory placeholders. No bytes are read/extracted for these.
+            # Accept only that exact marker, never links or special-file modes.
+            if item.external_attr == 0xFFFF0010 and item.is_dir() and item.file_size == 0:
+                kind = stat.S_IFDIR
             if kind not in (0, stat.S_IFREG, stat.S_IFDIR) or item.flag_bits & 1:
                 raise NoticeError("Linked/special/encrypted production archive entry")
             if item.is_dir():

@@ -40,7 +40,10 @@ class DesktopCrossfadeTest {
     private fun config(): DesktopRuntimeConfig {
         val root = System.getenv("VEYRA_PROJECT_ROOT")?.let(Path::of)
             ?: generateSequence(Path.of("").toAbsolutePath()) { it.parent }.first { Files.exists(it.resolve("settings.gradle.kts")) }
-        val directory = root.resolve(".work/desktop-audio/crossfade-tests")
+        // macOS rejects a second copy of the bundled libmpv (duplicate Swift/ObjC classes) when
+        // one JVM loads it through two different test data directories. Share the already-used
+        // native-test directory so every desktop test in this worker resolves one dylib path.
+        val directory = root.resolve(".work/desktop-audio/kotlin-tests")
         Files.createDirectories(directory)
         javaClass.getResourceAsStream("/dev/veyra/desktop/tone.mp3")!!.use { Files.copy(it, directory.resolve("tone.mp3"), REPLACE_EXISTING) }
         return DesktopRuntimeConfig(directory, silentTestOutput = true)

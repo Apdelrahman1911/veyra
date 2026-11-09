@@ -4,6 +4,15 @@ Updated 2026-11-07 UTC. Formal Goal tool currently reports **blocked/incomplete*
 
 ## Current Task B continuation — 2026-11-09
 
+Latest manual retry `42563893628` at `e7cfb5c` finished red. Android APK/AAB and
+Linux installer bytes were retained, downloaded and hash/provenance verified;
+this is package generation, not installation or release acceptance. PR27 now
+batches shared Native portability, Windows Bash, macOS native/retention/locale,
+canonical desktop fixtures and typed listening-proof repairs. One focused
+committed-source gate precedes the next hosted retry. Full details and retained
+failures are in `verification/task-b-build-retention-preparation.md`.
+
+
 This entry supersedes historical execution status below. Task A's shared/Room/UI
 scope is lead-accepted. PR27 remains the single integration branch; final native,
 five-platform packaging, installation/audio, signing and distribution gates remain

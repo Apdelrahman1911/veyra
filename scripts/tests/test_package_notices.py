@@ -370,6 +370,21 @@ class PackageNoticeTests(unittest.TestCase):
             write(target, archive(items))
             with self.subTest(index=index), self.assertRaises(NOTICES.NoticeError): NOTICES.archive_notices(target)
 
+    def test_empty_maven_directory_mode_sentinel_does_not_hide_special_files(self):
+        target = self.root / ".work/fixtures/archive.jar"
+        marker = zipfile.ZipInfo("META-INF/maven/")
+        marker.create_system = 3
+        marker.external_attr = 0xFFFF0010
+        write(target, archive([(marker, b""), ("META-INF/LICENSE", self.mit)]))
+        NOTICES.archive_notices(target)
+        for name, payload in (("META-INF/file", b""), ("META-INF/maven/", b"hidden")):
+            invalid = zipfile.ZipInfo(name)
+            invalid.create_system = 3
+            invalid.external_attr = 0xFFFF0010
+            write(target, archive([(invalid, payload)]))
+            with self.subTest(name=name), self.assertRaises(NOTICES.NoticeError):
+                NOTICES.archive_notices(target)
+
     def test_embedded_test_classes_in_regular_and_multi_release_jars_are_rejected(self):
         target = self.root / ".work/fixtures/archive.jar"
         for name in ("junit/Test.class", "org/junit/Test.class", "org/opentest4j/Test.class", "org/hamcrest/Test.class",

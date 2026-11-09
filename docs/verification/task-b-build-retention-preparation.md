@@ -1,10 +1,55 @@
 # Task B build, retention and five-platform preparation
 
-Status: **retention source reviewed; production dispatch authorized and next. Canary verified;
-no production package, release publication, signing or Task B acceptance is claimed.** This note is
-the current-candidate Task B operating record. The older
-`docs/verification/five-platform-preparation.md` remains historical source research; its Task A
-dependency-gate text is superseded by the lead acceptance at `9c8e97c`.
+Status: **production retry `42563893628` completed with failures; Android and Linux
+package bytes were retained and independently verified. Platform repairs and typed proof
+integration are under focused validation in PR27. No installation, physical-audio,
+signing, publication or Task B acceptance is claimed.** This note is the current-candidate
+Task B operating record. Older preparation and execution entries remain historical.
+
+## Hosted retry and batched correction — 2026-11-09
+
+The manual run used exact source `e7cfb5c9ec34d9e07587e116294d1675a2454a46`.
+Its jobs ran even though PR27 reported no checks. Android assembled debug APK,
+unsigned release APK and release AAB; Linux generated a 112,854,142-byte Debian
+installer. The lead independently downloaded all ten assets across Android,
+Linux and the Windows diagnostic lane and verified exact sizes, SHA-256 hashes,
+commit/pin/schema identities and draft/prerelease/unpublished state. Draft release
+IDs are Android `438758148`, Linux `438758003`, Windows `438757294`. All three
+lane outcomes remain failed. Fresh-runner readback verified available lanes and
+correctly failed when Apple lane releases were missing. Local evidence is
+`.work/verification/task-b-hosted-fixes/hosted-retry-42563893628/`.
+
+The same PR now batches the returned corrections:
+
+- Explicit Native coroutine IO, okio `use` and common Volatile imports; replace
+  JVM-only ForwardingSink with the equivalent common Sink delegation. No
+  dispatcher, storage-error, schema or pin policy changes.
+- Pass the scoped Git Bash executable directly to Gradle's native Exec task;
+  use an ASCII JSON transport to test unchanged Arabic process arguments.
+- Replace the invalid Objective-C `__block` capture by a synchronous pointer
+  lifetime, and initialize Darwin native LC_NUMERIC to C before each libmpv
+  owner, as required by libmpv client.h. Apple execution remains pending.
+- Make optional empty retention arrays safe on macOS Bash 3. Preserve special
+  archive-entry refusal while accepting only the observed exact `0xffff0010`
+  empty Maven directory marker. Authored negatives still reject linked/special,
+  encrypted, conflicting-file and nonempty sentinel entries.
+- Close the reopened playback test controller; assert the accepted pre-activation
+  removal failure; supply exact Resume fixture authority; share one native
+  test-library path. Prior uncaught-test and duplicate-library warnings are
+  evidence; exclusive causal attribution of those failures is not established.
+- Allow 35 minutes for bounded desktop compile/tests: Intel macOS was stopped at
+  20 minutes during cold compilation, before desktop tests began. Linux GUI
+  namespace permissions remain a blocker; containment is unchanged.
+- Adapt the opt-in listening proof to the accepted typed acquisition/execution
+  ports and canonical durable Room identities. Author checks, actual raw-first
+  admission, bounded owned playback/transfer, resource drain and offline
+  zero-gateway requirements remain. See `central-proof-typed-integration.md`.
+
+The 113 targeted Python checks (73 notices, 16 tooling, 14 retention, 10 workflow)
+pass. Source-only notice `--check` remains 0 production components, 3 retained
+texts and 1 open coverage issue; this is not binary legal closure. The combined
+committed-source shared/desktop gate and hosted Apple/Windows verification are
+pending; earlier dirty proof runs are not final acceptance.
 
 ## Starting point and scope
 

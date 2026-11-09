@@ -7,6 +7,7 @@ import dev.veyra.data.room.VeyraDatabase
 import dev.veyra.data.room.buildVeyraDatabase
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.IO
 
 /** Platform factories supply only Room's platform builder; transactions/recovery stay shared. */
 fun createRoomLibraryStore(

@@ -2296,7 +2296,11 @@ class AppContainerIntegrationTest {
         fixture.app.initializeScheduling()
         fixture.app.downloads.pause(pauseJob)
         fixture.app.downloads.cancel(cancelJob)
-        fixture.app.downloads.remove(removeJob)
+        // Pre-activation remove cannot prove physical cleanup. The production contract reports
+        // BACKGROUND_RESTRICTED while durably retaining removeWhenClean for an activated owner.
+        val removeFailure = assertFailsWith<VeyraException> { fixture.app.downloads.remove(removeJob) }
+        assertEquals(FailureCode.BACKGROUND_RESTRICTED, removeFailure.failure.code)
+        assertEquals("download_owner_drain_unconfirmed", removeFailure.failure.detail)
         fun assertIntent(view: dev.veyra.data.LibraryAcquisitionView) {
             val paused = view.acquisition.physicalDownloads.getValue(pauseJob)
             assertEquals(DownloadStatus.PAUSED, paused.status)

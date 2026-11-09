@@ -28,6 +28,17 @@ internal interface MpvNative : Library {
         private val libraries = mutableMapOf<String, MpvNative>()
         // Keep the Windows directory cookie alive for the entire loaded-library lifetime.
         private val directoryCookies = mutableListOf<Pointer>()
+        private val darwinLocale by lazy { Native.load("c", DarwinNumericLocale::class.java) }
+
+        @Synchronized
+        fun initializeNumericLocale(platform: String) {
+            if (platform.startsWith("macos-")) {
+                // libmpv client.h requires LC_NUMERIC=C for mpv_create and its lifetime.
+                // Darwin locale.h defines LC_NUMERIC=4. Initialize before each owner.
+                check(darwinLocale.setlocale(4, "C") == "C") { "Could not initialize native numeric locale" }
+            }
+        }
+
         @Synchronized
         fun load(runtime: PreparedDesktopRuntime): MpvNative {
             libraries[runtime.library.toString()]?.let { return it }
@@ -42,6 +53,10 @@ internal interface MpvNative : Library {
             }
         }
     }
+}
+
+internal interface DarwinNumericLocale : Library {
+    fun setlocale(category: Int, locale: String): String?
 }
 
 internal interface WindowsLibrarySearch : com.sun.jna.win32.StdCallLibrary {

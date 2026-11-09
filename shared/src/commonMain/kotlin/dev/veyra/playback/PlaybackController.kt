@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlin.concurrent.Volatile
 import kotlin.random.Random
 
 private const val GRACEFUL_SHUTDOWN_TIMEOUT_MS = 5_000L

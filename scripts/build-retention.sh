@@ -39,9 +39,9 @@ python_args=(
   --pin "$(cat gradle/kmpyt.commit)" --schema-sha256 "$(hash_file shared/schemas/dev.veyra.data.room.VeyraDatabase/3.json)"
   --host-label "${ImageOS:-unknown}-${RUNNER_ARCH:-unknown}"
 )
-for value in "${packages[@]}"; do python_args+=(--package "$value"); done
-for value in "${directories[@]}"; do python_args+=(--directory "$value"); done
-for value in "${xml_roots[@]}"; do python_args+=(--xml-root "$value"); done
+for value in ${packages[@]+"${packages[@]}"}; do python_args+=(--package "$value"); done
+for value in ${directories[@]+"${directories[@]}"}; do python_args+=(--directory "$value"); done
+for value in ${xml_roots[@]+"${xml_roots[@]}"}; do python_args+=(--xml-root "$value"); done
 [ -z "$legal" ] || python_args+=(--legal "$legal")
 [ -z "$inventory" ] || python_args+=(--inventory "$inventory")
 [ -z "$packages_json" ] || python_args+=(--packages-json "$packages_json")
