@@ -144,7 +144,11 @@ object RoomProcessProbe {
                         connection.execSQL("PRAGMA synchronous = FULL")
                         connection.immediateTransaction {
                             database.libraryDao().writeDifference(before.toRows(), processMutation(before).copy(revision = before.revision + 1).toRows())
-                            database.libraryDao().stageQueueEntriesOrder()
+                            // Preserve the all-current-rows negative-order crash point while the
+                            // production DAO now requires exact, bounded staging identities.
+                            database.libraryDao().readQueueEntries().map { it.id }.chunked(256).forEach { ids ->
+                                database.libraryDao().stageQueueEntriesOrder(ids)
+                            }
                             Files.writeString(directory.resolve("child.signal"), "transaction")
                             awaitCancellation()
                         }

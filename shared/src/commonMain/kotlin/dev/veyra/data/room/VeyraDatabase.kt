@@ -6,7 +6,6 @@ import androidx.room.RoomDatabase
 import androidx.room.RoomDatabaseConstructor
 import androidx.room.migration.Migration
 import androidx.sqlite.SQLiteConnection
-import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import androidx.sqlite.execSQL
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -73,7 +72,7 @@ fun buildVeyraDatabase(
     builder: RoomDatabase.Builder<VeyraDatabase>,
     dispatcher: CoroutineDispatcher = Dispatchers.IO,
 ): VeyraDatabase = builder
-    .setDriver(BundledSQLiteDriver())
+    .setDriver(VeyraSQLiteDriver())
     .setQueryCoroutineContext(dispatcher)
     .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
     .addMigrations(MIGRATION_1_2)
