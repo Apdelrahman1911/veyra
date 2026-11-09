@@ -29,7 +29,7 @@ def python(code: str, *arguments: str) -> list[str]:
     return [sys.executable, "-I", "-B", "-c", code, *map(str, arguments)]
 
 
-def alive(pid: int) -> bool:
+def alive(pid: int, *, wait_ms: int = 0) -> bool:
     if os.name == "nt":
         kernel = ctypes.WinDLL("kernel32", use_last_error=True)
         kernel.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
@@ -42,7 +42,10 @@ def alive(pid: int) -> bool:
         if not handle:
             return False
         try:
-            return kernel.WaitForSingleObject(handle, 0) == 258  # WAIT_TIMEOUT
+            result = kernel.WaitForSingleObject(handle, wait_ms)
+            if result not in (0, 258):  # WAIT_OBJECT_0 / WAIT_TIMEOUT
+                raise OSError("Cannot verify authored process termination")
+            return result == 258
         finally:
             kernel.CloseHandle(handle)
     try:
@@ -52,7 +55,7 @@ def alive(pid: int) -> bool:
         return False
 
 
-class OwnedProcessTest(unittest.TestCase):
+class _OwnedProcessFixture:
     def setUp(self):
         parent = ROOT / ".work/native-owned-process-tests"
         parent.mkdir(parents=True, exist_ok=True)
@@ -90,7 +93,10 @@ class OwnedProcessTest(unittest.TestCase):
         pids = [int(value) for value in path.read_text().split()]
         self.assertTrue(pids)
         for pid in pids:
-            self.assertFalse(alive(pid), f"Owned fixture process {pid} was not awaited/reaped")
+            # Windows termination and process-object signaling are separate observations.
+            # Pin one query-only handle and bound the wait; never signal by PID.
+            self.assertFalse(alive(pid, wait_ms=2000),
+                             f"Owned fixture process {pid} was not awaited/reaped")
 
     def tree(self, path, *, exitcode=None, flood=False, detached=False):
         descendant = "import signal,time; signal.signal(signal.SIGTERM,lambda *_:None); time.sleep(60)"
@@ -102,6 +108,7 @@ class OwnedProcessTest(unittest.TestCase):
             + (f"sys.exit({exitcode})\n" if exitcode is not None else
                "while True:\n print('x'*8192,flush=True)\n" if flood else "time.sleep(60)\n"), path)
 
+class OwnedProcessTest(_OwnedProcessFixture, unittest.TestCase):
     def test_capture_combines_bounded_stdout_and_stderr(self):
         output = self.capture(python("import sys; print('authored stdout',flush=True); print('authored stderr',file=sys.stderr,flush=True)"))
         self.assertEqual(b"authored stdout\nauthored stderr\n", output.replace(b"\r\n", b"\n"))
@@ -373,6 +380,22 @@ class WindowsJobPolicyTest(unittest.TestCase):
         def kill(self): self.events.append("kill-gate")
         def wait(self, timeout): self.events.append("await-gate"); return 1
 
+    def test_windows_fixture_waits_on_a_pinned_handle_and_refuses_wait_errors(self):
+        for result, expected in ((0, False), (258, True), (0xffffffff, None)):
+            events = []
+            kernel = SimpleNamespace(
+                OpenProcess=lambda access, inherit, pid: events.append(("open", access, pid)) or 81,
+                WaitForSingleObject=lambda handle, timeout: events.append(("wait", handle, timeout)) or result,
+                CloseHandle=lambda handle: events.append(("close", handle)) or 1)
+            with self.subTest(result=result), patch.object(os, "name", "nt"), \
+                 patch.object(ctypes, "WinDLL", return_value=kernel, create=True):
+                if expected is None:
+                    with self.assertRaises(OSError):
+                        alive(123, wait_ms=2000)
+                else:
+                    self.assertEqual(expected, alive(123, wait_ms=2000))
+            self.assertEqual([("open", 0x00100000, 123), ("wait", 81, 2000), ("close", 81)], events)
+
     def test_failure_snapshot_distinguishes_completed_command_from_live_job(self):
         api = self.Api()
         api.count = 2
@@ -493,10 +516,7 @@ class WindowsJobPolicyTest(unittest.TestCase):
 
 
 @unittest.skipUnless(os.name == "nt", "Actual Windows Job Object execution is required on Windows CI")
-class WindowsActualJobTest(unittest.TestCase):
-    setUp = OwnedProcessTest.setUp
-    tearDown = OwnedProcessTest.tearDown
-    capture = OwnedProcessTest.capture
+class WindowsActualJobTest(_OwnedProcessFixture, unittest.TestCase):
 
     def test_timeout_snapshot_reports_exited_root_and_remaining_owned_child(self):
         ids = self.directory / "pids"

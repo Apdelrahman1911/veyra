@@ -4,6 +4,16 @@ Updated 2026-11-07 UTC. Formal Goal tool currently reports **blocked/incomplete*
 
 ## Current Task B continuation — 2026-11-09
 
+First short Windows probe `42669996782` at `0e5c9a8` failed before CMake:
+the new Windows test referenced a helper from the wrong class, and an existing
+termination assertion observed a fixture PID still live. Shared fixture
+inheritance corrects the missing helper; a bounded wait on a pinned Windows
+process handle replaces the instantaneous liveness observation, without changing
+production cleanup. Local process tests: 33 discovered / 31 passed / two
+Windows-only skips. The historical PID cause and CMake timeout remain unknown.
+A corrected short Windows probe is the next proof step.
+
+
 Windows-only run `42664351655` at `c149781` passed 1,216 shared / 484
 desktop tests (one Linux-only skip), then timed out exactly 180 seconds into
 session-helper CMake configuration. Compilation did not start. MSBuild no-reuse

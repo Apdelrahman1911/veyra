@@ -39,3 +39,29 @@ Local checks: **32 process tests discovered, 30 passed, 2 Windows-only skips**;
 probe's proof step. The initial process-test syntax error and corrected result
 are both retained. Evidence is under
 `.work/verification/task-b-windows-42664351655/`.
+
+
+## First probe correction
+
+Probe `42669996782` at `0e5c9a8e3b673f65dc7090851c394482a8e4631e`
+failed in the process tests before bundle tests or CMake ran. The added Windows
+snapshot test called `tree` from the wrong test class (`AttributeError`). The
+existing nonzero-exit test also observed a fixture PID still live immediately
+after cleanup. That observation alone does not distinguish delayed signaling,
+PID reuse or a real cleanup defect; no retrospective cause is asserted.
+
+Both actual-process test classes now inherit the same fixture mixin, including
+`tree` and `assert_drained`. The Windows assertion opens one synchronization-only
+process handle, waits at most two seconds for its termination signal, and still
+fails if the process remains live or the wait API reports an error. No process is
+signaled or killed by the assertion. An authored API seam verifies the timeout,
+signaled and failed-wait cases and handle closure. Production cleanup and timeout
+code are unchanged. Microsoft's `TerminateProcess` reference was retained as
+`terminateprocess-reference.html` alongside the failed probe log; it describes
+termination as asynchronous and recommends waiting on the process handle. This
+supports the bounded observation, not a diagnosis of the historical PID.
+
+Local corrected result: **33 process tests discovered, 31 passed, two Windows-only
+skips** (`process-tests-probe-fix-final.log`). Bundle/workflow sources were not
+changed, so their previously passing local checks were not repeated. A fresh
+Windows probe remains necessary; no native-helper or installer pass is claimed.
