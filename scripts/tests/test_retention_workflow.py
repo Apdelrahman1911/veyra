@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 import os
+import json
+import textwrap
 import shutil
 import subprocess
 import tempfile
@@ -14,6 +16,26 @@ WORKFLOW = (ROOT / ".github/workflows/verify.yml").read_text()
 BUILD_RETENTION = (ROOT / "scripts/build-retention.sh").read_text()
 
 class RetentionWorkflowTest(unittest.TestCase):
+    def test_combined_scope_retains_exactly_android_linux_and_windows(self):
+        marker = "      - name: Compute exact expected lane set"
+        code = WORKFLOW.split(marker, 1)[1].split("<<'PY'\n", 1)[1].split("          PY", 1)[0]
+        code = textwrap.dedent(code)
+        with tempfile.TemporaryDirectory(dir=ROOT / ".work/tmp", prefix="lane-plan-") as tmp:
+            output = Path(tmp) / "output"
+            for package, expected in (("true", ["desktop-linux-x64", "desktop-windows-x64", "android"]),
+                                      ("false", ["android"])):
+                result = subprocess.run([__import__("sys").executable, "-B", "-c", code],
+                    env=dict(os.environ, SCOPE="android-linux-windows", PACKAGE_DESKTOP=package,
+                             GITHUB_OUTPUT=str(output)), capture_output=True, text=True, timeout=10)
+                self.assertEqual(0, result.returncode, result.stderr)
+                self.assertEqual(expected, json.loads(result.stdout))
+        expression = WORKFLOW.split("        include: ${{ fromJSON(", 1)[1].split(" }}", 1)[0]
+        combined = expression.split("inputs.scope == 'android-linux-windows' && '", 1)[1].split("'", 1)[0]
+        self.assertEqual(["desktop-linux-x64", "desktop-windows-x64"],
+                         [lane["platform"] for lane in json.loads(combined)])
+        self.assertIn("ubuntu-24.04", combined)
+        self.assertIn("VEYRA_LINUX_NAMESPACE_LAUNCHER:", WORKFLOW)
+
     def test_canary_is_manual_and_public_only(self):
         self.assertIn("workflow_dispatch:", WORKFLOW)
         self.assertIn("retention_canary:", WORKFLOW)
@@ -61,7 +83,7 @@ class RetentionWorkflowTest(unittest.TestCase):
         self.assertIn('--diagnostic "scope=$VEYRA_VERIFY_SCOPE tests=', WORKFLOW)
         self.assertIn("(inputs.scope == 'windows' || inputs.scope == 'windows-recovery') &&", WORKFLOW)
         self.assertIn('scope in ("windows", "windows-recovery") and package:', WORKFLOW)
-        diagnostic = WORKFLOW.split('if [ "$VEYRA_VERIFY_SCOPE" = windows-recovery ]; then', 1)[1].split("          else", 1)[0]
+        diagnostic = WORKFLOW.split('if [ "$VEYRA_VERIFY_SCOPE" = windows-recovery ]', 1)[1].split("          else", 1)[0]
         self.assertIn(":shared:jvmTest", diagnostic)
         self.assertIn("--tests 'dev.veyra.data.RoomProcessRecoveryTest*'", diagnostic)
         self.assertIn("DownloadRecoveryRoomTest.failedReturnAfterDurableIntentInsertion", diagnostic)

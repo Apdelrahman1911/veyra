@@ -30,6 +30,7 @@ PY
 mkdir -p .work/verification
 python3 -B scripts/verification-summary.py --metadata-only --phase "$mode"
 python3 -B scripts/tests/test_tooling.py
+python3 -B scripts/tests/test_gradle_bootstrap.py
 python3 -B scripts/tests/test_verification.py
 python3 -B scripts/tests/test_package_notices.py
 python3 -B scripts/tests/test_package_manifest.py

@@ -24,6 +24,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "native"))
@@ -338,7 +339,7 @@ def _clean_diagnostic_line(value: str) -> str:
 def _read_log_tail(path: Path, root: Path = ROOT) -> tuple[str, bool]:
     """Read a bounded tail of the already-preserved owned build log."""
     work(path, root)
-    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0))
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_BINARY", 0))
     try:
         info = os.fstat(descriptor)
         if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
@@ -420,13 +421,60 @@ def _write_diagnostic(path: Path, record: dict) -> None:
             pass
 
 
-def report_build_failure(log: Path, failure: owned_process.OwnedProcessError, root: Path = ROOT) -> None:
+def _previous_diagnostic_reports(path: Path, invocation: str | None) -> list[dict]:
+    """Keep only fresh, bounded, already-filtered reports from this owned child."""
+    if invocation is None or not re.fullmatch(r"[0-9a-f]{32}", invocation):
+        return []
+    try:
+        info = path.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or not 0 < info.st_size <= 48 * 1024:
+            return []
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
+        with os.fdopen(descriptor, "rb") as stream:
+            opened = os.fstat(stream.fileno())
+            if (opened.st_dev, opened.st_ino, opened.st_size) != (info.st_dev, info.st_ino, info.st_size):
+                return []
+            payload = stream.read(48 * 1024 + 1)
+        if len(payload) > 48 * 1024:
+            return []
+        previous = json.loads(payload)
+        if previous.get("invocation") != invocation:
+            return []
+        candidates = previous.get("previousReports", []) + [previous]
+        reports = []
+        keys = {"schema", "kind", "generatedAtUtc", "reason", "cleanupComplete", "returncode", "log",
+                "logAvailable", "logTailTruncated", "lines", "suppressedLines", "truncated", "limits",
+                "releaseReady", "diagnosticReadFailure", "invocation"}
+        for candidate in candidates[-3:]:
+            if not isinstance(candidate, dict):
+                return []
+            value = {key: item for key, item in candidate.items() if key in keys}
+            lines = value.get("lines")
+            log = value.get("log")
+            if (value.get("invocation") != invocation or value.get("schema") != 1 or value.get("kind") != "veyra-native-build-diagnostic"
+                    or value.get("releaseReady") is not False or not isinstance(log, str)
+                    or not log.startswith(".work/") or ".." in PurePosixPath(log).parts
+                    or not isinstance(lines, list) or len(lines) > DIAGNOSTIC_MAX_LINES
+                    or any(not isinstance(line, str) or len(line) > DIAGNOSTIC_MAX_LINE for line in lines)):
+                return []
+            payload = json.dumps(value, ensure_ascii=True)
+            if len(payload.encode()) > 12 * 1024 or _SENSITIVE_LINE.search(payload):
+                return []
+            reports.append(value)
+        return reports
+    except (OSError, ValueError, TypeError, AttributeError):
+        return []
+
+
+def report_build_failure(log: Path, failure: owned_process.OwnedProcessError, root: Path = ROOT,
+                         *, invocation: str | None = None) -> None:
     """Retain a small safe diagnostic without deleting or dumping the raw log."""
     lines: list[str] = []
     suppressed = 0
     truncated = False
     tail_truncated = False
     available = False
+    read_failure = None
     relative = None
     try:
         relative = log.resolve().relative_to(root.resolve()).as_posix()
@@ -436,10 +484,11 @@ def report_build_failure(log: Path, failure: owned_process.OwnedProcessError, ro
         text, tail_truncated = _read_log_tail(log, root)
         lines, suppressed, truncated = _extract_diagnostics(text, tail_truncated)
         available = True
-    except (OSError, ValueError):
-        pass
+    except (OSError, ValueError) as error:
+        read_failure = type(error).__name__
     record = {
         "schema": 1,
+        "invocation": invocation,
         "kind": "veyra-native-build-diagnostic",
         "generatedAtUtc": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
         "reason": failure.reason,
@@ -447,6 +496,7 @@ def report_build_failure(log: Path, failure: owned_process.OwnedProcessError, ro
         "returncode": failure.returncode,
         "log": relative,
         "logAvailable": available,
+        "diagnosticReadFailure": read_failure,
         "logTailTruncated": tail_truncated,
         "lines": lines,
         "suppressedLines": suppressed,
@@ -462,6 +512,7 @@ def report_build_failure(log: Path, failure: owned_process.OwnedProcessError, ro
     try:
         path = work(root / DIAGNOSTIC, root)
         path.parent.mkdir(parents=True, exist_ok=True)
+        record["previousReports"] = _previous_diagnostic_reports(path, invocation)
         _write_diagnostic(path, record)
     except (OSError, ValueError):
         print("Native build diagnostic could not be retained; build log: " + relative + ".", file=sys.stderr)
@@ -497,11 +548,13 @@ def run(command: list[str], directory: Path, log: Path, timeout: int, *, root: P
     # The owned runner validates the opened log and waits for the complete
     # trusted build-process tree, not only the immediate compiler/launcher.
     # Failure never grants permission to delete this work or its diagnostic log.
+    invocation = uuid.uuid4().hex
+    env["VEYRA_NATIVE_DIAGNOSTIC_INVOCATION"] = invocation
     try:
         owned_process.run(command, cwd=directory, env=env, timeout=timeout, log=log)
     except owned_process.OwnedProcessError as failure:
         try:
-            report_build_failure(log, failure, root)
+            report_build_failure(log, failure, root, invocation=invocation)
         except Exception:
             pass  # Diagnostic reporting must never mask the owned failure.
         raise

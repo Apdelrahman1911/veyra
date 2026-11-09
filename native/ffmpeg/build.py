@@ -242,6 +242,7 @@ def write_sidecar(path: Path, digest: str) -> None:
 
 
 def run(command: list[str], cwd: Path, env: dict[str, str], timeout: int, log: Path) -> None:
+    invocation = env.get("VEYRA_NATIVE_DIAGNOSTIC_INVOCATION")
     try:
         owned_process.run(command, cwd=owned(cwd), env=env, timeout=timeout, log=writable(log))
     except owned_process.OwnedProcessError as failure:
@@ -252,15 +253,15 @@ def run(command: list[str], cwd: Path, env: dict[str, str], timeout: int, log: P
             from bundle import report_build_failure
             phase = "configure" if len(command) > 1 and Path(command[1]).name == "configure" else "build"
             print("Native FFmpeg " + phase + " command failed.", file=sys.stderr)
-            report_build_failure(log, failure, ROOT)
+            report_build_failure(log, failure, ROOT, invocation=invocation)
             if len(command) > 1 and Path(command[1]).name == "configure":
                 # FFmpeg keeps the compiler probe itself in this explicit
                 # configure output, separate from the console build log.
                 probe_log = cwd / "ffbuild/config.log"
                 if probe_log.is_file():
-                    report_build_failure(probe_log, failure, ROOT)
-        except Exception:
-            pass
+                    report_build_failure(probe_log, failure, ROOT, invocation=invocation)
+        except Exception as diagnostic_error:
+            print("Bounded FFmpeg diagnostic failed (" + type(diagnostic_error).__name__ + ").", file=sys.stderr)
         raise
 
 

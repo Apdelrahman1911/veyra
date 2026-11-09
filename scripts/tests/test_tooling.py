@@ -222,6 +222,31 @@ class ScopedToolingTests(unittest.TestCase):
         self.assertIn("Refusing a mount", result.stderr)
         self.assertEqual(before, Path("/proc/self/mountinfo").read_bytes())
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux namespace launcher")
+    def test_podman_launcher_uses_only_owned_state_and_no_container(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="namespace-launcher-", dir=TMP) as directory:
+            tools = Path(directory)
+            capture = tools / "arguments"
+            fake = tools / "podman"
+            fake.write_bytes(b'#!/usr/bin/env bash\nprintf "%s\\0" "$@" > "$AUTHORED_NAMESPACE_ARGS"\nexit 73\n')
+            fake.chmod(0o755)
+            result = subprocess.run([BASH, str(TOOLS / "linux-namespace.sh"), "true"],
+                env=dict(os.environ, PATH=str(tools) + os.pathsep + os.environ["PATH"],
+                         VEYRA_LINUX_NAMESPACE_LAUNCHER="podman", AUTHORED_NAMESPACE_ARGS=str(capture)),
+                text=True, capture_output=True, timeout=10)
+            self.assertEqual(73, result.returncode, result.stderr)
+            args = capture.read_bytes().decode().split("\0")[:-1]
+            for option, suffix in (("--root", "storage"), ("--runroot", "run"), ("--tmpdir", "tmp")):
+                self.assertEqual(str(ROOT / ".work/linux-namespace" / suffix), args[args.index(option)+1])
+            self.assertIn("--storage-driver=vfs", args)
+            self.assertIn("--events-backend=none", args)
+            index = args.index("unshare")
+            self.assertEqual(["unshare", "unshare", "--mount", "--propagation", "unchanged"], args[index:index+5])
+            self.assertNotIn("run", args)
+            self.assertNotIn("pull", args)
+            self.assertNotIn("sudo", args)
+            self.assertEqual("true", args[-1])
+
     def test_escaping_work_directory_is_rejected_before_writes(self) -> None:
         with tempfile.TemporaryDirectory(prefix="boundary-test-", dir=TMP) as directory:
             base = Path(directory)

@@ -290,6 +290,48 @@ class NativeBundleTest(unittest.TestCase):
         run.assert_not_called()
         self.assertFalse(log.exists())
 
+    def test_nested_native_failure_keeps_configure_and_probe_diagnostics(self):
+        invocation = "a" * 32
+        failure = BUNDLE.owned_process.OwnedProcessError("command_failed", cleanup_complete=True, returncode=1)
+        with contextlib.redirect_stderr(io.StringIO()):
+            for name, text in (("configure", "error: configure sentinel\n"),
+                               ("probe", "fatal error: probe sentinel\n"),
+                               ("outer", "Managed build command failed: command_failed\n")):
+                log = self.inputs / (name + ".log")
+                log.write_bytes(text.encode())
+                BUNDLE.report_build_failure(log, failure, self.root, invocation=invocation)
+        record = json.loads((self.root / BUNDLE.DIAGNOSTIC).read_text())
+        self.assertEqual(2, len(record["previousReports"]))
+        self.assertIn("configure sentinel", record["previousReports"][0]["lines"][0])
+        self.assertIn("probe sentinel", record["previousReports"][1]["lines"][0])
+
+    def test_prior_native_diagnostic_must_be_fresh_and_safe(self):
+        invocation = "b" * 32
+        log = self.inputs / "first.log"
+        log.write_bytes(b"error: authored first\n")
+        failure = BUNDLE.owned_process.OwnedProcessError("command_failed", cleanup_complete=True, returncode=1)
+        with contextlib.redirect_stderr(io.StringIO()):
+            BUNDLE.report_build_failure(log, failure, self.root, invocation=invocation)
+        path = self.root / BUNDLE.DIAGNOSTIC
+        self.assertEqual([], BUNDLE._previous_diagnostic_reports(path, "c" * 32))
+        record = json.loads(path.read_text())
+        record["lines"] = ["error: Authorization: Bearer gho_authoredcredential"]
+        path.write_text(json.dumps(record))
+        self.assertEqual([], BUNDLE._previous_diagnostic_reports(path, invocation))
+        record["lines"] = ["error: safe"]
+        record["log"] = ".work/../outside.log"
+        path.write_text(json.dumps(record))
+        self.assertEqual([], BUNDLE._previous_diagnostic_reports(path, invocation))
+
+    def test_native_log_tail_preserves_binary_ctrl_z_before_diagnostic(self):
+        log = self.inputs / "binary.log"
+        original = b"authored\r\n\x1a\r\nerror: after binary eof sentinel\r\n"
+        log.write_bytes(original)
+        text, truncated = BUNDLE._read_log_tail(log, self.root)
+        self.assertIn("after binary eof sentinel", text)
+        self.assertFalse(truncated)
+        self.assertEqual(original, log.read_bytes())
+
     def test_failed_owned_build_retains_bounded_safe_compiler_diagnostic(self):
         log = self.inputs / "build.log"
         original = (

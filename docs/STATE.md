@@ -4,6 +4,18 @@ Updated 2026-11-07 UTC. Formal Goal tool currently reports **blocked/incomplete*
 
 ## Current Task B continuation — 2026-11-09
 
+Local Android/Linux-first continuation: Android 873 unit tests and lint pass;
+debug APK, unsigned release APK and AAB build. Linux 484 desktop + 4 recovery
+tests pass. The revised user-namespace mount guard passes 13 focused tests;
+source-pinned FFmpeg and the fresh Linux application image build, exact embedded
+legal comparison and seven silent native operations pass. Batch the bounded
+Gradle-download correction, Linux namespace launcher/recursive bind correction
+and Windows inner-diagnostic retention in one `android-linux-windows` dispatch.
+Actual hosted launcher entry and Windows SQLite/configure causes remain open;
+no local DEB/device/signing/release claim. See
+`verification/task-b-android-linux-local.md` and its ignored evidence receipt.
+
+
 Manual run `42569788087` at `ceced9a` retained independently verified Linux and
 macOS arm64 packages. The unpacked Linux package passed all seven silent native
 self-test operations, TLS verification and owned shutdown. macOS arm64 desktop

@@ -8,7 +8,7 @@ on:
       scope:
         description: Target group to verify
         type: choice
-        options: [all, desktop, windows, windows-recovery, android, ios]
+        options: [all, desktop, android-linux-windows, windows, windows-recovery, android, ios]
         default: all
       package_desktop:
         description: Generate native installers (no upload or OS installation)
@@ -41,7 +41,7 @@ env:
 
 jobs:
   desktop:
-    if: ${{ github.event.repository.private == false && inputs.retention_canary != true && (inputs.scope == 'all' || inputs.scope == 'desktop' || inputs.scope == 'windows' || inputs.scope == 'windows-recovery') }}
+    if: ${{ github.event.repository.private == false && inputs.retention_canary != true && (inputs.scope == 'all' || inputs.scope == 'desktop' || inputs.scope == 'android-linux-windows' || inputs.scope == 'windows' || inputs.scope == 'windows-recovery') }}
     name: Desktop (${{ matrix.label }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
@@ -51,12 +51,14 @@ jobs:
       fail-fast: false
       max-parallel: 2
       matrix:
-        include: ${{ fromJSON((inputs.scope == 'windows' || inputs.scope == 'windows-recovery') && '[{"label":"Windows x64","runner":"windows-2022","system":"Windows","arch":"x64","platform":"desktop-windows-x64"}]' || '[{"label":"Linux x64","runner":"ubuntu-24.04","system":"Linux","arch":"x64","platform":"desktop-linux-x64"},{"label":"Windows x64","runner":"windows-2022","system":"Windows","arch":"x64","platform":"desktop-windows-x64"},{"label":"macOS arm64","runner":"macos-15","system":"Darwin","arch":"arm64","platform":"desktop-macos-arm64"},{"label":"macOS x64","runner":"macos-15-intel","system":"Darwin","arch":"x64","platform":"desktop-macos-x64"}]') }}
+        include: ${{ fromJSON((inputs.scope == 'windows' || inputs.scope == 'windows-recovery') && '[{"label":"Windows x64","runner":"windows-2022","system":"Windows","arch":"x64","platform":"desktop-windows-x64"}]' || inputs.scope == 'android-linux-windows' && '[{"label":"Linux x64","runner":"ubuntu-24.04","system":"Linux","arch":"x64","platform":"desktop-linux-x64"},{"label":"Windows x64","runner":"windows-2022","system":"Windows","arch":"x64","platform":"desktop-windows-x64"}]' || '[{"label":"Linux x64","runner":"ubuntu-24.04","system":"Linux","arch":"x64","platform":"desktop-linux-x64"},{"label":"Windows x64","runner":"windows-2022","system":"Windows","arch":"x64","platform":"desktop-windows-x64"},{"label":"macOS arm64","runner":"macos-15","system":"Darwin","arch":"arm64","platform":"desktop-macos-arm64"},{"label":"macOS x64","runner":"macos-15-intel","system":"Darwin","arch":"x64","platform":"desktop-macos-x64"}]') }}
     env:
       VEYRA_EXPECTED_OS: ${{ matrix.system }}
       VEYRA_EXPECTED_ARCH: ${{ matrix.arch }}
       BUILD_PACKAGES: ${{ inputs.package_desktop }}
       VEYRA_VERIFY_SCOPE: ${{ inputs.scope }}
+      # Use the installed namespace launcher; no image, install or policy writes.
+      VEYRA_LINUX_NAMESPACE_LAUNCHER: ${{ matrix.system == 'Linux' && 'podman' || '' }}
     steps:
       - name: Checkout without global Git configuration or retained credentials
         id: checkout
@@ -78,8 +80,11 @@ jobs:
             export DEVELOPER_DIR=/Applications/Xcode_26.0.1.app/Contents/Developer
             test -d "$DEVELOPER_DIR"
           fi
-          if [ "$VEYRA_VERIFY_SCOPE" = windows-recovery ]; then
+          if [ "$VEYRA_VERIFY_SCOPE" = windows-recovery ] || { [ "$VEYRA_VERIFY_SCOPE" = android-linux-windows ] && [ "$RUNNER_OS" = Windows ]; }; then
             # Diagnostic scope: these four recovery methods only, never a full-suite claim.
+            scripts/dev.sh python3 -B scripts/tests/test_gradle_bootstrap.py
+            scripts/dev.sh python3 -B native/test_bundle.py
+            scripts/dev.sh python3 -B native/ffmpeg/test_build.py
             scripts/gradle.sh :shared:jvmTest \
               --tests 'dev.veyra.data.RoomProcessRecoveryTest*' \
               --tests 'dev.veyra.downloads.DownloadRecoveryRoomTest.failedReturnAfterDurableIntentInsertionCanBeCancelledWithoutLostFileReferences*'
@@ -183,7 +188,7 @@ jobs:
         run: scripts/dev.sh python3 -B scripts/verification-summary.py --phase desktop
 
   android:
-    if: ${{ github.event.repository.private == false && inputs.retention_canary != true && (inputs.scope == 'all' || inputs.scope == 'android') }}
+    if: ${{ github.event.repository.private == false && inputs.retention_canary != true && (inputs.scope == 'all' || inputs.scope == 'android' || inputs.scope == 'android-linux-windows') }}
     name: Android compile, unit tests and lint
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -701,7 +706,9 @@ jobs:
               platforms += ["desktop-linux-x64", "desktop-windows-x64", "desktop-macos-arm64", "desktop-macos-x64"]
           if scope in ("windows", "windows-recovery") and package:
               platforms += ["desktop-windows-x64"]
-          if scope in ("all", "android"):
+          if scope == "android-linux-windows" and package:
+              platforms += ["desktop-linux-x64", "desktop-windows-x64"]
+          if scope in ("all", "android", "android-linux-windows"):
               platforms += ["android"]
           if scope in ("all", "ios"):
               platforms += ["ios-simulator-arm64", "ios-simulator-x64", "ios-device-arm64"]
