@@ -4,7 +4,7 @@
 # overwrite, artifact action or cache action is used.
 set -euo pipefail
 platform=""; lane_outcome=""; diagnostic=""
-packages=(); directories=(); xml_roots=(); legal=""; inventory=""; packages_json=""
+packages=(); directories=(); xml_roots=(); legal=""; inventory=""; native_diagnostic=""; packages_json=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --platform) platform="$2"; shift 2 ;;
@@ -15,6 +15,7 @@ while [ "$#" -gt 0 ]; do
     --xml-root) xml_roots+=("$2"); shift 2 ;;
     --legal) legal="$2"; shift 2 ;;
     --inventory) inventory="$2"; shift 2 ;;
+    --native-diagnostic) native_diagnostic="$2"; shift 2 ;;
     --packages-json) packages_json="$2"; shift 2 ;;
     *) printf 'Unknown retention argument: %s\n' "$1" >&2; exit 2 ;;
   esac
@@ -44,6 +45,7 @@ for value in ${directories[@]+"${directories[@]}"}; do python_args+=(--directory
 for value in ${xml_roots[@]+"${xml_roots[@]}"}; do python_args+=(--xml-root "$value"); done
 [ -z "$legal" ] || python_args+=(--legal "$legal")
 [ -z "$inventory" ] || python_args+=(--inventory "$inventory")
+[ -z "$native_diagnostic" ] || python_args+=(--native-diagnostic "$native_diagnostic")
 [ -z "$packages_json" ] || python_args+=(--packages-json "$packages_json")
 python3 -B scripts/build-retention.py "${python_args[@]}" > "$receipt"
 cat "$receipt"

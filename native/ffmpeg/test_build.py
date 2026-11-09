@@ -110,7 +110,7 @@ class ProductionFfmpegBuildTest(unittest.TestCase):
         executable.write_bytes(b"authored-not-an-executed-binary")
         executable.chmod(0o700)
         digest = BUILD.sha256(executable)
-        (output / "ffmpeg.sha256").write_text(digest + "\n")
+        BUILD.write_sidecar(output / "ffmpeg.sha256", digest)
         metadata = {**expected, "executable": "ffmpeg", "executableSha256": digest,
                     "executableBytes": executable.stat().st_size,
                     "fileSha256": {relative: BUILD.sha256(output / relative) for relative in BUILD.package_files("ffmpeg")}}

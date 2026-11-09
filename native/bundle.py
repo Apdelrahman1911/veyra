@@ -44,6 +44,9 @@ _DIAGNOSTIC_LINE = re.compile(
     r"(?i)(?:\berror\b|\bfatal\b|cmake error|undefined (?:reference|symbol)|"
     r"\bld:\s|\bcollect2:\s|ninja: build stopped|make(?:\[\d+\])?: \*\*\*|"
     r"clang(?:-\d+)?: error|gcc: error|"
+    r"^C compiler test failed\.$|\bis unable to create an executable file\.|"
+    r"\bno such file or directory\b|\bcommand not found\b|"
+    r"\bnot recognized as an internal or external command\b|"
     r"^scoped production ffmpeg build failed \(valueerror\)\. no global install or substitute binary\.$|"
     r"^existing matching-host compiler/make/bash tools are required; nothing is installed$)"
 )

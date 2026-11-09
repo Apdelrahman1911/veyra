@@ -331,6 +331,21 @@ class NativeBundleTest(unittest.TestCase):
         self.assertNotIn("authored setup", console)
         self.assertIn("Preserved log:", console)
 
+    def test_configure_and_shell_failures_are_retained_without_raw_output(self):
+        text = (
+            "authored unrelated setup\n"
+            "cl.exe is unable to create an executable file.\n"
+            "C compiler test failed.\n"
+            "bash: /authored/configure: No such file or directory\n"
+            "bash: cl.exe: command not found\n"
+            "bash: token=authored-private: command not found\n"
+            "bash: https://example.invalid/authored-private: No such file or directory\n"
+        )
+        lines, suppressed, truncated = BUNDLE._extract_diagnostics(text)
+        self.assertEqual(text.splitlines()[1:5], lines)
+        self.assertEqual(2, suppressed)
+        self.assertFalse(truncated)
+
     def test_ffmpeg_prerequisite_headline_and_message_are_retained_without_log_dump(self):
         text = (
             "authored unrelated setup\n"

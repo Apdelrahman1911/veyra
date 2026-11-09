@@ -45,6 +45,15 @@ now covers 85 coordinates/92 records; the retained Linux inventory projection ha
 two missing-text issues, down from six. Atomicfu and the three mediamp native
 runtime coordinates remain unresolved in the platform union. Readiness remains
 false; no fresh installer or native/JDK/source closure follows from this update.
+Windows-only run `42588682043` at `fd03068` passed the previous 19 manifest
+checks and downloaded Gradle successfully. It exposed a separate FFmpeg test
+fixture CRLF sidecar error, native preparation failure without selected inner
+compiler lines, and shell retention rejection of `--native-diagnostic` (already
+supported by the Python helper). No installer or retained packet was produced;
+the independent readback correctly failed on the absent release. The lead fixed
+the fixture bytes and shell forwarding, added shell/configure diagnostic forms
+under the existing bounds/filter, and passed 84 focused local tests. Windows
+native compilation and installer verification still require the scoped rerun.
 The live source still refuses playback preparation with
 `PROVIDER_ACCESS_REQUIRED / YOUTUBE_ACCESS_REQUIRED`; no media transfer or offline
 proof occurred. Installation, physical audio, five-platform success, signing and

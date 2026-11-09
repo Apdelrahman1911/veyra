@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
+import shutil
+import subprocess
+import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -23,6 +27,33 @@ class RetentionWorkflowTest(unittest.TestCase):
         self.assertNotIn("RUNNER_TEMP", WORKFLOW)
         self.assertNotIn("RUNNER_TEMP", BUILD_RETENTION)
         self.assertIn(".work/verification", WORKFLOW)
+
+    def test_shell_forwards_native_diagnostic_before_any_release_operation(self):
+        work = ROOT / ".work/tmp"
+        work.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="retention-shell-", dir=work) as directory:
+            workspace = Path(directory)
+            forwarded = workspace / "forwarded.args"
+            environment = dict(os.environ, GH_TOKEN="authored-placeholder",
+                GITHUB_SHA="a" * 40, GITHUB_RUN_ID="authored", GITHUB_RUN_ATTEMPT="1",
+                GITHUB_WORKSPACE=workspace.as_posix(), GITHUB_REPOSITORY="authored/fixture",
+                GITHUB_WORKFLOW_REF="authored/workflow", GITHUB_REF="refs/heads/authored",
+                AUTHORED_ARGUMENTS=forwarded.as_posix())
+            bash = os.environ.get("VEYRA_TRUSTED_BASH") or shutil.which("bash") or "bash"
+            # Stop at the actual Python invocation. Never call GitHub or build a packet.
+            command = '''python3() { printf '%s\\0' "$@" > "$AUTHORED_ARGUMENTS"; return 73; }
+                gh() { return 74; }
+                source "$1" "${@:2}"'''
+            result = subprocess.run([bash, "-c", command, "authored-shell",
+                (ROOT / "scripts/build-retention.sh").as_posix(),
+                "--platform", "desktop-windows-x64", "--lane-outcome", "failed",
+                "--diagnostic", "tests=failed package=failed inventory=success",
+                "--native-diagnostic", "authored directory/native diagnostic.json"],
+                cwd=ROOT, env=environment, capture_output=True, text=True, timeout=30)
+            self.assertEqual(73, result.returncode, result.stdout + result.stderr)
+            arguments = forwarded.read_bytes().decode().split("\0")[:-1]
+            index = arguments.index("--native-diagnostic")
+            self.assertEqual("authored directory/native diagnostic.json", arguments[index + 1])
 
     def test_production_lanes_are_unique_per_run_attempt_and_platform(self):
         self.assertIn('tag="veyra-draft-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${platform}"', BUILD_RETENTION)

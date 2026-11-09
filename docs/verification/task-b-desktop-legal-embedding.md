@@ -356,3 +356,35 @@ Historical reports, run receipts and research seals are unchanged. The next
 Windows-only attempt must exercise the corrected authored test and, if the
 pinned Gradle download is available, the fresh inventory/package path. No full
 matrix or local native build was repeated for this data/test-only batch.
+
+
+## 11. Windows run 42588682043 and direct corrections
+
+Run `42588682043` tested `fd03068b34543aa670c9beb455be535d4f92a2fe`.
+All 19 manifest and 74 notice tests passed; Gradle 8.13 downloaded and shared
+and desktop production Kotlin compilation executed. Three distinct failures
+remain in its preserved logs under
+`.work/verification/task-b-windows-42588682043/`:
+
+- `test_valid_output_reuse_does_not_run_compilers_network_or_executable` created
+  its SHA sidecar with newline-translating `write_text`; Windows emitted CRLF
+  while the verifier deliberately requires LF bytes. The fixture now uses the
+  existing byte-exact sidecar writer. Production verification is unchanged.
+- Native preparation failed with `OwnedProcessError`. Neither console log
+  selected an inner compiler diagnostic. This run does not establish the native
+  cause. The bounded reporter now also recognizes FFmpeg compiler-probe failures
+  and shell missing-file/command messages; secret/URL suppression and all bounds
+  remain unchanged.
+- The workflow supplied `--native-diagnostic`, but `build-retention.sh` rejected
+  it before invoking the Python helper that already implements the option.
+  The shell now parses and forwards it unchanged. A shell-execution regression
+  checks the real argument path, including a filename with spaces, and stops
+  before any GitHub operation. The existing Python packet test verifies retained
+  diagnostic bytes and credential rejection.
+
+No release was created by the failed retention step, so the independent readback
+truthfully failed with `release not found`. No retained package can be claimed
+from this run. Local proportional checks: workflow/shell 13/13, FFmpeg 24/24,
+native bundle 29/29, build retention 18/18 (84 total), shell syntax and diff check.
+These are Linux authored checks; the Windows runtime and native failure require
+the next scoped hosted result. No full platform matrix was repeated.
