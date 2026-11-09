@@ -80,6 +80,11 @@ internal class DownloadPhysicalCommands(
         // asset-backed job to QUEUED, which neither transfer nor local validation can admit.
         if (before.job.assetId != null && before.job.status == DownloadStatus.FAILED)
             fail(FailureCode.RECOVERY_REQUIRED, "download_retained_local_validation_required")
+        // A completed-check host hold is cleared only by resumePending(), the real foreground
+        // announcement. Ordinary Resume must not spend the network Retry lane's retry flag as a
+        // foreground authority and silently erase the durable marker.
+        if (before.job.assetId != null && before.job.status == DownloadStatus.NEEDS_FOREGROUND)
+            fail(FailureCode.RECOVERY_REQUIRED, "download_foreground_announcement_required")
         requireAdmission()
         updateIntentLocked(before, DownloadBatchIntent.ACTIVE, retain = true, retry = true)
         changed(id)
@@ -89,6 +94,8 @@ internal class DownloadPhysicalCommands(
      * Explicit replacement for UNKNOWN migrated provenance only. The selection was already
      * accepted by the root; this operation never resolves a title. Cancellation after the first
      * phase leaves the old owner cancelled/nonretaining, not eligible for an automatic revival.
+     * If a scheduler cleanup already owns the exact retired-generation lease, this waits for its
+     * actual deletion outside the command lock; it must not drain that external owner.
      */
     suspend fun adoptSchema2(id: String, requestId: AcquisitionRequestId, bindingId: ExecutionBindingId,
         requireIntentCurrent: () -> Unit): String {
@@ -113,12 +120,26 @@ internal class DownloadPhysicalCommands(
                 fail(FailureCode.INVALID_STATE, "download_adoption_selection_mismatch")
             requireAdmission()
             requireIntentCurrent()
+            if (before.job.cleanupPending && before.job.maintenanceKind == PhysicalDownloadMaintenanceKind.CLEANUP &&
+                before.job.leaseOwner != null) {
+                // An external/scheduler cleanup already owns the exact maintenance lease. Draining
+                // this observation would cancel that owner before it can delete the retired path.
+                // Wait outside the command lock for the actual cleanup, then re-enter admission.
+                return@withLock null
+            }
             val updated = updateIntentLocked(before, DownloadBatchIntent.CANCELLED, retain = false, retry = false)
             val cancelled = committed(repository.reconcilePhysicalDownloadIntent(ReconcilePhysicalDownloadIntent(id,
                 updated.job.producer, updated.job.ownershipGeneration, updated.claims, clock.epochMs())))
             val epoch = host.activeLock.withLock { runtime.observePhysicalEpoch(cancelled) }
             changed(id)
             Pending(cancelled, epoch)
+        }
+        if (pending == null) {
+            val state = host.state()
+            if (!state.started || state.closed || state.suspended || state.drainsInFlight != 0 || state.failure != null)
+                fail(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")
+            awaitRemoval(id)
+            return adoptSchema2(id, requestId, bindingId, requireIntentCurrent)
         }
         try {
             val stopped = runtime.epochs.drain(pending.epoch)
@@ -130,6 +151,15 @@ internal class DownloadPhysicalCommands(
                 is AcquisitionDownloadDurableSettlement.Unconfirmed -> throw VeyraException(durable.failure)
                 AcquisitionDownloadDurableSettlement.Stale -> fail(FailureCode.RECOVERY_REQUIRED, "download_checkpoint_stale")
                 else -> Unit // No-resource observation still had the positive canonical intent CAS above.
+            }
+            // Adoption is destructive replacement, not an intent-only operation. If the inline
+            // claim lost a transient race or an external scheduler owns cleanup, wait for the
+            // actual physical deletion before requiring a cleared legacy generation.
+            if (repository.physicalDownload(id)?.job?.cleanupPending == true) {
+                val state = host.state()
+                if (!state.started || state.closed || state.suspended || state.drainsInFlight != 0 || state.failure != null)
+                    fail(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")
+                awaitRemoval(id)
             }
             val drained = host.commands.withLock {
                 requireAdmission()
@@ -190,18 +220,56 @@ internal class DownloadPhysicalCommands(
                 val settled = cleaned ?: pending.epoch
                 if (cleaned == null && !stopped || cleaned != null && !runtime.epochs.drain(cleaned))
                     fail(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")
+                // A normal remove return must mean actual authoritative removal for EVERY
+                // retained/staged/finalization shape, not just a prior failure-backed row.
+                if (discard && remove && repository.physicalDownload(id)?.job?.cleanupPending == true) {
+                    val state = host.state()
+                    if (!state.started || state.suspended || state.failure != null)
+                        fail(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")
+                    awaitRemoval(id)
+                }
                 when (val durable = runtime.epochs.durableSettlement(settled)) {
                     is AcquisitionDownloadDurableSettlement.Unconfirmed -> throw VeyraException(durable.failure)
                     AcquisitionDownloadDurableSettlement.Stale -> fail(FailureCode.RECOVERY_REQUIRED, "download_checkpoint_stale")
                     else -> Unit // A detached idle epoch has no finalizer; the intent CAS above is positive.
                 }
+            } else if (discard && remove &&
+                repository.physicalDownload(id)?.job?.cleanupPending == true) {
+                // The intent may already have advanced beyond this caller's local observation
+                // epoch. The durable cleanupPending row is still the authority; never treat a
+                // detached null durable settlement as completion.
+                val state = host.state()
+                if (!state.started || state.suspended || state.failure != null)
+                    fail(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")
+                awaitRemoval(id)
             }
         } catch (error: CancellationException) {
             // A gate expiration cancels the maintenance child after the removal intent was
-            // durably accepted. If the caller itself is still active, the retained cleanup owner
-            // and foreground retry own the physical deletion; do not report a caller failure.
-            if (pending == null || !currentCoroutineContext().isActive) throw error
+            // durably accepted. If the caller itself is still active, observe the exact durable
+            // cleanup outcome; a future foreground retry may complete the actual deletion.
+            if (!currentCoroutineContext().isActive) throw error
+            if (discard && repository.physicalDownload(id)?.job?.cleanupPending == true)
+                awaitRemoval(id, tolerateTransientCleanupFailure = true)
+            else if (pending == null) throw error
         } finally { host.signalWork() }
+    }
+
+    /**
+     * Bounded truthful removal observation. Success requires the durable row to be actually
+     * cleaned (no pending cleanup/asset/staging/finalization/active owner); a terminal failed
+     * observation or a missing owner within the bounded handoff is a real failure.
+     */
+    private suspend fun awaitRemoval(id: String, tolerateTransientCleanupFailure: Boolean = false) {
+        host.state().failure?.let { throw VeyraException(it) }
+        runtime.awaitRemovalOutcome(id, failedIsTerminal = !tolerateTransientCleanupFailure)
+            ?.let { throw VeyraException(it) }
+        val current = repository.physicalDownload(id)
+            ?: fail(FailureCode.RECOVERY_REQUIRED, "download_removal_join_missing")
+        if (current.job.cleanupPending || current.job.assetId != null || current.asset != null ||
+            current.job.stagingPath != null || current.finalization != null ||
+            current.cleanupReservation != null || current.job.maintenanceKind != null ||
+            current.job.leaseOwner != null || current.activeAttempt != null)
+            fail(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")
     }
 
     private suspend fun admitAcceptedLocked(requestId: AcquisitionRequestId, requiredBindingId: ExecutionBindingId): String {

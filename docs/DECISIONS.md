@@ -62,6 +62,8 @@ Catalogue favorites/playlists are metadata operations, not media execution. Give
 
 A surfaced Validate action for a retained failed file must have a real execution path. Distinguish explicit one-shot local revalidation from scheduled checks: manual input may bypass only local validation retry/deferral, while automatic FAILED work remains stopped. Host readiness, coverage, physical ownership/leases, claims, native-reader release and cleanup checks remain authoritative. Do not reset to COMPLETE to gain admission. Only actual complete hash/native validation and an exact-fenced atomic Room success may clear validation failure/backoff, restore COMPLETE and record the exact requested AssetUse; sibling uses are never inferred. Source-confirmed UI/runtime mismatches and pending fixes are recorded in STATE, not described as verified functionality.
 
+A genuine local File or Native validation negative establishes that the shared physical asset is not currently usable by THIS process; it is not proof that every historical request physically corrupted its bytes or that an unsupported/unavailable decoder result means corrupt media. Preserve the exact actual failure code and immutable R1 receipt/use history, but withhold current Ready for all members sharing the unvalidated asset until complete hash/native validation and the exact-fenced success command restore COMPLETE. A binding-local stale member/identity rejection must not demote healthy siblings. The surfaced Verify/Validate action remains the manual local path; it may bypass only local retry/deferral and must not become a network Retry or removal.
+
 ## D011 — Genuine release discovery from MusicBrainz core metadata (accepted)
 Use MusicBrainz WS2 **release** records, identified by edition-specific MBID, as the genuine album/release metadata producer. A release group is not a selected edition; an EP or untyped release must not be relabeled an Album. Preserve complete release/track titles, credited artist names/join phrases, source-declared type/status, edition/date/country/label/catalogue number, ordered media/track occurrences and distinct recording IDs. Never deduplicate occurrences by recording ID or silently select a different edition. Explicitly represent incomplete/malformed metadata.
 
@@ -74,3 +76,26 @@ All actual playback/downloads remain D005/D010 operations. The immutable parent 
 Use one application-owned metadata scheduler, at most one in-flight request and starts at least1100ms apart; bounded pending requests/caches/response sizes, meaningful versioned User-Agent with repository contact URL, no cookies/history/identifiers/polling and no automatic retry loop. Honor429/503 cooldowns/Retry-After; offline mode denies metadata requests. Save normalized core observations and immutable selected provenance in Room, never raw response blobs. Search/detail freshness is a cache policy, not a refresh timer. The packet's safety ceilings must produce truthful incomplete states, not truncation or false completeness.
 
 One bounded documentation-linked metadata lookup returned an actual Official **EP** with two media; this establishes that response only, not album search, Arabic coverage, implementation, audio rights or playback. Implementation requires authored parser/rate/cancellation/cache/pagination/offline tests, a connected edition-selection journey and the unchanged central-listening release gates.
+
+## D012 — Public download removal completion contract (accepted; implementation verification pending)
+A normal successful physical `remove(Unit)` return means authoritative removal of the accepted job's live
+physical generation, not merely durable intent acceptance. This applies to retained assets, staging and
+finalization-only state alike. The command must join/drain the caller's exact ownership epoch, use the
+generation-scoped removal observation for any remaining cleanup, and return only when the durable row has no
+pending cleanup, live asset, staging path, finalization, cleanup reservation, maintenance lease or active
+attempt. A healthy external writer or scheduler may perform the actual deletion; the caller then waits for
+that authoritative completion rather than guessing a latest owner or manufacturing a receipt.
+
+When the host is unstarted/suspended/failed, the exact owner is missing/consumed/failed, or the bounded
+handoff expires, removal returns the existing truthful `BACKGROUND_RESTRICTED` (or more specific real
+failure) and preserves cleanup intent, assets, reservations and physical locks for a later foreground pass.
+Detached observation epochs with null durable settlement are never completion. Caller cancellation must
+propagate; an active caller whose child cleanup was cancelled may observe a controlled foreground retry
+without converting a transient cancelled-owner failure into a false success. Shared-asset sibling claims
+remain authoritative: removal never deletes bytes still demanded by a retaining sibling.
+
+Explicit cleanup is exempt from the local validation recheck deadline at the authoritative Room claim,
+because removal intent owns cleanup. A maintenance claim whose post-read identity/paths change is rolled
+back with the exact committed fence/claims and retried without stranding its lease. These are source/test
+contracts only until the final gated compile, focused and full results are recorded; no UI/API integration,
+Task A, native/device or release acceptance is implied.

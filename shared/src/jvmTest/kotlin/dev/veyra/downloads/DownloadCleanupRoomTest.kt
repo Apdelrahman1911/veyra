@@ -2,6 +2,10 @@ package dev.veyra.downloads
 
 import dev.veyra.data.getOrThrow
 import dev.veyra.data.AcquisitionRepositoryState
+import dev.veyra.data.ClaimPhysicalDownloadMaintenance
+import dev.veyra.data.ClaimedPhysicalDownload
+import dev.veyra.data.PhysicalDownloadJoin
+import dev.veyra.data.UpdateStandaloneDownloadIntent
 import dev.veyra.model.*
 import dev.veyra.playback.LocalMediaValidationReaderRelease
 import dev.veyra.playback.LocalMediaValidationReaderUnacknowledged
@@ -13,6 +17,7 @@ import dev.veyra.playback.ResolvedPlayable
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
 import java.io.IOException
+import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicBoolean
@@ -22,6 +27,135 @@ import kotlin.test.*
 
 /** REAL SQLite and OS file leases; fake native/central handles and authored NON-AUDIO bytes. */
 class DownloadCleanupRoomTest {
+    @Test fun cleanupPendingRejectsNonCancelIntentAndKeepsANonRetainingClaimUnchanged() = executorSchema3Case {
+        val owner = owner()
+        val (id, _) = enqueue(owner)
+        owner.coordinator.start(DownloadActivation.USER_SESSION)
+        complete(owner, id)
+        val deleting = barrier()
+        owner.beforeDelete = { deleting.stop() }
+        val preRead = AtomicReference<PhysicalDownloadJoin>()
+        val command = AtomicReference<ClaimPhysicalDownloadMaintenance>()
+        val committed = AtomicReference<ClaimedPhysicalDownload>()
+        val first = AtomicBoolean(true)
+        owner.repository.beforeMaintenanceClaim = { current ->
+            if (current.kind == PhysicalDownloadMaintenanceKind.CLEANUP && first.compareAndSet(true, false)) {
+                command.set(current)
+                val before = assertNotNull(owner.repository.physicalDownload(id))
+                preRead.set(before)
+                val claim = before.claims.single()
+                // A cleanup-pending claim rejects every non-CANCELLED or newly retaining intent.
+                assertIs<PhysicalDownloadCommit.Stale>(owner.repository.updateStandaloneDownloadIntent(
+                    UpdateStandaloneDownloadIntent(id, before.job.producer, before.job.ownershipGeneration,
+                        claim.id, claim.generation, claim.ownerIntentRevision, DownloadBatchIntent.PAUSED,
+                        retainCompletedAsset = true, nowEpochMs = clock.epochMs())))
+                assertIs<PhysicalDownloadCommit.Stale>(owner.repository.updateStandaloneDownloadIntent(
+                    UpdateStandaloneDownloadIntent(id, before.job.producer, before.job.ownershipGeneration,
+                        claim.id, claim.generation, claim.ownerIntentRevision, DownloadBatchIntent.CANCELLED,
+                        retainCompletedAsset = true, nowEpochMs = clock.epochMs())))
+                assertIs<PhysicalDownloadCommit.Committed<*>>(owner.repository.updateStandaloneDownloadIntent(
+                    UpdateStandaloneDownloadIntent(id, before.job.producer, before.job.ownershipGeneration,
+                        claim.id, claim.generation, claim.ownerIntentRevision, DownloadBatchIntent.CANCELLED,
+                        retainCompletedAsset = false, nowEpochMs = clock.epochMs())))
+                assertEquals(before.claims, assertNotNull(owner.repository.physicalDownload(id)).claims,
+                    "This nonretaining cleanup-pending claim rejects non-CANCELLED/retaining intent; the retaining-to-nonretaining transition is covered separately")
+            }
+        }
+        owner.repository.transformMaintenanceClaim = { current, result ->
+            if (current.kind == PhysicalDownloadMaintenanceKind.CLEANUP &&
+                result is PhysicalDownloadCommit.Committed && committed.get() == null)
+                committed.set(result.value)
+            result
+        }
+        coroutineScope {
+            val removing = async(start = CoroutineStart.UNDISPATCHED) { runCatching { owner.coordinator.remove(id) } }
+            deleting.entered.await()
+            val before = assertNotNull(preRead.get())
+            val claimed = assertNotNull(committed.get())
+            val current = assertNotNull(command.get())
+            assertEquals(before.job.ownershipGeneration + 1, claimed.fence.ownershipGeneration)
+            assertEquals(current.owner, claimed.fence.leaseOwner)
+            assertEquals(before.job.producer, claimed.fence.producer)
+            assertEquals(before.job.activeAttemptId, claimed.fence.attemptId)
+            assertEquals(before.claims.toSet(), claimed.physical.claims.toSet(),
+                "The canonical cleanup claim returns the exact pre-read claim identity")
+            assertTrue(claimed.physical.claims.all {
+                it.intent == DownloadBatchIntent.CANCELLED && !it.retainCompletedAsset
+            })
+            assertFalse(removing.isCompleted)
+            deleting.release()
+            removing.await().getOrThrow()
+        }
+        awaitJob(owner, id) { !it.job.cleanupPending && it.asset == null }
+        owner.legacy.assertUnused()
+    }
+
+    @Test fun committedCleanupClaimJoinChangeRollsBackReturnedFenceAndRetriesWithoutStickyLease() = executorSchema3Case {
+        val owner = owner()
+        val (id, _) = enqueue(owner)
+        owner.coordinator.start(DownloadActivation.USER_SESSION)
+        val completed = complete(owner, id)
+        val asset = assertNotNull(completed.asset)
+        val retryClaim = barrier()
+        val deleting = barrier()
+        owner.beforeDelete = { deleting.stop() }
+        val claims = AtomicInteger()
+        val injectedFence = AtomicReference<PhysicalDownloadFence>()
+        val injectedClaims = AtomicReference<List<DownloadClaim>>()
+        val injected = AtomicBoolean()
+        owner.repository.beforeMaintenanceClaim = { command ->
+            if (command.kind == PhysicalDownloadMaintenanceKind.CLEANUP && claims.incrementAndGet() == 2)
+                retryClaim.stop()
+        }
+        owner.repository.transformMaintenanceClaim = { command, result ->
+            if (!injected.get() && command.kind == PhysicalDownloadMaintenanceKind.CLEANUP &&
+                result is PhysicalDownloadCommit.Committed) {
+                injected.set(true)
+                injectedFence.set(result.value.fence)
+                injectedClaims.set(result.value.physical.claims)
+                val changed = result.value.physical.copy(
+                    job = result.value.physical.job.copy(stagingPath = "/authored/committed-post-read-path"))
+                PhysicalDownloadCommit.Committed(result.libraryRevision, result.value.copy(physical = changed))
+            } else result
+        }
+        coroutineScope {
+            val removing = async(start = CoroutineStart.UNDISPATCHED) { runCatching { owner.coordinator.remove(id) } }
+            retryClaim.entered.await()
+            assertTrue(injected.get())
+            val rollback = owner.repository.maintenanceFinishCalls.single {
+                it.kind == PhysicalDownloadMaintenanceKind.CLEANUP && !it.cleanupCompleted
+            }
+            assertEquals(injectedFence.get(), rollback.fence,
+                "Rollback must settle the exact fence returned by the committed claim, not the pre-read fence")
+            assertEquals(injectedClaims.get(), rollback.expectedClaims)
+            assertNull(rollback.failure)
+            val held = join(owner, id)
+            assertTrue(held.job.cleanupPending)
+            assertEquals(DownloadStatus.CANCELLED, held.job.status)
+            assertEquals(asset, held.asset)
+            assertNull(held.job.leaseOwner, "The failed post-read join must clear the committed maintenance lease")
+            assertNull(held.cleanupReservation)
+            assertTrue(Files.exists(Path.of(asset.uri)))
+            assertFalse(removing.isCompleted, "The retryable removal must not return while deletion is pending")
+            retryClaim.release()
+            deleting.entered.await()
+            assertFalse(removing.isCompleted, "The retried exact cleanup must await actual deletion")
+            deleting.release()
+            removing.await().getOrThrow()
+        }
+        val removed = join(owner, id)
+        assertFalse(removed.job.cleanupPending)
+        assertEquals(DownloadStatus.CANCELLED, removed.job.status)
+        assertNull(removed.asset)
+        assertFalse(Files.exists(Path.of(asset.uri)))
+        assertEquals(asset.receipt(), owner.store.acquisitionView().acquisition.materializationReceipts[asset.id])
+        assertTrue(owner.store.acquisitionView().acquisition.assetUses.any {
+            it.materializationAssetId == asset.id && it.requestedBindingId == asset.producer.bindingId
+        })
+        assertNull(owner.coordinator.lastFailure.value)
+        owner.legacy.assertUnused()
+    }
+
     @Test fun resourceCloseFailureRetainsNativeFileSlotAndRoomOwnershipUntilExplicitClose() = executorSchema3Case {
         // EX16: the removed PlaybackResource is now the EXACT original local reader receipt.
         val owner = owner()

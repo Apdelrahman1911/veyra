@@ -19,7 +19,9 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.*
 
 /** REAL owned paths/hash/OS leases; deliberately FAKE canonical commands, source and native gate. */
-internal class PhysicalRuntimeFixture {
+internal class PhysicalRuntimeFixture(
+    private val removalOwnerGraceMs: Long = 5_000L,
+) {
     val directory = physicalDownloadTestDirectory()
     val events = CopyOnWriteArrayList<String>()
     val leases = PhysicalRuntimeLeaseProbe(events)
@@ -60,7 +62,8 @@ internal class PhysicalRuntimeFixture {
         validation(it)
     }, { beforeDelete(it) }, { beforeAdoption(it) }, { admission() }, acquisition, batches, materializationEvidence)
     val runtime = DownloadPhysicalRuntime(repository, dependencies, files, legacy, EngineCapabilities(), gate,
-        clock, leaseDurationMs = 60_000, heartbeatMs = 10_000, host = host)
+        clock, leaseDurationMs = 60_000, heartbeatMs = 10_000, host = host,
+        removalOwnerGraceMs = removalOwnerGraceMs)
     val contextR1 = physicalContext("r1")
     val contextR2 = physicalContext("r2")
     val memberR2 = AcquisitionDownloadMemberKey(DownloadBatchId("authored-batch"), 0, 0,
@@ -238,8 +241,9 @@ internal class PhysicalRuntimeFixture {
     companion object { const val JOB = "authored-physical-job" }
 }
 
-internal fun physicalRuntimeCase(block: suspend PhysicalRuntimeFixture.() -> Unit) = runBlocking {
-    val fixture = PhysicalRuntimeFixture()
+internal fun physicalRuntimeCase(removalOwnerGraceMs: Long = 5_000L,
+    block: suspend PhysicalRuntimeFixture.() -> Unit) = runBlocking {
+    val fixture = PhysicalRuntimeFixture(removalOwnerGraceMs)
     try { withTimeout(30_000) { fixture.block() } }
     finally { fixture.close() }
 }
@@ -412,6 +416,9 @@ internal class PhysicalRuntimeTestRepository(private val events: MutableList<Str
     @Volatile var afterAttemptClaim: suspend () -> Unit = { }
     @Volatile var finishBehavior = PhysicalFinishBehavior.CONFIRMED
     @Volatile var maintenanceBehavior = PhysicalFinishBehavior.CONFIRMED
+    /** Test-only coherent committed-identity oracle; default preserves the canonical claim. */
+    @Volatile var maintenanceClaimOutcome: (ClaimPhysicalDownloadMaintenance, ClaimedPhysicalDownload) -> ClaimedPhysicalDownload =
+        { _, value -> value }
 
     fun addContext(context: AcquisitionExecutionContext) {
         contexts[context.binding.id] = context
@@ -710,7 +717,14 @@ internal class PhysicalRuntimeTestRepository(private val events: MutableList<Str
             command.owner, attempt?.id, attempt?.number)
         publish(jobState(before.job.copy(ownershipGeneration = fence.ownershipGeneration, leaseOwner = command.owner,
             leaseExpiresEpochMs = command.nowEpochMs + command.leaseDurationMs, maintenanceKind = command.kind)))
-        PhysicalDownloadCommit.Committed(state.value.libraryRevision, ClaimedPhysicalDownload(fence, checkNotNull(joined(command.downloadId))))
+        val normal = ClaimedPhysicalDownload(fence, checkNotNull(joined(command.downloadId)))
+        val returned = maintenanceClaimOutcome(command, normal)
+        if (returned !== normal) {
+            publish(state.value.copy(
+                physicalDownloads = state.value.physicalDownloads + (command.downloadId to returned.physical.job),
+                claims = state.value.claims + returned.physical.claims.associateBy { it.id }))
+        }
+        PhysicalDownloadCommit.Committed(state.value.libraryRevision, returned)
     }
     override suspend fun finishPhysicalDownloadMaintenance(command: FinishPhysicalDownloadMaintenance): PhysicalDownloadCommit<PhysicalDownloadJoin> {
         maintenanceFinishes += command

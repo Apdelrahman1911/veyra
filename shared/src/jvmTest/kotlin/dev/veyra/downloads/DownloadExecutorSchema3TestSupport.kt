@@ -418,7 +418,11 @@ internal class DownloadExecutorRepositoryFaults(private val real: AcquisitionLib
     val claimCalls = CopyOnWriteArrayList<ClaimPhysicalDownloadAttempt>()
     val finishCalls = CopyOnWriteArrayList<FinishPhysicalDownloadAttempt>()
     val maintenanceFinishCalls = CopyOnWriteArrayList<FinishPhysicalDownloadMaintenance>()
+    val maintenanceClaims = CopyOnWriteArrayList<ClaimPhysicalDownloadMaintenance>()
     @Volatile var afterAttemptClaim: suspend (ClaimPhysicalDownloadAttempt, PhysicalDownloadCommit<ClaimedPhysicalDownload>) -> Unit = { _, _ -> }
+    @Volatile var beforeMaintenanceClaim: suspend (ClaimPhysicalDownloadMaintenance) -> Unit = { }
+    @Volatile var transformMaintenanceClaim: suspend (ClaimPhysicalDownloadMaintenance,
+        PhysicalDownloadCommit<ClaimedPhysicalDownload>) -> PhysicalDownloadCommit<ClaimedPhysicalDownload> = { _, result -> result }
     @Volatile var beforeAttemptFinish: suspend (FinishPhysicalDownloadAttempt) -> Unit = { }
     @Volatile var afterAttemptFinish: suspend (FinishPhysicalDownloadAttempt, PhysicalDownloadCommit<PhysicalDownloadJoin>) -> Unit = { _, _ -> }
     @Volatile var beforeMaintenanceFinish: suspend (FinishPhysicalDownloadMaintenance) -> Unit = { }
@@ -428,6 +432,11 @@ internal class DownloadExecutorRepositoryFaults(private val real: AcquisitionLib
     override suspend fun claimPhysicalDownloadAttempt(command: ClaimPhysicalDownloadAttempt): PhysicalDownloadCommit<ClaimedPhysicalDownload> {
         claimCalls += command
         return real.claimPhysicalDownloadAttempt(command).also { afterAttemptClaim(command, it) }
+    }
+    override suspend fun claimPhysicalDownloadMaintenance(command: ClaimPhysicalDownloadMaintenance): PhysicalDownloadCommit<ClaimedPhysicalDownload> {
+        beforeMaintenanceClaim(command)
+        maintenanceClaims += command
+        return transformMaintenanceClaim(command, real.claimPhysicalDownloadMaintenance(command))
     }
     override suspend fun finishPhysicalDownloadAttempt(command: FinishPhysicalDownloadAttempt): PhysicalDownloadCommit<PhysicalDownloadJoin> {
         finishCalls += command
@@ -444,7 +453,8 @@ internal class DownloadExecutorRepositoryFaults(private val real: AcquisitionLib
     override suspend fun publishPhysicalDownloadFinalization(command: PublishPhysicalDownloadFinalization): PhysicalDownloadCommit<PhysicalDownloadJoin> =
         real.publishPhysicalDownloadFinalization(command).also { afterPublish(command, it) }
     fun clearFaults() {
-        afterAttemptClaim = { _, _ -> }; beforeAttemptFinish = { }; afterAttemptFinish = { _, _ -> }
+        afterAttemptClaim = { _, _ -> }; beforeMaintenanceClaim = { }; transformMaintenanceClaim = { _, result -> result }
+        beforeAttemptFinish = { }; afterAttemptFinish = { _, _ -> }
         beforeMaintenanceFinish = { }; afterMaintenanceFinish = { _, _ -> }; afterPrepare = { _, _ -> }; afterPublish = { _, _ -> }
     }
 }
