@@ -125,15 +125,41 @@ gradle.projectsEvaluated {
                     attributes.attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, 'android-classes-jar')
                 }.artifacts
                 : configuration.incoming.artifacts
-            def artifacts = artifactCollection.artifacts.collect { artifact ->
+            def artifacts = artifactCollection.artifacts.collectMany { artifact ->
                 def attributes = new TreeMap<String, String>()
                 artifact.variant.attributes.keySet().each { key ->
                     attributes[key.name] = String.valueOf(artifact.variant.attributes.getAttribute(key))
                 }
-                recordFile(artifact.file) + [component: componentId(artifact.id.componentIdentifier), variant: attributes]
+                def identity = [component: componentId(artifact.id.componentIdentifier), variant: attributes]
+                def path = ownedPath(artifact.file)
+                if (!Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
+                    return [recordFile(artifact.file) + identity]
+                }
+                // Kotlin/Native project outputs may be unpacked KLIB directories.
+                // Hash their exact regular members, never replace them with a
+                // guessed archive or scan unrelated build/cache directories.
+                if (!platform.startsWith('ios-') || !path.toString().replace('\\', '/').contains('/main/klib/')) {
+                    throw new GradleException('Unexpected directory artifact in production inventory')
+                }
+                def members = []
+                Files.walk(path).withCloseable { stream ->
+                    def iterator = stream.iterator()
+                    int entries = 0
+                    while (iterator.hasNext()) {
+                        def member = iterator.next()
+                        if (++entries > 16384 || Files.isSymbolicLink(member)) {
+                            throw new GradleException('Linked/oversized unpacked KLIB artifact')
+                        }
+                        if (!Files.isDirectory(member, LinkOption.NOFOLLOW_LINKS)) {
+                            members.add(recordFile(member.toFile()) + identity + [container: root.relativize(path).toString().replace('\\', '/')])
+                        }
+                    }
+                }
+                if (members.isEmpty()) throw new GradleException('Empty unpacked KLIB artifact')
+                members
             }.sort { a, b -> (a.component <=> b.component) ?: (a.path <=> b.path) }
-            if (artifacts.isEmpty()) {
-                throw new GradleException('Empty production artifact set is not a successful inventory')
+            if (artifacts.isEmpty() || artifacts.size() > 16384) {
+                throw new GradleException('Empty/oversized production artifact set is not a successful inventory')
             }
 
             def poms = new TreeMap<String, Object>()

@@ -361,3 +361,18 @@ Cheap checks for this batch: tooling 16/16, native bundle 25/25, build retention
 14/14, workflow invariants 10/10, retention packet 7/7, package manifest 7/7,
 package notices 72/72, verification summary 6/6; shell syntax and YAML parse pass.
 These do not establish Windows/Apple execution or close the hosted Linux boundary.
+
+Focused local validation at committed `800a591`: `task-b-hosted-fixes/ownership-001`
+passed all 11 `DownloadOwnershipRoomTest` methods with no failures/errors/skips,
+Gradle exit 0, byte-identical before/after manifests and zero final argv/cwd/fd
+drain matches. Shared production/test Kotlin compilation executed. This supports
+the test synchronization change; it does not retrospectively diagnose the Mac red.
+
+The original Intel iOS logs also contain failed Kotlin compilation, despite GitHub
+showing successful step conclusions for `continue-on-error` steps. Their actual
+outcomes are failures and the final enforcement correctly fails the job. No iOS
+compile success is claimed. The native inventory supports unpacked project KLIBs
+by hashing each exact regular member (bounded traversal, no linked members) rather
+than requiring every selected native artifact to be an archive file. Other kinds
+of directory artifacts remain refused. This records selected link inputs and does
+not establish final-package/native/legal closure.
