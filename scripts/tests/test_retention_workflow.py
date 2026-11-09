@@ -49,8 +49,12 @@ class RetentionWorkflowTest(unittest.TestCase):
         canary = WORKFLOW.split("  retention-canary:", 1)[1].split("  retention-readback:", 1)[0]
         readback = WORKFLOW.split("  retention-readback:", 1)[1]
         self.assertIn("permissions:\n      contents: write", canary)
-        self.assertIn("permissions:\n      contents: read", readback)
-        self.assertNotIn("contents: write", readback)
+        self.assertIn("permissions:\n      contents: write", readback)
+        self.assertIn("only reads", readback)
+        # No job carries unrelated write scopes.
+        self.assertNotIn("actions: write", WORKFLOW)
+        self.assertNotIn("packages: write", WORKFLOW)
+        self.assertNotIn("pull-requests: write", WORKFLOW)
 
     def test_readback_is_independent_and_hash_checks(self):
         readback = WORKFLOW.split("  retention-readback:", 1)[1]

@@ -296,8 +296,10 @@ jobs:
     name: Independent draft Release retention readback
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    # Draft releases are invisible to contents:read tokens; this job only reads,
+    # but GitHub requires repository write visibility for an unpublished draft.
     permissions:
-      contents: read
+      contents: write
     env:
       GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
