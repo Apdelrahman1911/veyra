@@ -80,9 +80,12 @@ Earlier canary attempts are preserved as failed evidence:
   stdout. Fixed to use command exit status.
 - `42557355020`: GitHub created an untagged draft placeholder; no asset existed. The empty
   placeholder was removed after recording the failure.
-- `42557488750` and `42557671375`: tag creation and asset upload succeeded, but the readback
-  attempted the published-only `/releases/tags` endpoint. Draft releases/tags were retained;
+- `42557488750`: tag creation and draft release creation succeeded, but the release lookup used the
+  published-only `/releases/tags` endpoint before assets were uploaded. Draft release/tag retained;
   fixed to use release ids.
+- `42557671375` and `42557816142`: tag/release/asset upload succeeded, but readback failed first on
+  the published-only tag endpoint and then on a `contents: read` 403 for draft assets. Drafts/tags
+  were retained; fixed to use release-id asset download with draft visibility.
 - `42557816142`: release-id asset listing returned 403 to a `contents: read` token. The readback
   job now carries repository write visibility while remaining read-only in behavior; draft
   releases are not visible to read-only tokens. Fixed canary `42557930270` passed both jobs.
