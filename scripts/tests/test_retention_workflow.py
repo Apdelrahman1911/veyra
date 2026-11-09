@@ -56,6 +56,35 @@ class RetentionWorkflowTest(unittest.TestCase):
         ios_condition = WORKFLOW.split("  ios:\n", 1)[1].split("    name:", 1)[0]
         self.assertNotIn("android-desktop", ios_condition)
 
+    def test_windows_arm_retry_matches_exact_build_and_retention_lanes(self):
+        scope = "windows-macos-arm64"
+        marker = "      - name: Compute exact expected lane set"
+        code = textwrap.dedent(WORKFLOW.split(marker, 1)[1].split("<<'PY'\n", 1)[1].split("          PY", 1)[0])
+        with tempfile.TemporaryDirectory(dir=ROOT / ".work/tmp", prefix="windows-arm-plan-") as tmp:
+            output = Path(tmp) / "output"
+            environment = dict(os.environ, SCOPE=scope, PACKAGE_DESKTOP="true", GITHUB_OUTPUT=str(output))
+            result = subprocess.run([__import__("sys").executable, "-B", "-c", code],
+                env=environment, capture_output=True, text=True, timeout=10)
+            self.assertEqual(0, result.returncode, result.stderr)
+            expected = ["desktop-windows-x64", "desktop-macos-arm64"]
+            self.assertEqual(expected, json.loads(result.stdout))
+            self.assertEqual(expected, json.loads(output.read_text().strip().split("=", 1)[1]))
+            output.unlink()
+            result = subprocess.run([__import__("sys").executable, "-B", "-c", code],
+                env=dict(environment, PACKAGE_DESKTOP="false"), capture_output=True, text=True, timeout=10)
+            self.assertNotEqual(0, result.returncode)
+            self.assertFalse(output.exists())
+        expression = WORKFLOW.split("        include: ${{ fromJSON(", 1)[1].split(" }}", 1)[0]
+        selected = json.loads(expression.split("inputs.scope == '" + scope + "' && '", 1)[1].split("'", 1)[0])
+        self.assertEqual(expected, [lane["platform"] for lane in selected])
+        self.assertEqual(["windows-2022", "macos-15"], [lane["runner"] for lane in selected])
+        self.assertIn(scope, WORKFLOW.split("options:", 1)[1].split("\n", 1)[0])
+        desktop = WORKFLOW.split("  desktop:\n", 1)[1].split("    name:", 1)[0]
+        self.assertIn("inputs.scope == '" + scope + "'", desktop)
+        for job in ("android", "ios"):
+            condition = WORKFLOW.split("  " + job + ":\n", 1)[1].split("    name:", 1)[0]
+            self.assertNotIn(scope, condition)
+
     def test_canary_is_manual_and_public_only(self):
         self.assertIn("workflow_dispatch:", WORKFLOW)
         self.assertIn("retention_canary:", WORKFLOW)

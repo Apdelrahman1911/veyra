@@ -4,24 +4,23 @@ Updated 2026-11-07 UTC. Formal Goal tool currently reports **blocked/incomplete*
 
 ## Current Task B continuation — 2026-11-09
 
-Combined run `42643143184` at `baa8370` has passed Android and Linux, including
-Linux tests and DEB generation. Windows stopped in the new Python AWK preflight
-before Kotlin tests, then independent packaging stopped in the same preflight.
-Earlier commentary saying Windows tests passed was incorrect for this run.
-The retained error shows the inline AWK program lost a backslash. The lead moved
-the exact upstream filter to an `awk -f` file, uses the same adapter in the early
-probe and generated production configuration, and binds the file to Windows
-corresponding-source provenance. 34 FFmpeg recipe + 36 native bundle + 74 package
-notice tests pass locally (144 total); actual Windows retry remains pending.
-macOS ARM then failed one shared test because its observer required a transfer
-history to remain a singleton after allowing a legitimate retry. Its DMG and
-inventory built. The test now captures and awaits the exact original transfer;
-all 11 ownership-class tests pass locally, preserving the physical-slot checks.
-Intel macOS remains running. Let it finish and inspect its retained result before
-another dispatch. See `verification/task-b-windows-awk-file-42643143184.md` and
-`verification/task-b-arm-ownership-observer-42643143184.md`. Actual Windows/ARM
-execution of these corrections and release acceptance remain pending.
+Combined run `42643143184` at `baa8370` completed: Android, Linux x64 and
+macOS Intel passed. Intel passed 1,216 shared tests and 484 desktop tests with
+one Linux-only skip, then built its DMG. Independent production readback passed
+for all five lane packets. Windows failed its Python AWK preflight before
+Kotlin tests or native compilation; ARM failed one shared ownership test but
+built its DMG. The Windows AWK-file fix (`72f169d`) passes 144 affected Python
+tests locally; the ARM observer correction (`2a5f081`) passes all 11 ownership
+class tests locally. Neither has successor hosted acceptance yet.
 
+The `windows-macos-arm64` manual scope selects exactly these two failed lanes,
+with ordinary full desktop verification, installers and independent readback.
+The other three successful lanes need no repeat for these scoped corrections.
+All 17 workflow tests pass, including actual retention-plan execution and exact
+build/readback-lane agreement; YAML parses with unique keys. The next dispatch
+will use this scope once. See `verification/task-b-completed-run-42643143184.md`,
+`verification/task-b-windows-awk-file-42643143184.md` and
+`verification/task-b-arm-ownership-observer-42643143184.md`. Release holds remain.
 
 Run `42628939368` at `7b91522` completed with Android and macOS arm64 passing.
 Android passed 873 tests, lint and APK/AAB builds. All desktop lanes discovered
