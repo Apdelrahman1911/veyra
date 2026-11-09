@@ -61,7 +61,8 @@ class DownloadRemovalInterruptedRetryRoomTest {
         assertEquals(asset, held.asset)
         assertEquals(FailureCode.BACKGROUND_RESTRICTED, held.job.failure?.code)
         assertFalse(removal.isCompleted,
-            "The cancelled first owner was legitimately consumed; the active removal must keep observing the retry")
+            "The cancelled first owner was legitimately consumed; the active removal must keep observing the retry: " +
+                if (removal.isCompleted) removal.await().exceptionOrNull() else "pending")
 
         advance(5_000)
         withTimeout(10_000) { retry.entered.await() }

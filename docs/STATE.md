@@ -4,20 +4,28 @@ Updated 2026-11-07 UTC. Formal Goal tool currently reports **blocked/incomplete*
 
 ## Current Task B continuation — 2026-11-09
 
-Run `42628939368` at `7b91522` has a successful Android lane. Linux passed all
-1,215 shared tests and built its DEB, but nine native desktop tests expose the
-next missing hosted library, `libEGL.so.1`. The lead corrected the scoped helper
-to provide the complete external MPV dependency chain, verified it in a private
-minimal root without VPS graphics/audio fallbacks, and passed all 10 native
-audio/crossfade tests plus seven helper tests locally. Windows and macOS arm64
-then passed 1,215 shared / 484 desktop tests (one Linux-only platform skip each).
-ARM built its DMG. Windows packaging exposed an AWK syntax error after configure;
-explicit Make/Bash selection, an early upstream-AWK preflight and fuller bounded
-AWK diagnostics pass 66 affected Python checks locally. Windows runtime remains
-unverified; macOS x64 is still running. Batch the next dispatch after its result.
-See `verification/task-b-linux-native-closure-42628939368.md` and
-`verification/task-b-windows-make-shell-42628939368.md`. No hosted successor or
-release acceptance is claimed.
+Run `42628939368` at `7b91522` completed with Android and macOS arm64 passing.
+Android passed 873 tests, lint and APK/AAB builds. All desktop lanes discovered
+1,215 shared / 484 desktop tests. Linux passed shared tests and built its DEB,
+but nine native tests failed on missing `libEGL.so.1`. Windows passed tests (one
+Linux-only skip), then FFmpeg Make failed with an AWK syntax error. ARM passed
+with the same skip and built its DMG. Intel built its DMG and passed desktop
+with that skip, but one shared removal-retry regression failed. Independent
+production retention readback passed for all five lanes; the lead independently
+verified their support packets and all 911 indexed entries, including exact tags.
+
+Linux's complete external MPV library closure and Windows's explicit scoped
+Make/Bash selection plus early AWK preflight are pushed as `08bc006` / `2a8e2e4`.
+Local Linux loader isolation and 10 native audio tests pass; Windows execution
+remains unverified. Intel followup found a revoked/superseded owner's benign
+stale finish was still emitted as a terminal removal failure. A deterministic
+regression reproduces that source defect locally; the correction passes 80
+focused tests across six suites, including real Room removal and terminal
+failure/timeout coverage. Shared Android compilation also passed. These fixes
+are ready for one combined hosted retry. The prior Intel log did not retain
+the removal exception, so this is a source-supported explanation rather than
+exact retrospective exception attribution. See
+`verification/task-b-completed-run-42628939368.md`. Release holds remain open.
 
 
 Five-platform run `42615340845` at `c4a3f1e` completed with Android and macOS x64

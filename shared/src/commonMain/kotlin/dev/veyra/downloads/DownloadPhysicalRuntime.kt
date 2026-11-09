@@ -1726,9 +1726,12 @@ internal class DownloadPhysicalRuntime(
             val observation = when {
                 currentJob?.cleanupPending == false -> DownloadCleanupObservation.Completed
                 durable is AcquisitionDownloadDurableSettlement.Unconfirmed -> DownloadCleanupObservation.Failed(durable.failure)
+                // The revoked/superseded owner has released all physical resources. Its stale
+                // finish leaves cleanup pending for the foreground retry, including when the
+                // scheduler won admission and the command never caught the child cancellation.
+                benignStale -> DownloadCleanupObservation.InProgress
                 durable is AcquisitionDownloadDurableSettlement.Stale -> DownloadCleanupObservation.Failed(
-                    if (benignStale) AppFailure(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")
-                    else AppFailure(FailureCode.INVALID_STATE, "download_checkpoint_stale"))
+                    AppFailure(FailureCode.INVALID_STATE, "download_checkpoint_stale"))
                 cleanup.failed.value || durable == null -> DownloadCleanupObservation.Failed(
                     AppFailure(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed"))
                 else -> DownloadCleanupObservation.InProgress

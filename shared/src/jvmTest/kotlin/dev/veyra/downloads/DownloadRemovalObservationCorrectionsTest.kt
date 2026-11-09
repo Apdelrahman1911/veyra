@@ -68,6 +68,39 @@ class DownloadRemovalObservationCorrectionsTest {
         }
     }
 
+    @Test fun consumedRevokedCleanupWithStaleSettlementWaitsForTheForegroundRetry() = physicalRuntimeCase(removalOwnerGraceMs = 10_000) {
+        val pending = currentJob().copy(status = DownloadStatus.NEEDS_FOREGROUND, cleanupPending = true,
+            ownershipGeneration = 1, leaseOwner = null, maintenanceKind = null)
+        repository.state.value = repository.state.value.copy(
+            physicalDownloads = mapOf(PhysicalRuntimeFixture.JOB to pending))
+        val epoch = runtime.epochs.begin(PhysicalRuntimeFixture.JOB, producer(contextR1), 1, null, null, null)
+        epoch.revoked = true
+        val cleanup = DownloadPhysicalCleanup(runtime, epoch, emptyList(), acceptedDurableOwner = true,
+            maintenanceKind = PhysicalDownloadMaintenanceKind.CLEANUP) {
+            AcquisitionDownloadDurableSettlement.Stale
+        }
+        host.cleanupRegistry.register(cleanup)
+        runtime.epochs.retain(epoch, cleanup.token, cleanup, completesAcquisition = true)
+        runtime.epochs.finishAdmission(epoch)
+        coroutineScope {
+            // The scheduler can win cleanup admission before the removal command. That caller
+            // observes the normal path, without catching the cancelled child's exception itself.
+            val observed = async(start = CoroutineStart.UNDISPATCHED) {
+                runtime.awaitRemovalOutcome(PhysicalRuntimeFixture.JOB)
+            }
+            runtime.attemptCleanup(cleanup, report = false)
+            assertTrue(host.cleanupRegistry.owners.value.values.none { it === cleanup })
+            assertNull(runtime.drainCheckpointFailure())
+            assertNull(withTimeoutOrNull(250) { observed.await() },
+                "The consumed revoked owner's stale finish must not fail the normal removal observer")
+            assertFalse(observed.isCompleted)
+            assertTrue(removalJob().job.cleanupPending)
+            repository.state.value = repository.state.value.copy(
+                physicalDownloads = mapOf(PhysicalRuntimeFixture.JOB to pending.copy(cleanupPending = false)))
+            assertNull(observed.await(), "Only the subsequent durable deletion completes removal")
+        }
+    }
+
     @Test fun interruptedRemovalWithoutAnOwnerStillFailsBoundedAndPreservesIntent() = physicalRuntimeCase(removalOwnerGraceMs = 40) {
         val pending = currentJob().copy(status = DownloadStatus.CANCELLED, cleanupPending = true,
             ownershipGeneration = 1, leaseOwner = null, maintenanceKind = null)
