@@ -28,7 +28,7 @@ permissions:
 
 concurrency:
   group: veyra-verify-${{ github.ref }}
-  cancel-in-progress: ${{ !inputs.retention_canary }}
+  cancel-in-progress: ${{ !inputs.retention_canary && !inputs.retain_builds }}
 
 defaults:
   run:
@@ -82,7 +82,7 @@ jobs:
           scripts/ci.sh desktop
       - name: Build desktop installer independently of test outcome
         id: desktop_package
-        if: ${{ inputs.package_desktop == true && steps.bootstrap.outcome == 'success' }}
+        if: ${{ always() && inputs.package_desktop == true && steps.bootstrap.outcome == 'success' }}
         timeout-minutes: 45
         continue-on-error: true
         run: |
@@ -93,7 +93,7 @@ jobs:
           scripts/package.sh
       - name: Generate native inventory and inventory-backed legal copy
         id: desktop_inventory
-        if: ${{ inputs.retain_builds == true && inputs.package_desktop == true && steps.bootstrap.outcome == 'success' }}
+        if: ${{ always() && inputs.retain_builds == true && inputs.package_desktop == true && steps.bootstrap.outcome == 'success' }}
         timeout-minutes: 20
         continue-on-error: true
         env:
@@ -176,13 +176,13 @@ jobs:
         run: scripts/ci.sh android
       - name: Rebuild Android debug APK independently of test outcome
         id: android_package
-        if: ${{ inputs.retain_builds == true && steps.bootstrap.outcome == 'success' }}
+        if: ${{ always() && inputs.retain_builds == true && steps.bootstrap.outcome == 'success' }}
         timeout-minutes: 20
         continue-on-error: true
         run: scripts/gradle.sh :composeApp:assembleDebug
       - name: Generate Android inventory and inventory-backed legal copy
         id: android_inventory
-        if: ${{ inputs.retain_builds == true && steps.bootstrap.outcome == 'success' }}
+        if: ${{ always() && inputs.retain_builds == true && steps.bootstrap.outcome == 'success' }}
         timeout-minutes: 20
         continue-on-error: true
         run: |
@@ -266,7 +266,7 @@ jobs:
         run: scripts/ci.sh ios
       - name: Rebuild unsigned iOS outputs independently of test outcome
         id: ios_build
-        if: ${{ inputs.retain_builds == true && steps.bootstrap.outcome == 'success' }}
+        if: ${{ always() && inputs.retain_builds == true && steps.bootstrap.outcome == 'success' }}
         timeout-minutes: 40
         continue-on-error: true
         run: |
@@ -274,7 +274,7 @@ jobs:
           if [ "${{ matrix.retain_device }}" = true ]; then scripts/build-ios.sh device; fi
       - name: Generate iOS inventory and inventory-backed legal copy
         id: ios_inventory
-        if: ${{ inputs.retain_builds == true && steps.bootstrap.outcome == 'success' }}
+        if: ${{ always() && inputs.retain_builds == true && steps.bootstrap.outcome == 'success' }}
         timeout-minutes: 25
         continue-on-error: true
         run: |

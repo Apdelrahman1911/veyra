@@ -14,6 +14,7 @@ class RetentionWorkflowTest(unittest.TestCase):
         self.assertIn("workflow_dispatch:", WORKFLOW)
         self.assertIn("retention_canary:", WORKFLOW)
         self.assertIn("retain_builds:", WORKFLOW)
+        self.assertIn("cancel-in-progress: ${{ !inputs.retention_canary && !inputs.retain_builds }}", WORKFLOW)
         self.assertIn("github.event.repository.private == false", WORKFLOW)
         self.assertIn("inputs.retention_canary == true", WORKFLOW)
         self.assertIn("inputs.retain_builds == true", WORKFLOW)
@@ -46,13 +47,17 @@ class RetentionWorkflowTest(unittest.TestCase):
         self.assertIn("id: retain", desktop)
         self.assertIn("continue-on-error: true", desktop)
         self.assertIn("if: ${{ always() }}", desktop)
+        self.assertIn("always() && inputs.package_desktop == true", desktop)
+        self.assertIn("always() && inputs.retain_builds == true", desktop)
         android = WORKFLOW.split("  android:", 1)[1].split("  ios:", 1)[0]
         self.assertIn("id: android_tests", android)
         self.assertIn("id: android_package", android)
+        self.assertIn("always() && inputs.retain_builds == true", android)
         self.assertIn("id: retain", android)
         ios = WORKFLOW.split("  ios:", 1)[1].split("  # Nonproduction canary", 1)[0]
         self.assertIn("id: ios_tests", ios)
         self.assertIn("id: ios_build", ios)
+        self.assertIn("always() && inputs.retain_builds == true", ios)
         self.assertIn("id: retain_simulator", ios)
         self.assertIn("id: retain_device", ios)
 
