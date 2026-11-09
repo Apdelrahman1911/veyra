@@ -230,8 +230,8 @@ def package_zip(name: str, directory: Path, output_directory: Path, root: Path) 
         if not relative or any(part in ("", ".", "..") for part in relative.split("/")):
             raise LaneError("unsafe package path: " + relative)
         size = path.stat().st_size
-        if size <= 0 or size > MAX_PACKAGE:
-            raise LaneError("empty/oversized file in package directory: " + relative)
+        if size > MAX_PACKAGE:
+            raise LaneError("oversized file in package directory: " + relative)
         total += size
         if total > MAX_PACKAGE:
             raise LaneError("package directory exceeds its byte bound: " + name)
@@ -463,6 +463,8 @@ def verify(args: argparse.Namespace) -> int:
         support_entries = manifest.get("supportArchive", {}).get("entries")
         if not isinstance(support_entries, dict) or set(support_entries) != {info.filename for info in infos}:
             raise LaneError("support archive entries do not match the manifest")
+        if any(info.file_size > MAX_SUPPORT_FILE for info in infos) or sum(info.file_size for info in infos) > MAX_SUPPORT_TOTAL:
+            raise LaneError("support archive expanded size exceeds its bound")
         for info in infos:
             if info.is_dir() or info.filename.startswith("/") or ".." in PurePosixPath(info.filename).parts or "\\" in info.filename:
                 raise LaneError("unsafe support archive entry")

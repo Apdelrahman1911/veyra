@@ -1,7 +1,7 @@
 # Task B build, retention and five-platform preparation
 
-Status: **preparation and nonproduction retention canary only. No production matrix dispatch,
-package retention, release publication, signing or Task B acceptance is claimed.** This note is
+Status: **retention source reviewed; production dispatch authorized and next. Canary verified;
+no production package, release publication, signing or Task B acceptance is claimed.** This note is
 the current-candidate Task B operating record. The older
 `docs/verification/five-platform-preparation.md` remains historical source research; its Task A
 dependency-gate text is superseded by the lead acceptance at `9c8e97c`.
@@ -189,7 +189,7 @@ the manual `retain_builds` input:
    `retention-readback` job downloads every lane via the release-id asset API, verifies the exact
    tag commit/draft state/asset hashes and fails on a missing or malformed lane.
 
-The ready production command (NOT executed; requires lead review) is:
+The lead-reviewed production command (dispatch recorded below once executed) is:
 
 ```sh
 gh workflow run verify.yml \
@@ -198,9 +198,8 @@ gh workflow run verify.yml \
   -f retention_canary=false
 ```
 
-No production matrix dispatch has occurred and no production package has been retained. The
-collateral expectations remain: known desktop test hangs/timeouts fail the job truthfully while
-package generation and failed-lane diagnostics remain retained; no release is published.
+No production matrix dispatch has occurred and no production package has been retained. Any desktop test failure or timeout fails the job truthfully while independent package generation
+and failed-lane diagnostics remain retained; no release is published.
 
 ## Checks performed
 
@@ -217,15 +216,49 @@ package generation and failed-lane diagnostics remain retained; no release is pu
 
 ## Limits and holds
 
-- Known full-desktop blocker: `MusicSurfacesTest.requestedAndFirstResultTitlesStayDistinctAndOnlyConfirmedOverlapLooksActive`
-  hangs at line 360 `performScrollTo(crossfade-progress)` with the AWT thread in Skiko
-  `RenderNode_nDrawInto`; retained jstacks are under
-  `.work/verification/pr4-core-shell-corrections/runs/diagnose-crossfade-jstack/`. This is not
-  diagnosed or claimed green here.
+- Historical crossfade helper hang is corrected in the selected diagnostic test run described below.
+  A final clean hosted full-desktop run remains required.
 - Previous same-source `DownloadRecoveryRoomTest` 15s timeout remains unexplained; later isolated
   and full-shared green runs do not diagnose it.
-- No live source/authentication, copyrighted audio, physical audio/device, native decoder, signing,
+- No live source/authentication, copyrighted audio, physical audio/device, final-package native closure, signing,
   notarization, installability, package installation, workflow production matrix, release
   publication or distribution is claimed.
 - No Task B or release acceptance is claimed. The canary draft is intentionally unpublished and
   must not be treated as a release.
+
+
+## Lead review and local native/scroll verification (2026-11-09)
+
+The lead independently verified canary run `42557930270`, its exact commit/tag/draft state,
+and all four downloaded assets against their recorded sizes/digests. The seven cheap Python
+suites were independently rerun: build retention **14**, workflow **10**, packet **7**,
+package manifest **7**, notices **72**, tooling **10**, verification **6**, all green.
+The 14th retention test rejects a compressed support entry exceeding its expanded size bound;
+the existing application-directory test now also preserves an empty package file. The lead
+reviewed the concrete workflow and retention scripts, including scoped credentials and paths.
+Android's independent packaging step now also attempts unsigned release APK/AAB output; the
+inventory in this lane is still explicitly `android-debug`, not release legal acceptance.
+Hosted bootstrap requires clean exact `GITHUB_SHA`, approved pin and schema before building.
+
+`gesture-native-003` ran through the resource gate with the shared project lock and bounded
+JVM/test settings: Gradle exit **0**, **19 tests / 2 suites / 0 failures/errors/skips**:
+`MusicSurfacesTest` **16**, `DesktopAudioEngineTest` **3**. The music test now uses one actual
+swipe and asserts the complete progress bounds fit the pane and semantic value is **0.35**.
+All title/provenance/phase/current-item oracles remain. Explicit scrolling had exposed the full
+indicator while `performScrollTo` still looped; Material's expanded semantic bounds support
+that helper-boundary diagnosis, but no native renderer deadlock is claimed.
+
+The audio test exercised the actual bundled libmpv with authored MP3 and a **silent sink**:
+prepare, play, pause, forward/back seek, speed, stop and TLS-verification configuration. It is
+native execution evidence, not audible hardware, TLS network, live-source, package installation
+or five-platform verification.
+
+Evidence lives under `.work/verification/task-b-crossfade-diagnosis/gesture-native-003/`.
+The selected test source matches retained `MusicSurfacesTest.gesture.kt` (SHA-256
+`b6424855d8b1bffffae9b793eee414c3dca9a87f8a876787d2eeae5c3f61834a`);
+only import ordering changed afterward. Concurrent workflow commits changed the broad input
+manifest, so the evidence runner stopped at its comparison with exit **1** after Gradle passed.
+This is diagnostic evidence, not a sealed clean-final-source run. XML/log/source are retained;
+a later Java-executable/cwd/fd sample found **0** owned JVM processes. That later sample does
+not establish an in-lock drain. The first sample incorrectly matched the shell text and is
+retained separately as a false positive. Earlier bounded diagnostic hangs remain preserved.

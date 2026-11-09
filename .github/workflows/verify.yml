@@ -174,12 +174,12 @@ jobs:
         timeout-minutes: 25
         continue-on-error: true
         run: scripts/ci.sh android
-      - name: Rebuild Android debug APK independently of test outcome
+      - name: Build Android debug and unsigned release outputs independently of test outcome
         id: android_package
         if: ${{ always() && inputs.retain_builds == true && steps.bootstrap.outcome == 'success' }}
         timeout-minutes: 20
         continue-on-error: true
-        run: scripts/gradle.sh :composeApp:assembleDebug
+        run: scripts/gradle.sh :composeApp:assembleDebug :composeApp:assembleRelease :composeApp:bundleRelease
       - name: Generate Android inventory and inventory-backed legal copy
         id: android_inventory
         if: ${{ always() && inputs.retain_builds == true && steps.bootstrap.outcome == 'success' }}
@@ -202,11 +202,14 @@ jobs:
           set -euo pipefail
           apk=composeApp/build/outputs/apk/debug/composeApp-debug.apk
           outcome=success
-          if [ "${{ steps.android_tests.outcome }}" != success ] || [ ! -f "$apk" ] || \
+          if [ "${{ steps.android_tests.outcome }}" != success ] || [ "${{ steps.android_package.outcome }}" != success ] || [ ! -f "$apk" ] || \
              [ "${{ steps.android_inventory.outcome }}" != success ]; then outcome=failed; fi
           args=(--platform android --lane-outcome "$outcome"
             --diagnostic "tests=${{ steps.android_tests.outcome }} package=${{ steps.android_package.outcome }} inventory=${{ steps.android_inventory.outcome }} apk=$([ -f "$apk" ] && echo present || echo missing)")
           [ -f "$apk" ] && args+=(--package "$apk")
+          for release in composeApp/build/outputs/apk/release/composeApp-release-unsigned.apk composeApp/build/outputs/bundle/release/composeApp-release.aab; do
+            [ -f "$release" ] && args+=(--package "$release")
+          done
           for results in shared/build/test-results composeApp/build/test-results; do
             [ -d "$results" ] && args+=(--xml-root "$results")
           done
@@ -222,6 +225,7 @@ jobs:
           test "${{ steps.android_tests.outcome }}" = success
           if [ "${{ inputs.retain_builds }}" = true ]; then
             test "${{ steps.android_inventory.outcome }}" = success
+            test "${{ steps.android_package.outcome }}" = success
             test -f composeApp/build/outputs/apk/debug/composeApp-debug.apk
           fi
       - name: Report exact verification level

@@ -163,6 +163,20 @@ class BuildRetentionTest(unittest.TestCase):
         (self.packet / "Veyra_1.0.0.deb").write_bytes(b"tampered")
         self.run_verify(ok=False)
 
+    def test_support_expanded_size_is_rejected_before_decompression(self):
+        self.run_create("--package", str(self.package))
+        support = self.packet / "support.zip"
+        with zipfile.ZipFile(support, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("oversized.txt", b"a" * (32 * 1024 * 1024 + 1))
+        manifest_path = self.packet / "manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        record = next(item for item in manifest["files"] if item["name"] == "support.zip")
+        record.update(bytes=support.stat().st_size, sha256=hashlib.sha256(support.read_bytes()).hexdigest())
+        manifest["supportArchive"]["entries"] = {"oversized.txt": {"bytes": 32 * 1024 * 1024 + 1, "sha256": "d" * 64}}
+        manifest_path.write_text(json.dumps(manifest))
+        result = self.run_verify(ok=False)
+        self.assertIn("expanded size exceeds its bound", result.stderr)
+
     def test_extra_file_is_rejected(self):
         self.run_create("--package", str(self.package))
         (self.packet / "extra.bin").write_bytes(b"extra")
@@ -184,12 +198,14 @@ class BuildRetentionTest(unittest.TestCase):
         app = self.root / "Veyra.app"
         (app / "Contents").mkdir(parents=True)
         (app / "Contents/Info.plist").write_text("authored\n")
+        (app / "Contents/empty-marker").touch()
         self.run_create("--directory", "app=" + str(app), "--package", str(self.package))
         self.run_verify()
         manifest = json.loads((self.packet / "manifest.json").read_text())
         self.assertIn("app.zip", manifest["packages"])
         with zipfile.ZipFile(self.packet / "app.zip") as archive:
-            self.assertEqual(["Contents/Info.plist"], archive.namelist())
+            self.assertEqual(["Contents/Info.plist", "Contents/empty-marker"], archive.namelist())
+            self.assertEqual(b"", archive.read("Contents/empty-marker"))
 
     def test_identity_or_platform_mismatch_is_rejected(self):
         self.run_create("--package", str(self.package))
