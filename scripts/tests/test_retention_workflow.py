@@ -31,6 +31,8 @@ class RetentionWorkflowTest(unittest.TestCase):
         self.assertNotIn("gh release edit", WORKFLOW)
         self.assertNotIn("gh release publish", WORKFLOW)
         self.assertIn("Refusing to reuse an existing release/tag", WORKFLOW)
+        self.assertIn('if gh api "repos/$REPO/git/ref/tags/$TAG" >/dev/null 2>&1; then', WORKFLOW)
+        self.assertNotIn("--jq .object.sha 2>/dev/null || true", WORKFLOW)
 
     def test_no_artifact_or_cache_storage_and_no_paid_runner(self):
         self.assertNotIn("upload-artifact", WORKFLOW)

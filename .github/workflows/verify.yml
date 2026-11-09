@@ -197,7 +197,7 @@ jobs:
             printf 'Refusing to reuse an existing release/tag: %s\n' "$TAG" >&2
             exit 1
           fi
-          if [ -n "$(gh api "repos/$REPO/git/ref/tags/$TAG" --jq .object.sha 2>/dev/null || true)" ]; then
+          if gh api "repos/$REPO/git/ref/tags/$TAG" >/dev/null 2>&1; then
             printf 'Refusing to move/reuse an existing tag: %s\n' "$TAG" >&2
             exit 1
           fi
