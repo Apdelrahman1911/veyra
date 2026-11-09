@@ -38,6 +38,7 @@ class ProductionFfmpegBuildTest(unittest.TestCase):
                                                        cleanup_complete=True)
         console = io.StringIO()
         with patch.object(BUILD, "ROOT", self.root), \
+                patch.object(BUILD.platform, "system", return_value="Linux"), \
                 patch.object(BUILD.owned_process, "run", side_effect=failure), \
                 contextlib.redirect_stderr(console):
             with self.assertRaises(BUILD.owned_process.OwnedProcessError) as caught:
@@ -59,6 +60,7 @@ class ProductionFfmpegBuildTest(unittest.TestCase):
         failure = BUILD.owned_process.OwnedProcessError("command_failed", returncode=1,
                                                        cleanup_complete=True)
         with patch.object(BUILD, "ROOT", self.root), \
+                patch.object(BUILD.platform, "system", return_value="Linux"), \
                 patch.object(BUILD.owned_process, "run", side_effect=failure), \
                 contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(BUILD.owned_process.OwnedProcessError) as caught:
@@ -67,6 +69,27 @@ class ProductionFfmpegBuildTest(unittest.TestCase):
         record = json.loads((self.work / "verification/native-build-diagnostic.json").read_text())
         self.assertEqual(".work/ffbuild/config.log", record["log"])
         self.assertIn("authored compiler-probe discriminator", "\n".join(record["lines"]))
+
+    def test_windows_commands_pin_path_resolution_before_createprocess(self):
+        environment = {"PATH": "authored trusted tool path"}
+        for name, resolved in (("bash", "C:/Program Files/Git/bin/bash.exe"),
+                               ("make", "C:/existing/tools/make.exe")):
+            with self.subTest(tool=name), patch.object(BUILD.platform, "system", return_value="Windows"), \
+                    patch.object(BUILD.shutil, "which", return_value=resolved) as which, \
+                    patch.object(BUILD.owned_process, "run") as run:
+                BUILD.run([name, "authored argument with spaces"], self.work, environment, 10,
+                          self.work / "resolved.log")
+                which.assert_called_once_with(name, path=environment["PATH"])
+                self.assertEqual([resolved, "authored argument with spaces"], run.call_args.args[0])
+                self.assertIs(environment, run.call_args.kwargs["env"])
+
+    def test_windows_missing_resolved_tool_never_launches_a_system_fallback(self):
+        with patch.object(BUILD.platform, "system", return_value="Windows"), \
+                patch.object(BUILD.shutil, "which", return_value=None), \
+                patch.object(BUILD.owned_process, "run") as run:
+            with self.assertRaisesRegex(ValueError, "Existing matching-host command"):
+                BUILD.run(["bash", "authored/configure"], self.work, {}, 10, self.work / "missing.log")
+            run.assert_not_called()
 
     def archive(self, entries):
         archive = self.work / "source.tar.gz"

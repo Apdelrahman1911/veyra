@@ -81,12 +81,13 @@ jobs:
             test -d "$DEVELOPER_DIR"
           fi
           if [ "$VEYRA_VERIFY_SCOPE" = windows-recovery ] || { [ "$VEYRA_VERIFY_SCOPE" = android-linux-windows ] && [ "$RUNNER_OS" = Windows ]; }; then
-            # Diagnostic scope: these four recovery methods only, never a full-suite claim.
+            # Targeted crash recovery and retry policy; never a full-suite claim.
             scripts/dev.sh python3 -B scripts/tests/test_gradle_bootstrap.py
             scripts/dev.sh python3 -B native/test_bundle.py
             scripts/dev.sh python3 -B native/ffmpeg/test_build.py
             scripts/gradle.sh :shared:jvmTest \
               --tests 'dev.veyra.data.RoomProcessRecoveryTest*' \
+              --tests 'dev.veyra.data.WindowsWalRecoveryTest*' \
               --tests 'dev.veyra.downloads.DownloadRecoveryRoomTest.failedReturnAfterDurableIntentInsertionCanBeCancelledWithoutLostFileReferences*'
           else
             scripts/ci.sh desktop

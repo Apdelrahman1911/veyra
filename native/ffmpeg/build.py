@@ -243,6 +243,13 @@ def write_sidecar(path: Path, digest: str) -> None:
 
 def run(command: list[str], cwd: Path, env: dict[str, str], timeout: int, log: Path) -> None:
     invocation = env.get("VEYRA_NATIVE_DIAGNOSTIC_INVOCATION")
+    if platform.system() == "Windows":
+        # CreateProcess searches System32 before PATH for a bare executable.
+        # Pin the already-resolved tool (especially Git Bash vs the WSL shim).
+        executable = shutil.which(command[0], path=env.get("PATH"))
+        if executable is None:
+            raise ValueError("Existing matching-host command is required; nothing is installed")
+        command = [executable, *command[1:]]
     try:
         owned_process.run(command, cwd=owned(cwd), env=env, timeout=timeout, log=writable(log))
     except owned_process.OwnedProcessError as failure:

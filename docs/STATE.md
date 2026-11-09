@@ -4,6 +4,18 @@ Updated 2026-11-07 UTC. Formal Goal tool currently reports **blocked/incomplete*
 
 ## Current Task B continuation — 2026-11-09
 
+Combined run `42605023132` at `29f6477` completed: Android passed 873 tests,
+lint and APK/AAB builds. Linux GUI tests did **not** run: Podman's owned runroot
+exceeded 50 characters. Linux DEB generation succeeded, then app-image legal
+verification failed; the lane retained diagnostics only. Windows repeated two
+SQLite 1546 crash-recovery failures and failed FFmpeg configure. The lead fixed
+the owned path length, explicit persistent image creation, Windows executable
+resolution and a narrowly bounded upstream-documented Windows WAL validation
+retry. Local gates pass 204 data/Room tests, current shared Android compilation,
+fresh source-native/image builds, actual embedded legal comparison and seven
+silent native operations. No Windows runtime or new hosted Linux acceptance
+follows yet. See `verification/task-b-combined-run-corrections.md`.
+
 Local Android/Linux-first continuation: Android 873 unit tests and lint pass;
 debug APK, unsigned release APK and AAB build. Linux 484 desktop + 4 recovery
 tests pass. The revised user-namespace mount guard passes 13 focused tests;

@@ -11,6 +11,7 @@ import okio.use
 
 internal interface DatabaseLease { fun release() }
 internal expect fun acquireDatabaseLease(path: String): DatabaseLease
+internal expect fun <T> withWalRecoveryRetry(read: () -> T): T
 
 /** Owned database lifecycle; neither failed opening nor a missing file silently erases a library. */
 internal class RoomDatabaseFiles(directory: String, private val fileSystem: FileSystem = FileSystem.SYSTEM) {
@@ -106,14 +107,22 @@ internal class RoomDatabaseFiles(directory: String, private val fileSystem: File
             source.readByteArray(16)
         }
         if (!header.contentEquals("SQLite format 3\u0000".encodeToByteArray())) recoveryRequired("Invalid database header")
-        BundledSQLiteDriver().open(path.toString()).use { connection ->
-            val version = connection.prepare("PRAGMA user_version").use { it.step(); it.getLong(0) }
-            if (version > VeyraDatabase.VERSION) throw VeyraException(AppFailure(FailureCode.FUTURE_SCHEMA))
-            if (version < 1) recoveryRequired("Unknown database schema")
-            val quickCheck = connection.prepare("PRAGMA quick_check(1)").use { it.step() && it.getText(0) == "ok" }
-            if (!quickCheck) recoveryRequired("SQLite integrity check failed")
-            if (connection.prepare("PRAGMA foreign_key_check").use { it.step() }) recoveryRequired("Broken database relations")
+        val read = {
+            BundledSQLiteDriver().open(path.toString()).use { connection ->
+                val version = connection.prepare("PRAGMA user_version").use { it.step(); it.getLong(0) }
+                if (version > VeyraDatabase.VERSION) throw VeyraException(AppFailure(FailureCode.FUTURE_SCHEMA))
+                if (version < 1) recoveryRequired("Unknown database schema")
+                val quickCheck = connection.prepare("PRAGMA quick_check(1)").use { it.step() && it.getText(0) == "ok" }
+                if (!quickCheck) recoveryRequired("SQLite integrity check failed")
+                if (connection.prepare("PRAGMA foreign_key_check").use { it.step() }) recoveryRequired("Broken database relations")
+            }
         }
+        // A killed Windows writer can release its WAL locks before the OS
+        // unmaps -shm. Retry only this read/validation, keeping our lease and
+        // every database/sidecar byte. Normal opens and mutations are unchanged.
+        if (fileSystem.exists(sidecar(path, "-wal")) && fileSystem.exists(sidecar(path, "-shm"))) {
+            withWalRecoveryRetry(read)
+        } else read()
     }
 
     private fun checkpointAndSync(path: Path) {

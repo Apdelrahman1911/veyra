@@ -237,7 +237,9 @@ class ScopedToolingTests(unittest.TestCase):
             self.assertEqual(73, result.returncode, result.stderr)
             args = capture.read_bytes().decode().split("\0")[:-1]
             for option, suffix in (("--root", "storage"), ("--runroot", "run"), ("--tmpdir", "tmp")):
-                self.assertEqual(str(ROOT / ".work/linux-namespace" / suffix), args[args.index(option)+1])
+                self.assertEqual(str(ROOT / ".work/ns" / suffix), args[args.index(option)+1])
+            self.assertLessEqual(len(args[args.index("--runroot")+1]), 50)
+            self.assertLessEqual(len("/home/runner/work/veyra/veyra/.work/ns/run"), 50)
             self.assertIn("--storage-driver=vfs", args)
             self.assertIn("--events-backend=none", args)
             index = args.index("unshare")

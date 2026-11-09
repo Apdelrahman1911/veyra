@@ -36,3 +36,5 @@ internal actual fun acquireDatabaseLease(path: String): DatabaseLease = synchron
         throw VeyraException(AppFailure(FailureCode.STORAGE_IO, "Database lease could not be acquired"))
     }
 }
+
+internal actual fun <T> withWalRecoveryRetry(read: () -> T): T = read()

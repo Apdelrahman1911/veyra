@@ -26,3 +26,5 @@ internal actual fun acquireDatabaseLease(path: String): DatabaseLease {
         }
     }
 }
+
+internal actual fun <T> withWalRecoveryRetry(read: () -> T): T = read()

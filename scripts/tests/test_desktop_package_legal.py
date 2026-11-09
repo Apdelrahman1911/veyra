@@ -129,6 +129,7 @@ class DesktopPackageLegalTest(unittest.TestCase):
         self.assertIn(":shared:jvmJar", PACKAGE_SH)
         self.assertIn(":composeApp:exportProductionInventory", PACKAGE_SH)
         self.assertIn("--supplement third_party/notices/desktop-reviewed.json", PACKAGE_SH)
+        self.assertIn(':composeApp:createDistributable ":composeApp:$task"', PACKAGE_SH)
         self.assertIn("-Pveyra.desktopLegalDir=$legal", PACKAGE_SH)
         self.assertIn("--app-jar \"$app_jar\"", PACKAGE_SH)
         self.assertIn("--desktop-legal-dir \"$legal\"", PACKAGE_SH)

@@ -34,7 +34,10 @@ python3 -B scripts/package-notices.py \
     --supplement third_party/notices/desktop-reviewed.json \
     --output "$legal"
 python3 -B scripts/desktop-package-legal.py validate-legal-dir --directory "$legal"
-"$SCRIPT_DIR/gradle.sh" ":composeApp:$task" "-Pveyra.desktopLegalDir=$legal"
+# Installer tasks can create their image only in a temporary jpackage tree.
+# Request the persistent image explicitly so its actual legal bytes can be
+# checked on a fresh checkout, without relying on an earlier local build.
+"$SCRIPT_DIR/gradle.sh" :composeApp:createDistributable ":composeApp:$task" "-Pveyra.desktopLegalDir=$legal"
 app_jar="$(python3 -B scripts/desktop-package-legal.py locate-app-jar --platform "$platform")"
 python3 -B scripts/package-manifest.py --newer-than "$marker" \
     --expected-source-sha "${GITHUB_SHA:-}" --repository "${GITHUB_REPOSITORY:-}" --task "$task" \

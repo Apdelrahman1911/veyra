@@ -162,7 +162,10 @@ if [ "${VEYRA_LINUX_NAMESPACE_LAUNCHER:-}" = podman ]; then
     # namespaces. Use its namespace command without an image/container or
     # network setup; all container-tool state stays in the repository.
     command -v podman >/dev/null 2>&1 || { printf '%s\n' 'Existing podman required; no installation or uncontained fallback.' >&2; exit 1; }
-    namespace_state="$VEYRA_WORK_ROOT/linux-namespace"
+    # Podman limits runroot to 50 characters (Unix socket paths). Keep the
+    # state name short even in the hosted runner's nested checkout.
+    namespace_state="$VEYRA_WORK_ROOT/ns"
+    [ "${#namespace_state}" -le 46 ] || { printf '%s\n' 'Repository path is too long for an owned Podman runroot (50-character limit).' >&2; exit 1; }
     mkdir -p "$namespace_state/storage" "$namespace_state/run" "$namespace_state/tmp"
     exec podman --root "$namespace_state/storage" --runroot "$namespace_state/run" \
         --tmpdir "$namespace_state/tmp" --storage-driver=vfs --events-backend=none \
