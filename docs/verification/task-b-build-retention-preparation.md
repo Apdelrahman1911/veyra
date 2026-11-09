@@ -276,3 +276,8 @@ tracked CRLF text file already has a deliberate `-text` exception, including ret
 and `gradlew.bat`; those bytes remain unchanged. Bootstrap now reports source identity failures.
 A `windows` dispatch scope permits a single-lane retry without repeating healthy platform lanes.
 The other original jobs continue; this record does not claim their outcome or Windows success.
+
+Windows retry `42561342038` at `035f518` stayed pending behind the whole original matrix's
+branch-wide concurrency group. No job started. That pending run is superseded; retained runs
+now use unique concurrency groups, so a scoped retry can proceed in its independent workspace
+without cancelling an in-flight retention run. Standard non-retention runs keep scoped groups.

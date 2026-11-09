@@ -27,7 +27,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: veyra-verify-${{ github.ref }}
+  # Retained runs own separate workspaces/releases and must not queue behind each other.
+  group: veyra-verify-${{ github.ref }}-${{ (inputs.retention_canary || inputs.retain_builds) && github.run_id || inputs.scope }}
   cancel-in-progress: ${{ !inputs.retention_canary && !inputs.retain_builds }}
 
 defaults:
