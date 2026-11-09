@@ -36,6 +36,12 @@ def archive(entries: list[tuple[str | zipfile.ZipInfo, bytes]]) -> bytes:
     with warnings.catch_warnings(), zipfile.ZipFile(output, "w") as bundle:
         warnings.simplefilter("ignore", UserWarning)
         for name, data in entries:
+            if isinstance(name, str):
+                raw_name = name
+                name = zipfile.ZipInfo(raw_name)
+                # Author exact ZIP header bytes even when Windows normalizes
+                # the constructor's filename. These are parser negatives.
+                name.filename = raw_name
             bundle.writestr(name, data)
     return output.getvalue()
 
@@ -369,6 +375,19 @@ class PackageNoticeTests(unittest.TestCase):
         for index, items in enumerate(entries):
             write(target, archive(items))
             with self.subTest(index=index), self.assertRaises(NOTICES.NoticeError): NOTICES.archive_notices(target)
+
+    def test_raw_backslash_archive_name_is_rejected_after_windows_normalization(self):
+        data = archive([("a\\b", b"fixture")])
+        with zipfile.ZipFile(io.BytesIO(data)) as bundle:
+            self.assertEqual(bundle.infolist()[0].orig_filename, "a\\b")
+        target = self.root / ".work/fixtures/windows-raw-name.jar"
+        write(target, data)
+        with patch.object(zipfile.os, "sep", "\\"):
+            with zipfile.ZipFile(io.BytesIO(data)) as bundle:
+                self.assertEqual(bundle.infolist()[0].filename, "a/b")
+                self.assertEqual(bundle.infolist()[0].orig_filename, "a\\b")
+            with self.assertRaises(NOTICES.NoticeError):
+                NOTICES.archive_notices(target)
 
     def test_empty_maven_directory_mode_sentinel_does_not_hide_special_files(self):
         target = self.root / ".work/fixtures/archive.jar"

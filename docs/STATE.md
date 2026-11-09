@@ -4,22 +4,22 @@ Updated 2026-11-07 UTC. Formal Goal tool currently reports **blocked/incomplete*
 
 ## Current Task B continuation — 2026-11-09
 
-Latest manual retry `42569788087` is dispatched at `ceced9a` with the full platform
-and draft-package retention lanes; results are pending. It includes the platform,
-fixture and typed-proof corrections plus the native self-test JSON repair. Targeted
-verification passed: 25 crossfade/reader tests and 11 native/report tests. The first
-combined attempt preserves 43 shared log passes and desktop 50/2 XML; the two old
-crossfade assertions were corrected in the narrow run, not hidden by a repeated full
-suite. The retained older Linux package launches but its self-test report was invalid;
-new package execution is pending. The fresh typed live proof reached the actual
-raw-first result and playback preparation, then returned
-`PROVIDER_ACCESS_REQUIRED / YOUTUBE_ACCESS_REQUIRED` with zero media transfer and
-host closure confirmed. No alternate source or relaxed proof policy was used.
-Full evidence and limits: `verification/task-b-build-retention-preparation.md`.
-The preceding hosted run `42563893628` at `e7cfb5c` remains red, with independently
-verified Android/Linux draft package bytes. Five-platform build success, installation,
-physical audio, signing and distribution acceptance remain incomplete.
-
+Manual run `42569788087` at `ceced9a` retained independently verified Linux and
+macOS arm64 packages. The unpacked Linux package passed all seven silent native
+self-test operations, TLS verification and owned shutdown. macOS arm64 desktop
+tests/package/inventory passed; one shared cleanup assertion remains unexplained
+and passes unchanged locally. Windows ZIP-name validation is corrected with a
+Windows-normalization regression (74 notice tests pass); shared test logs now retain
+full failure stacks. No cleanup semantics or timeouts changed. macOS x64 is still
+building; final run/readback results are pending. Android and iOS stopped on pinned
+distribution HTTP 504 responses; one Android retry repeated the failure. Windows
+also has dependency/network and undiagnosed native-preparation failures. Linux GUI
+namespace containment remains blocked. No repeated full matrix was dispatched.
+The live source still refuses playback preparation with
+`PROVIDER_ACCESS_REQUIRED / YOUTUBE_ACCESS_REQUIRED`; no media transfer or offline
+proof occurred. Installation, physical audio, five-platform success, signing and
+distribution acceptance remain incomplete. Details and preserved failures:
+`verification/task-b-build-retention-preparation.md`.
 
 This entry supersedes historical execution status below. Task A's shared/Room/UI
 scope is lead-accepted. PR27 remains the single integration branch; final native,

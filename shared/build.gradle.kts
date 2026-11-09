@@ -62,3 +62,15 @@ android {
     }
     testOptions { unitTests.isReturnDefaultValues = true }
 }
+
+// Keep coroutine assertion details in hosted logs; retained XML deliberately
+// removes failure text, and SHORT output points only at the fixture wrapper.
+tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+    testLogging {
+        events("failed")
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+        showExceptions = true
+        showCauses = true
+        showStackTraces = true
+    }
+}

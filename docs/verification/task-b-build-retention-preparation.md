@@ -1,11 +1,54 @@
 # Task B build, retention and five-platform preparation
 
-Status: **hosted retry `42569788087` dispatched at `ceced9a`; results pending.
-The preceding run retained verified Android and Linux package bytes. Targeted local
-corrections passed; the typed live proof reached playback preparation and was refused
-with `PROVIDER_ACCESS_REQUIRED / YOUTUBE_ACCESS_REQUIRED`. No installation,
-physical-audio, signing, publication or Task B acceptance is claimed.** This note is the
-current-candidate Task B operating record. Older entries remain historical.
+Status: **run `42569788087` at `ceced9a` retained verified Linux and macOS arm64
+packages; the macOS x64 lane is still building. Other completed lanes failed as
+recorded below. The fresh unpacked Linux package passed silent native self-test.
+Task B, installation, physical audio, signing and distribution remain incomplete.**
+This note is the current-candidate Task B operating record. Older entries remain historical.
+
+## Hosted retry findings and package execution — 2026-11-09
+
+PR checks remain empty because verification is manual; inspect Actions run
+`42569788087` directly. At this checkpoint macOS x64 reached installer generation;
+its final result and the aggregate fresh-runner readback are pending.
+
+| Lane | Verified result / remaining failure |
+|---|---|
+| Linux | Installer and inventory succeeded; GUI tests refused the required user namespace. Containment was preserved. |
+| macOS arm64 | Desktop tests, installer and inventory succeeded. Shared tests: 1,205 methods, one failure in `cleanupExpirationRetainsAllReferencesThroughNoncancellableUnwindAndOldEpochCallback`. |
+| Windows | The raw-backslash ZIP negative failed; dependency resolution returned HTTP 504. Native preparation separately failed without a retained compiler diagnosis; its cause remains unknown. |
+| Android | Pinned Gradle distribution download returned HTTP 504 before compilation. Scoped retry `42570333742` repeated that failure; its diagnostic-only retention/readback succeeded. Further unchanged retries are held. |
+| iOS x64 / arm64 | Gradle / Kotlin-Native distribution downloads respectively returned HTTP 504 before compilation. These are infrastructure failures, not new compiler diagnostics. |
+
+The ZIP failure exposed both a fixture and scanner issue: Windows `ZipInfo` normalizes
+backslashes. The fixture now writes the exact unsafe header name, and the scanner
+validates `orig_filename` before using the normalized view. All 74 notice tests pass,
+including an authored Windows-normalization discriminator. Shared JVM tests now log
+full failure stacks; no cleanup behavior, assertions or timeouts changed.
+
+The macOS shared failure took 0.475 seconds; its sanitized retained XML contains no
+inner assertion. Two focused local attempts passed the unchanged method, including
+one after the logging configuration change. These are equal-input dirty-worktree
+runs (`cleanup-diagnostic-002` and `-003`), not a diagnosis or clean-source full-suite
+acceptance. `cleanup-diagnostic-001` stopped on duplicate Gradle CLI flags before
+running tests. The hosted failure remains unexplained; no timeout was inflated.
+
+The lead downloaded and independently verified all assets from draft releases
+Linux `438788311`, macOS arm64 `438793201` and Windows diagnostic `438785962`.
+Exact tags resolve to `ceced9a7af226b22a2a96b82d8fa2451a6522729`; each packet's
+source/pin/schema, asset sizes and hashes pass `scripts/build-retention.py verify`.
+All three releases remain draft/prerelease/unpublished and all lane outcomes remain
+failed. The macOS arm64 packet contains 1,689 tests total: one failure and one skip.
+
+The new 112,972,962-byte Linux Debian package was extracted with safe tar filtering;
+no package installation or maintainer script ran. `linux-package-selftest-003` passed
+prepare/play/pause/seekForward/rate/seekBack/stop with authored MP3, mpv 0.41.0,
+FFmpeg 8.0.1, `tlsVerify=yes`, silent `null` output, exit 0 and owned cleanup complete.
+Attempt `-002` stopped before launcher execution because Python tarfile cannot read
+the zstd payload directly; `-003` explicitly decompresses it with the installed zstd.
+This proves unpacked-package native execution, not audible playback or installation.
+Evidence: `.work/verification/task-b-hosted-fixes/retained-42569788087/`,
+`linux-package-selftest-003/` and `lead-hosted-retry-receipt.json`.
 
 ## Focused correction results and current dispatch — 2026-11-09
 

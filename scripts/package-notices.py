@@ -315,7 +315,9 @@ def archive_notices(path: Path, collect_documents: bool = True) -> tuple[list[di
             raise NoticeError("Oversized production archive index")
         names = set()
         for item in entries:
-            name = relative_name(item.filename)
+            # ZipInfo.filename normalizes backslashes on Windows. Validate the
+            # original central-directory name before using that normalized view.
+            name = relative_name(item.orig_filename)
             if name in names:
                 raise NoticeError("Duplicate production archive entry")
             names.add(name)
