@@ -10,7 +10,7 @@ platform="$(python3 -B scripts/desktop-package-legal.py platform)"
 case "$(uname -s)" in
     Linux) task=packageDeb ;;
     Darwin) task=packageDmg ;;
-    MINGW*|MSYS*|CYGWIN*) task=packageMsi ;;
+    MINGW*|MSYS*|CYGWIN*) task=packageExe ;;
     *) printf '%s\n' 'No supported native installer for this host.' >&2; exit 1 ;;
 esac
 marker="$(mktemp "$VEYRA_WORK_ROOT/tmp/package-started.XXXXXX")"

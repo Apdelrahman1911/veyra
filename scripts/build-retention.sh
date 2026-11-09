@@ -100,9 +100,11 @@ for name, (size, sha) in expected.items():
         raise SystemExit("remote lane asset identity mismatch: " + name)
 print(json.dumps({"tag": tag, "assets": sorted(actual)}, sort_keys=True))
 PY
+release_url="$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" --jq .html_url)"
 {
   printf '### Draft build retention lane `%s`\n\n' "$platform"
   printf -- '- Tag/release: `%s` (draft, prerelease, unpublished)\n' "$tag"
+  printf -- '- [Download this platform build](%s) (draft; sign in as repository owner)\n' "$release_url"
   printf -- '- Release id: `%s`\n' "$release_id"
   printf -- '- Exact commit: `%s`; lane outcome: `%s`\n' "$GITHUB_SHA" "$lane_outcome"
   printf -- '- Assets: %s\n' "$(cd "$packet" && printf '%s ' *)"

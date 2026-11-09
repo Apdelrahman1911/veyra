@@ -4,6 +4,25 @@ Updated 2026-11-07 UTC. Formal Goal tool currently reports **blocked/incomplete*
 
 ## Current Task B continuation — 2026-11-09
 
+Windows full run `42677661597` at `b658073eff08fc791371675ff03776d312bc1e83`
+PASSED: 1,216 shared tests; 484 desktop tests, one Linux-only skip; MSI generation,
+exact embedded legal binding, draft retention and independent download/hash
+readback. The native helper also passed short probe `42676263500` at the same
+source. The owned telemetry correction is now exercised on Windows. These are
+build/test results, not OS installation or audible-output verification.
+
+The owner now requests APK/EXE/DMG/Linux installers to try the app. A manual
+`installers.yml` entry reuses `verify.yml` with build-only scope `installers`:
+five lanes, full tests explicitly skipped, debug APK only, Windows EXE, Mac ARM/
+Intel DMGs and Linux DEB. Actual package/inventory checks and independent draft
+readback remain mandatory; per-lane summaries link the downloads. Local authored
+checks 85/85; YAML and 36 shell scripts valid; actual offline Gradle configuration
+passed in 29 seconds under the shared project lock. The new hosted installer run
+is pending. See `verification/trial-installers.md` for use and exact limits.
+
+The following paragraphs retain the earlier diagnostic progression:
+
+
 Corrected short probe `42672976807` at `7052b0f` passed Windows process/bundle
 tests, then established **CMake exit 0 with one owned `vctip.exe` still alive**.
 The wrapper timed out awaiting that telemetry helper; a stuck CMake command is

@@ -39,6 +39,14 @@ class DesktopPackageLegalTest(unittest.TestCase):
         (path / "notices/a.txt").write_text("authored fixture\n")
         return path
 
+    def test_windows_installer_format_is_exe_and_legacy_msi_is_still_identifiable(self):
+        self.assertEqual(".exe", MANIFEST.package_extension("Windows", "packageExe"))
+        self.assertEqual(".msi", MANIFEST.package_extension("Windows", "packageMsi"))
+        self.assertEqual(".deb", MANIFEST.package_extension("Linux", "packageDeb"))
+        self.assertEqual(".dmg", MANIFEST.package_extension("Darwin", "packageDmg"))
+        with self.assertRaises(MANIFEST.ManifestError):
+            MANIFEST.package_extension("Unknown", "packageExe")
+
     def test_platform_mapping_is_explicit(self):
         self.assertEqual("desktop-linux-x64", PACKAGE_LEGAL.platform_name("Linux", "x86_64"))
         self.assertEqual("desktop-linux-x64", PACKAGE_LEGAL.platform_name("Linux", "AMD64"))

@@ -323,7 +323,7 @@ def verify_embedded_legal(root: Path, app_jar: Path, pin: str,
     return {
         "verified": True,
         "verificationScope": ("desktop application-image JAR consumed by the installer task; "
-                              "the .deb/.dmg/.msi container itself is not re-opened"),
+                              "the .deb/.dmg/.msi/.exe container itself is not re-opened"),
         "resourcePrefix": LEGAL_RESOURCE_PREFIX,
         "appJarPath": jar.relative_to(root).as_posix(),
         "appJarBytes": jar.stat().st_size,
@@ -337,6 +337,15 @@ def verify_embedded_legal(root: Path, app_jar: Path, pin: str,
         "files": [{"path": name, "bytes": len(data), "sha256": digest_bytes(data)}
                   for name, data in sorted(files.items())],
     }
+
+
+def package_extension(system: str, task: str) -> str:
+    extension = {"Linux": ".deb", "Darwin": ".dmg", "Windows": ".msi"}.get(system)
+    if extension is None:
+        raise ManifestError("Unsupported package host")
+    if system == "Windows" and task == "packageExe":
+        return ".exe"
+    return extension
 
 
 def main() -> int:
@@ -365,9 +374,7 @@ def main() -> int:
     marker = args.newer_than.resolve() if args.newer_than else None
     if marker is not None and (not marker.is_file() or marker.is_symlink()):
         raise ManifestError("--newer-than must be a regular build marker")
-    extension = {"Linux": ".deb", "Darwin": ".dmg", "Windows": ".msi"}.get(platform.system())
-    if extension is None:
-        raise ManifestError("Unsupported package host")
+    extension = package_extension(platform.system(), args.task)
     packages = []
     if base.exists():
         for path in sorted(base.glob(f"**/*{extension}")):

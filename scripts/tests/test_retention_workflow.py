@@ -85,6 +85,96 @@ class RetentionWorkflowTest(unittest.TestCase):
             condition = WORKFLOW.split("  " + job + ":\n", 1)[1].split("    name:", 1)[0]
             self.assertNotIn(scope, condition)
 
+    def test_installer_entry_reuses_exact_workflow_with_only_build_and_retention_inputs(self):
+        entry = (ROOT / ".github/workflows/installers.yml").read_text()
+        self.assertIn("workflow_dispatch:", entry)
+        self.assertIn("uses: ./.github/workflows/verify.yml", entry)
+        self.assertIn("scope: installers", entry)
+        self.assertIn("package_desktop: true", entry)
+        self.assertIn("retain_builds: true", entry)
+        self.assertIn("retention_canary: false", entry)
+        self.assertIn("contents: write", entry)
+        self.assertIn("workflow_call:", WORKFLOW)
+        self.assertNotIn("secrets: inherit", entry)
+        for job in ("desktop", "android"):
+            block = WORKFLOW.split("  " + job + ":\n", 1)[1]
+            condition = block.split("    name:", 1)[0]
+            self.assertIn("inputs.scope == 'installers'", condition)
+            tests = block.split("id: " + ("desktop_tests" if job == "desktop" else "android_tests"), 1)[1]
+            self.assertIn("if: ${{ inputs.scope != 'installers' }}", tests.split("      - name:", 1)[0])
+        ios = WORKFLOW.split("  ios:\n", 1)[1].split("    name:", 1)[0]
+        self.assertNotIn("installers", ios)
+
+    def test_installer_plan_expects_five_exact_lanes_and_requires_packaging(self):
+        marker = "      - name: Compute exact expected lane set"
+        code = textwrap.dedent(WORKFLOW.split(marker, 1)[1].split("<<'PY'\n", 1)[1].split("          PY", 1)[0])
+        with tempfile.TemporaryDirectory(dir=ROOT / ".work/tmp", prefix="installer-plan-") as tmp:
+            for package in ("true", "false"):
+                output = Path(tmp) / (package + ".txt")
+                result = subprocess.run([__import__("sys").executable, "-B", "-c", code],
+                    env=dict(os.environ, SCOPE="installers", PACKAGE_DESKTOP=package,
+                             GITHUB_OUTPUT=str(output)), capture_output=True, text=True, timeout=10)
+                if package == "true":
+                    self.assertEqual(0, result.returncode, result.stderr)
+                    self.assertEqual(["desktop-linux-x64", "desktop-windows-x64", "desktop-macos-arm64",
+                                      "desktop-macos-x64", "android"], json.loads(result.stdout))
+                else:
+                    self.assertNotEqual(0, result.returncode)
+                    self.assertFalse(output.exists())
+
+    def test_desktop_installer_gate_allows_only_explicitly_skipped_tests_and_successful_builds(self):
+        marker = "      - name: Enforce desktop test/package/inventory outcomes"
+        block = WORKFLOW.split(marker, 1)[1].split("      - name:", 1)[0]
+        code = textwrap.dedent(block.split("        run: |\n", 1)[1])
+        bash = os.environ.get("VEYRA_TRUSTED_BASH") or shutil.which("bash") or "bash"
+        for scope, tests, package, inventory, retained, expected in (
+                ("installers", "skipped", "success", "success", "true", 0),
+                ("installers", "skipped", "failure", "success", "true", 1),
+                ("installers", "skipped", "success", "failure", "true", 1),
+                ("installers", "cancelled", "success", "success", "true", 1),
+                ("installers", "skipped", "success", "success", "false", 1),
+                ("windows", "success", "success", "success", "true", 0),
+                ("windows", "skipped", "success", "success", "true", 1)):
+            replacements = {"steps.desktop_tests.outcome": tests, "steps.desktop_package.outcome": package,
+                            "steps.desktop_inventory.outcome": inventory, "inputs.package_desktop": "true",
+                            "inputs.retain_builds": retained}
+            script = code
+            for key, value in replacements.items():
+                script = script.replace("${{ " + key + " }}", value)
+            self.assertNotIn("${{", script)
+            with self.subTest(scope=scope, tests=tests, package=package, inventory=inventory, retained=retained):
+                result = subprocess.run([bash, "-euo", "pipefail", "-c", script],
+                    env=dict(os.environ, VEYRA_VERIFY_SCOPE=scope), capture_output=True, text=True, timeout=5)
+                self.assertEqual(expected, int(result.returncode != 0), result.stderr)
+
+    def test_android_installer_gate_requires_actual_apk_and_successful_inventory(self):
+        marker = "      - name: Enforce Android test/inventory/APK outcomes"
+        block = WORKFLOW.split(marker, 1)[1].split("      - name:", 1)[0]
+        code = textwrap.dedent(block.split("        run: |\n", 1)[1])
+        bash = os.environ.get("VEYRA_TRUSTED_BASH") or shutil.which("bash") or "bash"
+        with tempfile.TemporaryDirectory(dir=ROOT / ".work/tmp", prefix="installer-android-gate-") as tmp:
+            apk = Path(tmp) / "composeApp/build/outputs/apk/debug/composeApp-debug.apk"
+            apk.parent.mkdir(parents=True)
+            for tests, package, inventory, present, expected in (
+                    ("skipped", "success", "success", True, 0),
+                    ("skipped", "success", "success", False, 1),
+                    ("skipped", "failure", "success", True, 1),
+                    ("skipped", "success", "failure", True, 1),
+                    ("failure", "success", "success", True, 1)):
+                if present:
+                    apk.write_bytes(b"authored APK fixture; never executed")
+                elif apk.exists():
+                    apk.unlink()
+                script = code
+                for key, value in {"steps.android_tests.outcome": tests, "steps.android_package.outcome": package,
+                                   "steps.android_inventory.outcome": inventory, "inputs.retain_builds": "true"}.items():
+                    script = script.replace("${{ " + key + " }}", value)
+                self.assertNotIn("${{", script)
+                with self.subTest(tests=tests, package=package, inventory=inventory, present=present):
+                    result = subprocess.run([bash, "-euo", "pipefail", "-c", script], cwd=tmp,
+                        env=dict(os.environ, VEYRA_VERIFY_SCOPE="installers"), capture_output=True, text=True, timeout=5)
+                    self.assertEqual(expected, int(result.returncode != 0), result.stderr)
+
     def test_session_probe_is_one_bounded_windows_job_without_gradle_or_packages(self):
         probe = WORKFLOW.split("  windows-session-probe:\n", 1)[1].split("  desktop:\n", 1)[0]
         self.assertIn("runs-on: windows-2022", probe)

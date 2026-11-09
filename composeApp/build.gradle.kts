@@ -289,7 +289,7 @@ compose.desktop {
         mainClass = "dev.veyra.desktop.MainKt"
         buildTypes.release.proguard { isEnabled = false }
         nativeDistributions {
-            targetFormats(TargetFormat.Deb, TargetFormat.Dmg, TargetFormat.Msi)
+            targetFormats(TargetFormat.Deb, TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Exe)
             packageName = "Veyra"
             packageVersion = "1.0.0"
             description = "Veyra — music and podcasts, online and offline"

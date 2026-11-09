@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
+from contextlib import redirect_stdout
+from unittest.mock import patch
 import io
 import json
 import os
@@ -74,6 +77,27 @@ class PackageManifestTest(unittest.TestCase):
              "--expected-source-sha", self.source_sha, "--repository", "Apdelrahman1911/veyra",
              "--task", "packageDeb", "--output", str(self.root / ".work/verification/packages.json"),
              *extra], cwd=ROOT, text=True, capture_output=True)
+
+    def test_exe_manifest_binds_fresh_windows_exe_and_refuses_msi_substitution(self):
+        spec = importlib.util.spec_from_file_location("authored_manifest_exe", SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        exe = self.package("Veyra-1.0.0.exe")
+        self.package("Veyra-1.0.0.msi")
+        output = self.root / ".work/verification/packages.json"
+        argv = [str(SCRIPT), "--root", str(self.root), "--base", str(self.base),
+                "--newer-than", str(self.marker), "--expected-source-sha", self.source_sha,
+                "--task", "packageExe", "--output", str(output)]
+        with patch.object(module.platform, "system", return_value="Windows"), \
+             patch.object(sys, "argv", argv), redirect_stdout(io.StringIO()):
+            self.assertEqual(0, module.main())
+            value = json.loads(output.read_text())
+            self.assertEqual(["Veyra-1.0.0.exe"], [Path(item["path"]).name for item in value["packages"]])
+            self.assertEqual("packageExe", value["build"]["task"])
+            self.assertEqual(hexdigest(exe.read_bytes()), value["packages"][0]["sha256"])
+            exe.unlink()
+            with self.assertRaises(module.ManifestError):
+                module.main()  # A fresh MSI alone cannot satisfy an EXE build.
 
     def legal_fixture(self, platform_id: str = PLATFORM, components: bool = True) -> tuple[Path, Path, bytes]:
         license_text = b"Authored complete embedded license fixture.\n"
