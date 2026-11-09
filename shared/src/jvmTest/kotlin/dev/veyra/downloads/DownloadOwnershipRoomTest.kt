@@ -314,15 +314,19 @@ class DownloadOwnershipRoomTest {
         val (id, _) = enqueue(a)
         a.coordinator.start(DownloadActivation.DURABLE_WORK)
         zombie.entered.await()
+        val retiredTransfer = a.gateway.transfers.single()
         b.coordinator.start(DownloadActivation.DURABLE_WORK)
         advance(1_100)
         awaitJob(b, id) { it.job.leaseOwner == null }
         delay(160)
         assertTrue(b.gateway.transfers.isEmpty())
         assertNull(probeFiles.tryTransferSlot(1))
-        assertFalse(a.gateway.transfers.single().operation.isCompleted)
+        assertFalse(retiredTransfer.operation.isCompleted)
         zombie.release()
-        awaitCondition { a.gateway.transfers.single().operation.isCompleted }
+        // Either live coordinator may admit the retry after the old OS slot is released.
+        // Await this exact retired transfer rather than requiring its gateway history to
+        // stay a singleton while that legitimate retry is already being recorded.
+        awaitCondition { retiredTransfer.operation.isCompleted }
         advance(5_100)
         val completed = complete(b, id, evidenceOwners = listOf(a, b))
         assertEquals(DownloadStatus.COMPLETE, completed.job.status)

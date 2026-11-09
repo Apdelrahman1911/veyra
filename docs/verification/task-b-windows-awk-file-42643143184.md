@@ -8,9 +8,8 @@ and in independent packaging's identical preflight. Kotlin tests did **not** run
 on Windows in this attempt; earlier commentary calling them passed was incorrect.
 The prior run's Windows Kotlin results belong to `7b91522`, not this attempt.
 
-The actual Windows console preserves the damaged parser input: the upstream
-`gsub(/\/, "/")` arrives as `gsub(/\/, "/")` with only one literal backslash
-in the received regular expression. The exact boundary that removed it among
+The actual Windows console preserves the damaged parser input: the received
+regular expression contains one literal backslash instead of the required two. The exact boundary that removed it among
 Make, shell and AWK argument handling is not captured. Explicit Bash selection
 alone did not fix the toolchain. The early discriminator stopped before the long
 configure, retaining the failing program and caret rather than hiding it.

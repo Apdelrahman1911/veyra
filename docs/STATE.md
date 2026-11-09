@@ -13,9 +13,14 @@ the exact upstream filter to an `awk -f` file, uses the same adapter in the earl
 probe and generated production configuration, and binds the file to Windows
 corresponding-source provenance. 34 FFmpeg recipe + 36 native bundle + 74 package
 notice tests pass locally (144 total); actual Windows retry remains pending.
-Both Mac lanes were still running when this note was prepared. Let them finish
-and inspect their retained failures before another dispatch. See
-`verification/task-b-windows-awk-file-42643143184.md`. No release acceptance.
+macOS ARM then failed one shared test because its observer required a transfer
+history to remain a singleton after allowing a legitimate retry. Its DMG and
+inventory built. The test now captures and awaits the exact original transfer;
+all 11 ownership-class tests pass locally, preserving the physical-slot checks.
+Intel macOS remains running. Let it finish and inspect its retained result before
+another dispatch. See `verification/task-b-windows-awk-file-42643143184.md` and
+`verification/task-b-arm-ownership-observer-42643143184.md`. Actual Windows/ARM
+execution of these corrections and release acceptance remain pending.
 
 
 Run `42628939368` at `7b91522` completed with Android and macOS arm64 passing.
