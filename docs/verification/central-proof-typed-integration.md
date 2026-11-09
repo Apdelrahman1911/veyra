@@ -1,8 +1,31 @@
 # Central listening proof: typed acquisition integration
 
-Status: authored regression only. No live source request, native decoder run, physical
-audio, signing, or distribution was performed for this note. This is not an acceptance
-claim.
+Status: the final 37 authored safeguards passed in the lead's combined gate at
+`daae24c`. A fresh live attempt at `ceced9a` reached typed acquisition, independently
+verified the actual raw-first author and entered playback preparation, then received
+`PROVIDER_ACCESS_REQUIRED / YOUTUBE_ACCESS_REQUIRED`. No transferred media,
+offline restart, physical audio or release acceptance is claimed.
+
+## Lead verification — 2026-11-09
+
+- `.work/verification/task-b-hosted-fixes/focused-batch-001/` retains the 25 legacy
+  and 12 typed proof test XML results at clean `daae24c`, including the final
+  `UNBOUNDED_NATIVE_PLAYBACK_REFUSED` assertion. All 37 passed. The enclosing desktop
+  task was red because of two separate inherited crossfade assertions; that red is
+  preserved. The lead corrected those assertions and verified 25 crossfade/reader
+  ownership tests separately, without changing the proof policy.
+- `.work/verification/task-b-hosted-fixes/live-central-typed-002/` is the clean
+  `ceced9a` live attempt. It records one typed acquisition, one independent first-author
+  check and one playback preparation. The actual raw-first result was approved;
+  preparation returned `PROVIDER_ACCESS_REQUIRED / YOUTUBE_ACCESS_REQUIRED` before
+  any download preparation or transferred byte. This demonstrates that the original
+  missing-interface failure was passed, not successful native source playback.
+- Both attempts' input comparisons and seals were independently checked. The live
+  report has `ownersClosedByHost=true`, no rejected-resource backlog and the outer
+  managed owner reports `ownedCleanupComplete=true`. The in-gate process snapshot
+  contains that still-running outer keeper; it is not a zero-match snapshot.
+- No online materialization marker was earned, so no offline stage was attempted.
+  No cookies, later candidate, alternate source or relaxed bound were used.
 
 ## Verified cause of the live failure
 
@@ -72,8 +95,8 @@ Attempt directory:
 - Gradle test task exit: 0 (`exit.txt`).
 
 A final failure-detail split (`UNBOUNDED_NATIVE_PLAYBACK_REFUSED` for a missing/mismatched
-owned resource) and its authored assertion were made after attempt `i` and are awaiting the
-lead's combined focused gate.
+owned resource) and its authored assertion were made after attempt `i`. The lead's later
+clean combined gate above covers that exact final change.
 
 The runner's outer input-equality post-check reported a mismatch because unrelated
 tracked files were edited concurrently in the same shared worktree during the run. Those
@@ -82,8 +105,8 @@ compiled proof suites themselves passed.
 
 ## Limits
 
-- No live online/offline source attempt was made; the lead owns the source/security
-  review and live-run decision.
+- The agent's original authored run made no live request. The later lead-owned online
+  attempt above was refused by the provider; offline restart remains unverified.
 - No physical audible output, network-namespace denial, packaging, signing, or
   distribution was verified here.
 - The typed wrapper cannot attest that the production source will choose a SABR

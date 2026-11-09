@@ -1,10 +1,66 @@
 # Task B build, retention and five-platform preparation
 
-Status: **production retry `42563893628` completed with failures; Android and Linux
-package bytes were retained and independently verified. Platform repairs and typed proof
-integration are under focused validation in PR27. No installation, physical-audio,
-signing, publication or Task B acceptance is claimed.** This note is the current-candidate
-Task B operating record. Older preparation and execution entries remain historical.
+Status: **hosted retry `42569788087` dispatched at `ceced9a`; results pending.
+The preceding run retained verified Android and Linux package bytes. Targeted local
+corrections passed; the typed live proof reached playback preparation and was refused
+with `PROVIDER_ACCESS_REQUIRED / YOUTUBE_ACCESS_REQUIRED`. No installation,
+physical-audio, signing, publication or Task B acceptance is claimed.** This note is the
+current-candidate Task B operating record. Older entries remain historical.
+
+## Focused correction results and current dispatch — 2026-11-09
+
+Source corrections are committed at `ceced9a7af226b22a2a96b82d8fa2451a6522729` on
+PR27. Hosted run `42569788087` uses that exact commit, `scope=all`,
+`package_desktop=true`, `retain_builds=true`, and `retention_canary=false`. It retries
+Android, Windows, Linux, both macOS architectures and both iOS simulator build lanes
+on the existing standard public-repository runners. The run is pending, not acceptance.
+The kmpYT pin is `6805d4db8077650992d342e5395b1f0d7c80e984`; schema 3 remains
+`aab30e43a35a431a25a7ecbb7ebccefd849811f688957054304b02d3caf6d367`.
+
+Local evidence is under `.work/verification/task-b-hosted-fixes/`:
+
+| Attempt | Source and result |
+| --- | --- |
+| `focused-batch-001` | Clean `daae24c`: all 43 selected shared methods passed in the log; desktop XML is 50 tests / 6 suites / 2 failures / 0 errors / 0 skips. All 37 proof guards, 3 native-audio, 2 viewport and 1 removal tests passed. The two failures were old crossfade transport-error assertions. The shared XML was overwritten by the desktop task's common output directory, so the 43 shared passes are log evidence, not retained shared XML. |
+| `crossfade-focused-002` | `daae24c` plus the exact crossfade test changes later committed in `ceced9a`: 25 tests / 2 suites / 0 failures / errors / skips. This is an unchanged-input dirty-test run, not a clean committed-source run. |
+| `native-report-focused-003` | Clean `ceced9a`: 11 tests / 2 suites / 0 failures / errors / skips; desktop production and test compilation executed. |
+| `live-central-typed-002` | Clean `ceced9a`: actual discovery, raw-first acquisition, independent author check and playback preparation reached; provider access refused, process exit 1. No media transfer or offline phase. |
+
+All four attempts have equal before/after input manifests (`inputs_equal=0` is the
+comparison exit code) and independently rechecked attempt seals. The lead receipt is
+`lead-receipt-ceced9a.json`. Project-lock snapshots and process scans are retained.
+Some scans include the next queued gate's shell/Python processes; the live in-gate
+scan also sees its outer managed-process keeper. These are not zero-match scans.
+The live outer owner's final receipt reports `ownedCleanupComplete=true`; no Java
+process remained in the recorded post-run scans. No historical evidence was resealed.
+
+The crossfade corrections preserve the current reader-fence contract: failed retired
+resource closure leaves `awaitRetiredReaders` unacknowledged and later stop/close
+failing, while successful promotion or unrelated cancellation does not silence the
+current deck or invent its playback error. Assertions now check the exact cleanup
+failure, live-deck continuity, no duplicate close, and the later deletion/shutdown
+veto. Production transport behavior was not changed to satisfy these tests.
+
+The retained `e7cfb5c` Linux Debian package was safely extracted under
+`linux-package-selftest-001` (503 entries, 288,298,773 extracted bytes), without
+installation or maintainer scripts. Its launcher `--help` succeeded. Its native
+self-test returned exit 1 with `invalid_verification_report` and host closure true.
+Source inspection found a missing closing brace in `DesktopSelfTest`'s JSON return.
+`ceced9a` corrects that brace; the native test now parses the complete report and
+asserts all seven operations and the TLS setting, rather than searching substrings.
+The older package remains a failed verification result; the current local test is
+silent native decoding/control evidence, not a repaired-package or audible-output
+claim. New package execution still requires the hosted retry's artifacts.
+
+The typed live result records `acquireCalls=1`, `firstVideoAuthorChecks=1`,
+`preparePlaybackCalls=1`, `prepareDownloadCalls=0`, `transferCalls=0`,
+`transferBytes=0`, `approvedRawFirst=true`, no rejected-resource backlog and
+`ownersClosedByHost=true`. The actual provider failure is
+`PROVIDER_ACCESS_REQUIRED / YOUTUBE_ACCESS_REQUIRED`. No later-result substitution,
+cookies, alternate source or reduced proof bounds were introduced. The online
+materialization/offline-restart gate remains blocked. Linux hosted GUI namespace
+permissions, physical devices/audio, installation, signing and release gates remain
+open independently of this source refusal.
 
 ## Hosted retry and batched correction — 2026-11-09
 
@@ -48,8 +104,9 @@ The same PR now batches the returned corrections:
 The 113 targeted Python checks (73 notices, 16 tooling, 14 retention, 10 workflow)
 pass. Source-only notice `--check` remains 0 production components, 3 retained
 texts and 1 open coverage issue; this is not binary legal closure. The combined
-committed-source shared/desktop gate and hosted Apple/Windows verification are
-pending; earlier dirty proof runs are not final acceptance.
+committed-source shared/desktop attempt is recorded above, including its two reds
+and the narrow passing corrections. Hosted Apple/Windows verification remains pending;
+earlier dirty proof runs are not final acceptance.
 
 ## Starting point and scope
 

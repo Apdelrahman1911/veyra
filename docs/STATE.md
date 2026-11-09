@@ -4,13 +4,21 @@ Updated 2026-11-07 UTC. Formal Goal tool currently reports **blocked/incomplete*
 
 ## Current Task B continuation — 2026-11-09
 
-Latest manual retry `42563893628` at `e7cfb5c` finished red. Android APK/AAB and
-Linux installer bytes were retained, downloaded and hash/provenance verified;
-this is package generation, not installation or release acceptance. PR27 now
-batches shared Native portability, Windows Bash, macOS native/retention/locale,
-canonical desktop fixtures and typed listening-proof repairs. One focused
-committed-source gate precedes the next hosted retry. Full details and retained
-failures are in `verification/task-b-build-retention-preparation.md`.
+Latest manual retry `42569788087` is dispatched at `ceced9a` with the full platform
+and draft-package retention lanes; results are pending. It includes the platform,
+fixture and typed-proof corrections plus the native self-test JSON repair. Targeted
+verification passed: 25 crossfade/reader tests and 11 native/report tests. The first
+combined attempt preserves 43 shared log passes and desktop 50/2 XML; the two old
+crossfade assertions were corrected in the narrow run, not hidden by a repeated full
+suite. The retained older Linux package launches but its self-test report was invalid;
+new package execution is pending. The fresh typed live proof reached the actual
+raw-first result and playback preparation, then returned
+`PROVIDER_ACCESS_REQUIRED / YOUTUBE_ACCESS_REQUIRED` with zero media transfer and
+host closure confirmed. No alternate source or relaxed proof policy was used.
+Full evidence and limits: `verification/task-b-build-retention-preparation.md`.
+The preceding hosted run `42563893628` at `e7cfb5c` remains red, with independently
+verified Android/Linux draft package bytes. Five-platform build success, installation,
+physical audio, signing and distribution acceptance remain incomplete.
 
 
 This entry supersedes historical execution status below. Task A's shared/Room/UI
