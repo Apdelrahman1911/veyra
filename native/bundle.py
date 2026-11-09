@@ -44,7 +44,7 @@ _DIAGNOSTIC_LINE = re.compile(
     r"(?i)(?:\berror\b|\bfatal\b|cmake error|undefined (?:reference|symbol)|"
     r"\bld:\s|\bcollect2:\s|ninja: build stopped|make(?:\[\d+\])?: \*\*\*|"
     r"clang(?:-\d+)?: error|gcc: error|"
-    r"^C compiler test failed\.$|\bis unable to create an executable file\.|"
+    r"\b(?:failed|unable|unsupported|impossible)\b|\bunknown option\b|\bcannot find\b|"
     r"\bno such file or directory\b|\bcommand not found\b|"
     r"\bnot recognized as an internal or external command\b|"
     r"^scoped production ffmpeg build failed \(valueerror\)\. no global install or substitute binary\.$|"
@@ -372,6 +372,11 @@ def _extract_diagnostics(text: str, drop_first_line: bool = False) -> tuple[list
     index = 0
     while index < len(raw):
         line = _clean_diagnostic_line(raw[index])
+        # Nested owners must not mistake the reporter's own metadata for a cause.
+        if line.lstrip().startswith(("Native build diagnostic (", "No compiler/build error lines retained;",
+                                     "Preserved log:", "Diagnostic record:")):
+            index += 1
+            continue
         if not _DIAGNOSTIC_LINE.search(line):
             index += 1
             continue

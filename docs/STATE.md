@@ -54,6 +54,21 @@ the independent readback correctly failed on the absent release. The lead fixed
 the fixture bytes and shell forwarding, added shell/configure diagnostic forms
 under the existing bounds/filter, and passed 84 focused local tests. Windows
 native compilation and installer verification still require the scoped rerun.
+Run `42591361805` at `72a17e5` verified both prior corrections on Windows:
+the FFmpeg checks passed and draft retention/independent readback succeeded.
+Shared tests: 1,205 with three failures (two forced-process Room reopen failures
+and one 15 s cleanup timeout). Desktop tests: 484, zero failures/errors, one skip.
+Native preparation still failed without a useful inner cause; the retained record
+contained reporter metadata. Its unpublished diagnostic packet/tag/assets were
+independently hash-verified; it contains no installer. The lead is correcting
+error reporting, preserving raw exception causes in test-only Room wrappers and
+last-job state on the existing cleanup timeout, and using `windows-recovery` to
+run only the four affected recovery methods plus independent packaging. This
+scope is explicitly retained in the lane diagnostic and is not a full-suite gate.
+No test assertion/timeout or production Room/download behavior was relaxed.
+Both local focused gates passed the four methods; the final gate has zero
+failures/errors/skips and equal tracked inputs. All 68 proportional Python/shell
+checks pass. Windows reproduction and the native root cause remain pending.
 The live source still refuses playback preparation with
 `PROVIDER_ACCESS_REQUIRED / YOUTUBE_ACCESS_REQUIRED`; no media transfer or offline
 proof occurred. Installation, physical audio, five-platform success, signing and

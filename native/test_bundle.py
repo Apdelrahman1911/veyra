@@ -331,6 +331,25 @@ class NativeBundleTest(unittest.TestCase):
         self.assertNotIn("authored setup", console)
         self.assertIn("Preserved log:", console)
 
+    def test_configure_early_exit_and_nested_reporter_metadata_are_distinguished(self):
+        lines, suppressed, truncated = BUNDLE._extract_diagnostics(
+            'Unknown option "--authored-invalid".\n'
+            'Unsupported MSVC version (2013 or newer required)\n'
+            'Unable to create temporary directory in authored-work.\n'
+            'Native FFmpeg configure command failed.\n'
+            'Native build diagnostic (bounded compiler/build output only):\n'
+            '  No compiler/build error lines retained; inspect the build log.\n'
+            '  Preserved log: .work/authored-error.log\n'
+            '  Diagnostic record: .work/authored-error.json\n')
+        self.assertEqual([
+            'Unknown option "--authored-invalid".',
+            'Unsupported MSVC version (2013 or newer required)',
+            'Unable to create temporary directory in authored-work.',
+            'Native FFmpeg configure command failed.',
+        ], lines)
+        self.assertEqual(0, suppressed)
+        self.assertFalse(truncated)
+
     def test_configure_and_shell_failures_are_retained_without_raw_output(self):
         text = (
             "authored unrelated setup\n"
@@ -368,7 +387,7 @@ class NativeBundleTest(unittest.TestCase):
                      "https://example.invalid/authored-secret")
         lines, suppressed, _ = BUNDLE._extract_diagnostics(sensitive)
         self.assertEqual([], lines)
-        self.assertEqual(0, suppressed)
+        self.assertEqual(1, suppressed)
 
     def test_changed_or_unmanaged_stage_is_preserved_not_silently_cleaned(self):
         directory, sources = self.stage()

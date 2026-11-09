@@ -38,7 +38,7 @@ class RoomProcessRecoveryTest {
         val directory = roomWorkDirectory("killed-commit")
         val before = seed(directory)
         killAtSignal(directory, "commit")
-        val reopened = createPlatformLibraryStore(directory.toString())
+        val reopened = diagnosticRecoveryStore(directory)
         try {
             assertEquals(processMutation(before).copy(revision = before.revision + 1), reopened.initialize().getOrThrow())
             assertEquals(StoreStatus.Ready(), reopened.status.value)
@@ -49,7 +49,7 @@ class RoomProcessRecoveryTest {
         val directory = roomWorkDirectory("killed-transaction")
         val before = seed(directory)
         killAtSignal(directory, "transaction")
-        val reopened = createPlatformLibraryStore(directory.toString())
+        val reopened = diagnosticRecoveryStore(directory)
         try {
             assertEquals(before, reopened.initialize().getOrThrow())
             withSql(directory.resolve("veyra.db")) { db ->
@@ -57,6 +57,21 @@ class RoomProcessRecoveryTest {
                 assertFalse(db.prepare("PRAGMA foreign_key_check").use { it.step() })
             }
         } finally { reopened.close() }
+    }
+
+    // Keep the same real production persistence/builder. Only failed open reporting differs:
+    // LibraryStore otherwise maps the original SQLite/OS exception to a safe public failure.
+    private fun diagnosticRecoveryStore(directory: Path): LibraryStore {
+        val room = RoomLibraryPersistence({ path -> testDatabase(Path.of(path)) }, RoomDatabaseFiles(directory.toString()))
+        val diagnostic = object : LibraryPersistence by room, AcquisitionPersistence by room {
+            override suspend fun open(): OpenedLibrary = try { room.open() }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) {
+                throw AssertionError("Real crash recovery failed before public error mapping: " +
+                    ((error as? VeyraException)?.failure ?: error.javaClass.simpleName), error)
+            }
+        }
+        return LibraryStore(diagnostic)
     }
 
     private suspend fun seed(directory: Path): AppSnapshot {

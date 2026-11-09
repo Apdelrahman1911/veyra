@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static safety invariants for the manual retention canary workflow."""
+"""Safety invariants and bounded shell seams for manual build retention."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -54,6 +54,19 @@ class RetentionWorkflowTest(unittest.TestCase):
             arguments = forwarded.read_bytes().decode().split("\0")[:-1]
             index = arguments.index("--native-diagnostic")
             self.assertEqual("authored directory/native diagnostic.json", arguments[index + 1])
+
+    def test_windows_recovery_scope_keeps_only_the_affected_host_and_test_methods(self):
+        self.assertIn("windows-recovery", WORKFLOW)
+        self.assertIn("VEYRA_VERIFY_SCOPE: ${{ inputs.scope }}", WORKFLOW)
+        self.assertIn('--diagnostic "scope=$VEYRA_VERIFY_SCOPE tests=', WORKFLOW)
+        self.assertIn("(inputs.scope == 'windows' || inputs.scope == 'windows-recovery') &&", WORKFLOW)
+        self.assertIn('scope in ("windows", "windows-recovery") and package:', WORKFLOW)
+        diagnostic = WORKFLOW.split('if [ "$VEYRA_VERIFY_SCOPE" = windows-recovery ]; then', 1)[1].split("          else", 1)[0]
+        self.assertIn(":shared:jvmTest", diagnostic)
+        self.assertIn("--tests 'dev.veyra.data.RoomProcessRecoveryTest*'", diagnostic)
+        self.assertIn("DownloadRecoveryRoomTest.failedReturnAfterDurableIntentInsertion", diagnostic)
+        self.assertNotIn("scripts/ci.sh desktop", diagnostic)
+        self.assertNotIn("GH_TOKEN", diagnostic)
 
     def test_production_lanes_are_unique_per_run_attempt_and_platform(self):
         self.assertIn('tag="veyra-draft-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${platform}"', BUILD_RETENTION)

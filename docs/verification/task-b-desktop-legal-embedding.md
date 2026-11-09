@@ -388,3 +388,58 @@ from this run. Local proportional checks: workflow/shell 13/13, FFmpeg 24/24,
 native bundle 29/29, build retention 18/18 (84 total), shell syntax and diff check.
 These are Linux authored checks; the Windows runtime and native failure require
 the next scoped hosted result. No full platform matrix was repeated.
+
+
+## 12. Hosted verification of the prior fixes and narrowed diagnosis
+
+Windows run `42591361805` at `72a17e5d840d2be73a8fbde1c292a5e285579f38`
+verified the corrected FFmpeg authored fixture and the retention shell forwarding.
+It also executed 1,205 shared tests with three failures, and 484 desktop tests
+with zero failures/errors and one skip. The failed shared methods are:
+
+- `RoomProcessRecoveryTest.killedWriterRetainsAcknowledgedRoomCommitWithoutCleanCloseOrBackup`
+  (`RECOVERY_REQUIRED` after forced process death).
+- `RoomProcessRecoveryTest.killedWriterRollsBackUncommittedRowsAndStagedOccurrenceOrder`
+  (`STORAGE_IO` after forced process death).
+- `DownloadRecoveryRoomTest.failedReturnAfterDurableIntentInsertionCanBeCancelledWithoutLostFileReferences`
+  (15 s cleanup wait timeout).
+
+Native preparation still failed. The retained record contained the reporter's own
+"No compiler/build error lines retained" metadata, rather than the inner cause.
+The lead corrected that selection, recognizes additional configure early-exit
+forms, and emits a fixed configure/build phase label. All existing bounds and
+credential/URL suppression remain. The native cause is still unknown; these
+changes must not be described as a native build fix.
+
+Test-only Room persistence delegates now preserve original open exceptions before
+the public store maps them to safe failures. They still use the real production
+persistence, database builder, SQLite/files/locks and identical crash assertions.
+The cleanup timeout now includes its last observed job/lease state and authored
+events; no timeout, success condition, cleanup rule or production behavior changed.
+
+Manual scope `windows-recovery` runs only the three process tests and the one
+failing cleanup method, followed by the existing independent installer/inventory
+and retention paths. It selects only the free Windows runner and records the
+scope in the retained diagnostic. It is deliberately not a full-suite result;
+normal `windows`, desktop and all-platform scopes keep their existing test path.
+The scope reaches shell code through an environment variable.
+
+Evidence is under `.work/verification/task-b-windows-42591361805/`. The lead
+independently verified unpublished draft/prerelease `438932818`, exact tag target,
+manifest asset `726899698` (41,772 bytes) and support asset `726899699` (322,442
+bytes). Support SHA-256 is
+`b291e434f2b4cdc6b2a9888589f2d4fccb9f4e6e9862b86e5234a69115842678`.
+The packet verifier reports `verified: true`, failed-lane outcome and no packages.
+Raw hosted logs and sanitized retained XML are preserved; no prior seal was changed.
+
+The first gated Linux diagnostic run passed all four selected tests, with actual
+included/shared/test Kotlin compilation and equal tracked before/after inputs.
+It used dirty source based on `72a17e5`; its exact hashes are retained under
+`local-recovery-1/`. This does not reproduce or explain the Windows failures.
+Final local run `local-recovery-2` also passed all four selected methods (two
+suites, zero failures/errors/skips), with test Kotlin compilation executed and
+tracked input equality verified. The 68 focused Python/shell checks also pass
+(native bundle 30, FFmpeg 24, workflow/shell 14), and the installed Ruby YAML
+parser accepts the workflow. Documentation-only result updates follow that gate;
+all code/test/workflow inputs match its retained manifest. No Task B/native/
+installer/release acceptance is implied.

@@ -112,7 +112,15 @@ class DownloadRecoveryRoomTest {
         a.coordinator.close()
         assertTrue(a.coordinator.dependencyReleaseSafeAfterClose)
         advance(5_100)
-        val cancelled = awaitJob(b, id) { it.job.status == DownloadStatus.CANCELLED && !it.job.cleanupPending }
+        val cancelled = try {
+            awaitJob(b, id) { it.job.status == DownloadStatus.CANCELLED && !it.job.cleanupPending }
+        } catch (timeout: TimeoutCancellationException) {
+            val observed = join(b, id).job
+            throw AssertionError("Cleanup timed out: status=${observed.status}, pending=${observed.cleanupPending}, " +
+                "maintenance=${observed.maintenanceKind}, generation=${observed.ownershipGeneration}, " +
+                "owner=${observed.leaseOwner}, expires=${observed.leaseExpiresEpochMs}, now=${clock.epochMs()}, " +
+                "failure=${observed.failure}, events=${events.takeLast(20)}", timeout)
+        }
         assertNull(cancelled.asset)
         assertNull(cancelled.finalization)
         assertNull(cancelled.job.leaseOwner)

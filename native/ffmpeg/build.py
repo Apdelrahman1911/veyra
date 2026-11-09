@@ -250,6 +250,8 @@ def run(command: list[str], cwd: Path, env: dict[str, str], timeout: int, log: P
             # the actual configure/make log before the outer owner summarizes
             # this child. Reporting is optional and cannot mask the failure.
             from bundle import report_build_failure
+            phase = "configure" if len(command) > 1 and Path(command[1]).name == "configure" else "build"
+            print("Native FFmpeg " + phase + " command failed.", file=sys.stderr)
             report_build_failure(log, failure, ROOT)
             if len(command) > 1 and Path(command[1]).name == "configure":
                 # FFmpeg keeps the compiler probe itself in this explicit

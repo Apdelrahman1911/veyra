@@ -8,7 +8,7 @@ on:
       scope:
         description: Target group to verify
         type: choice
-        options: [all, desktop, windows, android, ios]
+        options: [all, desktop, windows, windows-recovery, android, ios]
         default: all
       package_desktop:
         description: Generate native installers (no upload or OS installation)
@@ -41,7 +41,7 @@ env:
 
 jobs:
   desktop:
-    if: ${{ github.event.repository.private == false && inputs.retention_canary != true && (inputs.scope == 'all' || inputs.scope == 'desktop' || inputs.scope == 'windows') }}
+    if: ${{ github.event.repository.private == false && inputs.retention_canary != true && (inputs.scope == 'all' || inputs.scope == 'desktop' || inputs.scope == 'windows' || inputs.scope == 'windows-recovery') }}
     name: Desktop (${{ matrix.label }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
@@ -51,11 +51,12 @@ jobs:
       fail-fast: false
       max-parallel: 2
       matrix:
-        include: ${{ fromJSON(inputs.scope == 'windows' && '[{"label":"Windows x64","runner":"windows-2022","system":"Windows","arch":"x64","platform":"desktop-windows-x64"}]' || '[{"label":"Linux x64","runner":"ubuntu-24.04","system":"Linux","arch":"x64","platform":"desktop-linux-x64"},{"label":"Windows x64","runner":"windows-2022","system":"Windows","arch":"x64","platform":"desktop-windows-x64"},{"label":"macOS arm64","runner":"macos-15","system":"Darwin","arch":"arm64","platform":"desktop-macos-arm64"},{"label":"macOS x64","runner":"macos-15-intel","system":"Darwin","arch":"x64","platform":"desktop-macos-x64"}]') }}
+        include: ${{ fromJSON((inputs.scope == 'windows' || inputs.scope == 'windows-recovery') && '[{"label":"Windows x64","runner":"windows-2022","system":"Windows","arch":"x64","platform":"desktop-windows-x64"}]' || '[{"label":"Linux x64","runner":"ubuntu-24.04","system":"Linux","arch":"x64","platform":"desktop-linux-x64"},{"label":"Windows x64","runner":"windows-2022","system":"Windows","arch":"x64","platform":"desktop-windows-x64"},{"label":"macOS arm64","runner":"macos-15","system":"Darwin","arch":"arm64","platform":"desktop-macos-arm64"},{"label":"macOS x64","runner":"macos-15-intel","system":"Darwin","arch":"x64","platform":"desktop-macos-x64"}]') }}
     env:
       VEYRA_EXPECTED_OS: ${{ matrix.system }}
       VEYRA_EXPECTED_ARCH: ${{ matrix.arch }}
       BUILD_PACKAGES: ${{ inputs.package_desktop }}
+      VEYRA_VERIFY_SCOPE: ${{ inputs.scope }}
     steps:
       - name: Checkout without global Git configuration or retained credentials
         id: checkout
@@ -77,7 +78,14 @@ jobs:
             export DEVELOPER_DIR=/Applications/Xcode_26.0.1.app/Contents/Developer
             test -d "$DEVELOPER_DIR"
           fi
-          scripts/ci.sh desktop
+          if [ "$VEYRA_VERIFY_SCOPE" = windows-recovery ]; then
+            # Diagnostic scope: these four recovery methods only, never a full-suite claim.
+            scripts/gradle.sh :shared:jvmTest \
+              --tests 'dev.veyra.data.RoomProcessRecoveryTest*' \
+              --tests 'dev.veyra.downloads.DownloadRecoveryRoomTest.failedReturnAfterDurableIntentInsertionCanBeCancelledWithoutLostFileReferences*'
+          else
+            scripts/ci.sh desktop
+          fi
       - name: Build desktop installer independently of test outcome
         id: desktop_package
         if: ${{ always() && inputs.package_desktop == true && steps.bootstrap.outcome == 'success' }}
@@ -134,7 +142,7 @@ jobs:
           if [ "${{ inputs.package_desktop }}" = true ] && [ "${{ steps.desktop_package.outcome }}" != success ]; then outcome=failed; fi
           if [ "${{ steps.desktop_inventory.outcome }}" != success ]; then outcome=failed; fi
           args=(--platform "$VEYRA_INVENTORY_PLATFORM" --lane-outcome "$outcome"
-            --diagnostic "tests=${{ steps.desktop_tests.outcome }} package=${{ steps.desktop_package.outcome }} inventory=${{ steps.desktop_inventory.outcome }}")
+            --diagnostic "scope=$VEYRA_VERIFY_SCOPE tests=${{ steps.desktop_tests.outcome }} package=${{ steps.desktop_package.outcome }} inventory=${{ steps.desktop_inventory.outcome }}")
           for results in shared/build/test-results composeApp/build/test-results; do
             [ -d "$results" ] && args+=(--xml-root "$results")
           done
@@ -691,7 +699,7 @@ jobs:
           platforms = []
           if scope in ("all", "desktop") and package:
               platforms += ["desktop-linux-x64", "desktop-windows-x64", "desktop-macos-arm64", "desktop-macos-x64"]
-          if scope == "windows" and package:
+          if scope in ("windows", "windows-recovery") and package:
               platforms += ["desktop-windows-x64"]
           if scope in ("all", "android"):
               platforms += ["android"]
