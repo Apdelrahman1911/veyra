@@ -1241,10 +1241,13 @@ internal class DownloadPhysicalRuntime(
             .singleOrNull { it.epoch.downloadId == id }
 
     /**
-     * Bounded observation of a removal whose cleanup may be owned by the scheduler. A present
-     * owner or a terminal pending/observation transition settles it; otherwise the caller fails
-     * within a fixed grace instead of waiting indefinitely for a missing owner. The grace covers
-     * the real handoff between a failed execution finalizer and the scheduler's cleanup claim.
+     * Bounded observation of a removal whose cleanup may be owned by the scheduler. The initial
+     * phase learns whether an exact cleanup owner is present. The settled phase then waits for
+     * durable `cleanupPending=false` or, when terminal failure policy applies, a terminal
+     * `Failed` observation; a consumed owner alone is never success or failure. If neither
+     * happens, the caller fails within a fixed grace instead of waiting indefinitely for a
+     * missing owner. The grace covers the real handoff between a failed execution finalizer and
+     * the scheduler's cleanup claim.
      */
     internal suspend fun awaitRemovalOutcome(id: String, failedIsTerminal: Boolean = true): AppFailure? {
         val pending = repository.state.map { state ->

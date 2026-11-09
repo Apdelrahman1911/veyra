@@ -416,6 +416,9 @@ internal class PhysicalRuntimeTestRepository(private val events: MutableList<Str
     @Volatile var afterAttemptClaim: suspend () -> Unit = { }
     @Volatile var finishBehavior = PhysicalFinishBehavior.CONFIRMED
     @Volatile var maintenanceBehavior = PhysicalFinishBehavior.CONFIRMED
+    /** Test-only coherent committed-identity oracle; default preserves the canonical claim. */
+    @Volatile var maintenanceClaimOutcome: (ClaimPhysicalDownloadMaintenance, ClaimedPhysicalDownload) -> ClaimedPhysicalDownload =
+        { _, value -> value }
 
     fun addContext(context: AcquisitionExecutionContext) {
         contexts[context.binding.id] = context
@@ -714,7 +717,14 @@ internal class PhysicalRuntimeTestRepository(private val events: MutableList<Str
             command.owner, attempt?.id, attempt?.number)
         publish(jobState(before.job.copy(ownershipGeneration = fence.ownershipGeneration, leaseOwner = command.owner,
             leaseExpiresEpochMs = command.nowEpochMs + command.leaseDurationMs, maintenanceKind = command.kind)))
-        PhysicalDownloadCommit.Committed(state.value.libraryRevision, ClaimedPhysicalDownload(fence, checkNotNull(joined(command.downloadId))))
+        val normal = ClaimedPhysicalDownload(fence, checkNotNull(joined(command.downloadId)))
+        val returned = maintenanceClaimOutcome(command, normal)
+        if (returned !== normal) {
+            publish(state.value.copy(
+                physicalDownloads = state.value.physicalDownloads + (command.downloadId to returned.physical.job),
+                claims = state.value.claims + returned.physical.claims.associateBy { it.id }))
+        }
+        PhysicalDownloadCommit.Committed(state.value.libraryRevision, returned)
     }
     override suspend fun finishPhysicalDownloadMaintenance(command: FinishPhysicalDownloadMaintenance): PhysicalDownloadCommit<PhysicalDownloadJoin> {
         maintenanceFinishes += command

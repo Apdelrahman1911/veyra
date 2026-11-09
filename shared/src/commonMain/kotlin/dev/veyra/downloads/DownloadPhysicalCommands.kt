@@ -94,6 +94,8 @@ internal class DownloadPhysicalCommands(
      * Explicit replacement for UNKNOWN migrated provenance only. The selection was already
      * accepted by the root; this operation never resolves a title. Cancellation after the first
      * phase leaves the old owner cancelled/nonretaining, not eligible for an automatic revival.
+     * If a scheduler cleanup already owns the exact retired-generation lease, this waits for its
+     * actual deletion outside the command lock; it must not drain that external owner.
      */
     suspend fun adoptSchema2(id: String, requestId: AcquisitionRequestId, bindingId: ExecutionBindingId,
         requireIntentCurrent: () -> Unit): String {
@@ -118,12 +120,26 @@ internal class DownloadPhysicalCommands(
                 fail(FailureCode.INVALID_STATE, "download_adoption_selection_mismatch")
             requireAdmission()
             requireIntentCurrent()
+            if (before.job.cleanupPending && before.job.maintenanceKind == PhysicalDownloadMaintenanceKind.CLEANUP &&
+                before.job.leaseOwner != null) {
+                // An external/scheduler cleanup already owns the exact maintenance lease. Draining
+                // this observation would cancel that owner before it can delete the retired path.
+                // Wait outside the command lock for the actual cleanup, then re-enter admission.
+                return@withLock null
+            }
             val updated = updateIntentLocked(before, DownloadBatchIntent.CANCELLED, retain = false, retry = false)
             val cancelled = committed(repository.reconcilePhysicalDownloadIntent(ReconcilePhysicalDownloadIntent(id,
                 updated.job.producer, updated.job.ownershipGeneration, updated.claims, clock.epochMs())))
             val epoch = host.activeLock.withLock { runtime.observePhysicalEpoch(cancelled) }
             changed(id)
             Pending(cancelled, epoch)
+        }
+        if (pending == null) {
+            val state = host.state()
+            if (!state.started || state.closed || state.suspended || state.drainsInFlight != 0 || state.failure != null)
+                fail(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")
+            awaitRemoval(id)
+            return adoptSchema2(id, requestId, bindingId, requireIntentCurrent)
         }
         try {
             val stopped = runtime.epochs.drain(pending.epoch)

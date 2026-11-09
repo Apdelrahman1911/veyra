@@ -275,6 +275,69 @@ class DownloadSchema2AdoptionRoomTest {
         assertTrue(owner.coordinator.dependencyReleaseSafeAfterClose)
     }
 
+    @Test fun adoptionWaitsForSchedulerOwnedCleanupBarrier() = acquisitionDownloadRoomCase {
+        val seed = seedSchema2(withBinding = false)
+        val owner = owner()
+        owner.coordinator.initializeScheduling()
+        val selected = freshSelection(owner, seed)
+        offline(owner)
+        assertFailsWith<VeyraException> { owner.coordinator.remove(seed.jobId) }
+        assertTrue(owner.store.acquisitionView().acquisition.physicalDownloads.getValue(seed.jobId).cleanupPending)
+        val gateHeld = barrier()
+        var heldOnce = false
+        owner.gate.beforeAcquire = {
+            if (!heldOnce) {
+                heldOnce = true
+                gateHeld.stop()
+            }
+        }
+        owner.coordinator.start(DownloadActivation.DURABLE_WORK)
+        gateHeld.entered.await()
+        val claimed = owner.store.acquisitionView().acquisition.physicalDownloads.getValue(seed.jobId)
+        assertTrue(claimed.cleanupPending)
+        assertTrue(claimed.removeWhenClean)
+        assertNotNull(claimed.leaseOwner, "The scheduler cleanup must own the maintenance lease at the barrier")
+        assertEquals(PhysicalDownloadMaintenanceKind.CLEANUP, claimed.maintenanceKind)
+        coroutineScope {
+            val adoption = async {
+                runCatching { owner.coordinator.adoptSchema2(seed.jobId, selected.request.id, selected.singleBinding()) { } }
+            }
+            delay(90)
+            assertFalse(adoption.isCompleted, "Adoption must wait for the scheduler-owned cleanup")
+            val waiting = owner.store.acquisitionView().acquisition
+            val waitingJob = waiting.physicalDownloads.getValue(seed.jobId)
+            assertIs<PhysicalDownloadProducer.Schema2>(waitingJob.producer)
+            assertTrue(waitingJob.cleanupPending)
+            assertTrue(waitingJob.removeWhenClean)
+            assertTrue(Files.exists(seed.part))
+            assertTrue(Files.exists(seed.journal))
+            assertNull(files.tryLeasePaths(listOf(seed.part.toString())),
+                "The scheduler cleanup holds the exact retired path lease at the barrier")
+            val waitingClaims = waiting.claims.values.filter { it.physicalJobId == seed.jobId }
+            assertEquals(1, waitingClaims.size)
+            assertEquals(DownloadBatchIntent.CANCELLED, waitingClaims.single().intent)
+            assertFalse(waitingClaims.single().retainCompletedAsset)
+            assertNoAdoptions()
+            gateHeld.release()
+            assertEquals(seed.jobId, withTimeout(10_000) { adoption.await().getOrThrow() })
+        }
+        val adopted = owner.store.acquisitionView().acquisition
+        assertIs<PhysicalDownloadProducer.Typed>(adopted.physicalDownloads.getValue(seed.jobId).producer)
+        assertEquals(selected.singleBinding(), adopted.physicalDownloads.getValue(seed.jobId).producer.bindingId)
+        assertEquals(DownloadBatchIntent.ACTIVE, adopted.claims.values.single { it.physicalJobId == seed.jobId }.intent)
+        assertFalse(adopted.physicalDownloads.getValue(seed.jobId).cleanupPending)
+        assertFalse(Files.exists(seed.part))
+        assertTrue(owner.gateway.preparations.isEmpty())
+        assertTrue(owner.gateway.transfers.isEmpty())
+        withSql(databasePath) { db ->
+            assertEquals(1L, db.longValue("SELECT count(*) FROM download_producer_adoptions"))
+        }
+        assertEquals(0, leases.open.get())
+        idle(owner)
+        owner.coordinator.close()
+        assertTrue(owner.coordinator.dependencyReleaseSafeAfterClose)
+    }
+
     private fun retiredPathCleanup(withBinding: Boolean) = acquisitionDownloadRoomCase {
         val seed = seedSchema2(withBinding)
         val owner = owner()
