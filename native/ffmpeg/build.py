@@ -247,6 +247,32 @@ def build_environment(target: str, epoch: int, inherited: dict[str, str]) -> dic
 WINDOWS_DEPENDENCY_AWK = r'/including/ { sub(/^.*file: */, ""); gsub(/\\/, "/"); if (!match($$0, / /)) print "$@:", $$0 }'
 
 
+# Keep the upstream filter out of Windows command-line argument re-parsing.
+# Only Make's target substitution moves to an AWK variable; matching is unchanged.
+WINDOWS_DEPENDENCY_FILE = "veyra-msvc-deps.awk"
+WINDOWS_DEPENDENCY_SCRIPT = (WINDOWS_DEPENDENCY_AWK.replace("$$0", "$0")
+    .replace('"$@:"', 'target ":"') + "\n").encode("ascii")
+WINDOWS_DEPENDENCY_COMMAND = 'awk -v target="$@" -f ffbuild/' + WINDOWS_DEPENDENCY_FILE
+
+
+def install_windows_dependency_filter(directory: Path) -> None:
+    config = directory / "ffbuild/config.mak"
+    script = directory / "ffbuild" / WINDOWS_DEPENDENCY_FILE
+    if config.is_symlink() or not config.is_file() or not 0 < config.stat().st_size <= 1024 * 1024:
+        raise ValueError("Windows FFmpeg generated dependency configuration is missing or unsafe")
+    writable(config)
+    writable(script)
+    original = config.read_bytes()
+    inline = ("awk '" + WINDOWS_DEPENDENCY_AWK + "'").encode("ascii")
+    if not 1 <= original.count(inline) <= 8:
+        raise ValueError("Windows FFmpeg dependency filter differs from the pinned upstream program")
+    changed = original.replace(inline, WINDOWS_DEPENDENCY_COMMAND.encode("ascii"))
+    # Exclusive creation refuses stale/linked scratch; never rewrite the source archive.
+    with script.open("xb") as output:
+        output.write(WINDOWS_DEPENDENCY_SCRIPT)
+    config.write_bytes(changed)
+
+
 def windows_make_shell(env: dict[str, str]) -> str:
     trusted = env.get("VEYRA_TRUSTED_BASH")
     resolved = shutil.which("bash", path=env.get("PATH"))
@@ -257,16 +283,19 @@ def windows_make_shell(env: dict[str, str]) -> str:
 
 
 def verify_windows_make_shell(directory: Path, env: dict[str, str], bash: str) -> None:
-    # Fail before the lengthy configure if this host's native make/Bash/AWK
-    # combination cannot preserve upstream's single quotes, backslashes and $$.
+    # Exercise the same generated-config adaptation as production before configure.
     recipe = directory / "veyra-shell-probe.mk"
     output = directory / "veyra-shell-probe.out"
-    recipe.write_bytes((
-        ".PHONY: veyra-shell-probe\nveyra-shell-probe:\n"
-        "\t@printf '%s\\n' 'Note: including file: C:\\veyra-authored\\header.h' "
-        "'Note: including file: C:\\Program Files\\ignored.h' | awk '"
-        + WINDOWS_DEPENDENCY_AWK + "' > veyra-shell-probe.out\n"
-    ).encode("ascii"))
+    (directory / "ffbuild").mkdir(exist_ok=True)
+    (directory / "ffbuild/config.mak").write_bytes((
+        "CCDEP=cat veyra-includes.txt | awk '" + WINDOWS_DEPENDENCY_AWK
+        + "' > veyra-shell-probe.out\n").encode("ascii"))
+    (directory / "veyra-includes.txt").write_bytes(
+        b"Note: including file: C:\\veyra-authored\\header.h\n"
+        b"Note: including file: C:\\Program Files\\ignored.h\n")
+    install_windows_dependency_filter(directory)
+    recipe.write_bytes(b"include ffbuild/config.mak\n.PHONY: veyra-shell-probe\n"
+                       b"veyra-shell-probe:\n\t@$(call CCDEP,CC)\n")
     command = [*make_command("windows-x64", "1", bash=bash)[:-1],
                "-f", recipe.name, "veyra-shell-probe"]
     run(command, directory, env, 30, directory / "make-shell-probe.log")
@@ -374,7 +403,8 @@ def package_files(name: str) -> set[str]:
             "corresponding-source/build.py", "corresponding-source/README.md",
             "corresponding-source/owned_process.py"} | {
                 "licenses/" + filename for filename in LICENSE_FILES} | {
-                "corresponding-source/" + filename for filename in CONFIGURATION_FILES}
+                "corresponding-source/" + filename for filename in CONFIGURATION_FILES} | (
+                {"corresponding-source/" + WINDOWS_DEPENDENCY_FILE} if name == "ffmpeg.exe" else set())
 
 
 def verify_output(output: Path, expected: dict[str, object], root: Path = ROOT) -> Path:
@@ -405,6 +435,8 @@ def verify_output(output: Path, expected: dict[str, object], root: Path = ROOT) 
         path = output / relative
         if not path.is_file() or path.is_symlink() or sha256(path) != hashes[relative]:
             raise ValueError("Native FFmpeg retained file changed")
+    if name == "ffmpeg.exe" and (output / "corresponding-source" / WINDOWS_DEPENDENCY_FILE).read_bytes() != WINDOWS_DEPENDENCY_SCRIPT:
+        raise ValueError("Retained Windows dependency filter differs from the build recipe")
     executable = output / name
     digest = sha256(executable)
     if not 0 < executable.stat().st_size <= MAX_EXECUTABLE_BYTES or not os.access(executable, os.X_OK):
@@ -480,6 +512,8 @@ def build(source_argument: Path | None, jobs: str, *, verify_only: bool = False)
     # kind, so another timeout cannot be mistaken for a compiler rejection.
     configure_seconds = 1200 if target == "windows-x64" else 600
     run(["bash", (source / "configure").as_posix(), *configure], build_directory, env, configure_seconds, log)
+    if target == "windows-x64":
+        install_windows_dependency_filter(build_directory)
     name = executable_name(target)
     run(make_command(target, jobs, bash=bash), build_directory, env, 1800, log)
     executable = build_directory / name
@@ -508,6 +542,9 @@ def build(source_argument: Path | None, jobs: str, *, verify_only: bool = False)
         for filename in ("config.h", "config_components.h", "ffbuild/config.mak"):
             copied = sources / filename.replace("/", "-")
             shutil.copyfile(build_directory / filename, copied)
+        if target == "windows-x64":
+            shutil.copyfile(build_directory / "ffbuild" / WINDOWS_DEPENDENCY_FILE,
+                            sources / WINDOWS_DEPENDENCY_FILE)
         metadata = {
             **expected, "jobs": int(jobs), "sourceDateEpoch": epoch,
             "buildSeconds": round(time.monotonic() - started, 3), "host": platform.platform(),

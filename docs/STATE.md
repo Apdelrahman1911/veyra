@@ -4,6 +4,20 @@ Updated 2026-11-07 UTC. Formal Goal tool currently reports **blocked/incomplete*
 
 ## Current Task B continuation — 2026-11-09
 
+Combined run `42643143184` at `baa8370` has passed Android and Linux, including
+Linux tests and DEB generation. Windows stopped in the new Python AWK preflight
+before Kotlin tests, then independent packaging stopped in the same preflight.
+Earlier commentary saying Windows tests passed was incorrect for this run.
+The retained error shows the inline AWK program lost a backslash. The lead moved
+the exact upstream filter to an `awk -f` file, uses the same adapter in the early
+probe and generated production configuration, and binds the file to Windows
+corresponding-source provenance. 34 FFmpeg recipe + 36 native bundle + 74 package
+notice tests pass locally (144 total); actual Windows retry remains pending.
+Both Mac lanes were still running when this note was prepared. Let them finish
+and inspect their retained failures before another dispatch. See
+`verification/task-b-windows-awk-file-42643143184.md`. No release acceptance.
+
+
 Run `42628939368` at `7b91522` completed with Android and macOS arm64 passing.
 Android passed 873 tests, lint and APK/AAB builds. All desktop lanes discovered
 1,215 shared / 484 desktop tests. Linux passed shared tests and built its DEB,

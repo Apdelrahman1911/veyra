@@ -57,6 +57,54 @@ class ProductionFfmpegBuildTest(unittest.TestCase):
         self.assertEqual("veyra-shell-probe: C:/veyra-authored/header.h\n",
                          (self.work / "veyra-shell-probe.out").read_text())
 
+    def test_windows_dependency_adaptation_preserves_other_config_and_multiple_filters(self):
+        (self.work / "ffbuild").mkdir()
+        config = self.work / "ffbuild/config.mak"
+        inline = "awk '" + BUILD.WINDOWS_DEPENDENCY_AWK + "'"
+        original = ("UNCHANGED=authored-value\nCCDEP=" + inline + " > $(@:.o=.d)\n"
+                    "HOSTCCDEP=" + inline + " > $(@:.o=.d)\n").encode("ascii")
+        config.write_bytes(original)
+        BUILD.install_windows_dependency_filter(self.work)
+        self.assertEqual(original.replace(inline.encode(), BUILD.WINDOWS_DEPENDENCY_COMMAND.encode()),
+                         config.read_bytes())
+        script = self.work / "ffbuild" / BUILD.WINDOWS_DEPENDENCY_FILE
+        self.assertEqual(BUILD.WINDOWS_DEPENDENCY_SCRIPT, script.read_bytes())
+        self.assertIn(br'gsub(/\\/, "/")', script.read_bytes())
+        self.assertNotIn(b"$$", script.read_bytes())
+
+    def test_windows_dependency_adaptation_refuses_unknown_program_without_mutation(self):
+        (self.work / "ffbuild").mkdir()
+        config = self.work / "ffbuild/config.mak"
+        original = b"CCDEP=awk 'authored changed or WSL dependency program'\n"
+        config.write_bytes(original)
+        with self.assertRaisesRegex(ValueError, "pinned upstream"):
+            BUILD.install_windows_dependency_filter(self.work)
+        self.assertEqual(original, config.read_bytes())
+        self.assertFalse((self.work / "ffbuild" / BUILD.WINDOWS_DEPENDENCY_FILE).exists())
+
+    def test_windows_dependency_script_rejects_stale_file_without_overwriting_config(self):
+        (self.work / "ffbuild").mkdir()
+        config = self.work / "ffbuild/config.mak"
+        original = ("CCDEP=awk '" + BUILD.WINDOWS_DEPENDENCY_AWK + "'\n").encode("ascii")
+        config.write_bytes(original)
+        script = self.work / "ffbuild" / BUILD.WINDOWS_DEPENDENCY_FILE
+        script.write_bytes(b"authored stale retained script")
+        with self.assertRaises(FileExistsError):
+            BUILD.install_windows_dependency_filter(self.work)
+        self.assertEqual(original, config.read_bytes())
+        self.assertEqual(b"authored stale retained script", script.read_bytes())
+
+    def test_packaged_windows_dependency_script_cannot_be_replaced_by_resealing_receipt(self):
+        output, expected, metadata = self.completed_output("windows-x64")
+        BUILD.verify_output(output, expected, self.root)
+        relative = "corresponding-source/" + BUILD.WINDOWS_DEPENDENCY_FILE
+        script = output / relative
+        script.write_bytes(b"authored different dependency program\n")
+        metadata["fileSha256"][relative] = BUILD.sha256(script)
+        (output / "provenance.json").write_text(json.dumps(metadata))
+        with self.assertRaisesRegex(ValueError, "dependency filter"):
+            BUILD.verify_output(output, expected, self.root)
+
     def test_windows_dependency_probe_refuses_incorrect_output(self):
         (self.work / "veyra-shell-probe.out").write_text("authored damaged dependency\n")
         with patch.object(BUILD, "run") as run, self.assertRaisesRegex(ValueError, "preflight"):
@@ -153,7 +201,7 @@ class ProductionFfmpegBuildTest(unittest.TestCase):
                 output.addfile(entry, io.BytesIO(body) if kind == tarfile.REGTYPE else None)
         return archive
 
-    def completed_output(self):
+    def completed_output(self, target="linux-x64"):
         """An authored, nonexecuted package; tests pin its own tiny archive explicitly."""
         archive = self.archive([(BUILD.SOURCE_ROOT + "/" + name, tarfile.REGTYPE, 0o600, ("authored " + name).encode())
                                 for name in BUILD.LICENSE_FILES])
@@ -162,9 +210,9 @@ class ProductionFfmpegBuildTest(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
         base = self.work / "native-ffmpeg"
-        output = base / "output/linux-x64"
+        output = base / "output" / target
         output.mkdir(parents=True)
-        expected = BUILD.identity("linux-x64", BUILD.host_profile("Linux", "x86_64")[1], base)
+        expected = BUILD.identity(target, BUILD.host_profile("Windows" if target == "windows-x64" else "Linux", "x86_64")[1], base)
         sources = output / "corresponding-source"
         sources.mkdir()
         shutil.copyfile(archive, sources / "FFmpeg-n8.0.1.tar.gz")
@@ -177,14 +225,17 @@ class ProductionFfmpegBuildTest(unittest.TestCase):
         licenses.mkdir()
         for name in BUILD.LICENSE_FILES:
             (licenses / name).write_text("authored " + name)
-        executable = output / "ffmpeg"
+        name = BUILD.executable_name(target)
+        if target == "windows-x64":
+            (sources / BUILD.WINDOWS_DEPENDENCY_FILE).write_bytes(BUILD.WINDOWS_DEPENDENCY_SCRIPT)
+        executable = output / name
         executable.write_bytes(b"authored-not-an-executed-binary")
         executable.chmod(0o700)
         digest = BUILD.sha256(executable)
-        BUILD.write_sidecar(output / "ffmpeg.sha256", digest)
-        metadata = {**expected, "executable": "ffmpeg", "executableSha256": digest,
+        BUILD.write_sidecar(output / (name + ".sha256"), digest)
+        metadata = {**expected, "executable": name, "executableSha256": digest,
                     "executableBytes": executable.stat().st_size,
-                    "fileSha256": {relative: BUILD.sha256(output / relative) for relative in BUILD.package_files("ffmpeg")}}
+                    "fileSha256": {relative: BUILD.sha256(output / relative) for relative in BUILD.package_files(name)}}
         (output / "provenance.json").write_text(json.dumps(metadata))
         return output, expected, metadata
 

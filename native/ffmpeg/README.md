@@ -81,3 +81,12 @@ not silently overwritten. Preserve/review a stale or invalid output before an
 explicit rebuild. This is a trusted-build receipt, not a digital signature against
 an attacker who can replace both output and provenance. Failed task-owned build logs remain in
 `.work/native-ffmpeg/build-*`; cleanup is selective. No `make install` runs.
+
+On Windows, Make uses the exact existing trusted Git Bash. The early dependency
+probe and actual generated `ffbuild/config.mak` use the pinned upstream MSVC AWK
+filter through an `awk -f` file; passing the program inline lost a backslash on
+the hosted Windows toolchain. Only target substitution becomes `-v target=...`.
+The generated-config adapter refuses an unknown upstream filter. The unmodified
+source archive, adapter recipe, adapted configuration and exact AWK file are
+retained and hash-bound with Windows corresponding source. This is build-time
+command transport, with no compiler installation or runtime fallback.
