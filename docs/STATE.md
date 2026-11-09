@@ -1,5 +1,9 @@
 # Veyra — resumable state
 
+## Current consolidation — 2026-11-09
+
+The owner superseded the worktree-per-task workflow with one checkout on `main`. The active source is PR27 `cf78955d4363599f42f40ce539e3608a31c4040d`; its five-platform APK/EXE/DMG/DEB packaging run `42688713102` passed. All prior branch tips and five local-change snapshots are preserved in main history. Focused checks (85 tests), offline Gradle configuration and Git object verification passed before reclamation. See `docs/verification/main-consolidation-20261109.md` for selection decisions, exact snapshot commits, evidence restoration and final cleanup status. Older entries below are historical and do not override this owner instruction. Installation, physical/live/offline audio, iOS, signing/notarization and legal/native/JDK release gates remain open.
+
 Updated 2026-11-07 UTC. Formal Goal tool currently reports **blocked/incomplete**; the owner explicitly resumed this turn. The exposed tool cannot resume that stored status; do not claim an active automatic continuation. No token budget requested. Read `PLAN.md`, `DECISIONS.md`, then verify files, tests and upstream checks before continuing.
 
 ## Current Task B continuation — 2026-11-09
