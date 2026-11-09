@@ -225,7 +225,9 @@ class TaskAUiRecoveryIntegrationTest {
                 val current = entry(support.awaitPresentation {
                     it.view.acquisition.batches.getValue(batch.id).intentRevision == stale.intentRevision
                 }, job.id)
-                assertEquals(stale.intentRevision, current.retainedValidation?.expectedIntentRevision)
+                assertNull(current.retainedValidation,
+                    "A paused batch must not offer validation that its authoritative intent rejects")
+                assertTrue(current.retainedValidationChoices.isEmpty())
                 val before = support.app.downloads.acquisitionPresentation.value
                 val beforeClaims = before.view.acquisition.claims
                 val beforeUses = before.view.acquisition.assetUses
@@ -235,7 +237,7 @@ class TaskAUiRecoveryIntegrationTest {
                 support.app.onMusicAction(MusicUiAction.ValidateRetainedDownload(job.id, binding.value,
                     target.batchId, target.memberPosition, target.expectedIntentRevision))
                 withTimeout(20_000L) { support.app.notice.first {
-                    it?.failure?.detail == "retained_validation_target_stale"
+                    it?.failure?.detail == "retained_validation_target_unavailable"
                 } }
                 val after = support.app.downloads.acquisitionPresentation.value
                 assertEquals(beforeClaims, after.view.acquisition.claims)

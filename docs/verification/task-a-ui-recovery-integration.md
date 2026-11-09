@@ -105,7 +105,7 @@ Evidence root (ignored, task-owned):
 `/root/.t3/worktrees/Veyra/t3-b705873a/.work/verification/task-a-ui-recovery-integration/attempts/`
 
 All final runs started at committed head `ee1aa17`, used the shared project lock inside
-`vps-build`, `--offline`, one bounded test fork, the required single JVM argument, and recorded
+`vps-build`, `--offline`, one bounded test fork, and recorded
 before/after tracked-input manifests. All three final attempts have identical input-manifest
 SHA-256 `f5a1d5d5a5f4af1432b9eeb625cc981c20ff8632098d013f5d10734fcc300e55`, exit 0,
 positive owned drains (`scan_matches=0`), lock-holder snapshots and gate admission prefixes.
@@ -140,10 +140,20 @@ non-reproducible full-sequence timing timeout, not as a green first attempt.
 - iOS/Xcode was not available; no iOS compile/simulator/device result is claimed.
 - No physical device, native decoder/audible output, background OS scheduling, packaging, signing,
   workflow dispatch or distribution result is claimed.
-- Explicit local validation under a **paused** batch intent currently returns the shared
-  `download_asset_check_not_admitted` failure. The active repeated-origin path is tested; the
-  paused-intent limitation is not claimed as a recovery success.
+- Explicit local validation requires an active batch intent. Lead review found that the original
+  projection offered a Validate action for paused batches although the shared API rejected it.
+  The followup suppresses unavailable batch targets and checks rejection before native validation;
+  reactivating the exact batch restores its current target. It does not bypass paused intent.
 - The known `MusicSurfacesTest.performScrollTo` hang is unresolved and was not included in the
   selected union; it is not called green.
 - Task A acceptance still waits on lead review/adjudication. Task B, the shared recovery successor
   integration outside the merged PR26 source, and all release gates remain held.
+
+## Lead process correction
+
+The three historical runs above did **not** pass the required 1280 MiB Gradle daemon JVM argument.
+Their sealed runner and command records invoke the wrapper without an override, whose tracked
+`gradle.properties` configures 2048 MiB heap / 768 MiB metaspace. The earlier exact-daemon-bounds
+claim was unsupported. Input, test, lock and drain evidence remain genuine; no historical argv or
+seal was changed. Future runs use a separate corrected runner that records and supplies the
+required literal JVM argument. The bounded 384 MiB Test fork was configured in the historical runs.

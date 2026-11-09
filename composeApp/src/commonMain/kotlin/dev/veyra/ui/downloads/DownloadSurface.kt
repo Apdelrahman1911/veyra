@@ -246,7 +246,8 @@ private fun retainedValidationTargets(presentation: DownloadAcquisitionPresentat
                     val batch = state.batches[owner.batchId] ?: return@mapNotNull null
                     val member = batch.members.singleOrNull { it.position == owner.position }
                         ?: return@mapNotNull null
-                    if (batch.intentRevision != claim.ownerIntentRevision ||
+                    if (batch.intent != DownloadBatchIntent.ACTIVE || claim.intent != DownloadBatchIntent.ACTIVE ||
+                        batch.intentRevision != claim.ownerIntentRevision ||
                         member.claimId != claim.id || member.requiredBindingId != bindingId) return@mapNotNull null
                     RetainedValidationTarget(job.id, bindingId.value, batch.id.value, owner.position,
                         batch.intentRevision)
