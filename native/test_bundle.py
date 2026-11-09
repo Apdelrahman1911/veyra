@@ -355,6 +355,21 @@ class NativeBundleTest(unittest.TestCase):
         run.assert_not_called()
         self.assertFalse(log.exists())
 
+    def test_failed_build_retains_owned_windows_process_state(self):
+        log = self.inputs / "build.log"
+        log.write_bytes(b"authored non-diagnostic output")
+        state = {"commandCompleted": True, "commandReturncode": 0, "jobActiveBeforeCleanup": 1,
+                 "processes": {"listed": 1, "truncated": False,
+                               "members": [{"pid": 42, "image": "mspdbsrv.exe"}]}}
+        failure = BUNDLE.owned_process.OwnedProcessError("timeout", cleanup_complete=True, process_state=state)
+        console = io.StringIO()
+        with contextlib.redirect_stderr(console):
+            BUNDLE.report_build_failure(log, failure, self.root)
+        record = json.loads((self.root / BUNDLE.DIAGNOSTIC).read_text())
+        self.assertEqual(state, record["processState"])
+        self.assertIn("mspdbsrv.exe", console.getvalue())
+        self.assertNotIn("authored non-diagnostic output", console.getvalue())
+
     def test_nested_native_failure_keeps_configure_and_probe_diagnostics(self):
         invocation = "a" * 32
         failure = BUNDLE.owned_process.OwnedProcessError("command_failed", cleanup_complete=True, returncode=1)

@@ -511,6 +511,7 @@ def report_build_failure(log: Path, failure: owned_process.OwnedProcessError, ro
         "reason": failure.reason,
         "cleanupComplete": failure.cleanup_complete,
         "returncode": failure.returncode,
+        "processState": getattr(failure, "process_state", None),
         "log": relative,
         "logAvailable": available,
         "diagnosticReadFailure": read_failure,
@@ -535,6 +536,8 @@ def report_build_failure(log: Path, failure: owned_process.OwnedProcessError, ro
         print("Native build diagnostic could not be retained; build log: " + relative + ".", file=sys.stderr)
         return
     print("Native build diagnostic (bounded compiler/build output only):", file=sys.stderr)
+    if record["processState"] is not None:
+        print("  Owned Windows process state: " + json.dumps(record["processState"], sort_keys=True), file=sys.stderr)
     for line in lines:
         print("  " + line, file=sys.stderr)
     if suppressed:

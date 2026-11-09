@@ -4,6 +4,20 @@ Updated 2026-11-07 UTC. Formal Goal tool currently reports **blocked/incomplete*
 
 ## Current Task B continuation — 2026-11-09
 
+Windows-only run `42664351655` at `c149781` passed 1,216 shared / 484
+desktop tests (one Linux-only skip), then timed out exactly 180 seconds into
+session-helper CMake configuration. Compilation did not start. MSBuild no-reuse
+controls did not resolve it. The prior long FFmpeg stage was avoided. No root
+exit or remaining-process identities were retained, so neither compiler failure
+nor a leftover child is established. A short `windows-session-probe` runs only
+native process/bundle tests and the real session helper, without Gradle/FFmpeg/
+packaging. Timeout diagnostics now capture command completion and a bounded,
+job-membership-checked allowlist of tool basenames before unchanged cleanup.
+Local results: process 32 discovered / 30 passed / 2 Windows-only skips;
+bundle 40 passed; workflow 18 passed; YAML valid. A real Windows child/root
+snapshot test is included in the probe. This is diagnostic work, not a claimed
+fix or installer pass. See `verification/task-b-windows-configure-probe-42664351655.md`.
+
 Two-lane retry `42653628227` at `bbcc62f` completed. ARM passed all 1,216
 shared tests and 484 desktop tests (one Linux-only skip), DMG and inventory.
 Windows passed the same tests but timed out in the native media-session helper

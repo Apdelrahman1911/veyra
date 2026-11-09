@@ -43,11 +43,12 @@ _JOB_KILL_ON_CLOSE = 0x2000
 
 class OwnedProcessError(RuntimeError):
     def __init__(self, reason: str, *, cleanup_complete: bool,
-                 returncode: int | None = None, output: bytes = b""):
+                 returncode: int | None = None, output: bytes = b"", process_state: dict | None = None):
         self.reason = reason
         self.cleanup_complete = cleanup_complete
         self.returncode = returncode
         self.output = output
+        self.process_state = process_state
         super().__init__(f"Managed build command failed: {reason}; "
                          f"owned processes {'drained' if cleanup_complete else 'NOT proven drained'}.")
 
@@ -133,6 +134,19 @@ class _JobAccounting(ctypes.Structure):
                 ("active", ctypes.c_uint32), ("terminated", ctypes.c_uint32)]
 
 
+class _JobProcessIds(ctypes.Structure):
+    _fields_ = [("assigned", ctypes.c_uint32), ("listed", ctypes.c_uint32),
+                ("ids", ctypes.c_size_t * 64)]
+
+
+# Diagnostics retain only known tool basenames, never paths, arguments or env.
+_DIAGNOSTIC_TOOL_NAMES = frozenset((
+    "cmake.exe", "msbuild.exe", "cl.exe", "link.exe", "mspdbsrv.exe", "vctip.exe",
+    "cmd.exe", "python.exe", "python3.exe", "nmake.exe", "ninja.exe", "rc.exe",
+    "cvtres.exe", "tracker.exe", "conhost.exe", "powershell.exe", "pwsh.exe",
+    "vbcscompiler.exe", "vswhere.exe"))
+
+
 class _WindowsApi:
     def __init__(self):
         self.dll = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -141,6 +155,9 @@ class _WindowsApi:
             "SetInformationJobObject": ([ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32], ctypes.c_int),
             "AssignProcessToJobObject": ([ctypes.c_void_p, ctypes.c_void_p], ctypes.c_int),
             "QueryInformationJobObject": ([ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p], ctypes.c_int),
+            "OpenProcess": ([ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32], ctypes.c_void_p),
+            "IsProcessInJob": ([ctypes.c_void_p, ctypes.c_void_p, ctypes.POINTER(ctypes.c_int)], ctypes.c_int),
+            "QueryFullProcessImageNameW": ([ctypes.c_void_p, ctypes.c_uint32, ctypes.c_wchar_p, ctypes.POINTER(ctypes.c_uint32)], ctypes.c_int),
             "TerminateJobObject": ([ctypes.c_void_p, ctypes.c_uint32], ctypes.c_int),
             "CloseHandle": ([ctypes.c_void_p], ctypes.c_int),
         }
@@ -171,6 +188,30 @@ class _WindowsApi:
         self._check(self.dll.QueryInformationJobObject(handle, 1, ctypes.byref(accounting), ctypes.sizeof(accounting), None))
         return accounting.active
 
+    def processes(self, handle):
+        members = _JobProcessIds()
+        self._check(self.dll.QueryInformationJobObject(handle, 3, ctypes.byref(members), ctypes.sizeof(members), None))
+        if members.listed > len(members.ids):
+            raise ValueError("Invalid owned-job process count")
+        result = []
+        for pid in list(members.ids)[:min(members.listed, 16)]:
+            process = self.dll.OpenProcess(0x1000, False, pid)  # query-only, never terminate access
+            if not process:
+                continue  # It may have exited after the membership snapshot.
+            try:
+                member = ctypes.c_int()
+                self._check(self.dll.IsProcessInJob(process, handle, ctypes.byref(member)))
+                if not member.value:
+                    continue  # A recycled PID grants no right to inspect another process.
+                capacity = ctypes.c_uint32(32768)
+                image = ctypes.create_unicode_buffer(capacity.value)
+                self._check(self.dll.QueryFullProcessImageNameW(process, 0, image, ctypes.byref(capacity)))
+                name = image.value.replace("\\", "/").rsplit("/", 1)[-1].casefold()
+                result.append({"pid": int(pid), "image": name if name in _DIAGNOSTIC_TOOL_NAMES else "<other>"})
+            finally:
+                self.close(process)
+        return {"listed": members.listed, "truncated": members.listed > 16, "members": result}
+
     def terminate(self, handle):
         self._check(self.dll.TerminateJobObject(handle, 1))
 
@@ -195,6 +236,18 @@ class _WindowsJob:
 
     def active(self):
         return self.api.active(self.handle)
+
+    def failure_state(self, control):
+        # Best effort and captured BEFORE cleanup; it grants no cleanup authority.
+        completed = control.completed if control is not None else None
+        state = {"commandCompleted": completed is not None,
+                 "commandReturncode": completed["returncode"] if completed else None}
+        try:
+            state["jobActiveBeforeCleanup"] = self.active()
+            state["processes"] = self.api.processes(self.handle)
+        except Exception as error:
+            state["snapshotError"] = type(error).__name__
+        return state
 
     def terminate(self):
         self.api.terminate(self.handle)
@@ -442,6 +495,7 @@ def _execute(command, *, cwd, env, timeout, log=None, max_output_bytes=1024 * 10
             _validate_log(log_path, output)
             return b""
         except BaseException as error:
+            process_state = job.failure_state(control) if job is not None else None
             drain_deadline = time.monotonic() + _CLEANUP_SECONDS + 2
             if job is not None:
                 drained = _drain_windows(process, job, drain_deadline)
@@ -463,10 +517,11 @@ def _execute(command, *, cwd, env, timeout, log=None, max_output_bytes=1024 * 10
                 drained = captured.done.wait(max(0, drain_deadline - time.monotonic()))
             retained = bytes(captured.output) if captured is not None else b""
             if not drained:
-                raise OwnedProcessError("cleanup_failed", cleanup_complete=False, output=retained) from error
+                raise OwnedProcessError("cleanup_failed", cleanup_complete=False, output=retained,
+                                        process_state=process_state) from error
             if isinstance(error, _Stop):
                 raise OwnedProcessError(error.reason, cleanup_complete=True,
-                                        returncode=error.returncode, output=retained) from None
+                                        returncode=error.returncode, output=retained, process_state=process_state) from None
             raise
     finally:
         # No work/log deletion, including any failure to establish a drained tree.

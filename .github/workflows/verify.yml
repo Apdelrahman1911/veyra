@@ -8,7 +8,7 @@ on:
       scope:
         description: Target group to verify
         type: choice
-        options: [all, desktop, android-desktop, android-linux-windows, windows, windows-recovery, windows-macos-arm64, android, ios]
+        options: [all, desktop, android-desktop, android-linux-windows, windows, windows-recovery, windows-macos-arm64, windows-session-probe, android, ios]
         default: all
       package_desktop:
         description: Generate native installers (no upload or OS installation)
@@ -40,6 +40,32 @@ env:
   VEYRA_GRADLE_WORKERS: '1'
 
 jobs:
+  windows-session-probe:
+    if: ${{ github.event.repository.private == false && inputs.scope == 'windows-session-probe' && inputs.retention_canary != true && inputs.retain_builds != true }}
+    name: Windows native session probe
+    runs-on: windows-2022
+    timeout-minutes: 8
+    steps:
+      - name: Checkout probe source without retained credentials
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          persist-credentials: false
+          set-safe-directory: false
+          submodules: false
+      - name: Check owned-process diagnostics and configure the session helper
+        run: |
+          scripts/dev.sh python3 -B native/test_owned_process.py
+          scripts/dev.sh python3 -B native/test_bundle.py
+          scripts/dev.sh python3 -B - <<'PY'
+          import platform
+          from native.bundle import ROOT, host_target, preparation_lock, session_helper
+          target = host_target(platform.system(), platform.machine())
+          if target != "windows-x64":
+              raise SystemExit("Windows x64 host required")
+          with preparation_lock(ROOT / ".work/desktop-native"):
+              session_helper(target)
+          PY
+
   desktop:
     if: ${{ github.event.repository.private == false && inputs.retention_canary != true && (inputs.scope == 'all' || inputs.scope == 'desktop' || inputs.scope == 'android-desktop' || inputs.scope == 'android-linux-windows' || inputs.scope == 'windows' || inputs.scope == 'windows-recovery' || inputs.scope == 'windows-macos-arm64') }}
     name: Desktop (${{ matrix.label }})

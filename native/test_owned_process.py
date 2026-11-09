@@ -373,6 +373,50 @@ class WindowsJobPolicyTest(unittest.TestCase):
         def kill(self): self.events.append("kill-gate")
         def wait(self, timeout): self.events.append("await-gate"); return 1
 
+    def test_failure_snapshot_distinguishes_completed_command_from_live_job(self):
+        api = self.Api()
+        api.count = 2
+        job = OWNED._WindowsJob(api)
+        expected = {"listed": 2, "truncated": False, "members": [{"pid": 12, "image": "mspdbsrv.exe"}]}
+        with patch.object(api, "processes", return_value=expected, create=True):
+            result = job.failure_state(SimpleNamespace(completed={"returncode": 0}))
+        self.assertTrue(result["commandCompleted"])
+        self.assertEqual(0, result["commandReturncode"])
+        self.assertEqual(2, result["jobActiveBeforeCleanup"])
+        self.assertEqual(expected, result["processes"])
+        with patch.object(api, "processes", side_effect=OSError("authored private error"), create=True):
+            result = job.failure_state(None)
+        self.assertFalse(result["commandCompleted"])
+        self.assertIsNone(result["commandReturncode"])
+        self.assertEqual("OSError", result["snapshotError"])
+        self.assertNotIn("private", json.dumps(result))
+        job.close()
+
+    def test_process_snapshot_rechecks_job_membership_and_redacts_unknown_images(self):
+        events = []
+        def query(handle, kind, pointer, size, returned):
+            self.assertEqual(3, kind)
+            members = ctypes.cast(pointer, ctypes.POINTER(OWNED._JobProcessIds)).contents
+            members.assigned = members.listed = 3
+            members.ids[:3] = (11, 22, 33)
+            return 1
+        def member(process, job, pointer):
+            ctypes.cast(pointer, ctypes.POINTER(ctypes.c_int)).contents.value = process != 22
+            return 1
+        def image(process, flags, buffer, capacity):
+            events.append(("image", process))
+            buffer.value = "C:/authored-private-dir/" + ("MSBuild.exe" if process == 11 else "authored-private.exe")
+            return 1
+        def close(handle): events.append(("close", handle)); return 1
+        api = object.__new__(OWNED._WindowsApi)
+        api.dll = SimpleNamespace(QueryInformationJobObject=query, OpenProcess=lambda access, inherit, pid: pid,
+            IsProcessInJob=member, QueryFullProcessImageNameW=image, CloseHandle=close)
+        result = api.processes(91)
+        self.assertEqual([{"pid": 11, "image": "msbuild.exe"}, {"pid": 33, "image": "<other>"}], result["members"])
+        self.assertNotIn("private", json.dumps(result))
+        self.assertNotIn(("image", 22), events)
+        self.assertEqual([11, 22, 33], [item[1] for item in events if item[0] == "close"])
+
     def test_job_has_kill_on_close_without_either_breakaway_flag(self):
         api = self.Api()
         job = OWNED._WindowsJob(api)
@@ -453,6 +497,22 @@ class WindowsActualJobTest(unittest.TestCase):
     setUp = OwnedProcessTest.setUp
     tearDown = OwnedProcessTest.tearDown
     capture = OwnedProcessTest.capture
+
+    def test_timeout_snapshot_reports_exited_root_and_remaining_owned_child(self):
+        ids = self.directory / "pids"
+        with self.assertRaises(OWNED.OwnedProcessError) as raised:
+            self.capture(self.tree(ids, exitcode=0), timeout=2.5)
+        failure = raised.exception
+        self.assertEqual("timeout", failure.reason)
+        self.assertTrue(failure.cleanup_complete)
+        state = failure.process_state
+        self.assertTrue(state["commandCompleted"])
+        self.assertEqual(0, state["commandReturncode"])
+        self.assertGreater(state["jobActiveBeforeCleanup"], 0)
+        self.assertTrue(state["processes"]["members"])
+        self.assertTrue(any(member["image"] in ("python.exe", "python3.exe")
+                            for member in state["processes"]["members"]))
+        self.assert_drained(ids)
 
     def test_actual_job_refuses_explicit_breakaway(self):
         code = """import subprocess,sys

@@ -85,6 +85,23 @@ class RetentionWorkflowTest(unittest.TestCase):
             condition = WORKFLOW.split("  " + job + ":\n", 1)[1].split("    name:", 1)[0]
             self.assertNotIn(scope, condition)
 
+    def test_session_probe_is_one_bounded_windows_job_without_gradle_or_packages(self):
+        probe = WORKFLOW.split("  windows-session-probe:\n", 1)[1].split("  desktop:\n", 1)[0]
+        self.assertIn("runs-on: windows-2022", probe)
+        self.assertIn("timeout-minutes: 8", probe)
+        self.assertIn("github.event.repository.private == false", probe)
+        self.assertIn("inputs.retain_builds != true", probe)
+        self.assertIn("native/test_owned_process.py", probe)
+        self.assertIn("native/test_bundle.py", probe)
+        self.assertIn("with preparation_lock(ROOT", probe)
+        self.assertIn("session_helper(target)", probe)
+        self.assertIn('target != "windows-x64"', probe)
+        for forbidden in ("scripts/gradle.sh", "scripts/package.sh", "native/ffmpeg/build.py", "GH_TOKEN"):
+            self.assertNotIn(forbidden, probe)
+        for job in ("desktop", "android", "ios"):
+            condition = WORKFLOW.split("  " + job + ":\n", 1)[1].split("    name:", 1)[0]
+            self.assertNotIn("windows-session-probe", condition)
+
     def test_canary_is_manual_and_public_only(self):
         self.assertIn("workflow_dispatch:", WORKFLOW)
         self.assertIn("retention_canary:", WORKFLOW)
