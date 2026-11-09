@@ -18,10 +18,18 @@ internal actual fun acquireDatabaseLease(path: String): DatabaseLease = synchron
     if (!DatabaseLeaseRegistry.held.add(key)) throw VeyraException(AppFailure(FailureCode.STORAGE_IO, "Database is already open"))
     var channel: FileChannel? = null
     try {
-        val opened = FileChannel.open(file.toPath(), StandardOpenOption.CREATE, StandardOpenOption.WRITE)
-        channel = opened
-        val lock = try { opened.tryLock() } catch (_: OverlappingFileLockException) { null }
-        if (lock == null) throw VeyraException(AppFailure(FailureCode.STORAGE_IO, "Database is already open"))
+        val acquired = retryWindowsDatabaseLease {
+            val opened = FileChannel.open(file.toPath(), StandardOpenOption.CREATE, StandardOpenOption.WRITE)
+            channel = opened
+            var retained = false
+            try {
+                val lock = try { opened.tryLock() } catch (_: OverlappingFileLockException) { null }
+                if (lock == null) null else (opened to lock).also { retained = true }
+            } finally {
+                if (!retained) { opened.close(); channel = null }
+            }
+        } ?: throw VeyraException(AppFailure(FailureCode.STORAGE_IO, "Database is already open"))
+        val (opened, lock) = acquired
         object : DatabaseLease {
             private var closed = false
             override fun release() = synchronized(DatabaseLeaseRegistry) {
@@ -38,5 +46,6 @@ internal actual fun acquireDatabaseLease(path: String): DatabaseLease = synchron
         try { channel?.close(); DatabaseLeaseRegistry.held.remove(key) }
         catch (closeError: Exception) { error.addSuppressed(closeError) }
         throw VeyraException(AppFailure(FailureCode.STORAGE_IO, "Database lease could not be acquired"))
+            .also { it.initCause(error) }
     }
 }

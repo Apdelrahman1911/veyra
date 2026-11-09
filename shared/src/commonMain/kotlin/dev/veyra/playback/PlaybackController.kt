@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlin.concurrent.Volatile
 import kotlin.random.Random
 
 private const val GRACEFUL_SHUTDOWN_TIMEOUT_MS = 5_000L
@@ -185,9 +186,17 @@ class PlaybackController(
                     }
                 }
             } finally {
-                messages.close()
-                positions.close()
-                engineOperations.close()
+                // Cancel producers before closing their destination. A live snapshot/event
+                // producer can otherwise send between close() and job.cancel(), leaking a
+                // ClosedSendChannelException into the application lifetime during shutdown.
+                job.cancel()
+                // A producer already running on another thread may still reach send().
+                // Preserve buffered-command disposal below, but make late sends observe
+                // cancellation rather than an uncaught ClosedSendChannelException.
+                val stopped = CancellationException("Playback controller closed")
+                messages.close(stopped)
+                positions.close(stopped)
+                engineOperations.close(stopped)
                 val failure = PlaybackResult.Failure(AppFailure(FailureCode.CANCELLED))
                 while (true) {
                     when (val pending = messages.tryReceive().getOrNull() ?: break) {
@@ -198,7 +207,6 @@ class PlaybackController(
                         else -> discardMessage(pending)
                     }
                 }
-                job.cancel()
                 withContext(NonCancellable) {
                     engineOperationJob.cancelAndJoin()
                     // SupervisorJob/join do not propagate a child's exception to public close().

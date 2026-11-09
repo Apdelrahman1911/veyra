@@ -734,6 +734,7 @@ class PodcastViewportCaptureTest {
                 progress = mapOf(episode.id to MediaProgress(positionMs = 45_000L, durationMs = 180_000L)),
                 settings = AppSettings(offlineOnly = true), downloads = mapOf(record.id to record))
             var shown by mutableStateOf(snapshot)
+            var progressView by mutableStateOf<PodcastProgressView?>(null)
             val actions = mutableListOf<PodcastAction>()
             val strings = AppStrings(language)
             val locale = if (language == LanguagePreference.ARABIC) "ar" else "en"
@@ -747,7 +748,7 @@ class PodcastViewportCaptureTest {
                 CompositionLocalProvider(LocalDensity provides Density(1f, fontScale)) {
                     VeyraTheme(darkTheme = dark, language = language) {
                         Surface(Modifier.fillMaxSize().testTag("podcast-capture-frame")) {
-                            EpisodeDetailScreen(EpisodeDetailUiState(episode.id, shown), actions::add)
+                            EpisodeDetailScreen(EpisodeDetailUiState(episode.id, shown, progressView = progressView), actions::add)
                         }
                     }
                 }
@@ -904,7 +905,22 @@ class PodcastViewportCaptureTest {
                 .copy(executionBindingId = historical.id)),
                 playbackBindings = listOf(historical, sameRecording, changedRecording).associateBy { it.id },
                 downloads = mapOf(record.id to readyRecord(sameRecording)))
-            runOnIdle { shown = ready }
+            // The exact queue occurrence is part of the resume contract. A historical position
+            // plus a matching downloaded recording is not, by itself, an actionable Resume.
+            val readyProgress = PodcastEpisodeProgress(
+                mediaId = episode.id, positionMs = 45_000L, durationMs = 180_000L, played = false,
+                updatedEpochMs = 1L, bindingId = historical.id, recordingId = "abcdefghijk",
+                occurrenceId = "capture-legacy-occurrence", source = PodcastProgressSource.LEGACY, bindingValid = true,
+            )
+            val readyTarget = PodcastResumeTarget(
+                occurrenceId = "capture-legacy-occurrence", bindingId = sameRecording.id,
+                recordingId = "schema2:abcdefghijk", legacyRecordingId = "abcdefghijk", queueRevision = 7L,
+            )
+            val readyProgressView = PodcastProgressView(
+                episodes = mapOf(episode.id to readyProgress),
+                queuedTargets = mapOf(episode.id to listOf(readyTarget)),
+            )
+            runOnIdle { shown = ready; progressView = readyProgressView }
             onNodeWithTag("podcast-episode-detail").performScrollToNode(hasTestTag("podcast-detail-play"))
             val resume = strings.format(TextKey.ResumeAt, strings.mediaTime(45_000L))
             onNodeWithTag("podcast-detail-play").assertIsEnabled().assertTextEquals(resume)

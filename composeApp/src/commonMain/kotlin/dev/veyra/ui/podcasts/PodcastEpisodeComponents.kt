@@ -303,13 +303,21 @@ fun PodcastEpisodeMenu(
                     onClick = { dispatch(PodcastAction.AddToEnd(state.episode.id)) })
             }
             HorizontalDivider()
-            val downloadAction = podcastDownloadAction(state)
-            listOfNotNull(downloadAction, podcastRetainedAssetRemovalAction(state)).forEachIndexed { index, action ->
+            val downloadActions = podcastDownloadActions(state)
+            downloadActions.forEachIndexed { index, action ->
                 DropdownMenuItem(
-                    text = { PodcastActionText(strings.text(action.label)) },
+                    text = {
+                        PodcastActionText(if (action.memberPosition != null) strings.format(action.label,
+                            strings.number(((action.memberOrdinal ?: (action.memberPosition ?: 0) + 1)).toLong()))
+                        else strings.text(action.label))
+                    },
                     enabled = action.enabled,
                     leadingIcon = { Icon(VeyraIcons.Download, null) },
-                    modifier = Modifier.testTag(if (index == 0) "podcast-menu-download" else "podcast-menu-remove-download"),
+                    modifier = Modifier.testTag(when {
+                        action.memberPosition != null -> "podcast-menu-validate-member-${action.memberPosition}"
+                        index == 0 -> "podcast-menu-download"
+                        else -> "podcast-menu-remove-download"
+                    }),
                     onClick = {
                         expanded = false
                         if (action.requiresRemovalConfirmation) confirmRemoveDownload = true
@@ -318,7 +326,7 @@ fun PodcastEpisodeMenu(
                 )
             }
             state.activeDownload?.takeIf(::podcastCanCancelDownload)?.let { download ->
-                if (downloadAction.action !is PodcastAction.CancelDownload) {
+                if (podcastDownloadAction(state).action !is PodcastAction.CancelDownload) {
                     DropdownMenuItem(text = { PodcastActionText(strings.text(TextKey.CancelDownload)) },
                         onClick = { dispatch(PodcastAction.CancelDownload(download.id)) })
                 }
@@ -418,16 +426,20 @@ internal fun PodcastEpisodeControls(state: PodcastEpisodeUiState, onAction: (Pod
 @Composable
 internal fun PodcastDownloadButton(state: PodcastEpisodeUiState, onAction: (PodcastAction) -> Unit) {
     val strings = LocalStrings.current
-    val action = podcastDownloadAction(state)
     var confirmRemoval by remember(state.episode.id) { mutableStateOf(false) }
-    listOfNotNull(action, podcastRetainedAssetRemovalAction(state)).forEachIndexed { index, offered ->
+    podcastDownloadActions(state).forEachIndexed { index, offered ->
         OutlinedButton(onClick = {
             if (offered.requiresRemovalConfirmation) confirmRemoval = true else offered.action?.let(onAction)
-        }, enabled = offered.enabled, modifier = Modifier.podcastActionTarget().testTag(
-            if (index == 0) "podcast-detail-download" else "podcast-detail-remove-download")) {
+        }, enabled = offered.enabled, modifier = Modifier.podcastActionTarget().testTag(when {
+            offered.memberPosition != null -> "podcast-detail-validate-member-${offered.memberPosition}"
+            index == 0 -> "podcast-detail-download"
+            else -> "podcast-detail-remove-download"
+        })) {
             Icon(if (state.activeDownload?.ready == true) VeyraIcons.Check else VeyraIcons.Download, null, modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(8.dp))
-            PodcastActionText(strings.text(offered.label))
+            PodcastActionText(if (offered.memberPosition != null) strings.format(offered.label,
+                strings.number(((offered.memberOrdinal ?: (offered.memberPosition ?: 0) + 1)).toLong()))
+            else strings.text(offered.label))
         }
     }
     if (confirmRemoval) {
@@ -534,6 +546,12 @@ internal data class PodcastDownloadAction(
     val action: PodcastAction?,
     val enabled: Boolean = true,
     val requiresRemovalConfirmation: Boolean = false,
+    /** Exact member position for a localized repeated-member choice, never a selection authority. */
+    val memberPosition: Int? = null,
+    /** Unique 1-based display ordinal among the row's choices; not an execution identity. */
+    val memberOrdinal: Int? = null,
+    /** Non-empty when one physical row has several exact batch-member validation targets. */
+    val memberActions: List<PodcastDownloadAction> = emptyList(),
 )
 
 internal val cancellableDownloadStatuses = setOf(
@@ -571,6 +589,14 @@ internal fun podcastRetainedAssetRemovalAction(state: PodcastEpisodeUiState): Po
         requiresRemovalConfirmation = true)
 }
 
+/** Expand one physical-row action into its explicit repeated-member choices plus removal. */
+internal fun podcastDownloadActions(state: PodcastEpisodeUiState): List<PodcastDownloadAction> {
+    val primary = podcastDownloadAction(state)
+    val removal = podcastRetainedAssetRemovalAction(state)
+    return if (primary.memberActions.isNotEmpty()) primary.memberActions + listOfNotNull(removal)
+    else listOfNotNull(primary, removal)
+}
+
 internal fun podcastDownloadAction(state: PodcastEpisodeUiState): PodcastDownloadAction {
     fun newDownload() = PodcastDownloadAction(TextKey.Download, PodcastAction.Download(state.episode.id),
         enabled = !state.offlineOnly && state.hasAudioSource)
@@ -593,10 +619,21 @@ internal fun podcastDownloadAction(state: PodcastEpisodeUiState): PodcastDownloa
         DownloadStatus.FAILED -> {
             val retained = download.hasOwnedBytes && !download.cleanupPending && download.origin != DownloadSurfaceOrigin.LEGACY
             if (retained) {
-                val binding = download.bindingId?.takeIf { download.origin == DownloadSurfaceOrigin.TYPED_CATALOGUE }
-                if (binding != null) PodcastDownloadAction(TextKey.ValidateDownload,
-                    PodcastAction.ValidateRetainedDownload(download.id, binding))
-                else PodcastDownloadAction(TextKey.RetainedValidationUnavailable, action = null, enabled = false)
+                val target = download.retainedValidation
+                val choices = download.retainedValidationChoices
+                when {
+                    target != null -> PodcastDownloadAction(TextKey.ValidateDownload,
+                        PodcastAction.ValidateRetainedDownload(target.jobId, target.bindingId, target.batchId,
+                            target.memberPosition, target.expectedIntentRevision))
+                    choices.isNotEmpty() -> PodcastDownloadAction(TextKey.ValidateDownload, action = null,
+                        enabled = false, memberActions = choices.mapIndexed { index, choice ->
+                            PodcastDownloadAction(TextKey.ValidateDownloadMember,
+                                PodcastAction.ValidateRetainedDownload(choice.jobId, choice.bindingId,
+                                    choice.batchId, choice.memberPosition, choice.expectedIntentRevision),
+                                memberPosition = choice.memberPosition, memberOrdinal = index + 1)
+                        })
+                    else -> PodcastDownloadAction(TextKey.RetainedValidationUnavailable, action = null, enabled = false)
+                }
             } else PodcastDownloadAction(TextKey.Retry, PodcastAction.ResumeDownload(download.id),
                 enabled = !state.offlineOnly)
         }

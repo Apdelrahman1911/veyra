@@ -8,22 +8,37 @@ import dev.kmpyt.extraction.TransportKind
 import dev.kmpyt.youtube.YouTubeBrowseText
 import dev.veyra.app.AppContainer
 import dev.veyra.app.AppInitialization
+import dev.veyra.data.AcquisitionRepositoryState
+import dev.veyra.data.executionContext
 import dev.veyra.desktop.DesktopPlatformServices
 import dev.veyra.desktop.runtime.DesktopMediaExecutionPolicy
 import dev.veyra.desktop.runtime.DesktopProcessContext
 import dev.veyra.model.*
+import dev.veyra.playback.AssetValidation
 import dev.veyra.playback.EngineCapabilities
+import dev.veyra.playback.LocalMediaValidationInput
 import dev.veyra.playback.PlaybackCommand
 import dev.veyra.playback.PlaybackPhase
 import dev.veyra.playback.PlaybackResource
 import dev.veyra.playback.PlaybackState
+import dev.veyra.playback.PlaybackTarget
 import dev.veyra.playback.ResolvedPlayable
 import dev.veyra.playback.getOrThrow
 import dev.veyra.source.BrowseKind
 import dev.veyra.source.BrowseRequest
 import dev.veyra.source.ResolvePurpose
+import dev.veyra.source.execution.AcquisitionExecutionContext
+import dev.veyra.source.execution.AcquisitionExecutionGateway
+import dev.veyra.source.execution.AcquisitionGateway
+import dev.veyra.source.execution.AcquisitionInspection
+import dev.veyra.source.execution.AcquisitionPlaybackSource
+import dev.veyra.source.execution.AcquisitionTransferProgress
+import dev.veyra.source.execution.AcquisitionTransferResult
+import dev.veyra.source.execution.CollectionContinuation
 import dev.veyra.source.execution.KmpFirstResult
 import dev.veyra.source.execution.KmpMediaGateway
+import dev.veyra.source.execution.PreparedAcquisitionDownload
+import dev.veyra.source.execution.SourceCollectionPage
 import dev.veyra.source.network.SafeHttp
 import dev.veyra.source.network.SafeHttpRequest
 import dev.veyra.source.network.PublicUrlPolicy
@@ -74,6 +89,13 @@ import kotlin.math.abs
 internal class CentralListeningProofFailure(val report: String) : Exception("Central listening verification did not complete")
 
 /**
+ * The proof-owned facade must expose the typed acquisition/execution ports itself. Returning a
+ * legacy-only [KmpMediaGateway] made the application's PolicyMediaGateway reject every typed
+ * acquisition before the production delegate was reached.
+ */
+internal interface CentralProofGateway : KmpMediaGateway, AcquisitionGateway, AcquisitionExecutionGateway
+
+/**
  * Opt-in D005 listening proof using the ONE supplied production AppContainer and native engine.
  * This is deliberately narrower than product playback: the authorized live run cannot switch
  * videos, skip a raw first card, use a direct fixture, or guess an unknown transfer size.
@@ -108,11 +130,13 @@ internal class CentralListeningProof(private val silentAudio: Boolean = false) :
 
     suspend fun runOnline(app: AppContainer): String = runPhase("online", app) {
         stage = "empty-dedicated-library"
-        requireEmptyLibrary(app.store.state.value)
+        val initial = app.store.acquisitionView()
+        requireEmptyLibrary(initial.snapshot)
+        requireEmptyAcquisition(initial.acquisition)
         val files = CentralProofFiles(Path.of(app.platform.dataDirectory))
         files.requireNoMarker()
         proofRequire(app.files.bytesUsed() == 0L, "NONEMPTY_MEDIA_DIRECTORY")
-        proofRequire(!app.store.state.value.settings.offlineOnly, "ONLINE_PHASE_IS_OFFLINE")
+        proofRequire(!initial.snapshot.settings.offlineOnly, "ONLINE_PHASE_IS_OFFLINE")
         val process = currentProcess!!
         milestones += "empty-dedicated-library"
 
@@ -128,55 +152,77 @@ internal class CentralListeningProof(private val silentAudio: Boolean = false) :
         authorization.discovered(item)
         milestones += "approved-discovery-complete-title"
 
-        stage = "raw-first-search-and-native-play"
+        stage = "typed-raw-first-search-and-native-play"
         app.onMusicAction(MusicUiAction.Play(item))
         val firstPlaying = awaitPlayback(app, timeoutMs = 180_000) {
             it.currentItem?.id == item.id && it.isPlaying && it.phase == PlaybackPhase.PLAYING && it.positionMs >= 600
         }
-        val binding = firstPlaying.executionBinding ?: proofFail("PLAYBACK_BINDING_MISSING")
-        authorization.requireBinding(binding)
-        proofRequire(app.store.state.value.playbackBindings[binding.id] == binding, "UNDURABLE_FIRST_RESULT")
-        milestones += "complete-title-raw-first-bound-in-room"
+        val selection = firstPlaying.currentSelection ?: proofFail("TYPED_SELECTION_MISSING")
+        proofRequire(selection.selectionState == OccurrenceSelectionState.BOUND &&
+            selection.target is PlaybackTarget.Catalog && selection.bindingId != null,
+            "TYPED_SELECTION_NOT_BOUND", FailureCode.PERMISSION_DENIED)
+        val context = selection.executionContext ?: proofFail("TYPED_EXECUTION_CONTEXT_MISSING")
+        authorization.requireTypedContext(context)
+        val durable = app.store.acquisition.playbackView()
+        val joined = try { durable.acquisition.executionContext(context.binding.id) }
+        catch (_: Exception) { proofFail("TYPED_ROOM_CONTEXT_MISSING", FailureCode.RECOVERY_REQUIRED) }
+        val occurrence = durable.acquisition.occurrences[selection.occurrenceId]
+            ?: proofFail("TYPED_OCCURRENCE_MISSING", FailureCode.RECOVERY_REQUIRED)
+        proofRequire(joined == context && occurrence.selectionState == OccurrenceSelectionState.BOUND &&
+            occurrence.requestId == context.request.id && occurrence.bindingId == context.binding.id &&
+            occurrence.subjectId == context.subject.id && occurrence.controlsMode == PlaybackControlsMode.MUSIC &&
+            durable.acquisition.queues.getValue(QueueContext.MUSIC).currentOccurrenceId == occurrence.id &&
+            durable.snapshot.media[item.id]?.title == item.title,
+            "TYPED_DURABLE_IDENTITY_CHANGED", FailureCode.PERMISSION_DENIED)
+        milestones += "complete-title-typed-raw-first-bound-in-room"
+
+        stage = "native-advance-pause-resume-forward-back-seek"
         observedNative = exerciseNative(app, firstPlaying)
         milestones += "native-advance-pause-resume-forward-back-seek"
 
-        stage = "same-binding-production-download"
+        stage = "same-binding-typed-production-download"
         // Normal UI command captures the currently displayed immutable receipt. No second search.
         app.onMusicAction(MusicUiAction.Download(item))
-        val record = awaitCompletedDownload(app, item.id)
-        val asset = record.asset ?: proofFail("COMPLETED_ASSET_MISSING")
-        proofRequire(record.executionBindingId == binding.id && asset.executionBindingId == binding.id,
-            "DOWNLOAD_BINDING_CHANGED")
-        proofRequire(asset.mediaId == item.id && asset.representationId == record.representationId &&
-            asset.representationId?.matches(CentralProofPolicy.REPRESENTATION) == true &&
-            asset.sizeBytes in 1..CentralProofPolicy.MAX_BYTES && asset.sha256?.matches(CentralProofPolicy.SHA256) == true &&
-            (asset.measuredDurationMs ?: 0) > 0, "DOWNLOAD_EVIDENCE_INCOMPLETE")
-        app.files.verifiedFile(asset) // streaming local size/SHA check, never a competing downloader
-        proofRequire(authorization.snapshot().searchCalls == 1 && authorization.snapshot().downloadCalls == 1 &&
-            authorization.snapshot().downloadPlans == 1, "ACQUISITION_COUNT_CHANGED")
-        milestones += "same-binding-kmpyt-download-native-validated-sha256-room-complete"
+        val download = awaitCompletedTypedDownload(app, context)
+        proofRequire(download.asset.representationId == authorization.downloadRepresentationId(),
+            "DOWNLOAD_REPRESENTATION_CHANGED", FailureCode.PERMISSION_DENIED)
+        verifyTypedAsset(app, download.asset)
+        val counts = authorization.snapshot()
+        proofRequire(counts.acquireCalls == 1 && counts.preparePlaybackCalls == 1 && counts.prepareDownloadCalls == 1 &&
+            counts.transferCalls == 1 && counts.downloadCalls == 1 && counts.downloadPlans == 1 &&
+            counts.searchCalls == 0 && counts.resolveCalls == 0 && counts.metadataChecks == 1,
+            "ACQUISITION_COUNT_CHANGED", FailureCode.PERMISSION_DENIED)
+        milestones += "same-binding-kmpyt-typed-download-native-validated-sha256-room-complete"
 
         stage = "persist-offline-restart-marker"
         app.playback.dispatch(PlaybackCommand.FlushProgress).getOrThrow()
         app.changeSettings { it.copy(offlineOnly = true) }
         awaitCondition(20_000) { app.store.state.value.settings.offlineOnly }
         app.playback.dispatch(PlaybackCommand.FlushProgress).getOrThrow()
-        val snapshot = app.store.state.value
-        val queue = snapshot.queue(QueueContext.MUSIC)
-        val position = snapshot.progress[item.id] ?: proofFail("POSITION_NOT_PERSISTED")
-        proofRequire(queue.currentEntry?.mediaId == item.id && queue.currentEntryId != null &&
-            position.executionBindingId == binding.id && position.positionMs > 0 &&
-            abs(queue.positionMs - position.positionMs) <= 500, "POSITION_BINDING_CHANGED")
+        val playbackView = app.store.acquisition.playbackView()
+        val queue = playbackView.acquisition.queues.getValue(QueueContext.MUSIC)
+        val checkpoint = playbackView.checkpoints[occurrence.id] ?: proofFail("NATIVE_CHECKPOINT_MISSING")
+        proofRequire(queue.currentOccurrenceId == occurrence.id && occurrence.id in queue.displayedOrder &&
+            queue.positionMs > 0 && checkpoint.bindingId == context.binding.id && checkpoint.positionMs > 0 &&
+            abs(queue.positionMs - checkpoint.positionMs) <= 500,
+            "POSITION_BINDING_CHANGED", FailureCode.PERMISSION_DENIED)
         files.writeNew(CentralProofMarker(
             process = process, mediaId = item.id, completeTitle = item.title,
-            discoveryVideoId = item.source.canonicalId, binding = binding,
-            downloadId = record.id, assetId = asset.id, sizeBytes = asset.sizeBytes,
-            sha256 = asset.sha256!!, representationId = asset.representationId!!,
-            measuredDurationMs = asset.measuredDurationMs!!,
-            entryId = queue.currentEntryId!!, positionMs = queue.positionMs,
+            discoveryVideoId = item.source.canonicalId,
+            firstResultVideoId = context.recording.canonicalId,
+            firstResultTitle = context.receipt.observation.entry.title
+                ?: proofFail("RAW_FIRST_TITLE_MISSING", FailureCode.PARSE_FAILURE),
+            requestId = context.request.id.value, receiptId = context.receipt.id.value,
+            bindingId = context.binding.id.value, recordingId = context.recording.id.value,
+            subjectId = context.subject.id.value, occurrenceId = occurrence.id.value,
+            downloadId = download.jobId, assetId = download.asset.id.value,
+            sizeBytes = download.asset.sizeBytes, sha256 = download.asset.sha256!!,
+            representationId = download.asset.representationId!!,
+            measuredDurationMs = download.asset.measuredDurationMs!!,
+            entryId = occurrence.id.value, positionMs = queue.positionMs,
             native = observedNative!!,
         ))
-        milestones += "offline-setting-binding-hash-position-marker-persisted"
+        milestones += "offline-setting-typed-binding-hash-position-marker-persisted"
         stage = "online-phase-verified-restart-still-required"
     }
 
@@ -191,41 +237,88 @@ internal class CentralListeningProof(private val silentAudio: Boolean = false) :
         milestones += "previous-online-process-terminated-different-process"
         milestones += "linux-private-network-namespace-all-current-threads-no-public-route-literal-tcp-denied"
 
-        stage = "room-offline-restore-and-file-validation"
-        val snapshot = app.store.state.value
+        stage = "room-offline-typed-restore-and-file-validation"
+        val playbackView = app.store.acquisition.playbackView()
+        val state = playbackView.acquisition
+        val snapshot = playbackView.snapshot
         proofRequire(snapshot.settings.offlineOnly, "OFFLINE_SETTING_NOT_RESTORED")
         val item = snapshot.media[marker.mediaId] ?: proofFail("ORIGINAL_ITEM_NOT_RESTORED")
         CentralProofPolicy.requireDiscovery(item)
-        proofRequire(item.title == marker.completeTitle && item.source.canonicalId == marker.discoveryVideoId &&
-            snapshot.playbackBindings[marker.binding.id] == marker.binding &&
-            snapshot.queue(QueueContext.MUSIC).currentEntryId == marker.entryId &&
-            snapshot.queue(QueueContext.MUSIC).currentEntry?.mediaId == item.id &&
-            snapshot.queue(QueueContext.MUSIC).positionMs == marker.positionMs &&
-            snapshot.progress[item.id]?.executionBindingId == marker.binding.id,
-            "ROOM_MARKER_IDENTITY_CHANGED")
+        proofRequire(item.title == marker.completeTitle && item.source.canonicalId == marker.discoveryVideoId,
+            "ROOM_MARKER_IDENTITY_CHANGED", FailureCode.PERMISSION_DENIED)
+        val request = state.requests[AcquisitionRequestId(marker.requestId)]
+            ?: proofFail("TYPED_REQUEST_NOT_RESTORED", FailureCode.RECOVERY_REQUIRED)
+        val capture = request.request.metadata as? MediaCapture
+            ?: proofFail("TYPED_CATALOG_CAPTURE_MISSING", FailureCode.RECOVERY_REQUIRED)
+        proofRequire(request.request.completeTitle == marker.completeTitle && request.request.kind == AcquisitionKind.MEDIA &&
+            capture.media.id == marker.mediaId && capture.media.title == marker.completeTitle &&
+            capture.media.source.provider == SourceProvider.YOUTUBE &&
+            capture.media.source.canonicalId == marker.discoveryVideoId,
+            "ROOM_MARKER_REQUEST_CHANGED", FailureCode.PERMISSION_DENIED)
+        val receipt = state.receipts[FirstResultReceiptId(marker.receiptId)] as? FirstResultReceipt.Observed
+            ?: proofFail("TYPED_RECEIPT_NOT_RESTORED", FailureCode.RECOVERY_REQUIRED)
+        proofRequire(receipt.observation.requestId == request.request.id &&
+            receipt.observation.queryTitle == marker.completeTitle &&
+            receipt.observation.entry.ordinal == 0 && receipt.observation.entry.kind == AcquisitionEntryKind.VIDEO &&
+            receipt.observation.entry.id == marker.firstResultVideoId &&
+            receipt.observation.entry.title == marker.firstResultTitle &&
+            receipt.observation.entry.issue == null &&
+            receipt.observation.canonicalUrl == CentralProofPolicy.watch(marker.firstResultVideoId),
+            "ROOM_MARKER_RECEIPT_CHANGED", FailureCode.PERMISSION_DENIED)
+        val recording = state.recordings[SourceRecordingId(marker.recordingId)]
+            ?: proofFail("TYPED_RECORDING_NOT_RESTORED", FailureCode.RECOVERY_REQUIRED)
+        val subject = state.subjects[ExecutableSubjectId(marker.subjectId)] as? ExecutableSubject.CatalogMedia
+            ?: proofFail("TYPED_SUBJECT_NOT_RESTORED", FailureCode.RECOVERY_REQUIRED)
+        val binding = state.bindings[ExecutionBindingId(marker.bindingId)]
+            ?: proofFail("TYPED_BINDING_NOT_RESTORED", FailureCode.RECOVERY_REQUIRED)
+        proofRequire(recording.canonicalId == marker.firstResultVideoId &&
+            recording.canonicalUrl == CentralProofPolicy.watch(marker.firstResultVideoId) &&
+            subject.mediaId == marker.mediaId && subject.id.value == marker.mediaId &&
+            binding.origin == ExecutionBindingOrigin.TYPED && binding.firstReceiptId == receipt.id &&
+            binding.recordingId == recording.id && binding.subjectId == subject.id,
+            "ROOM_MARKER_TYPED_LINEAGE_CHANGED", FailureCode.PERMISSION_DENIED)
+        val occurrence = state.occurrences[ExecutionOccurrenceId(marker.occurrenceId)]
+            ?: proofFail("TYPED_OCCURRENCE_NOT_RESTORED", FailureCode.RECOVERY_REQUIRED)
+        proofRequire(occurrence.origin == AcquisitionOrigin.TYPED &&
+            occurrence.selectionState == OccurrenceSelectionState.BOUND &&
+            occurrence.requestId == request.request.id && occurrence.bindingId == binding.id &&
+            occurrence.subjectId == subject.id && occurrence.controlsMode == PlaybackControlsMode.MUSIC,
+            "ROOM_MARKER_OCCURRENCE_CHANGED", FailureCode.PERMISSION_DENIED)
+        val queue = state.queues[QueueContext.MUSIC]
+            ?: proofFail("TYPED_QUEUE_NOT_RESTORED", FailureCode.RECOVERY_REQUIRED)
+        val checkpoint = playbackView.checkpoints[occurrence.id]
+            ?: proofFail("NATIVE_CHECKPOINT_NOT_RESTORED", FailureCode.RECOVERY_REQUIRED)
+        proofRequire(queue.currentOccurrenceId == occurrence.id && occurrence.id in queue.displayedOrder &&
+            queue.positionMs == marker.positionMs && checkpoint.bindingId == binding.id &&
+            abs(checkpoint.positionMs - marker.positionMs) <= 500,
+            "ROOM_MARKER_POSITION_CHANGED", FailureCode.PERMISSION_DENIED)
+        val download = requireTypedDownload(state, try { playbackView.acquisition.executionContext(binding.id) }
+        catch (_: Exception) { proofFail("TYPED_CONTEXT_NOT_RESTORED", FailureCode.RECOVERY_REQUIRED) })
+        proofRequire(download.jobId == marker.downloadId && download.asset.id.value == marker.assetId &&
+            download.asset.sizeBytes == marker.sizeBytes && download.asset.sha256 == marker.sha256 &&
+            download.asset.representationId == marker.representationId &&
+            download.asset.measuredDurationMs == marker.measuredDurationMs,
+            "RESTORED_ASSET_CHANGED", FailureCode.CORRUPT_MEDIA)
+        verifyTypedAsset(app, download.asset)
         val restored = app.playback.state.value
         proofRequire(!restored.isPlaying && !restored.desiredPlaying && restored.phase == PlaybackPhase.PAUSED &&
-            restored.currentItem?.id == item.id && restored.positionMs == marker.positionMs,
-            "RESTORE_AUTOPLAY_OR_POSITION_CHANGED")
-        val record = awaitCompletedDownload(app, item.id)
-        val asset = record.asset ?: proofFail("COMPLETED_ASSET_MISSING")
-        proofRequire(record.id == marker.downloadId && asset.id == marker.assetId && asset.mediaId == marker.mediaId &&
-            record.executionBindingId == marker.binding.id && asset.executionBindingId == marker.binding.id &&
-            asset.sizeBytes == marker.sizeBytes && asset.sha256 == marker.sha256 &&
-            record.representationId == marker.representationId && asset.representationId == marker.representationId &&
-            asset.measuredDurationMs == marker.measuredDurationMs, "RESTORED_ASSET_CHANGED")
-        app.files.verifiedFile(asset)
-        milestones += "room-offline-binding-hash-position-restored-no-autoplay"
+            restored.currentItem?.id == marker.mediaId && restored.currentEntryId == occurrence.id.value &&
+            restored.currentSelection?.bindingId == binding.id && restored.positionMs == marker.positionMs,
+            "RESTORE_AUTOPLAY_OR_POSITION_CHANGED", FailureCode.PERMISSION_DENIED)
+        milestones += "room-offline-typed-binding-hash-position-restored-no-autoplay"
 
         stage = "local-native-play-and-seek-with-os-egress-denied"
-        app.onMusicAction(MusicUiAction.PlayQueueEntry(QueueContext.MUSIC, marker.entryId))
+        app.onMusicAction(MusicUiAction.PlayQueueEntry(QueueContext.MUSIC, marker.occurrenceId))
         val playing = awaitPlayback(app, timeoutMs = 180_000) {
-            it.currentItem?.id == item.id && it.executionBinding == marker.binding && it.isPlaying &&
-                it.phase == PlaybackPhase.PLAYING && it.positionMs > marker.positionMs + 600
+            it.currentEntryId == marker.occurrenceId && it.currentSelection?.bindingId?.value == marker.bindingId &&
+                it.isPlaying && it.phase == PlaybackPhase.PLAYING && it.positionMs > marker.positionMs + 600
         }
         observedNative = exerciseNative(app, playing)
-        proofRequire(authorization.snapshot().let { it.searchCalls == 0 && it.resolveCalls == 0 && it.downloadCalls == 0 },
-            "OFFLINE_GATEWAY_WAS_ENTERED")
+        proofRequire(authorization.snapshot().let {
+            it.searchCalls == 0 && it.resolveCalls == 0 && it.downloadCalls == 0 && it.acquireCalls == 0 &&
+                it.restoreCalls == 0 && it.inspectCalls == 0 && it.preparePlaybackCalls == 0 &&
+                it.prepareDownloadCalls == 0 && it.transferCalls == 0
+        }, "OFFLINE_GATEWAY_WAS_ENTERED", FailureCode.OFFLINE_POLICY)
         val after = CentralNetworkEvidence.verify(marker.process.networkNamespace)
         proofRequire(after.networkNamespace == observedIsolation?.networkNamespace, "NATIVE_NETWORK_NAMESPACE_CHANGED")
         observedIsolation = after
@@ -252,7 +345,8 @@ internal class CentralListeningProof(private val silentAudio: Boolean = false) :
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Throwable) {
-            val failure = (error as? VeyraException)?.failure
+            val failure = authorization.failureOrNull()
+                ?: (error as? VeyraException)?.failure
                 ?: AppFailure(FailureCode.UNEXPECTED, "PROOF_OPERATION_FAILED")
             throw CentralListeningProofFailure(report(false, failure))
         } finally {
@@ -305,7 +399,8 @@ internal class CentralListeningProof(private val silentAudio: Boolean = false) :
                 it.currentEntryId == entry && !it.isPlaying && it.pendingSeekMs == null && abs(it.positionMs - target) <= 500
             }
             app.playback.dispatch(PlaybackCommand.FlushProgress).getOrThrow()
-            proofRequire(abs(app.store.state.value.queue(QueueContext.MUSIC).positionMs - after.positionMs) <= 500,
+            proofRequire(abs(app.store.acquisition.playbackView().acquisition.queues
+                .getValue(QueueContext.MUSIC).positionMs - after.positionMs) <= 500,
                 "NATIVE_SEEK_NOT_CHECKPOINTED")
             return after.positionMs
         }
@@ -344,6 +439,7 @@ internal class CentralListeningProof(private val silentAudio: Boolean = false) :
         predicate: (PlaybackState) -> Boolean): PlaybackState {
         var result = app.playback.state.value
         awaitCondition(timeoutMs) {
+            authorization.failureOrNull()?.let { throw VeyraException(it) }
             result = app.playback.state.value
             requireHealthy(result)
             if (generation != null) proofRequire(result.generation == generation, "NATIVE_GENERATION_CHANGED")
@@ -352,23 +448,94 @@ internal class CentralListeningProof(private val silentAudio: Boolean = false) :
         return result
     }
 
-    private suspend fun awaitCompletedDownload(app: AppContainer, mediaId: String): DownloadRecord {
-        var result: DownloadRecord? = null
+    private fun matchingTypedJobs(state: AcquisitionRepositoryState, context: AcquisitionExecutionContext) =
+        state.physicalDownloads.values.filter { job ->
+            val producer = job.producer as? PhysicalDownloadProducer.Typed
+            producer != null && producer.bindingId == context.binding.id &&
+                producer.recordingId == context.recording.id && producer.subjectId == context.subject.id
+        }
+
+    private suspend fun awaitCompletedTypedDownload(app: AppContainer,
+        context: AcquisitionExecutionContext): CentralTypedDownload {
+        var result: CentralTypedDownload? = null
         awaitCondition(8 * 60_000L) {
             requireHealthy(app.playback.state.value)
-            val records = app.library.value.downloads.values.filter { it.mediaId == mediaId }
-            proofRequire(records.size <= 1, "MULTIPLE_PROOF_DOWNLOADS")
-            result = records.singleOrNull()
-            result?.let { record ->
-                if (record.status in setOf(DownloadStatus.FAILED, DownloadStatus.CANCELLED, DownloadStatus.PAUSED,
+            val state = app.store.acquisitionView().acquisition
+            val jobs = matchingTypedJobs(state, context)
+            proofRequire(jobs.size <= 1, "MULTIPLE_PROOF_DOWNLOADS")
+            val job = jobs.singleOrNull()
+            if (job == null) false else {
+                if (job.status in setOf(DownloadStatus.FAILED, DownloadStatus.CANCELLED, DownloadStatus.PAUSED,
                         DownloadStatus.NEEDS_FOREGROUND, DownloadStatus.WAITING_NETWORK)) {
-                    throw VeyraException(record.failure ?: AppFailure(FailureCode.RECOVERY_REQUIRED, "DOWNLOAD_NOT_RUNNING"))
+                    throw VeyraException(job.failure ?: AppFailure(FailureCode.RECOVERY_REQUIRED, "DOWNLOAD_NOT_RUNNING"))
+                }
+                if (job.status != DownloadStatus.COMPLETE || job.assetId == null) false else {
+                    result = requireTypedDownload(state, context)
+                    true
                 }
             }
-            result?.status == DownloadStatus.COMPLETE && result?.asset != null
         }
         return result!!
     }
+
+    /**
+     * Canonical schema3 completion, not the legacy AppSnapshot.downloads projection. Typed jobs
+     * are deliberately absent from that legacy map, so the old await could never observe them.
+     */
+    private fun requireTypedDownload(state: AcquisitionRepositoryState,
+        context: AcquisitionExecutionContext): CentralTypedDownload {
+        val jobs = matchingTypedJobs(state, context)
+        proofRequire(jobs.size <= 1, "MULTIPLE_PROOF_DOWNLOADS")
+        val job = jobs.singleOrNull() ?: proofFail("COMPLETED_DOWNLOAD_MISSING", FailureCode.RECOVERY_REQUIRED)
+        if (job.status in setOf(DownloadStatus.FAILED, DownloadStatus.CANCELLED, DownloadStatus.PAUSED,
+                DownloadStatus.NEEDS_FOREGROUND, DownloadStatus.WAITING_NETWORK)) {
+            throw VeyraException(job.failure ?: AppFailure(FailureCode.RECOVERY_REQUIRED, "DOWNLOAD_NOT_RUNNING"))
+        }
+        proofRequire(job.status == DownloadStatus.COMPLETE && job.assetId != null,
+            "DOWNLOAD_NOT_COMPLETE", FailureCode.RECOVERY_REQUIRED)
+        proofRequire(!job.cleanupPending && job.maintenanceKind == null && job.leaseOwner == null &&
+            job.activeAttemptId == null && job.id !in state.physicalFinalizations,
+            "DOWNLOAD_OWNERSHIP_NOT_SETTLED", FailureCode.PERMISSION_DENIED)
+        val assetId = job.assetId ?: proofFail("COMPLETED_ASSET_MISSING", FailureCode.CORRUPT_MEDIA)
+        val asset = state.materializations[assetId]
+            ?: proofFail("COMPLETED_ASSET_MISSING", FailureCode.CORRUPT_MEDIA)
+        val producer = job.producer as? PhysicalDownloadProducer.Typed
+            ?: proofFail("DOWNLOAD_PRODUCER_CHANGED", FailureCode.PERMISSION_DENIED)
+        proofRequire(asset.producer == producer && asset.id == assetId &&
+            job.representationId == asset.representationId && job.bytesDownloaded == asset.sizeBytes &&
+            job.totalBytes == asset.sizeBytes, "DOWNLOAD_EVIDENCE_INCOMPLETE", FailureCode.CORRUPT_MEDIA)
+        proofRequire(asset.kind == OfflineAssetKind.FILE && asset.sizeBytes in 1..CentralProofPolicy.MAX_BYTES &&
+            asset.sha256?.matches(CentralProofPolicy.SHA256) == true &&
+            asset.representationId?.matches(CentralProofPolicy.REPRESENTATION) == true &&
+            (asset.measuredDurationMs ?: 0) > 0, "DOWNLOAD_EVIDENCE_INCOMPLETE", FailureCode.CORRUPT_MEDIA)
+        proofRequire(state.materializationReceipts[asset.id] == asset.receipt(),
+            "DOWNLOAD_RECEIPT_CHANGED", FailureCode.CORRUPT_MEDIA)
+        // The exact same-publication AssetUse is the typed playback authority. A COMPLETE flag
+        // or a file on disk alone is not sufficient.
+        proofRequire(state.assetUses.any { it.requestedBindingId == context.binding.id &&
+            it.materializationAssetId == asset.id && it.compatibilityPolicyVersion == 1 },
+            "DOWNLOAD_AUTHORITY_MISSING", FailureCode.PERMISSION_DENIED)
+        return CentralTypedDownload(job.id, asset)
+    }
+
+    /** Independent size/SHA-256 and native validation of the canonical materialization. */
+    private suspend fun verifyTypedAsset(app: AppContainer, asset: MaterializationAsset) {
+        val offline = OfflineAsset(
+            id = asset.id.value, mediaId = asset.producer.subjectId.value, uri = asset.uri,
+            sizeBytes = asset.sizeBytes, kind = asset.kind, mimeType = asset.mimeType, codecs = asset.codecs,
+            sha256 = asset.sha256, representationId = asset.representationId,
+            validatorGeneration = asset.validatorGeneration, completedEpochMs = asset.completedEpochMs,
+            executionBindingId = asset.producer.bindingId?.value, measuredDurationMs = asset.measuredDurationMs,
+        )
+        app.files.verifiedFile(offline)
+        val validation = app.platform.localValidator.validateLocal(LocalMediaValidationInput(
+            asset.uri, asset.kind, asset.sizeBytes, asset.mimeType, asset.codecs, asset.sha256,
+            asset.representationId, asset.validatorGeneration))
+        proofRequire(validation is AssetValidation.Valid,
+            "DOWNLOADED_NATIVE_VALIDATION_FAILED", FailureCode.CORRUPT_MEDIA)
+    }
+
+    private data class CentralTypedDownload(val jobId: String, val asset: MaterializationAsset)
 
     private fun requireOnline() {
         proofRequire(!closed.get() && mode.get() == "online" && appOwner.get()?.store?.state?.value?.settings?.offlineOnly == false,
@@ -483,6 +650,26 @@ internal class CentralProofAuthorization(
     private var metadataChecks = 0
     private var transferBytes = 0L
 
+    // Typed acquisition/execution state. These IDs are allocated by the canonical Room commit,
+    // so the first exact context is pinned here and every later context must match it.
+    private var typedRequest: AcquisitionRequest? = null
+    private var typedReceipt: FirstResultObservation? = null
+    private var typedVideoId: String? = null
+    private var typedAccepted = false
+    private var typedFailure: AppFailure? = null
+    private var typedBindingId: ExecutionBindingId? = null
+    private var typedReceiptId: FirstResultReceiptId? = null
+    private var typedRecordingId: SourceRecordingId? = null
+    private var typedSubjectId: ExecutableSubjectId? = null
+    private var playbackRepresentation: String? = null
+    private var downloadRepresentation: String? = null
+    private var acquireCalls = 0
+    private var restoreCalls = 0
+    private var inspectCalls = 0
+    private var preparePlaybackCalls = 0
+    private var prepareDownloadCalls = 0
+    private var transferCalls = 0
+
     fun discovered(item: MediaItem) = synchronized(gate) {
         requireActive()
         proofRequire(discovery == null, "SECOND_DISCOVERY_NOT_ALLOWED")
@@ -492,7 +679,13 @@ internal class CentralProofAuthorization(
 
     fun disable() = synchronized(gate) { disabled = true }
 
-    fun wrap(delegate: KmpMediaGateway): KmpMediaGateway = object : KmpMediaGateway {
+    fun failureOrNull(): AppFailure? = synchronized(gate) { typedFailure }
+
+    fun playbackRepresentationId(): String? = synchronized(gate) { playbackRepresentation }
+
+    fun downloadRepresentationId(): String? = synchronized(gate) { downloadRepresentation }
+
+    fun wrap(delegate: KmpMediaGateway): CentralProofGateway = object : CentralProofGateway {
         override suspend fun firstResult(completeTitle: String): KmpFirstResult? {
             synchronized(gate) {
                 searchCalls++
@@ -580,6 +773,35 @@ internal class CentralProofAuthorization(
             }
             return result
         }
+
+        override suspend fun acquire(request: AcquisitionRequest): SourceAcquisitionResult =
+            acquireTyped(delegate, request)
+
+        override fun restore(request: AcquisitionRequest, receipt: FirstResultObservation): SourceAcquisitionResult =
+            restoreTyped(delegate, request, receipt)
+
+        override suspend fun collection(request: AcquisitionRequest, selection: SourceAcquisitionResult.Collection,
+            limits: CollectionLimits): SourceCollectionPage =
+            proofFail("PROOF_COLLECTION_ACQUISITION_NOT_ALLOWED", FailureCode.PERMISSION_DENIED)
+
+        override suspend fun more(continuation: CollectionContinuation): SourceCollectionPage =
+            proofFail("PROOF_COLLECTION_ACQUISITION_NOT_ALLOWED", FailureCode.PERMISSION_DENIED)
+
+        override suspend fun inspect(request: AcquisitionRequest,
+            selection: SourceAcquisitionResult.Single): AcquisitionInspection =
+            inspectTyped(delegate, request, selection)
+
+        override suspend fun preparePlayback(context: AcquisitionExecutionContext, capabilities: EngineCapabilities,
+            requiredRepresentationId: String?, inspection: AcquisitionInspection?): AcquisitionPlaybackSource =
+            preparePlaybackTyped(delegate, context, capabilities, requiredRepresentationId, inspection)
+
+        override suspend fun prepareDownload(context: AcquisitionExecutionContext, capabilities: EngineCapabilities,
+            requiredRepresentationId: String?, inspection: AcquisitionInspection?): PreparedAcquisitionDownload =
+            prepareDownloadTyped(delegate, context, capabilities, requiredRepresentationId, inspection)
+
+        override suspend fun download(prepared: PreparedAcquisitionDownload, destinationPath: String,
+            onProgress: suspend (AcquisitionTransferProgress) -> Unit): AcquisitionTransferResult =
+            downloadTyped(delegate, prepared, destinationPath, onProgress)
     }
 
     fun requireBinding(value: PlaybackBinding) = synchronized(gate) {
@@ -594,19 +816,353 @@ internal class CentralProofAuthorization(
         if (binding == null) binding = value
     }
 
+    /**
+     * Exact durable typed join. Request/catalogue identity is the discovery capture; the actual
+     * execution identity is the raw ordinal-zero first receipt and its recording. IDs allocated
+     * by the canonical commit are pinned on first use and cannot change later.
+     */
+    fun requireTypedContext(context: AcquisitionExecutionContext) = synchronized(gate) {
+        requireActive()
+        val request = typedRequest ?: proofFail("TYPED_ACQUISITION_NOT_OBSERVED", FailureCode.PERMISSION_DENIED)
+        val receipt = typedReceipt ?: proofFail("TYPED_RECEIPT_NOT_OBSERVED", FailureCode.PERMISSION_DENIED)
+        val videoId = typedVideoId ?: proofFail("TYPED_VIDEO_NOT_OBSERVED", FailureCode.PERMISSION_DENIED)
+        val item = discovery ?: proofFail("DISCOVERY_NOT_AUTHORIZED", FailureCode.PERMISSION_DENIED)
+        proofRequire(context.request.id == request.id && context.request.completeTitle == request.completeTitle &&
+            context.request.kind == AcquisitionKind.MEDIA, "TYPED_REQUEST_CHANGED", FailureCode.PERMISSION_DENIED)
+        val capture = context.request.metadata as? MediaCapture
+            ?: proofFail("TYPED_CATALOG_CAPTURE_REQUIRED", FailureCode.PERMISSION_DENIED)
+        proofRequire(capture.media.id == item.id && capture.media.title == item.title &&
+            capture.media.source.provider == SourceProvider.YOUTUBE &&
+            capture.media.source.canonicalId == item.source.canonicalId,
+            "TYPED_CATALOGUE_IDENTITY_CHANGED", FailureCode.PERMISSION_DENIED)
+        proofRequire(context.receipt.observation == receipt &&
+            context.receipt.observation.entry.kind == AcquisitionEntryKind.VIDEO &&
+            context.receipt.observation.entry.ordinal == 0 &&
+            context.receipt.observation.entry.id == videoId &&
+            context.receipt.observation.queryTitle == request.completeTitle,
+            "TYPED_RECEIPT_CHANGED", FailureCode.PERMISSION_DENIED)
+        proofRequire(context.recording.canonicalId == videoId &&
+            context.recording.canonicalUrl == CentralProofPolicy.watch(videoId),
+            "TYPED_RECORDING_CHANGED", FailureCode.PERMISSION_DENIED)
+        proofRequire(context.binding.origin == ExecutionBindingOrigin.TYPED &&
+            context.binding.firstReceiptId == context.receipt.id &&
+            context.binding.subjectId == context.subject.id &&
+            context.binding.recordingId == context.recording.id,
+            "TYPED_BINDING_CHANGED", FailureCode.PERMISSION_DENIED)
+        val subject = context.subject as? ExecutableSubject.CatalogMedia
+            ?: proofFail("TYPED_CATALOGUE_SUBJECT_REQUIRED", FailureCode.PERMISSION_DENIED)
+        proofRequire(subject.mediaId == item.id && subject.id.value == item.id,
+            "TYPED_SUBJECT_CHANGED", FailureCode.PERMISSION_DENIED)
+        if (typedBindingId == null) {
+            typedBindingId = context.binding.id
+            typedReceiptId = context.receipt.id
+            typedRecordingId = context.recording.id
+            typedSubjectId = context.subject.id
+        } else {
+            proofRequire(typedBindingId == context.binding.id && typedReceiptId == context.receipt.id &&
+                typedRecordingId == context.recording.id && typedSubjectId == context.subject.id,
+                "TYPED_DURABLE_IDENTITY_CHANGED", FailureCode.PERMISSION_DENIED)
+        }
+    }
+
+    private suspend fun acquireTyped(delegate: KmpMediaGateway, request: AcquisitionRequest): SourceAcquisitionResult {
+        val target = delegate as? AcquisitionGateway
+            ?: proofFail("PROOF_GATEWAY_NOT_TYPED", FailureCode.UNSUPPORTED_SOURCE)
+        synchronized(gate) {
+            acquireCalls++
+            requireActive()
+            proofRequire(acquireCalls == 1, "SECOND_ACQUISITION_SEARCH_DENIED", FailureCode.PERMISSION_DENIED)
+            val item = discovery ?: proofFail("DISCOVERY_NOT_AUTHORIZED", FailureCode.PERMISSION_DENIED)
+            proofRequire(request.completeTitle == item.title && request.kind == AcquisitionKind.MEDIA,
+                "SECOND_OR_CHANGED_TITLE_ACQUISITION_DENIED", FailureCode.PERMISSION_DENIED)
+            val capture = request.metadata as? MediaCapture
+                ?: proofFail("TYPED_CATALOG_CAPTURE_REQUIRED", FailureCode.PERMISSION_DENIED)
+            proofRequire(capture.media.id == item.id && capture.media.title == item.title &&
+                capture.media.source.provider == SourceProvider.YOUTUBE &&
+                capture.media.source.canonicalId == item.source.canonicalId,
+                "ACQUISITION_CATALOGUE_IDENTITY_CHANGED", FailureCode.PERMISSION_DENIED)
+        }
+        val result = try { target.acquire(request) }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (error: VeyraException) {
+            synchronized(gate) { typedFailure = typedFailure ?: error.failure }
+            throw error
+        } catch (_: Exception) {
+            synchronized(gate) { typedFailure = typedFailure ?: AppFailure(FailureCode.UNEXPECTED, "ACQUISITION_SOURCE_FAILED") }
+            throw VeyraException(AppFailure(FailureCode.UNEXPECTED, "ACQUISITION_SOURCE_FAILED"))
+        }
+        return inspectAcquisition(request, result)
+    }
+
+    private suspend fun inspectAcquisition(request: AcquisitionRequest,
+        result: SourceAcquisitionResult): SourceAcquisitionResult {
+        val receipt = when (result) {
+            is SourceAcquisitionResult.Single -> result.receipt
+            is SourceAcquisitionResult.Collection ->
+                proofFail("COLLECTION_ACQUISITION_NOT_ALLOWED", FailureCode.PERMISSION_DENIED)
+            is SourceAcquisitionResult.Unplayable -> result.receipt
+        }
+        if (receipt != null) {
+            validateRawReceiptIdentity(request, receipt)
+            synchronized(gate) {
+                typedReceipt = receipt
+                typedVideoId = receipt.entry.id?.takeIf { receipt.entry.kind == AcquisitionEntryKind.VIDEO }
+            }
+        }
+        return when (result) {
+            is SourceAcquisitionResult.Unplayable -> {
+                synchronized(gate) { typedFailure = typedFailure ?: typedProblemFailure(result.problem) }
+                result
+            }
+            is SourceAcquisitionResult.Single -> {
+                val singleReceipt = receipt ?: proofFail("RAW_FIRST_RECEIPT_MISSING", FailureCode.PARSE_FAILURE)
+                val entry = singleReceipt.entry
+                proofRequire(entry.kind == AcquisitionEntryKind.VIDEO && entry.id != null,
+                    "RAW_FIRST_NOT_VIDEO", FailureCode.UNSUPPORTED_SOURCE)
+                val firstId = entry.id ?: proofFail("RAW_FIRST_NOT_VIDEO", FailureCode.UNSUPPORTED_SOURCE)
+                val recording = result.recording
+                proofRequire(recording.kind == AcquisitionEntryKind.VIDEO && recording.id == firstId &&
+                    recording.publicUrl == singleReceipt.canonicalUrl && YouTubeBrowseText.isCompleteTitle(recording.title),
+                    "RAW_FIRST_RECEIPT_INVALID", FailureCode.PARSE_FAILURE)
+                try {
+                    synchronized(gate) { requireActive(); metadataChecks++ }
+                    metadata(firstId) // Author of the ACTUAL raw first video, even if discovery differs.
+                    synchronized(gate) {
+                        requireActive()
+                        typedRequest = request
+                        typedAccepted = true
+                    }
+                    result
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (error: Exception) {
+                    val failure = (error as? VeyraException)?.failure
+                        ?: AppFailure(FailureCode.PERMISSION_DENIED, "RAW_FIRST_AUTHOR_UNVERIFIED")
+                    synchronized(gate) { typedFailure = typedFailure ?: failure }
+                    SourceAcquisitionResult.Unplayable(request.id, receipt,
+                        AcquisitionProblem(AcquisitionProblemCode.FIRST_RESULT_UNAVAILABLE))
+                }
+            }
+            is SourceAcquisitionResult.Collection -> error("unreachable")
+        }
+    }
+
+    private fun restoreTyped(delegate: KmpMediaGateway, request: AcquisitionRequest,
+        receipt: FirstResultObservation): SourceAcquisitionResult {
+        val target = delegate as? AcquisitionGateway
+            ?: proofFail("PROOF_GATEWAY_NOT_TYPED", FailureCode.UNSUPPORTED_SOURCE)
+        synchronized(gate) {
+            restoreCalls++
+            requirePure()
+            validateRawReceiptIdentity(request, receipt)
+        }
+        val result = target.restore(request, receipt)
+        synchronized(gate) {
+            requirePure()
+            when (result) {
+                is SourceAcquisitionResult.Single -> proofRequire(result.requestId == request.id &&
+                    result.receipt == receipt && result.recording.id == receipt.entry.id &&
+                    result.recording.publicUrl == receipt.canonicalUrl &&
+                    result.recording.kind == AcquisitionEntryKind.VIDEO,
+                    "RESTORED_RECEIPT_CHANGED", FailureCode.PERMISSION_DENIED)
+                is SourceAcquisitionResult.Unplayable -> proofRequire(result.requestId == request.id &&
+                    result.receipt == receipt, "RESTORED_RECEIPT_CHANGED", FailureCode.PERMISSION_DENIED)
+                is SourceAcquisitionResult.Collection ->
+                    proofFail("COLLECTION_RESTORE_NOT_ALLOWED", FailureCode.PERMISSION_DENIED)
+            }
+        }
+        return result
+    }
+
+    private suspend fun inspectTyped(delegate: KmpMediaGateway, request: AcquisitionRequest,
+        selection: SourceAcquisitionResult.Single): AcquisitionInspection {
+        val target = delegate as? AcquisitionGateway
+            ?: proofFail("PROOF_GATEWAY_NOT_TYPED", FailureCode.UNSUPPORTED_SOURCE)
+        synchronized(gate) {
+            inspectCalls++
+            requireActive()
+            val acceptedRequest = typedRequest
+                ?: proofFail("TYPED_ACQUISITION_NOT_OBSERVED", FailureCode.PERMISSION_DENIED)
+            val acceptedReceipt = typedReceipt
+                ?: proofFail("TYPED_RECEIPT_NOT_OBSERVED", FailureCode.PERMISSION_DENIED)
+            proofRequire(request.id == acceptedRequest.id &&
+                request.completeTitle == acceptedRequest.completeTitle &&
+                selection.requestId == request.id && selection.receipt == acceptedReceipt &&
+                selection.recording.id == acceptedReceipt.entry.id,
+                "TYPED_SELECTION_CHANGED", FailureCode.PERMISSION_DENIED)
+        }
+        val inspection = target.inspect(request, selection)
+        synchronized(gate) {
+            requireActive()
+            proofRequire(inspection.selection == selection,
+                "INSPECTION_SELECTION_CHANGED", FailureCode.PERMISSION_DENIED)
+        }
+        return inspection
+    }
+
+    private suspend fun preparePlaybackTyped(delegate: KmpMediaGateway, context: AcquisitionExecutionContext,
+        capabilities: EngineCapabilities, requiredRepresentationId: String?,
+        inspection: AcquisitionInspection?): AcquisitionPlaybackSource {
+        val target = delegate as? AcquisitionExecutionGateway
+            ?: proofFail("PROOF_GATEWAY_NOT_TYPED", FailureCode.UNSUPPORTED_SOURCE)
+        synchronized(gate) {
+            preparePlaybackCalls++
+            requireActive()
+            requireTypedContext(context)
+            proofRequire(preparePlaybackCalls == 1, "SECOND_PLAYBACK_ACQUISITION_DENIED", FailureCode.PERMISSION_DENIED)
+            proofRequire(requiredRepresentationId == null || requiredRepresentationId.matches(CentralProofPolicy.REPRESENTATION),
+                "PLAYBACK_REPRESENTATION_REQUEST_INVALID", FailureCode.PERMISSION_DENIED)
+            playbackResolves++
+            proofRequire(playbackResolves == 1, "SECOND_PLAYBACK_ACQUISITION_DENIED", FailureCode.PERMISSION_DENIED)
+            resolvesInFlight++
+        }
+        var acquired: AcquisitionPlaybackSource? = null
+        try {
+            val result = target.preparePlayback(context, capabilities, requiredRepresentationId, inspection)
+                .also { acquired = it }
+            currentCoroutineContext().ensureActive()
+            synchronized(gate) {
+                requireTypedContext(context)
+                proofRequire(result.context == context && !result.isLocal &&
+                    result.representationId.matches(CentralProofPolicy.REPRESENTATION),
+                    "RESOLVED_RECEIPT_CHANGED", FailureCode.PERMISSION_DENIED)
+                proofRequire(result.resource != null && result.ownedLoopbackUriOrNull() != null,
+                    "UNBOUNDED_NATIVE_PLAYBACK_REFUSED", FailureCode.UNSUPPORTED_TRANSPORT)
+                proofRequire(playbackRequest != null,
+                    "UNBOUNDED_NATIVE_PLAYBACK_REFUSED", FailureCode.UNSUPPORTED_TRANSPORT)
+                val pinned = playbackRepresentation
+                if (pinned == null) playbackRepresentation = result.representationId
+                else proofRequire(pinned == result.representationId,
+                    "PLAYBACK_REPRESENTATION_CHANGED", FailureCode.PERMISSION_DENIED)
+            }
+            return result
+        } catch (failure: Throwable) {
+            acquired?.resource?.let { rejectResource(it) }
+            throw failure
+        } finally {
+            synchronized(gate) { resolvesInFlight-- }
+        }
+    }
+
+    private suspend fun prepareDownloadTyped(delegate: KmpMediaGateway, context: AcquisitionExecutionContext,
+        capabilities: EngineCapabilities, requiredRepresentationId: String?,
+        inspection: AcquisitionInspection?): PreparedAcquisitionDownload {
+        val target = delegate as? AcquisitionExecutionGateway
+            ?: proofFail("PROOF_GATEWAY_NOT_TYPED", FailureCode.UNSUPPORTED_SOURCE)
+        synchronized(gate) {
+            prepareDownloadCalls++
+            requireActive()
+            requireTypedContext(context)
+            proofRequire(prepareDownloadCalls == 1, "SECOND_DOWNLOAD_PREPARATION_DENIED", FailureCode.PERMISSION_DENIED)
+            proofRequire(requiredRepresentationId == null || requiredRepresentationId.matches(CentralProofPolicy.REPRESENTATION),
+                "DOWNLOAD_REPRESENTATION_REQUEST_INVALID", FailureCode.PERMISSION_DENIED)
+        }
+        val prepared = target.prepareDownload(context, capabilities, requiredRepresentationId, inspection)
+        synchronized(gate) {
+            requireTypedContext(context)
+            proofRequire(prepared.context == context && prepared.requiredRepresentationId == requiredRepresentationId &&
+                prepared.representation.representationId.matches(CentralProofPolicy.REPRESENTATION),
+                "DOWNLOAD_PREPARATION_CHANGED", FailureCode.PERMISSION_DENIED)
+            // The download is a separate execution plan; it may legitimately choose a different
+            // compatible audio representation than streaming playback. Pin THIS download's
+            // immutable key so no later preparation/transfer can silently switch it.
+            proofRequire(playbackRepresentation != null,
+                "DOWNLOAD_WITHOUT_PLAYBACK_AUTHORIZATION", FailureCode.PERMISSION_DENIED)
+            val pinnedDownload = downloadRepresentation
+            if (pinnedDownload == null) downloadRepresentation = prepared.representation.representationId
+            else proofRequire(pinnedDownload == prepared.representation.representationId,
+                "DOWNLOAD_REPRESENTATION_CHANGED", FailureCode.PERMISSION_DENIED)
+        }
+        return prepared
+    }
+
+    private suspend fun downloadTyped(delegate: KmpMediaGateway, prepared: PreparedAcquisitionDownload,
+        destinationPath: String, onProgress: suspend (AcquisitionTransferProgress) -> Unit): AcquisitionTransferResult {
+        val target = delegate as? AcquisitionExecutionGateway
+            ?: proofFail("PROOF_GATEWAY_NOT_TYPED", FailureCode.UNSUPPORTED_SOURCE)
+        synchronized(gate) {
+            requireActive()
+            requireTypedContext(prepared.context)
+            proofRequire(transferCalls == 0 && downloadCalls == 0,
+                "SECOND_DOWNLOAD_TRANSFER_DENIED", FailureCode.PERMISSION_DENIED)
+            val pinned = downloadRepresentation
+                ?: proofFail("DOWNLOAD_NOT_PREPARED", FailureCode.PERMISSION_DENIED)
+            proofRequire(prepared.representation.representationId == pinned,
+                "DOWNLOAD_REPRESENTATION_CHANGED", FailureCode.PERMISSION_DENIED)
+            transferCalls++
+            downloadCalls++
+            proofRequire(downloadCalls == 1, "SECOND_DOWNLOAD_TRANSFER_DENIED", FailureCode.PERMISSION_DENIED)
+        }
+        val result = target.download(prepared, destinationPath) { progress ->
+            synchronized(gate) {
+                requireTypedContext(prepared.context)
+                val total = plannedBytes ?: proofFail("DOWNLOAD_HOOK_NOT_INSTALLED")
+                proofRequire(progress.bytesDownloaded in 0..total && progress.totalBytes == total,
+                    "DOWNLOAD_PROGRESS_EXCEEDS_PLAN", FailureCode.CORRUPT_MEDIA)
+                transferBytes = maxOf(transferBytes, progress.bytesDownloaded)
+            }
+            onProgress(progress)
+        }
+        synchronized(gate) {
+            requireTypedContext(prepared.context)
+            proofRequire(downloadPlans == 1 && result.bytesWritten == plannedBytes && result.bytesWritten > 0 &&
+                result.context == prepared.context && result.representation == prepared.representation,
+                "DOWNLOAD_COMPLETION_CHANGED", FailureCode.CORRUPT_MEDIA)
+            transferBytes = result.bytesWritten
+        }
+        return result
+    }
+
+    private fun validateRawReceiptIdentity(request: AcquisitionRequest, receipt: FirstResultObservation) {
+        proofRequire(receipt.requestId == request.id && receipt.queryTitle == request.completeTitle &&
+            receipt.entry.ordinal == 0, "RAW_FIRST_RECEIPT_INVALID", FailureCode.PARSE_FAILURE)
+        val entry = receipt.entry
+        when (entry.kind) {
+            AcquisitionEntryKind.VIDEO -> {
+                val id = entry.id
+                proofRequire(id != null && CentralProofPolicy.VIDEO_ID.matches(id) &&
+                    entry.title?.let(YouTubeBrowseText::isCompleteTitle) == true &&
+                    entry.publicUrl == CentralProofPolicy.watch(id) &&
+                    receipt.canonicalUrl == entry.publicUrl,
+                    "RAW_FIRST_RECEIPT_INVALID", FailureCode.PARSE_FAILURE)
+            }
+            AcquisitionEntryKind.CHANNEL, AcquisitionEntryKind.PLAYLIST -> proofRequire(
+                entry.id != null && entry.publicUrl != null && receipt.canonicalUrl == entry.publicUrl,
+                "RAW_FIRST_RECEIPT_INVALID", FailureCode.PARSE_FAILURE)
+            null -> proofRequire(entry.id == null && entry.publicUrl == null && receipt.canonicalUrl == null,
+                "RAW_FIRST_RECEIPT_INVALID", FailureCode.PARSE_FAILURE)
+        }
+    }
+
+    private fun typedProblemFailure(problem: AcquisitionProblem): AppFailure = when (problem.code) {
+        AcquisitionProblemCode.NO_FIRST_RESULT -> AppFailure(FailureCode.NOT_FOUND, "KMPYT_NO_FIRST_RESULT")
+        AcquisitionProblemCode.FIRST_RESULT_UNAVAILABLE ->
+            AppFailure(FailureCode.UNSUPPORTED_SOURCE, "YOUTUBE_FIRST_RESULT_UNAVAILABLE")
+        AcquisitionProblemCode.FIRST_RESULT_UNSUPPORTED ->
+            AppFailure(FailureCode.UNSUPPORTED_SOURCE, "YOUTUBE_FIRST_RESULT_UNSUPPORTED")
+        AcquisitionProblemCode.INVALID_FIRST_RESULT ->
+            AppFailure(FailureCode.PARSE_FAILURE, "YOUTUBE_FIRST_RESULT_INVALID")
+        AcquisitionProblemCode.SOURCE_FAILURE -> AppFailure(FailureCode.UNEXPECTED, "YOUTUBE_SOURCE_FAILURE")
+        AcquisitionProblemCode.INVALID_REQUEST -> AppFailure(FailureCode.INVALID_STATE, "YOUTUBE_INVALID_REQUEST")
+        AcquisitionProblemCode.MEMBER_NOT_PLAYABLE ->
+            AppFailure(FailureCode.UNSUPPORTED_SOURCE, "YOUTUBE_MEMBER_NOT_PLAYABLE")
+    }
+
     fun authorizeDownload(plan: PlannedDownload): Unit = synchronized(gate) {
         requireActive()
         proofRequire(downloadCalls == 1 && downloadPlans == 0, "SECOND_DOWNLOAD_TRANSFER_DENIED", FailureCode.PERMISSION_DENIED)
-        val selected = binding ?: proofFail("PLAN_WITHOUT_FIRST_BINDING", FailureCode.PERMISSION_DENIED)
-        plannedBytes = CentralProofPolicy.requirePlan(plan, selected.selectedVideoId!!)
+        val videoId = binding?.selectedVideoId ?: typedVideoId
+            ?: proofFail("PLAN_WITHOUT_FIRST_BINDING", FailureCode.PERMISSION_DENIED)
+        plannedBytes = CentralProofPolicy.requirePlan(plan, videoId)
         downloadPlans++
         Unit
     }
 
     fun authorizePlayback(request: SourcePlaybackRequest) = synchronized(gate) {
         requireActive()
-        val selected = binding ?: proofFail("PLAN_WITHOUT_FIRST_BINDING", FailureCode.PERMISSION_DENIED)
-        val videoId = selected.selectedVideoId ?: proofFail("PLAN_WITHOUT_SELECTED_VIDEO", FailureCode.PERMISSION_DENIED)
+        val selected = binding
+        val videoId = selected?.selectedVideoId ?: typedVideoId
+            ?: proofFail(if (selected == null) "PLAN_WITHOUT_FIRST_BINDING" else "PLAN_WITHOUT_SELECTED_VIDEO",
+                FailureCode.PERMISSION_DENIED)
         proofRequire(playbackResolves == 1 && request.metadata.id == videoId &&
             request.metadata.kind == dev.kmpyt.MediaKind.AUDIO && request.plan.primary.transport == TransportKind.SABR &&
             (playbackRequest == null || playbackRequest === request), "PLAYBACK_SESSION_CHANGED", FailureCode.PERMISSION_DENIED)
@@ -617,8 +1173,16 @@ internal class CentralProofAuthorization(
 
     fun snapshot(): CentralAuthorizationEvidence = synchronized(gate) {
         CentralAuthorizationEvidence(searchCalls, resolveCalls, downloadCalls, downloadPlans, metadataChecks,
-            transferBytes, discovery?.source?.canonicalId, discovery?.title, observed, accepted != null, binding?.id,
-            resolvesInFlight, rejectedResources.size, rejectedResourceCloseFailed)
+            transferBytes, discovery?.source?.canonicalId, discovery?.title, observed, accepted != null || typedAccepted,
+            binding?.id ?: typedBindingId?.value, resolvesInFlight, rejectedResources.size, rejectedResourceCloseFailed,
+            acquireCalls, restoreCalls, inspectCalls, preparePlaybackCalls, prepareDownloadCalls, transferCalls,
+            typedRequest?.id?.value, typedReceiptId?.value, typedBindingId?.value, typedRecordingId?.value,
+            typedSubjectId?.value, typedVideoId, typedReceipt, playbackRepresentation, downloadRepresentation)
+    }
+
+    private fun requirePure() {
+        proofRequire(!disabled, "PROOF_AUTHORIZATION_CLOSED", FailureCode.PERMISSION_DENIED)
+        proofRequire(!rejectedResourceCloseFailed, "REJECTED_RESOURCE_CLOSE_FAILED")
     }
 
     private suspend fun rejectResource(resource: PlaybackResource) = withContext(NonCancellable) {
@@ -669,6 +1233,12 @@ internal data class CentralAuthorizationEvidence(
     val metadataChecks: Int, val transferBytes: Long, val discoveryVideoId: String?, val completeTitle: String?,
     val first: KmpFirstResult?, val approved: Boolean, val bindingId: String?,
     val resolvesInFlight: Int, val rejectedResourcesPending: Int, val rejectedResourceCloseFailed: Boolean,
+    val acquireCalls: Int, val restoreCalls: Int, val inspectCalls: Int,
+    val preparePlaybackCalls: Int, val prepareDownloadCalls: Int, val transferCalls: Int,
+    val typedRequestId: String?, val typedReceiptId: String?, val typedBindingId: String?,
+    val typedRecordingId: String?, val typedSubjectId: String?, val typedVideoId: String?,
+    val typedFirst: FirstResultObservation?, val playbackRepresentationId: String?,
+    val downloadRepresentationId: String?,
 ) {
     fun json() = buildJsonObject {
         put("searchCalls", searchCalls); put("resolveCalls", resolveCalls); put("downloadCalls", downloadCalls)
@@ -677,12 +1247,26 @@ internal data class CentralAuthorizationEvidence(
         put("completeTitle", completeTitle); put("approvedRawFirst", approved); put("bindingId", bindingId)
         put("resolvesInFlight", resolvesInFlight); put("rejectedResourcesPending", rejectedResourcesPending)
         put("rejectedResourceCloseFailed", rejectedResourceCloseFailed)
+        put("acquireCalls", acquireCalls); put("restoreCalls", restoreCalls); put("inspectCalls", inspectCalls)
+        put("preparePlaybackCalls", preparePlaybackCalls); put("prepareDownloadCalls", prepareDownloadCalls)
+        put("transferCalls", transferCalls)
+        put("typedRequestId", typedRequestId); put("typedReceiptId", typedReceiptId)
+        put("typedBindingId", typedBindingId); put("typedRecordingId", typedRecordingId)
+        put("typedSubjectId", typedSubjectId); put("typedVideoId", typedVideoId)
+        put("playbackRepresentationId", playbackRepresentationId)
+        put("downloadRepresentationId", downloadRepresentationId)
         first?.let { receipt -> putJsonObject("rawFirst") {
             put("kind", receipt.kind.name); put("ordinal", receipt.selectionOrdinal)
             // Invalid/malformed receipt locators are never echoed. Complete valid titles are
             // public metadata; no resolved endpoint, plan, source body or resource is serialized.
             put("id", receipt.id.takeIf { it.length <= 200 && it.matches(Regex("[A-Za-z0-9_-]*")) })
             put("title", receipt.title.takeIf(YouTubeBrowseText::isCompleteTitle))
+        } }
+        typedFirst?.let { receipt -> putJsonObject("typedRawFirst") {
+            put("kind", receipt.entry.kind?.name); put("ordinal", receipt.entry.ordinal)
+            put("queryTitle", receipt.queryTitle.takeIf(YouTubeBrowseText::isCompleteTitle))
+            put("id", receipt.entry.id?.takeIf { it.length <= 200 && it.matches(Regex("[A-Za-z0-9_-]*")) })
+            put("title", receipt.entry.title?.takeIf(YouTubeBrowseText::isCompleteTitle))
         } }
     }
 }
@@ -695,6 +1279,10 @@ internal object CentralProofPolicy {
     val REPRESENTATION = Regex("yt-audio-v1:[0-9a-f]{64}")
     val SHA256 = Regex("[0-9a-f]{64}")
     fun watch(id: String) = "https://www.youtube.com/watch?v=$id"
+
+    /** Mirrors the canonical durable-ID character/length contract; no URL or secret is allowed. */
+    fun isProofId(value: String): Boolean = value.length in 1..256 && value.isNotBlank() &&
+        value.none { it.code < 32 || it.code in 127..159 }
 
     fun isApprovedAuthor(value: String?): Boolean {
         val uri = try { URI(value ?: return false) } catch (_: Exception) { return false }
@@ -813,24 +1401,28 @@ internal data class CentralNetworkEvidence(
 
 @Serializable
 internal data class CentralProofMarker(
-    val schema: Int = 1, val approvedChannel: String = CentralProofPolicy.CHANNEL_URL,
+    val schema: Int = 2, val approvedChannel: String = CentralProofPolicy.CHANNEL_URL,
     val process: CentralProcessEvidence, val mediaId: String, val completeTitle: String,
-    val discoveryVideoId: String, val binding: PlaybackBinding, val downloadId: String,
+    val discoveryVideoId: String, val firstResultVideoId: String, val firstResultTitle: String,
+    val requestId: String, val receiptId: String, val bindingId: String, val recordingId: String,
+    val subjectId: String, val occurrenceId: String, val downloadId: String,
     val assetId: String, val sizeBytes: Long, val sha256: String, val representationId: String,
     val measuredDurationMs: Long, val entryId: String, val positionMs: Long,
     val native: CentralNativeEvidence,
 ) {
     fun requireValid() {
-        proofRequire(schema == 1 && approvedChannel == CentralProofPolicy.CHANNEL_URL &&
+        proofRequire(schema == 2 && approvedChannel == CentralProofPolicy.CHANNEL_URL &&
             CentralProofPolicy.VIDEO_ID.matches(discoveryVideoId) && mediaId == "youtube:$discoveryVideoId" &&
-            YouTubeBrowseText.isCompleteTitle(completeTitle) && binding.mediaId == mediaId &&
-            binding.queryTitle == completeTitle && binding.firstResultKind == FirstResultKind.VIDEO &&
-            CentralProofPolicy.VIDEO_ID.matches(binding.firstResultId) && binding.selectedVideoId == binding.firstResultId &&
-            binding.firstResultUrl == CentralProofPolicy.watch(binding.firstResultId) && binding.selectionOrdinal == 0 &&
-            YouTubeBrowseText.isCompleteTitle(binding.firstResultTitle) && binding.id.isNotBlank() &&
+            YouTubeBrowseText.isCompleteTitle(completeTitle) &&
+            CentralProofPolicy.VIDEO_ID.matches(firstResultVideoId) &&
+            YouTubeBrowseText.isCompleteTitle(firstResultTitle) &&
+            CentralProofPolicy.isProofId(requestId) && CentralProofPolicy.isProofId(receiptId) &&
+            CentralProofPolicy.isProofId(bindingId) && CentralProofPolicy.isProofId(recordingId) &&
+            CentralProofPolicy.isProofId(subjectId) && CentralProofPolicy.isProofId(occurrenceId) &&
+            CentralProofPolicy.isProofId(downloadId) && CentralProofPolicy.isProofId(assetId) &&
             sizeBytes in 1..CentralProofPolicy.MAX_BYTES && CentralProofPolicy.SHA256.matches(sha256) &&
             CentralProofPolicy.REPRESENTATION.matches(representationId) && measuredDurationMs > 0 &&
-            entryId.isNotBlank() && positionMs in 1 until measuredDurationMs &&
+            entryId == occurrenceId && positionMs in 1 until measuredDurationMs &&
             native.entryId == entryId && !native.physicalAudioVerified && native.tlsVerification && native.durationMs >= 12_000 &&
             native.advancingPositionMs > native.firstPlayingPositionMs + 2_000 &&
             native.resumedPositionMs > native.pausedPositionMs + 500 &&
@@ -917,7 +1509,17 @@ private fun requireEmptyLibrary(snapshot: AppSnapshot) {
         snapshot.followedShowIds.isEmpty() && snapshot.artists.isEmpty() && snapshot.albums.isEmpty(), "DEDICATED_EMPTY_LIBRARY_REQUIRED")
 }
 
-private suspend fun awaitCondition(timeoutMs: Long, predicate: () -> Boolean) = withTimeout(timeoutMs) {
+private fun requireEmptyAcquisition(state: AcquisitionRepositoryState) {
+    proofRequire(state.requests.isEmpty() && state.receipts.isEmpty() && state.recordings.isEmpty() &&
+        state.subjects.isEmpty() && state.bindings.isEmpty() && state.runs.isEmpty() && state.snapshots.isEmpty() &&
+        state.scopes.isEmpty() && state.occurrences.isEmpty() && state.batches.isEmpty() && state.claims.isEmpty() &&
+        state.assetUses.isEmpty() && state.physicalDownloads.isEmpty() && state.physicalAttempts.isEmpty() &&
+        state.physicalFinalizations.isEmpty() && state.materializations.isEmpty() && state.materializationReceipts.isEmpty() &&
+        state.queues.values.all { it.displayedOrder.isEmpty() && it.originalOrder.isEmpty() &&
+            it.currentOccurrenceId == null && it.positionMs == 0L }, "DEDICATED_EMPTY_ACQUISITION_REQUIRED")
+}
+
+private suspend fun awaitCondition(timeoutMs: Long, predicate: suspend () -> Boolean) = withTimeout(timeoutMs) {
     while (!predicate()) { currentCoroutineContext().ensureActive(); delay(25) }
 }
 

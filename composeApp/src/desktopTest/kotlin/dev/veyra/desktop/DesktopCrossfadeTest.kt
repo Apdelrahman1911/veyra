@@ -11,6 +11,7 @@ import dev.veyra.model.VeyraException
 import dev.veyra.playback.CrossfadeMix
 import dev.veyra.playback.EngineEvent
 import dev.veyra.playback.PlaybackResource
+import dev.veyra.playback.NativeReaderDrainResult
 import dev.veyra.playback.ResolvedPlayable
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -40,7 +41,10 @@ class DesktopCrossfadeTest {
     private fun config(): DesktopRuntimeConfig {
         val root = System.getenv("VEYRA_PROJECT_ROOT")?.let(Path::of)
             ?: generateSequence(Path.of("").toAbsolutePath()) { it.parent }.first { Files.exists(it.resolve("settings.gradle.kts")) }
-        val directory = root.resolve(".work/desktop-audio/crossfade-tests")
+        // macOS rejects a second copy of the bundled libmpv (duplicate Swift/ObjC classes) when
+        // one JVM loads it through two different test data directories. Share the already-used
+        // native-test directory so every desktop test in this worker resolves one dylib path.
+        val directory = root.resolve(".work/desktop-audio/kotlin-tests")
         Files.createDirectories(directory)
         javaClass.getResourceAsStream("/dev/veyra/desktop/tone.mp3")!!.use { Files.copy(it, directory.resolve("tone.mp3"), REPLACE_EXISTING) }
         return DesktopRuntimeConfig(directory, silentTestOutput = true)
@@ -182,10 +186,13 @@ class DesktopCrossfadeTest {
             events.next { it is EngineEvent.StageReady }
             engine.beginCrossfade(300, 31, 30)
             events.next { it is EngineEvent.CrossfadeCompleted }
-            assertEquals(FailureCode.RECOVERY_REQUIRED,
-                assertFailsWith<VeyraException> { engine.confirmCrossfade(31, 30) }.failure.code)
-            assertTrue(failedCloseAttempts > 0)
-            assertEquals("yes", engine.diagnostics()["pause"], "Cleanup failure must silence the promoted deck")
+            engine.confirmCrossfade(31, 30)
+            assertEquals(1, failedCloseAttempts)
+            assertEquals("no", engine.diagnostics()["pause"], "Retired cleanup must preserve the promoted deck")
+            val drain = assertIs<NativeReaderDrainResult.Unacknowledged>(engine.awaitRetiredReaders(31))
+            assertEquals(FailureCode.RECOVERY_REQUIRED, drain.failure.code)
+            assertEquals("playback_resource_cleanup", drain.failure.detail)
+            assertFalse(events.all.any { it is EngineEvent.Error && it.generation == 31L })
             // Shared deletion uses stop as its native-file release fence. Successfully releasing
             // the unrelated current deck must NOT acknowledge the earlier retired file's release.
             assertEquals(FailureCode.RECOVERY_REQUIRED,
@@ -212,11 +219,17 @@ class DesktopCrossfadeTest {
                 if (staged) {
                     engine.preloadNext(source(config, "cancelled", bad), 0, 41, 40)
                     events.next { it is EngineEvent.StageReady }
-                    assertFailsWith<VeyraException> { engine.cancelNext(41, 40) }
-                } else assertFailsWith<VeyraException> { engine.prepare(source(config, "stale", bad), 0, 39) }
+                    engine.cancelNext(41, 40)
+                } else engine.prepare(source(config, "stale", bad), 0, 39)
+                // Transport commands preserve unrelated playback; only the reader fence can
+                // acknowledge deletion. The failed resource keeps that fence unacknowledged.
+                val drain = assertIs<NativeReaderDrainResult.Unacknowledged>(engine.awaitRetiredReaders(40))
+                assertEquals("playback_resource_cleanup", drain.failure.detail)
+                assertFalse(current.closed.get())
                 assertFailsWith<VeyraException> { engine.stop(42) }
                 assertTrue(current.closed.get())
-                assertFailsWith<VeyraException> { engine.cancelNext(41, 42) }
+                engine.cancelNext(41, 42)
+                assertIs<NativeReaderDrainResult.Unacknowledged>(engine.awaitRetiredReaders(42))
             } finally {
                 events.job.cancel()
                 withContext(NonCancellable) { assertFailsWith<VeyraException> { engine.close() } }

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import contextlib
 import io
 import json
 import os
@@ -28,6 +29,164 @@ class ProductionFfmpegBuildTest(unittest.TestCase):
         self.work = self.root / ".work"
         self.work.mkdir()
 
+    def test_windows_in_source_build_avoids_msys_absolute_make_include(self):
+        # Exercise FFmpeg's actual path selection from the retained pinned source
+        # through an authored Makefile: native make sees only a relative include.
+        source = self.work / "source"
+        source.mkdir()
+        (source / "Makefile").write_text("all:\n\t@echo authored-relative-source-ok\n")
+        wrapper = self.work / "build"
+        wrapper.mkdir()
+        (wrapper / "Makefile").write_text("include /d/author-only/source/Makefile\n")
+        make = shutil.which("make")
+        if make is None:
+            self.skipTest("Existing make unavailable")
+        good = __import__("subprocess").run([make], cwd=source, capture_output=True)
+        bad = __import__("subprocess").run([make], cwd=wrapper, capture_output=True)
+        self.assertEqual(0, good.returncode)
+        self.assertNotEqual(0, bad.returncode)
+        self.assertIn(b"authored-relative-source-ok", good.stdout)
+        self.assertIn('build_directory = source if target == "windows-x64"', Path(BUILD.__file__).read_text())
+
+    def test_windows_dependency_recipe_runs_the_upstream_awk_filter_with_explicit_bash(self):
+        bash = shutil.which("bash")
+        if bash is None or shutil.which("make") is None or shutil.which("awk") is None:
+            self.skipTest("Existing Bash/make/AWK required")
+        # Real make + Bash + AWK, authored MSVC include output; no compiler.
+        BUILD.verify_windows_make_shell(self.work, dict(os.environ), bash)
+        self.assertEqual("veyra-shell-probe: C:/veyra-authored/header.h\n",
+                         (self.work / "veyra-shell-probe.out").read_text())
+
+    def test_windows_dependency_adaptation_preserves_other_config_and_multiple_filters(self):
+        (self.work / "ffbuild").mkdir()
+        config = self.work / "ffbuild/config.mak"
+        inline = "awk '" + BUILD.WINDOWS_DEPENDENCY_AWK + "'"
+        original = ("UNCHANGED=authored-value\nCCDEP=" + inline + " > $(@:.o=.d)\n"
+                    "HOSTCCDEP=" + inline + " > $(@:.o=.d)\n").encode("ascii")
+        config.write_bytes(original)
+        BUILD.install_windows_dependency_filter(self.work)
+        self.assertEqual(original.replace(inline.encode(), BUILD.WINDOWS_DEPENDENCY_COMMAND.encode()),
+                         config.read_bytes())
+        script = self.work / "ffbuild" / BUILD.WINDOWS_DEPENDENCY_FILE
+        self.assertEqual(BUILD.WINDOWS_DEPENDENCY_SCRIPT, script.read_bytes())
+        self.assertIn(br'gsub(/\\/, "/")', script.read_bytes())
+        self.assertNotIn(b"$$", script.read_bytes())
+
+    def test_windows_dependency_adaptation_refuses_unknown_program_without_mutation(self):
+        (self.work / "ffbuild").mkdir()
+        config = self.work / "ffbuild/config.mak"
+        original = b"CCDEP=awk 'authored changed or WSL dependency program'\n"
+        config.write_bytes(original)
+        with self.assertRaisesRegex(ValueError, "pinned upstream"):
+            BUILD.install_windows_dependency_filter(self.work)
+        self.assertEqual(original, config.read_bytes())
+        self.assertFalse((self.work / "ffbuild" / BUILD.WINDOWS_DEPENDENCY_FILE).exists())
+
+    def test_windows_dependency_script_rejects_stale_file_without_overwriting_config(self):
+        (self.work / "ffbuild").mkdir()
+        config = self.work / "ffbuild/config.mak"
+        original = ("CCDEP=awk '" + BUILD.WINDOWS_DEPENDENCY_AWK + "'\n").encode("ascii")
+        config.write_bytes(original)
+        script = self.work / "ffbuild" / BUILD.WINDOWS_DEPENDENCY_FILE
+        script.write_bytes(b"authored stale retained script")
+        with self.assertRaises(FileExistsError):
+            BUILD.install_windows_dependency_filter(self.work)
+        self.assertEqual(original, config.read_bytes())
+        self.assertEqual(b"authored stale retained script", script.read_bytes())
+
+    def test_packaged_windows_dependency_script_cannot_be_replaced_by_resealing_receipt(self):
+        output, expected, metadata = self.completed_output("windows-x64")
+        BUILD.verify_output(output, expected, self.root)
+        relative = "corresponding-source/" + BUILD.WINDOWS_DEPENDENCY_FILE
+        script = output / relative
+        script.write_bytes(b"authored different dependency program\n")
+        metadata["fileSha256"][relative] = BUILD.sha256(script)
+        (output / "provenance.json").write_text(json.dumps(metadata))
+        with self.assertRaisesRegex(ValueError, "dependency filter"):
+            BUILD.verify_output(output, expected, self.root)
+
+    def test_windows_dependency_probe_refuses_incorrect_output(self):
+        (self.work / "veyra-shell-probe.out").write_text("authored damaged dependency\n")
+        with patch.object(BUILD, "run") as run, self.assertRaisesRegex(ValueError, "preflight"):
+            BUILD.verify_windows_make_shell(self.work, {}, "authored-existing-bash")
+        self.assertEqual(30, run.call_args.args[3])
+        self.assertEqual(self.work / "make-shell-probe.log", run.call_args.args[4])
+
+    def test_windows_make_shell_requires_the_exact_scoped_executable(self):
+        bash = shutil.which("bash")
+        if bash is None:
+            self.skipTest("Existing Bash required")
+        env = dict(os.environ, VEYRA_TRUSTED_BASH=bash)
+        self.assertEqual(bash, BUILD.windows_make_shell(env))
+        with patch.object(BUILD.shutil, "which", return_value=str(self.work / "different-bash")), \
+                self.assertRaises(ValueError):
+            BUILD.windows_make_shell(env)
+        env.pop("VEYRA_TRUSTED_BASH")
+        with self.assertRaises(ValueError):
+            BUILD.windows_make_shell(env)
+
+    def test_inner_compile_failure_reports_the_actual_log_without_leaking_or_masking(self):
+        log = self.work / "build.log"
+        original = (b"authored.c:9: error: authored compiler discriminator\n"
+                    b"error: https://example.invalid/?token=authored-private\n")
+        log.write_bytes(original)
+        failure = BUILD.owned_process.OwnedProcessError("command_failed", returncode=1,
+                                                       cleanup_complete=True)
+        console = io.StringIO()
+        with patch.object(BUILD, "ROOT", self.root), \
+                patch.object(BUILD.platform, "system", return_value="Linux"), \
+                patch.object(BUILD.owned_process, "run", side_effect=failure), \
+                contextlib.redirect_stderr(console):
+            with self.assertRaises(BUILD.owned_process.OwnedProcessError) as caught:
+                BUILD.run(["authored-not-executed"], self.work, {}, 10, log)
+        self.assertIs(failure, caught.exception)
+        record = json.loads((self.work / "verification/native-build-diagnostic.json").read_text())
+        self.assertIn("authored compiler discriminator", "\n".join(record["lines"]))
+        self.assertNotIn("authored-private", json.dumps(record) + console.getvalue())
+        self.assertEqual(".work/build.log", record["log"])
+        self.assertTrue(record["cleanupComplete"])
+        self.assertEqual(original, log.read_bytes())
+
+    def test_configure_failure_reports_the_explicit_compiler_probe_log(self):
+        log = self.work / "build.log"
+        log.write_text("authored failed configure summary\n")
+        probe = self.work / "ffbuild/config.log"
+        probe.parent.mkdir()
+        probe.write_text("check_cc authored_probe\ntest_cc\nprobe.c:1: error: authored compiler-probe discriminator\n")
+        failure = BUILD.owned_process.OwnedProcessError("command_failed", returncode=1,
+                                                       cleanup_complete=True)
+        with patch.object(BUILD, "ROOT", self.root), \
+                patch.object(BUILD.platform, "system", return_value="Linux"), \
+                patch.object(BUILD.owned_process, "run", side_effect=failure), \
+                contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(BUILD.owned_process.OwnedProcessError) as caught:
+                BUILD.run(["bash", "authored/configure"], self.work, {}, 10, log)
+        self.assertIs(failure, caught.exception)
+        record = json.loads((self.work / "verification/native-build-diagnostic.json").read_text())
+        self.assertEqual(".work/ffbuild/config.log", record["log"])
+        self.assertIn("authored compiler-probe discriminator", "\n".join(record["lines"]))
+
+    def test_windows_commands_pin_path_resolution_before_createprocess(self):
+        environment = {"PATH": "authored trusted tool path"}
+        for name, resolved in (("bash", "C:/Program Files/Git/bin/bash.exe"),
+                               ("make", "C:/existing/tools/make.exe")):
+            with self.subTest(tool=name), patch.object(BUILD.platform, "system", return_value="Windows"), \
+                    patch.object(BUILD.shutil, "which", return_value=resolved) as which, \
+                    patch.object(BUILD.owned_process, "run") as run:
+                BUILD.run([name, "authored argument with spaces"], self.work, environment, 10,
+                          self.work / "resolved.log")
+                which.assert_called_once_with(name, path=environment["PATH"])
+                self.assertEqual([resolved, "authored argument with spaces"], run.call_args.args[0])
+                self.assertIs(environment, run.call_args.kwargs["env"])
+
+    def test_windows_missing_resolved_tool_never_launches_a_system_fallback(self):
+        with patch.object(BUILD.platform, "system", return_value="Windows"), \
+                patch.object(BUILD.shutil, "which", return_value=None), \
+                patch.object(BUILD.owned_process, "run") as run:
+            with self.assertRaisesRegex(ValueError, "Existing matching-host command"):
+                BUILD.run(["bash", "authored/configure"], self.work, {}, 10, self.work / "missing.log")
+            run.assert_not_called()
+
     def archive(self, entries):
         archive = self.work / "source.tar.gz"
         with tarfile.open(archive, "w:gz") as output:
@@ -42,7 +201,7 @@ class ProductionFfmpegBuildTest(unittest.TestCase):
                 output.addfile(entry, io.BytesIO(body) if kind == tarfile.REGTYPE else None)
         return archive
 
-    def completed_output(self):
+    def completed_output(self, target="linux-x64"):
         """An authored, nonexecuted package; tests pin its own tiny archive explicitly."""
         archive = self.archive([(BUILD.SOURCE_ROOT + "/" + name, tarfile.REGTYPE, 0o600, ("authored " + name).encode())
                                 for name in BUILD.LICENSE_FILES])
@@ -51,9 +210,9 @@ class ProductionFfmpegBuildTest(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
         base = self.work / "native-ffmpeg"
-        output = base / "output/linux-x64"
+        output = base / "output" / target
         output.mkdir(parents=True)
-        expected = BUILD.identity("linux-x64", BUILD.host_profile("Linux", "x86_64")[1], base)
+        expected = BUILD.identity(target, BUILD.host_profile("Windows" if target == "windows-x64" else "Linux", "x86_64")[1], base)
         sources = output / "corresponding-source"
         sources.mkdir()
         shutil.copyfile(archive, sources / "FFmpeg-n8.0.1.tar.gz")
@@ -66,14 +225,17 @@ class ProductionFfmpegBuildTest(unittest.TestCase):
         licenses.mkdir()
         for name in BUILD.LICENSE_FILES:
             (licenses / name).write_text("authored " + name)
-        executable = output / "ffmpeg"
+        name = BUILD.executable_name(target)
+        if target == "windows-x64":
+            (sources / BUILD.WINDOWS_DEPENDENCY_FILE).write_bytes(BUILD.WINDOWS_DEPENDENCY_SCRIPT)
+        executable = output / name
         executable.write_bytes(b"authored-not-an-executed-binary")
         executable.chmod(0o700)
         digest = BUILD.sha256(executable)
-        (output / "ffmpeg.sha256").write_text(digest + "\n")
-        metadata = {**expected, "executable": "ffmpeg", "executableSha256": digest,
+        BUILD.write_sidecar(output / (name + ".sha256"), digest)
+        metadata = {**expected, "executable": name, "executableSha256": digest,
                     "executableBytes": executable.stat().st_size,
-                    "fileSha256": {relative: BUILD.sha256(output / relative) for relative in BUILD.package_files("ffmpeg")}}
+                    "fileSha256": {relative: BUILD.sha256(output / relative) for relative in BUILD.package_files(name)}}
         (output / "provenance.json").write_text(json.dumps(metadata))
         return output, expected, metadata
 
@@ -109,7 +271,11 @@ class ProductionFfmpegBuildTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "VERSION"):
             BUILD.require_release(source)
         self.assertEqual(["make", "-j1", "REVISION=8.0.1", "ffmpeg"], BUILD.make_command("linux-x64", "1"))
-        self.assertEqual(["make", "-j2", "REVISION=8.0.1", "ffmpeg.exe"], BUILD.make_command("windows-x64", "2"))
+        self.assertEqual(["make", "-j2", "REVISION=8.0.1", "SHELL=C:/Program Files/Git/usr/bin/bash.exe",
+                          ".SHELLFLAGS=-c", "ffmpeg.exe"],
+                         BUILD.make_command("windows-x64", "2", bash=r"C:\Program Files\Git\usr\bin\bash.exe"))
+        with self.assertRaises(ValueError):
+            BUILD.make_command("windows-x64", "1")
         with self.assertRaises(ValueError):
             BUILD.make_command("linux-x64", "99")
         expected = BUILD.identity("linux-x64", [], self.work)
@@ -119,7 +285,7 @@ class ProductionFfmpegBuildTest(unittest.TestCase):
     def test_build_environment_removes_ambient_make_and_revision_injection(self):
         forbidden = ("CFLAGS", "CPPFLAGS", "CXXFLAGS", "LDFLAGS", "CC", "CXX", "LD", "AR", "FFREPORT",
                      "MAKEFLAGS", "GNUMAKEFLAGS", "MFLAGS", "MAKEOVERRIDES", "MAKEFILES",
-                     "REVISION", "EXTRA_VERSION", "revision", "git_hash")
+                     "REVISION", "EXTRA_VERSION", "revision", "git_hash", "SHELL", "MAKESHELL")
         original = {**dict.fromkeys(forbidden, "authored override"), "PATH": "existing tools", "LIB": "existing SDK"}
         environment = BUILD.build_environment("macos-arm64", 1234, original)
         self.assertTrue(all(key not in environment for key in forbidden))
@@ -311,7 +477,10 @@ class ProductionFfmpegBuildTest(unittest.TestCase):
         log = self.work / "build.log"
         log.write_bytes(b"authored retained log")
         failure = BUILD.owned_process.OwnedProcessError("cleanup_failed", cleanup_complete=False)
-        with patch.object(BUILD.owned_process, "run", side_effect=failure) as run:
+        with patch.object(BUILD, "ROOT", self.root), \
+                patch.object(BUILD.platform, "system", return_value="Linux"), \
+                patch.object(BUILD.owned_process, "run", side_effect=failure) as run, \
+                contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(BUILD.owned_process.OwnedProcessError) as raised:
                 BUILD.run(["authored-tool"], self.work, {}, 5, log)
         self.assertIs(failure, raised.exception)

@@ -189,7 +189,7 @@ class DownloadPolicyRoomTest {
             val ids = (1..7).map { index -> enqueue(first, item("parallel-$index"), "PARALLEL00$index").first }
             coroutineScope { awaitAll(async { first.coordinator.start(DownloadActivation.DURABLE_WORK) },
                 async { second.coordinator.start(DownloadActivation.DURABLE_WORK) }) }
-            awaitCondition { inFlight.get() == limit }
+            awaitCondition { inFlight.get() == limit && maximum.get() >= limit }
             assertEquals(limit, maximum.get())
             assertEquals(gateway.transfers.size, gateway.transfers.map { it.context.subject.id }.distinct().size)
             parallelism(first, 1)

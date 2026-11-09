@@ -112,7 +112,29 @@ class DownloadRecoveryRoomTest {
         a.coordinator.close()
         assertTrue(a.coordinator.dependencyReleaseSafeAfterClose)
         advance(5_100)
-        val cancelled = awaitJob(b, id) { it.job.status == DownloadStatus.CANCELLED && !it.job.cleanupPending }
+        val cancelled = try {
+            withTimeout(15_000) {
+                while (true) {
+                    val current = join(b, id)
+                    if (current.job.status == DownloadStatus.CANCELLED && !current.job.cleanupPending) break
+                    // B may first observe A's held path just AFTER the single clock advance.
+                    // Follow its actual local wake deadline instead of freezing the fake clock
+                    // before that backoff. Never expire an admitted maintenance owner.
+                    if (current.job.leaseOwner == null) {
+                        val due = b.coordinator.schedulingPlan().nextLocalEpochMs
+                        if (due != null && due > clock.epochMs()) advance(due - clock.epochMs())
+                    }
+                    delay(20)
+                }
+                join(b, id)
+            }
+        } catch (timeout: TimeoutCancellationException) {
+            val observed = join(b, id).job
+            throw AssertionError("Cleanup timed out: status=${observed.status}, pending=${observed.cleanupPending}, " +
+                "maintenance=${observed.maintenanceKind}, generation=${observed.ownershipGeneration}, " +
+                "owner=${observed.leaseOwner}, expires=${observed.leaseExpiresEpochMs}, now=${clock.epochMs()}, " +
+                "failure=${observed.failure}, events=${events.takeLast(20)}", timeout)
+        }
         assertNull(cancelled.asset)
         assertNull(cancelled.finalization)
         assertNull(cancelled.job.leaseOwner)
@@ -138,20 +160,31 @@ class DownloadRecoveryRoomTest {
         assertEquals(DownloadStatus.COMPLETE, ready.job.status)
         assertFalse(a.coordinator.dependencyReleaseSafeAfterClose)
         b.coordinator.start(DownloadActivation.DURABLE_WORK)
-        // B has no durable foreign lease after publication. Its return accepts cleanup INTENT,
-        // NOT A's physical/native release, global quiescence or a completed deletion receipt.
-        b.coordinator.remove(id)
-        assertTrue(join(b, id).job.cleanupPending)
-        assertContentEquals(authoredBytes, Files.readAllBytes(Path.of(asset.uri)))
-        assertNull(probeFiles.tryLeasePaths(listOf(asset.uri)))
-        assertNull(probeFiles.tryTransferSlot(1))
-        assertEquals(clock.epochMs() + 5_000, b.coordinator.schedulingPlan().nextLocalEpochMs,
-            "Actual publication-lock contention has a bounded local recheck")
-        closing.release()
-        a.coordinator.close()
-        assertTrue(a.coordinator.dependencyReleaseSafeAfterClose)
-        advance(5_000)
-        val removed = awaitJob(b, id) { !it.job.cleanupPending && it.asset == null && it.job.status == DownloadStatus.CANCELLED }
+        val bDeleting = barrier()
+        b.beforeDelete = { bDeleting.stop() }
+        // A normal remove return must mean actual authoritative removal, not intent acceptance.
+        coroutineScope {
+            val removing = async(start = CoroutineStart.UNDISPATCHED) { runCatching { b.coordinator.remove(id) } }
+            awaitCondition { join(b, id).job.cleanupPending }
+            assertFalse(removing.isCompleted, "remove cannot return while the exact writer still owns the generation")
+            assertContentEquals(authoredBytes, Files.readAllBytes(Path.of(asset.uri)))
+            assertNull(probeFiles.tryLeasePaths(listOf(asset.uri)))
+            assertNull(probeFiles.tryTransferSlot(1))
+            closing.release()
+            a.coordinator.close()
+            assertTrue(a.coordinator.dependencyReleaseSafeAfterClose)
+            advance(5_000) // Actual ownership contention backoff, not an intent-only success.
+            bDeleting.entered.await()
+            assertFalse(removing.isCompleted, "remove must wait for the actual deletion, not cleanupPending")
+            assertTrue(join(b, id).job.cleanupPending)
+            assertContentEquals(authoredBytes, Files.readAllBytes(Path.of(asset.uri)))
+            bDeleting.release()
+            removing.await().getOrThrow()
+        }
+        val removed = join(b, id)
+        assertFalse(removed.job.cleanupPending)
+        assertEquals(DownloadStatus.CANCELLED, removed.job.status)
+        assertNull(removed.asset)
         assertNull(removed.finalization)
         assertFalse(Files.exists(Path.of(asset.uri)))
         assertEquals(ready.attempts, removed.attempts, "Removal preserves already committed materializer history")
@@ -164,6 +197,60 @@ class DownloadRecoveryRoomTest {
         }, "Immutable historical receipt/use survives live-byte removal, but no materialization is Ready")
         assertEquals(1, a.gateway.transfers.size)
         assertTrue(b.gateway.transfers.isEmpty())
+    }
+
+    @Test fun removeWhileHostSuspendedFailsTruthfullyAndSucceedsAfterForegroundResume() = executorSchema3Case {
+        val owner = owner()
+        val (id, _) = enqueue(owner)
+        owner.coordinator.start(DownloadActivation.USER_SESSION)
+        val completed = complete(owner, id)
+        val asset = assertNotNull(completed.asset)
+        owner.coordinator.drainForBackground()
+        val failure = assertFailsWith<VeyraException> { owner.coordinator.remove(id) }
+        assertEquals(FailureCode.BACKGROUND_RESTRICTED, failure.failure.code)
+        assertEquals("download_owner_drain_unconfirmed", failure.failure.detail)
+        val held = join(owner, id)
+        assertTrue(held.job.cleanupPending)
+        assertEquals(asset, held.asset)
+        assertTrue(Files.exists(Path.of(asset.uri)))
+        owner.coordinator.resumePending()
+        owner.coordinator.remove(id)
+        val removed = awaitJob(owner, id) { !it.job.cleanupPending && it.asset == null }
+        assertEquals(DownloadStatus.CANCELLED, removed.job.status)
+        assertFalse(Files.exists(Path.of(asset.uri)))
+        assertEquals(completed.attempts, removed.attempts)
+    }
+
+    @Test fun removeOfActiveStagingWaitsForWriterUnwindAndDeletesOnlyTheActualStagingGeneration() = executorSchema3Case {
+        val owner = owner()
+        val entered = CompletableDeferred<Unit>()
+        val unwinding = barrier()
+        owner.gateway.transfer = { call ->
+            call.write()
+            entered.complete(Unit)
+            try { awaitCancellation() }
+            finally { withContext(NonCancellable) { unwinding.stop() } }
+        }
+        val (id, _) = enqueue(owner)
+        owner.coordinator.start(DownloadActivation.DURABLE_WORK)
+        entered.await()
+        val stage = owner.gateway.transfers.single().path
+        coroutineScope {
+            val removing = async(start = CoroutineStart.UNDISPATCHED) { runCatching { owner.coordinator.remove(id) } }
+            unwinding.entered.await()
+            assertTrue(join(owner, id).job.cleanupPending)
+            assertTrue(Files.exists(Path.of(stage)))
+            assertFalse(removing.isCompleted, "An active staging writer must be joined, not acknowledged")
+            unwinding.release()
+            removing.await().getOrThrow()
+        }
+        val removed = awaitJob(owner, id) { !it.job.cleanupPending && it.asset == null }
+        assertEquals(DownloadStatus.CANCELLED, removed.job.status)
+        assertNull(removed.finalization)
+        assertFalse(Files.exists(Path.of(stage)))
+        assertEquals(DownloadAttemptStatus.PAUSED, removed.attempts.single().status)
+        assertNotNull(removed.attempts.single().finishedEpochMs)
+        assertTrue(owner.store.acquisitionView().acquisition.materializations.isEmpty())
     }
 
     @Test fun partialDeletionKeepsJournalForPriorAssetAndIntentDestinationUntilReopenCompletesAll() {

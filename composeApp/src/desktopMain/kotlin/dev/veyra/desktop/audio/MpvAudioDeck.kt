@@ -246,6 +246,7 @@ internal class MpvAudioDeck private constructor(
 
     private fun eventLoop() {
         try {
+            MpvNative.initializeNumericLocale(runtime.platform)
             handle = native.mpv_create() ?: error("Could not allocate audio engine")
             synchronized(gate) { wakeHandle = handle }
             val options = linkedMapOf(

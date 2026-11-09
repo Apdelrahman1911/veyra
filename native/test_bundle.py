@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Native staging/build-wiring regressions; no compiler, media or network runs."""
+import contextlib
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -92,6 +94,45 @@ class NativeBundleTest(unittest.TestCase):
             self.assertEqual(directory, BUNDLE.stage_resources("linux-x64", sources, root=self.root))
             run.assert_not_called()
         self.assertEqual(before, {str(p): p.stat().st_mtime_ns for p in directory.rglob("*")})
+
+    def test_gradle_created_empty_output_directory_is_replaced(self):
+        destination = self.root / ".work/desktop-native/resources/linux-x64"
+        destination.mkdir(parents=True)
+        self.assertEqual([], list(destination.iterdir()))
+        directory, sources = self.stage()
+        self.assertEqual(destination, directory)
+        self.assertEqual(set(sources), set(BUNDLE.read_manifest(directory, self.root)["files"]))
+
+    def test_nonempty_unrecognized_output_directory_is_refused_and_preserved(self):
+        destination = self.root / ".work/desktop-native/resources/linux-x64"
+        destination.mkdir(parents=True)
+        sentinel = destination / "owner-file"
+        sentinel.write_text("preserve me")
+        with self.assertRaises(ValueError):
+            BUNDLE.stage_resources("linux-x64", self.sources(), root=self.root)
+        self.assertEqual("preserve me", sentinel.read_text())
+        self.assertFalse((destination / BUNDLE.MANIFEST).exists())
+
+    @unittest.skipIf(os.name == "nt", "Requires unprivileged symlink support")
+    def test_linked_output_destination_is_refused_not_removed(self):
+        base = self.root / ".work/desktop-native/resources"
+        base.mkdir(parents=True)
+        outside = self.root / ".work/outside-destination"
+        outside.mkdir()
+        (base / "linux-x64").symlink_to(outside, target_is_directory=True)
+        with self.assertRaises(ValueError):
+            BUNDLE.stage_resources("linux-x64", self.sources(), root=self.root)
+        self.assertTrue(outside.is_dir())
+
+    def test_empty_output_placeholder_does_not_block_verified_backup_recovery(self):
+        directory, sources = self.stage()
+        original = BUNDLE.read_manifest(directory, self.root)
+        previous = directory.with_name(".old-linux-x64-authored-interruption")
+        directory.rename(previous)
+        directory.mkdir()  # Gradle-created empty declared output.
+        self.assertEqual(directory, BUNDLE.stage_resources("linux-x64", sources, root=self.root))
+        self.assertFalse(previous.exists())
+        self.assertEqual(original, BUNDLE.read_manifest(directory, self.root))
 
     def test_valid_stale_stage_is_replaced_and_only_old_generated_files_are_removed(self):
         directory, sources = self.stage()
@@ -209,6 +250,333 @@ class NativeBundleTest(unittest.TestCase):
         self.assertEqual(log, run.call_args.kwargs["log"])
         self.assertEqual(3, run.call_args.kwargs["timeout"])
         self.assertEqual(b"preserve diagnostic output", log.read_bytes())
+
+    def test_windows_native_run_prepares_only_the_child_environment(self):
+        log = self.inputs / "build.log"
+        process_environment = dict(os.environ)
+        prepared = {"PATH": "authored-x64-msvc", "VEYRA_SCOPED_ENV": "1"}
+        with patch.dict(os.environ, {"CC": "authored-fallback-compiler", "HOME": "authored-home",
+                                     "MSBUILDDISABLENODEREUSE": "0"}):
+            with patch.object(BUNDLE.platform, "system", return_value="Windows"), \
+                    patch.object(BUNDLE.windows_toolchain, "child_environment",
+                                 return_value=prepared) as helper, \
+                    patch.object(BUNDLE.owned_process, "run") as run:
+                BUNDLE.run(["authored-tool.exe", "arg with spaces"], self.root, log, 7, root=self.root)
+            helper.assert_called_once()
+            child = helper.call_args.args[0]
+            self.assertNotIn("CC", child)
+            self.assertNotIn("CXX", child)
+            self.assertEqual("authored-home", child["HOME"])
+            self.assertEqual(self.root, run.call_args.kwargs["cwd"])
+            actual_environment = dict(run.call_args.kwargs["env"])
+            self.assertRegex(actual_environment.pop("VEYRA_NATIVE_DIAGNOSTIC_INVOCATION"), r"^[0-9a-f]{32}$")
+            self.assertEqual(dict(prepared, MSBUILDDISABLENODEREUSE="1"), actual_environment)
+            self.assertNotIn("MSBUILDDISABLENODEREUSE", prepared)
+            self.assertNotIn("VEYRA_NATIVE_DIAGNOSTIC_INVOCATION", prepared)
+            self.assertEqual("0", os.environ["MSBUILDDISABLENODEREUSE"])
+            scratch = helper.call_args.kwargs["scratch"]
+            self.assertTrue(scratch.is_relative_to(self.root / ".work"))
+        self.assertEqual(process_environment, dict(os.environ))
+
+        with patch.object(BUNDLE.platform, "system", return_value="Linux"), \
+                patch.object(BUNDLE.windows_toolchain, "child_environment") as helper, \
+                patch.object(BUNDLE.owned_process, "run") as run:
+            BUNDLE.run(["authored-tool"], self.root, log, 7, root=self.root)
+        helper.assert_not_called()
+        self.assertEqual(os.environ.get("HOME"), run.call_args.kwargs["env"]["HOME"])
+
+    def test_windows_native_run_limits_optional_telemetry_to_selected_compiler_directory(self):
+        compiler = self.inputs / "cl.exe"
+        telemetry = compiler.with_name("vctip.exe")
+        compiler.write_bytes(b"authored-not-executed")
+        telemetry.write_bytes(b"authored-not-executed")
+        prepared = {"PATH": "authored-scoped-msvc"}
+        with patch.object(BUNDLE.platform, "system", return_value="Windows"), \
+             patch.object(BUNDLE.windows_toolchain, "child_environment", return_value=prepared), \
+             patch.object(BUNDLE.shutil, "which", return_value=str(compiler)) as which, \
+             patch.object(BUNDLE.owned_process, "run") as run:
+            BUNDLE.run(["authored-cmake"], self.root, self.inputs / "build.log", 7, root=self.root)
+            self.assertEqual(str(telemetry.resolve()), run.call_args.kwargs["completed_telemetry_image"])
+            which.assert_called_once_with("cl.exe", path="authored-scoped-msvc")
+            telemetry.unlink()
+            BUNDLE.run(["authored-cmake"], self.root, self.inputs / "build.log", 7, root=self.root)
+            self.assertNotIn("completed_telemetry_image", run.call_args.kwargs)
+
+    def test_session_helper_uses_phase_logs_and_windows_nonreusing_build(self):
+        for target in ("windows-x64", "macos-arm64"):
+            with self.subTest(target=target):
+                directory = self.root / ".work/native-session" / target
+                output = directory / "output" / ("veyra-session.dll" if target == "windows-x64"
+                                                  else "libveyra-session.dylib")
+                output.parent.mkdir(parents=True)
+                output.write_bytes(b"authored-not-executed")
+                console = io.StringIO()
+                with patch.object(BUNDLE, "ROOT", self.root), \
+                        patch.object(BUNDLE.shutil, "which", return_value="authored-cmake"), \
+                        patch.object(BUNDLE, "binary_target") as verify, \
+                        patch.object(BUNDLE, "run") as run, contextlib.redirect_stdout(console):
+                    self.assertEqual(output, BUNDLE.session_helper(target))
+                self.assertEqual(2, run.call_count)
+                configure, compile = run.call_args_list
+                self.assertEqual(directory / "configure.log", configure.args[2])
+                self.assertEqual(directory / "build.log", compile.args[2])
+                self.assertEqual(180, configure.args[3])
+                self.assertEqual(600, compile.args[3])
+                self.assertEqual(["--parallel", "1"], compile.args[0][5:7])
+                if target == "windows-x64":
+                    self.assertEqual(["--", "/nodeReuse:false"], compile.args[0][-2:])
+                    self.assertEqual(["-A", "x64"], configure.args[0][-2:])
+                else:
+                    self.assertNotIn("/nodeReuse:false", compile.args[0])
+                verify.assert_called_once_with(output, target)
+                self.assertIn("Native session configure completed: " + target, console.getvalue())
+                self.assertIn("Native session compile completed: " + target, console.getvalue())
+
+    def test_session_configure_failure_has_no_success_marker_or_compile(self):
+        console = io.StringIO()
+        with patch.object(BUNDLE, "ROOT", self.root), \
+                patch.object(BUNDLE.shutil, "which", return_value="authored-cmake"), \
+                patch.object(BUNDLE, "run", side_effect=ValueError("authored configure stop")) as run, \
+                contextlib.redirect_stdout(console):
+            with self.assertRaisesRegex(ValueError, "authored configure stop"):
+                BUNDLE.session_helper("windows-x64")
+        self.assertEqual(1, run.call_count)
+        self.assertIn("Native session configure started", console.getvalue())
+        self.assertNotIn("completed", console.getvalue())
+        self.assertNotIn("compile started", console.getvalue())
+
+    def test_windows_session_failure_precedes_ffmpeg_build(self):
+        failure = BUNDLE.owned_process.OwnedProcessError("timeout", cleanup_complete=True)
+        with patch.object(BUNDLE, "ROOT", self.root), \
+                patch.dict(os.environ, {"VEYRA_SCOPED_ENV": "1"}), \
+                patch.object(BUNDLE.platform, "system", return_value="Windows"), \
+                patch.object(BUNDLE.platform, "machine", return_value="AMD64"), \
+                patch.object(BUNDLE, "session_helper", side_effect=failure) as session, \
+                patch.object(BUNDLE, "run") as run, patch.object(BUNDLE, "stage_resources") as stage:
+            with self.assertRaises(BUNDLE.owned_process.OwnedProcessError) as raised:
+                BUNDLE.prepare("windows-x64")
+        self.assertIs(failure, raised.exception)
+        self.assertTrue(raised.exception.cleanup_complete)
+        session.assert_called_once_with("windows-x64")
+        run.assert_not_called()
+        stage.assert_not_called()
+
+    def test_windows_toolchain_failure_stops_before_any_native_command(self):
+        log = self.inputs / "build.log"
+        with patch.object(BUNDLE.platform, "system", return_value="Windows"), \
+                patch.object(BUNDLE.windows_toolchain, "child_environment",
+                             side_effect=ValueError("Existing x64 MSVC compiler tools are required; no substitute compiler is used.")), \
+                patch.object(BUNDLE.owned_process, "run") as run:
+            with self.assertRaisesRegex(ValueError, "no substitute compiler is used"):
+                BUNDLE.run(["authored-tool"], self.root, log, 7, root=self.root)
+        run.assert_not_called()
+        self.assertFalse(log.exists())
+
+    def test_failed_build_retains_owned_windows_process_state(self):
+        log = self.inputs / "build.log"
+        log.write_bytes(b"authored non-diagnostic output")
+        state = {"commandCompleted": True, "commandReturncode": 0, "jobActiveBeforeCleanup": 1,
+                 "processes": {"listed": 1, "truncated": False,
+                               "members": [{"pid": 42, "image": "mspdbsrv.exe"}]}}
+        failure = BUNDLE.owned_process.OwnedProcessError("timeout", cleanup_complete=True, process_state=state)
+        console = io.StringIO()
+        with contextlib.redirect_stderr(console):
+            BUNDLE.report_build_failure(log, failure, self.root)
+        record = json.loads((self.root / BUNDLE.DIAGNOSTIC).read_text())
+        self.assertEqual(state, record["processState"])
+        self.assertIn("mspdbsrv.exe", console.getvalue())
+        self.assertNotIn("authored non-diagnostic output", console.getvalue())
+
+    def test_nested_native_failure_keeps_configure_and_probe_diagnostics(self):
+        invocation = "a" * 32
+        failure = BUNDLE.owned_process.OwnedProcessError("command_failed", cleanup_complete=True, returncode=1)
+        with contextlib.redirect_stderr(io.StringIO()):
+            for name, text in (("configure", "error: configure sentinel\n"),
+                               ("probe", "fatal error: probe sentinel\n"),
+                               ("outer", "Managed build command failed: command_failed\n")):
+                log = self.inputs / (name + ".log")
+                log.write_bytes(text.encode())
+                BUNDLE.report_build_failure(log, failure, self.root, invocation=invocation)
+        record = json.loads((self.root / BUNDLE.DIAGNOSTIC).read_text())
+        self.assertEqual(2, len(record["previousReports"]))
+        self.assertIn("configure sentinel", record["previousReports"][0]["lines"][0])
+        self.assertIn("probe sentinel", record["previousReports"][1]["lines"][0])
+
+    def test_awk_diagnostic_retains_program_line_and_filters_sensitive_context(self):
+        text = ('awk: cmd. line:1: { authored_safe_program }\n'
+                'awk: cmd. line:1:                         ^ syntax error\n'
+                'awk: cmd. line:1: token=authored_private\n'
+                '  ^ syntax error\n')
+        lines, suppressed, truncated = BUNDLE._extract_diagnostics(text)
+        self.assertIn('authored_safe_program', "\n".join(lines))
+        self.assertNotIn('authored_private', "\n".join(lines))
+        self.assertEqual(2, suppressed)
+        self.assertFalse(truncated)
+
+    def test_configure_report_excludes_shell_dump_and_keeps_last_actual_probe(self):
+        log = self.inputs / "config.log"
+        raw = ("PRIVATE_VALUE='authored private environment'\n"
+               "test_shell_value='error: authored fake declaration'\n"
+               "test_cc () \n{\n    die 'ERROR: authored function definition';\n}\n"
+               "HELP='--fatal-warnings\nerror: authored help text'\n"
+               "check_cc first_probe\ntest_cc\nprobe.c:1: error: old expected probe rejection\n"
+               "test_cc second_probe\ncheck_ld cc\ntest_cc\n"
+               "probe.c:9: fatal error: actual final probe discriminator\n"
+               "error: https://example.invalid/?token=authored-private\n")
+        log.write_bytes(raw.encode())
+        failure = BUNDLE.owned_process.OwnedProcessError("timeout", cleanup_complete=True)
+        invocation = "d" * 32
+        with contextlib.redirect_stderr(io.StringIO()):
+            BUNDLE.report_build_failure(log, failure, self.root, invocation=invocation,
+                                        configure_log=True)
+            outer = self.inputs / "outer.log"
+            outer.write_bytes(b"Native FFmpeg configure command failed.\n")
+            BUNDLE.report_build_failure(outer, failure, self.root, invocation=invocation)
+        record = json.loads((self.root / BUNDLE.DIAGNOSTIC).read_text())
+        probe = record["previousReports"][0]
+        self.assertEqual("FFmpeg configure probe progress: observed=5 last=test_cc.", probe["lines"][0])
+        self.assertIn("actual final probe discriminator", "\n".join(probe["lines"]))
+        for forbidden in ("authored private", "fake declaration", "function definition",
+                          "help text", "old expected", "authored-private"):
+            self.assertNotIn(forbidden, json.dumps(record))
+        self.assertEqual(raw.encode(), log.read_bytes())
+        self.assertEqual("timeout", probe["reason"])
+
+    def test_configure_report_without_actual_probes_does_not_quote_shell_dump(self):
+        log = self.inputs / "config.log"
+        log.write_bytes(b"PRIVATE='fatal error: authored secret'\ntest_cc () \n{\n echo 'error';\n}\n")
+        failure = BUNDLE.owned_process.OwnedProcessError("timeout", cleanup_complete=True)
+        with contextlib.redirect_stderr(io.StringIO()):
+            BUNDLE.report_build_failure(log, failure, self.root, configure_log=True)
+        record = json.loads((self.root / BUNDLE.DIAGNOSTIC).read_text())
+        self.assertEqual(["FFmpeg configure probe progress: observed=0 last=none."], record["lines"])
+        self.assertNotIn("authored secret", json.dumps(record))
+
+    def test_prior_native_diagnostic_must_be_fresh_and_safe(self):
+        invocation = "b" * 32
+        log = self.inputs / "first.log"
+        log.write_bytes(b"error: authored first\n")
+        failure = BUNDLE.owned_process.OwnedProcessError("command_failed", cleanup_complete=True, returncode=1)
+        with contextlib.redirect_stderr(io.StringIO()):
+            BUNDLE.report_build_failure(log, failure, self.root, invocation=invocation)
+        path = self.root / BUNDLE.DIAGNOSTIC
+        self.assertEqual([], BUNDLE._previous_diagnostic_reports(path, "c" * 32))
+        record = json.loads(path.read_text())
+        record["lines"] = ["error: Authorization: Bearer gho_authoredcredential"]
+        path.write_text(json.dumps(record))
+        self.assertEqual([], BUNDLE._previous_diagnostic_reports(path, invocation))
+        record["lines"] = ["error: safe"]
+        record["log"] = ".work/../outside.log"
+        path.write_text(json.dumps(record))
+        self.assertEqual([], BUNDLE._previous_diagnostic_reports(path, invocation))
+
+    def test_native_log_tail_preserves_binary_ctrl_z_before_diagnostic(self):
+        log = self.inputs / "binary.log"
+        original = b"authored\r\n\x1a\r\nerror: after binary eof sentinel\r\n"
+        log.write_bytes(original)
+        text, truncated = BUNDLE._read_log_tail(log, self.root)
+        self.assertIn("after binary eof sentinel", text)
+        self.assertFalse(truncated)
+        self.assertEqual(original, log.read_bytes())
+
+    def test_failed_owned_build_retains_bounded_safe_compiler_diagnostic(self):
+        log = self.inputs / "build.log"
+        original = (
+            "authored setup\n"
+            "/src/authored.c:7:3: error: use of undeclared identifier 'sentinel_error'\n"
+            "  sentinel_error = 1;\n"
+            "  ^\n"
+            "CMake Error at CMakeLists.txt:4 (message):\n"
+            "  authored cmake sentinel\n"
+            "fatal error: Authorization: Bearer gho_authoredcredential\n"
+            "error: fetch https://example.invalid/object?X-Amz-Signature=authoredsignature failed\n"
+            + "".join("error: repeated authored diagnostic %d\n" % index for index in range(100))
+        ).encode()
+        log.write_bytes(original)
+        failure = BUNDLE.owned_process.OwnedProcessError("command_failed", cleanup_complete=True, returncode=1)
+        output = io.StringIO()
+        with patch.object(BUNDLE.owned_process, "run", side_effect=failure), contextlib.redirect_stderr(output):
+            with self.assertRaises(BUNDLE.owned_process.OwnedProcessError) as raised:
+                BUNDLE.run(["authored-tool"], self.root, log, 3, root=self.root)
+        self.assertIs(failure, raised.exception)
+        self.assertEqual(original, log.read_bytes())
+        record = json.loads((self.root / BUNDLE.DIAGNOSTIC).read_text())
+        text = "\n".join(record["lines"])
+        self.assertIn("sentinel_error", text)
+        self.assertIn("authored cmake sentinel", text)
+        self.assertNotIn("gho_authoredcredential", text)
+        self.assertNotIn("authoredsignature", text)
+        self.assertNotIn("Authorization", text)
+        self.assertNotIn("authored setup", text)
+        self.assertLessEqual(len(record["lines"]), BUNDLE.DIAGNOSTIC_MAX_LINES)
+        self.assertLessEqual(len(text.encode()), BUNDLE.DIAGNOSTIC_MAX_BYTES)
+        self.assertTrue(record["truncated"])
+        self.assertGreaterEqual(record["suppressedLines"], 2)
+        self.assertTrue(record["logAvailable"])
+        console = output.getvalue()
+        self.assertIn("sentinel_error", console)
+        self.assertNotIn("gho_authoredcredential", console)
+        self.assertNotIn("authoredsignature", console)
+        self.assertNotIn("authored setup", console)
+        self.assertIn("Preserved log:", console)
+
+    def test_configure_early_exit_and_nested_reporter_metadata_are_distinguished(self):
+        lines, suppressed, truncated = BUNDLE._extract_diagnostics(
+            'Unknown option "--authored-invalid".\n'
+            'Unsupported MSVC version (2013 or newer required)\n'
+            'Unable to create temporary directory in authored-work.\n'
+            'Native FFmpeg configure command failed.\n'
+            'Native build diagnostic (bounded compiler/build output only):\n'
+            '  No compiler/build error lines retained; inspect the build log.\n'
+            '  Preserved log: .work/authored-error.log\n'
+            '  Diagnostic record: .work/authored-error.json\n')
+        self.assertEqual([
+            'Unknown option "--authored-invalid".',
+            'Unsupported MSVC version (2013 or newer required)',
+            'Unable to create temporary directory in authored-work.',
+            'Native FFmpeg configure command failed.',
+        ], lines)
+        self.assertEqual(0, suppressed)
+        self.assertFalse(truncated)
+
+    def test_configure_and_shell_failures_are_retained_without_raw_output(self):
+        text = (
+            "authored unrelated setup\n"
+            "cl.exe is unable to create an executable file.\n"
+            "C compiler test failed.\n"
+            "bash: /authored/configure: No such file or directory\n"
+            "bash: cl.exe: command not found\n"
+            "bash: token=authored-private: command not found\n"
+            "bash: https://example.invalid/authored-private: No such file or directory\n"
+        )
+        lines, suppressed, truncated = BUNDLE._extract_diagnostics(text)
+        self.assertEqual(text.splitlines()[1:5], lines)
+        self.assertEqual(2, suppressed)
+        self.assertFalse(truncated)
+
+    def test_ffmpeg_prerequisite_headline_and_message_are_retained_without_log_dump(self):
+        text = (
+            "authored unrelated setup\n"
+            "Scoped production FFmpeg build failed (ValueError). No global install or substitute binary.\n"
+            "Existing matching-host compiler/make/bash tools are required; nothing is installed\n"
+            "authored unrelated detail\n"
+            "ValueError: not a known prerequisite headline\n"
+        )
+        lines, suppressed, truncated = BUNDLE._extract_diagnostics(text)
+        self.assertEqual([
+            "Scoped production FFmpeg build failed (ValueError). No global install or substitute binary.",
+            "Existing matching-host compiler/make/bash tools are required; nothing is installed",
+        ], lines)
+        self.assertEqual(0, suppressed)
+        self.assertFalse(truncated)
+
+        # Only the exact known-safe forms are retained; a URL appended to one is
+        # not copied into the diagnostic at all.
+        sensitive = ("Scoped production FFmpeg build failed (ValueError). No global install or substitute binary. "
+                     "https://example.invalid/authored-secret")
+        lines, suppressed, _ = BUNDLE._extract_diagnostics(sensitive)
+        self.assertEqual([], lines)
+        self.assertEqual(1, suppressed)
 
     def test_changed_or_unmanaged_stage_is_preserved_not_silently_cleaned(self):
         directory, sources = self.stage()

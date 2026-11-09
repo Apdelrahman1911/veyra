@@ -2,6 +2,12 @@
 
 **Status: preparation only. No Gradle invocation, native build, package build, device/emulator/simulator operation, workflow dispatch, live-source check, or release publication was performed for this document.**
 
+> **2026-11-09 current-candidate update:** Task A is lead-accepted at
+> `9c8e97ce9a80ffa01f4751f0e6eb49759f9d183b`. Use
+> [task-b-build-retention-preparation.md](task-b-build-retention-preparation.md) for the current
+> retention canary, legal regeneration, package-provenance and five-platform command record. The
+> dependency-gate and snapshot text below is historical preparation evidence, not the current gate.
+
 - **Original preparation:** 2026-11-07T05:36:45Z UTC at `ec97925883f7a26765b7e3409ba5a81e358082b9`, in worktree `/root/.t3/worktrees/Veyra/t3-61a2201d` on branch `t3/five-platform-preparation-1`.
 - **First review correction applied:** 2026-11-07T06:40:57Z UTC, documentation-only.
 - **Second (operational-retention) review correction applied:** 2026-11-07T07:17:36Z UTC, documentation-only.

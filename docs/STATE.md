@@ -2,6 +2,257 @@
 
 Updated 2026-11-07 UTC. Formal Goal tool currently reports **blocked/incomplete**; the owner explicitly resumed this turn. The exposed tool cannot resume that stored status; do not claim an active automatic continuation. No token budget requested. Read `PLAN.md`, `DECISIONS.md`, then verify files, tests and upstream checks before continuing.
 
+## Current Task B continuation — 2026-11-09
+
+Windows full run `42677661597` at `b658073eff08fc791371675ff03776d312bc1e83`
+PASSED: 1,216 shared tests; 484 desktop tests, one Linux-only skip; MSI generation,
+exact embedded legal binding, draft retention and independent download/hash
+readback. The native helper also passed short probe `42676263500` at the same
+source. The owned telemetry correction is now exercised on Windows. These are
+build/test results, not OS installation or audible-output verification.
+
+The owner now requests APK/EXE/DMG/Linux installers to try the app. A manual
+`installers.yml` entry reuses `verify.yml` with build-only scope `installers`:
+five lanes, full tests explicitly skipped, debug APK only, Windows EXE, Mac ARM/
+Intel DMGs and Linux DEB. Actual package/inventory checks and independent draft
+readback remain mandatory; per-lane summaries link the downloads. Local authored
+checks 85/85; YAML and 36 shell scripts valid; actual offline Gradle configuration
+passed in 29 seconds under the shared project lock. The new hosted installer run
+is pending. See `verification/trial-installers.md` for use and exact limits.
+
+The following paragraphs retain the earlier diagnostic progression:
+
+
+Corrected short probe `42672976807` at `7052b0f` passed Windows process/bundle
+tests, then established **CMake exit 0 with one owned `vctip.exe` still alive**.
+The wrapper timed out awaiting that telemetry helper; a stuck CMake command is
+not the cause in this attempt. The next correction permits stopping only the
+exact existing telemetry image beside selected MSVC, via a pinned process handle
+rechecked against the command's Job, after command and gate exit zero. Full Job
+drain remains mandatory; unknown children and failures remain failures. Local:
+37 process tests discovered / 35 passed / two Windows-only skips; bundle 41/41.
+A fresh short probe is required; Windows installer readiness remains open.
+
+
+First short Windows probe `42669996782` at `0e5c9a8` failed before CMake:
+the new Windows test referenced a helper from the wrong class, and an existing
+termination assertion observed a fixture PID still live. Shared fixture
+inheritance corrects the missing helper; a bounded wait on a pinned Windows
+process handle replaces the instantaneous liveness observation, without changing
+production cleanup. Local process tests: 33 discovered / 31 passed / two
+Windows-only skips. The historical PID cause and CMake timeout remain unknown.
+A corrected short Windows probe is the next proof step.
+
+
+Windows-only run `42664351655` at `c149781` passed 1,216 shared / 484
+desktop tests (one Linux-only skip), then timed out exactly 180 seconds into
+session-helper CMake configuration. Compilation did not start. MSBuild no-reuse
+controls did not resolve it. The prior long FFmpeg stage was avoided. No root
+exit or remaining-process identities were retained, so neither compiler failure
+nor a leftover child is established. A short `windows-session-probe` runs only
+native process/bundle tests and the real session helper, without Gradle/FFmpeg/
+packaging. Timeout diagnostics now capture command completion and a bounded,
+job-membership-checked allowlist of tool basenames before unchanged cleanup.
+Local results: process 32 discovered / 30 passed / 2 Windows-only skips;
+bundle 40 passed; workflow 18 passed; YAML valid. A real Windows child/root
+snapshot test is included in the probe. This is diagnostic work, not a claimed
+fix or installer pass. See `verification/task-b-windows-configure-probe-42664351655.md`.
+
+Two-lane retry `42653628227` at `bbcc62f` completed. ARM passed all 1,216
+shared tests and 484 desktop tests (one Linux-only skip), DMG and inventory.
+Windows passed the same tests but timed out in the native media-session helper
+while preparing its installer; it got past FFmpeg. Hosted independent readback
+passed both lane packets. The retained session diagnostic has no compiler error
+and cannot distinguish configure from compile; the original worker state is
+unknown. Native Windows child builds now disable MSBuild node reuse, move session
+admission ahead of FFmpeg and preserve separate phase logs/markers. All 39 native
+bundle and 10 Windows toolchain tests pass locally. Actual Windows execution is
+pending. The next retry is Windows only; no ARM repeat is needed. See
+`verification/task-b-windows-session-timeout-42653628227.md`.
+
+Combined run `42643143184` at `baa8370` completed: Android, Linux x64 and
+macOS Intel passed. Intel passed 1,216 shared tests and 484 desktop tests with
+one Linux-only skip, then built its DMG. Independent production readback passed
+for all five lane packets. Windows failed its Python AWK preflight before
+Kotlin tests or native compilation; ARM failed one shared ownership test but
+built its DMG. The Windows AWK-file fix (`72f169d`) passes 144 affected Python
+tests locally; the ARM observer correction (`2a5f081`) passes all 11 ownership
+class tests locally. Neither has successor hosted acceptance yet.
+
+The `windows-macos-arm64` manual scope selects exactly these two failed lanes,
+with ordinary full desktop verification, installers and independent readback.
+The other three successful lanes need no repeat for these scoped corrections.
+All 17 workflow tests pass, including actual retention-plan execution and exact
+build/readback-lane agreement; YAML parses with unique keys. The next dispatch
+will use this scope once. See `verification/task-b-completed-run-42643143184.md`,
+`verification/task-b-windows-awk-file-42643143184.md` and
+`verification/task-b-arm-ownership-observer-42643143184.md`. Release holds remain.
+
+Run `42628939368` at `7b91522` completed with Android and macOS arm64 passing.
+Android passed 873 tests, lint and APK/AAB builds. All desktop lanes discovered
+1,215 shared / 484 desktop tests. Linux passed shared tests and built its DEB,
+but nine native tests failed on missing `libEGL.so.1`. Windows passed tests (one
+Linux-only skip), then FFmpeg Make failed with an AWK syntax error. ARM passed
+with the same skip and built its DMG. Intel built its DMG and passed desktop
+with that skip, but one shared removal-retry regression failed. Independent
+production retention readback passed for all five lanes; the lead independently
+verified their support packets and all 911 indexed entries, including exact tags.
+
+Linux's complete external MPV library closure and Windows's explicit scoped
+Make/Bash selection plus early AWK preflight are pushed as `08bc006` / `2a8e2e4`.
+Local Linux loader isolation and 10 native audio tests pass; Windows execution
+remains unverified. Intel followup found a revoked/superseded owner's benign
+stale finish was still emitted as a terminal removal failure. A deterministic
+regression reproduces that source defect locally; the correction passes 80
+focused tests across six suites, including real Room removal and terminal
+failure/timeout coverage. Shared Android compilation also passed. These fixes
+are ready for one combined hosted retry. The prior Intel log did not retain
+the removal exception, so this is a source-supported explanation rather than
+exact retrospective exception attribution. See
+`verification/task-b-completed-run-42628939368.md`. Release holds remain open.
+
+
+Five-platform run `42615340845` at `c4a3f1e` completed with Android and macOS x64
+passing; Linux, Windows and macOS arm64 failed. All five lane support archives,
+indexed hashes and exact unpublished draft tags independently verify. Linux now
+runs actual tests: the remaining failures are missing host `libpulse.so.0` and
+one playback shutdown channel race. Windows configure completed, exposing a
+Git Bash absolute Makefile path error; one crash test fails at OS lease admission.
+Both Windows/ARM share a fake-clock cleanup test race; ARM also found a resumed
+foreground removal ACK race and a one-worker composite packaging stall. The lead
+batched direct corrections in the existing checkout. Local final gates pass
+36 shared + 49 desktop regressions, Android compilation, 873 Android unit tests,
+lint/debug APK, and 10 silent native audio tests using exact extracted Ubuntu
+libraries; 73 focused script tests pass. See
+`verification/task-b-completed-run-42615340845.md`. No acceptance or successor
+hosted pass is implied.
+
+
+Combined run `42610626351` at `c552395` completed: Android again passed
+873 tests, lint and APK/AAB generation; the three lane packets and independent
+readback verify. Linux built and retained its DEB and inventory, but GUI tests
+stopped before Gradle because the runner lacks `xdpyinfo`. Lead independently
+reopened the exact DEB: its app JAR and all 35 embedded legal resources match
+`packages.json` (161 components, 2 coverage issues; no release acceptance).
+The display authentication check now uses the existing Java-required Xlib
+instead of that extra executable; actual guarded Xvfb positive and two refusal
+checks pass locally. Windows stopped on an unisolated authored fake-tool test;
+independent packaging then hit FFmpeg configure's exact 600-second timeout.
+The fake is now host-independent; Windows gets a bounded 1200-second configure
+budget and sanitized last-probe diagnostics that exclude the shell `set` dump.
+The timeout's underlying cause and real Windows WAL regression remain unverified.
+94 focused script/workflow tests pass. Per owner request, the next `android-desktop`
+scope includes Android and Linux/Windows/macOS arm64/macOS x64, with independent
+failed-lane retention. No iOS lane is added to that scope. See
+`verification/task-b-combined-run-corrections.md`.
+
+Combined run `42605023132` at `29f6477` completed: Android passed 873 tests,
+lint and APK/AAB builds. Linux GUI tests did **not** run: Podman's owned runroot
+exceeded 50 characters. Linux DEB generation succeeded, then app-image legal
+verification failed; the lane retained diagnostics only. Windows repeated two
+SQLite 1546 crash-recovery failures and failed FFmpeg configure. The lead fixed
+the owned path length, explicit persistent image creation, Windows executable
+resolution and a narrowly bounded upstream-documented Windows WAL validation
+retry. Local gates pass 204 data/Room tests, current shared Android compilation,
+fresh source-native/image builds, actual embedded legal comparison and seven
+silent native operations. No Windows runtime or new hosted Linux acceptance
+follows yet. See `verification/task-b-combined-run-corrections.md`.
+
+Local Android/Linux-first continuation: Android 873 unit tests and lint pass;
+debug APK, unsigned release APK and AAB build. Linux 484 desktop + 4 recovery
+tests pass. The revised user-namespace mount guard passes 13 focused tests;
+source-pinned FFmpeg and the fresh Linux application image build, exact embedded
+legal comparison and seven silent native operations pass. Batch the bounded
+Gradle-download correction, Linux namespace launcher/recursive bind correction
+and Windows inner-diagnostic retention in one `android-linux-windows` dispatch.
+Actual hosted launcher entry and Windows SQLite/configure causes remain open;
+no local DEB/device/signing/release claim. See
+`verification/task-b-android-linux-local.md` and its ignored evidence receipt.
+
+
+Manual run `42569788087` at `ceced9a` retained independently verified Linux and
+macOS arm64 packages. The unpacked Linux package passed all seven silent native
+self-test operations, TLS verification and owned shutdown. macOS arm64 desktop
+tests/package/inventory passed; one shared cleanup assertion remains unexplained
+and passes unchanged locally. Windows ZIP-name validation is corrected with a
+Windows-normalization regression (74 notice tests pass); shared test logs now retain
+full failure stacks. No cleanup semantics or timeouts changed. macOS x64 completed:
+1,205 shared tests passed; desktop 484 tests, zero failures and one skip; installer
+and inventory succeeded. Its DMG passed lead packet/hash/tag verification. Independent
+readback passed for all eight lanes, including failed-lane diagnostics. The overall run
+remains failed. Windows-only run `42576296745` at `fb9a0b8` also failed: an
+authored archive-order assertion stopped the common checks, then independent
+packaging reached Kotlin compilation but failed native preparation. Inventory,
+diagnostic retention and independent readback passed; no Windows installer exists.
+Lead downloaded and hash/tag-verified the diagnostic-only draft packet. The native
+cause remains unknown. A batched correction removes the test's host-order assumption,
+exposes the inner FFmpeg/configure diagnostic, and retains all indexed legal texts
+with exact hashes. Authored checks: retention 18/18, FFmpeg recipe 24/24, workflow
+10/10, tooling 16/16. The reviewed notice registry covers 81 union coordinates;
+a harness Linux projection reduces 85 issues to six, with both readiness flags
+false. Package embedding, native transitive/JDK/source coverage remain open.
+Android and iOS stopped on pinned distribution HTTP 504 responses; one Android
+retry repeated the failure. Linux GUI namespace containment remains blocked.
+No repeated full matrix was dispatched.
+The desktop legal-embedding patch now passes a gated local Gradle desktop JAR
+check: 161 components, 28 documents and all 35 resources (34 hashed payloads plus index) match the retained
+Linux projection exactly; six legal gaps remain. This is resource-wiring proof,
+not a fresh inventory or installer gate. Two Gradle DSL errors were corrected
+before this pass. Fresh inventory/app-image/installer verification remains pending
+on the next scoped Windows run; details are in
+`verification/task-b-desktop-legal-embedding.md`.
+Scoped Windows run `42583592086` at `0bf9ace` failed: a test-only LF/CRLF
+assertion was corrected locally (19/19 manifest tests), while packaging and
+inventory stopped at the pinned Gradle distribution HTTP 504 before configuration.
+Its diagnostic-only draft packet was independently verified; no installer or JVM
+test result exists. No unchanged retry was dispatched. The small test correction
+is batched with four newly reviewed exact-coordinate records. The tracked registry
+now covers 85 coordinates/92 records; the retained Linux inventory projection has
+two missing-text issues, down from six. Atomicfu and the three mediamp native
+runtime coordinates remain unresolved in the platform union. Readiness remains
+false; no fresh installer or native/JDK/source closure follows from this update.
+Windows-only run `42588682043` at `fd03068` passed the previous 19 manifest
+checks and downloaded Gradle successfully. It exposed a separate FFmpeg test
+fixture CRLF sidecar error, native preparation failure without selected inner
+compiler lines, and shell retention rejection of `--native-diagnostic` (already
+supported by the Python helper). No installer or retained packet was produced;
+the independent readback correctly failed on the absent release. The lead fixed
+the fixture bytes and shell forwarding, added shell/configure diagnostic forms
+under the existing bounds/filter, and passed 84 focused local tests. Windows
+native compilation and installer verification still require the scoped rerun.
+Run `42591361805` at `72a17e5` verified both prior corrections on Windows:
+the FFmpeg checks passed and draft retention/independent readback succeeded.
+Shared tests: 1,205 with three failures (two forced-process Room reopen failures
+and one 15 s cleanup timeout). Desktop tests: 484, zero failures/errors, one skip.
+Native preparation still failed without a useful inner cause; the retained record
+contained reporter metadata. Its unpublished diagnostic packet/tag/assets were
+independently hash-verified; it contains no installer. The lead is correcting
+error reporting, preserving raw exception causes in test-only Room wrappers and
+last-job state on the existing cleanup timeout, and using `windows-recovery` to
+run only the four affected recovery methods plus independent packaging. This
+scope is explicitly retained in the lane diagnostic and is not a full-suite gate.
+No test assertion/timeout or production Room/download behavior was relaxed.
+Both local focused gates passed the four methods; the final gate has zero
+failures/errors/skips and equal tracked inputs. All 68 proportional Python/shell
+checks pass. Windows reproduction and the native root cause remain pending.
+The live source still refuses playback preparation with
+`PROVIDER_ACCESS_REQUIRED / YOUTUBE_ACCESS_REQUIRED`; no media transfer or offline
+proof occurred. Installation, physical audio, five-platform success, signing and
+distribution acceptance remain incomplete. Details and preserved failures:
+`verification/task-b-build-retention-preparation.md`.
+
+This entry supersedes historical execution status below. Task A's shared/Room/UI
+scope is lead-accepted. PR27 remains the single integration branch; final native,
+five-platform packaging, installation/audio, signing and distribution gates remain
+incomplete. Original hosted run `42560795834` built Android APK/AAB and passed
+713 shared + 160 app unit tests, but failed inventory/retention. Desktop and Apple
+failures are preserved in `verification/task-b-build-retention-preparation.md`.
+The batched correction updates only the iOS dependency bindings, common build
+shell/JDK selection, native staging/diagnostics, inventory API/artifact selection,
+retention paths/mode, and ownership-test scheduling. No shared production behavior
+is changed. Hosted Linux GUI tests remain blocked by user-namespace permissions.
+The existing checkout and PR27 are reused; no new worktree or successor PR.
+
 ## Project and ownership
 - **https://github.com/Apdelrahman1911/veyra**, public. Public branch `feat/veyra-integration` and local HEAD are at **`fa8d87c9f1aac85fefdb913cc8a1f9a6a7db4097`**, pushed and independently read back from the remote at 00:34 UTC on November 7; **not a verified release**. This 23-file UI checkpoint covers adaptive/Arabic navigation and player controls, runtime details, retained-file actions and recording-aware podcast progress. All 23 files match the retained GUI13/Podcast2/notice9 inputs (13/13, 2/2, 9/9 targeted tests); those runs also used other dirty build/runtime changes, so this isolated commit is **not** a newly tested clean/full revision and does not cover every committed test method. Earlier pushed checkpoints are `b22f2e7` (shared recovery/Room), `7ac1b27` (rejected-owner lifetime), and `1a9db04` (atomic podcast restart/current feed membership). Preserve remaining unstaged work.
 - **Veyra [PR1](https://github.com/Apdelrahman1911/veyra/pull/1) merged**, main **`304d4dcde725899d2f50c72497c624d8f416a54c`**: workflow-only bootstrap, not application integration. Sole added file `.github/workflows/verify.yml` has exact feature-matching blob `805a8f30a108c2f7f6e0d84d69d852e0bb859aa0`; workflow409222980 is active. Manual-only, pinned checkout, standard free public Ubuntu/Windows/macOS runners, no cache/upload/publish actions. No Veyra workflow has been dispatched and no Veyra release exists. Independent registration receipt: `.work/verification/veyra-ci-bootstrap/candidate-3a25414/registration-verified.json`.
@@ -24,6 +275,9 @@ Updated 2026-11-07 UTC. Formal Goal tool currently reports **blocked/incomplete*
 - Telegram accepted the checkpoint update (tool `b76d1d`, exit 0); acceptance is not a read receipt. No pending notification retry.
 
 ## Actual builds/tests
+- **2026-11-09 lead Task B dispatch preparation:** retention extension source reviewed; Python suites **126/126** pass (14 retention, 10 workflow, 7 packet, 7 manifest, 72 notices, 10 tooling, 6 verification). Selected crossfade music/native diagnostic **19/19** passes after replacing the looping progress scroll helper with an actual swipe plus full-bounds/value assertions. Bundled libmpv decoded/controlled authored MP3 through a silent sink; no physical audio/live source/package closure claim. The diagnostic broad input manifest changed concurrently, so it is not sealed final-source evidence. Hosted bootstrap now checks clean exact source/pin/schema; independent Android packaging also attempts unsigned release APK/AAB. Production matrix dispatch is the next authorized step. See [Task B record](verification/task-b-build-retention-preparation.md).
+- **2026-11-09 Task B retention/build preparation (not acceptance):** at lead-accepted Task A head `9c8e97c`, `t3/task-a-ui-recovery-integration`/PR27 gained a manual public-repository draft-Release retention canary. Final canary run `42557930270` at `5adf895` created immutable tag `veyra-draft-canary-42557930270-1`, draft prerelease id `438720474`, four bounded authored non-audio assets, and passed an independent fresh-runner readback (`verified: true`); the release remains unpublished. No artifact/cache/paid runner or clobber was used. Source-only legal resources were regenerated at the current pin (`0` production components, `3` retained texts, `1` open coverage issue). Package provenance now binds packages to exact source/pin/schema/legal/run/host and rejects stale files; `scripts/package.sh` uses a build marker. Local Linux package attempt `final-linux-package-001` stopped at an offline-cache Compose plugin probe and never reached native/package assembly; local `fakeroot` and Xcode are absent. Production five-platform matrix/package retention and all release/native/signing gates remain undispatched/unmet. Details: [task-b-build-retention-preparation.md](verification/task-b-build-retention-preparation.md).
+- **2026-11-09 Task A UI/recovery integration (draft, not acceptance):** `t3/task-a-ui-recovery-integration` starts at PR22 docs head `7fbe62d` and merges exact recovery PR26 `cd715dd` without moving frozen refs. Committed code/test head `ee1aa17` wires exact standalone/member retained Validate (explicit localized repeated-member choice, never first/newest), neutral typed source exact validation without catalogue authority, and true `NEEDS_FOREGROUND` `resumePending` while ordinary pause/waiting keeps `resume(id)`. Final committed-source evidence: full shared **1,205/1,205**, selected connected UI/AppContainer union **138/138**, Android app/shared changed Kotlin compilation **52 tasks executed**, all exit 0 with identical inputs `f5a1d5d5…`, pin `c0a0809`, schema `aab30e43…`, positive drains and gate admission prefixes. An earlier same-head full shared attempt retained one 15s `DownloadRecoveryRoomTest` timeout (1,204/1,205); that exact method passed alone. Explicit validation under a paused batch intent remains unadmitted; known `MusicSurfacesTest.performScrollTo` hang unresolved and not included. No Task A/Task B/native/live/device/package/signing acceptance. Details: [task-a-ui-recovery-integration.md](verification/task-a-ui-recovery-integration.md).
 - **2026-11-08 PR21 review correction successor (draft, not acceptance):** new `t3/pr4-pr21-review-corrections` starts at frozen PR21 `6e0a64a`; PR19 `c31b33d` and parent PR4 `6d09ed5` remain unchanged. Cross-context canonical Resume now carries the exact PODCAST occurrence/binding/revision even while MUSIC is active; expected-binding mismatch rejects; podcast saved choice is unambiguous and cannot override canonical Resume; already-current repeat reloads without a queue edit. Final committed-source in-lock runs: UI/journey/saved **98/98**, shared resolver/activation/admission/command **98/98**, core/music/PR18 **69/69**, all exit 0 with identical inputs `48c4755a…`, pin `c0a0809`, schema `aab30e43…` and positive drains. Real schema2 migration leaves queued history `LEGACY_UNBOUND`/null binding, so no runtime legacy Resume success is claimed; the owner test asserts the truthful `resume_target_unavailable` limitation. Known `MusicSurfacesTest.performScrollTo` hang remains unaccepted. No Task A/PR17-20/shared API/native release acceptance.
 - **2026-11-08 PR19 review correction branch (draft, not acceptance):** frozen PR19 `c31b33d` remains unaccepted/unchanged. New `t3/pr4-pr19-review-corrections` adds exact `ResumeOccurrence`, saved-intent `localOnly` through actor/resolver/admission, pre-activation exact-local-authority fencing, unambiguous saved catalogue binding, and a successor in-lock evidence runner. Final in-lock results: saved/resume 8/8, shared local-only 1/1, affected podcast/UI 84/84, shared playback/admission/command 96/96, core/music/PR18 69/69, forced included `kmpYT` compile successful; all final inputs unchanged and drains positive. `MusicSurfacesTest.requestedAndFirstResultTitlesStayDistinctAndOnlyConfirmedOverlapLooksActive` hung at `performScrollTo`; the retained record has 0 finalized XML, executor exit 143 and a positive drain, without an in-run worker PID/start/TERM identity; the legacy scroll hang remains unaccepted. No Task A/PR17/PR18/PR20 acceptance or shared API integration.
 - Declared toolchain: Kotlin2.2.21/Compose plugin1.9.3/AGP8.13.2/Gradle8.13/JDK21 (JVM17); Room2.8.5/SQLite2.6.2/KSP2.2.21-2.0.4. Use command-local Gradle JVM arg `-Xmx1280m -XX:MaxMetaspaceSize=512m -XX:+UseSerialGC -XX:ActiveProcessorCount=2 -Dfile.encoding=UTF-8` as one quoted `-Dorg.gradle.jvmargs=...` argument; serialize heavy builds.

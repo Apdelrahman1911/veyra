@@ -45,8 +45,8 @@
   "fileHashes": {
     "INDEX.txt": "495980b17aa15d615e53ecee830e010349f21ae13143319e0dba886dc7af8ebd",
     "LICENSE": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
-    "NOTICE.md": "2227f968a4f241c6dd0add307158427d5f7f3367a42320b28d46dd991294e85a",
-    "THIRD_PARTY_NOTICES.txt": "9167d699582c1cbdb1d941c8b032129c282b35ffe38bba00f7889e58bf257434",
+    "NOTICE.md": "7ca2f79a699cbb9821efe4bb244638b1b7e2d3bf971fb026e2ee1e1ef01774b3",
+    "THIRD_PARTY_NOTICES.txt": "bbd4fdff5cb423ae29a8731b173cc52e84db48d22308f995645ee6223d19d025",
     "kmpYT-LICENSE": "2b48ffd17a0263667e7df9b64b277520776571b1ce73365134b7e92a6d114bcb",
     "kmpYT-THIRD_PARTY_NOTICES.md": "08b4452d51cb19117fe6ec956d98c2eaf4fa6e0fe4a6ea21eeb90e3bae8c34a0",
     "notices/3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04.txt": "3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04",
@@ -70,11 +70,12 @@
   "platforms": [],
   "schemaVersion": 1,
   "source": {
-    "kmpytNoticeRevision": "c0a08090fe7dbd76e20216559b8184ad2cccde63",
-    "kmpytPin": "c0a08090fe7dbd76e20216559b8184ad2cccde63",
+    "kmpytNoticeRevision": "6805d4db8077650992d342e5395b1f0d7c80e984",
+    "kmpytPin": "6805d4db8077650992d342e5395b1f0d7c80e984",
     "mode": "actual-pinned-checkout",
     "publicationVerified": false
   },
+  "sourceProjectArtifacts": [],
   "testOnly": false,
   "unverifiedReleaseGates": [
     "Exact final package closure (including JDK, native libraries and separately provisioned helpers).",

@@ -29,7 +29,7 @@ def python(code: str, *arguments: str) -> list[str]:
     return [sys.executable, "-I", "-B", "-c", code, *map(str, arguments)]
 
 
-def alive(pid: int) -> bool:
+def alive(pid: int, *, wait_ms: int = 0) -> bool:
     if os.name == "nt":
         kernel = ctypes.WinDLL("kernel32", use_last_error=True)
         kernel.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
@@ -42,7 +42,10 @@ def alive(pid: int) -> bool:
         if not handle:
             return False
         try:
-            return kernel.WaitForSingleObject(handle, 0) == 258  # WAIT_TIMEOUT
+            result = kernel.WaitForSingleObject(handle, wait_ms)
+            if result not in (0, 258):  # WAIT_OBJECT_0 / WAIT_TIMEOUT
+                raise OSError("Cannot verify authored process termination")
+            return result == 258
         finally:
             kernel.CloseHandle(handle)
     try:
@@ -52,7 +55,7 @@ def alive(pid: int) -> bool:
         return False
 
 
-class OwnedProcessTest(unittest.TestCase):
+class _OwnedProcessFixture:
     def setUp(self):
         parent = ROOT / ".work/native-owned-process-tests"
         parent.mkdir(parents=True, exist_ok=True)
@@ -90,7 +93,10 @@ class OwnedProcessTest(unittest.TestCase):
         pids = [int(value) for value in path.read_text().split()]
         self.assertTrue(pids)
         for pid in pids:
-            self.assertFalse(alive(pid), f"Owned fixture process {pid} was not awaited/reaped")
+            # Windows termination and process-object signaling are separate observations.
+            # Pin one query-only handle and bound the wait; never signal by PID.
+            self.assertFalse(alive(pid, wait_ms=2000),
+                             f"Owned fixture process {pid} was not awaited/reaped")
 
     def tree(self, path, *, exitcode=None, flood=False, detached=False):
         descendant = "import signal,time; signal.signal(signal.SIGTERM,lambda *_:None); time.sleep(60)"
@@ -102,6 +108,7 @@ class OwnedProcessTest(unittest.TestCase):
             + (f"sys.exit({exitcode})\n" if exitcode is not None else
                "while True:\n print('x'*8192,flush=True)\n" if flood else "time.sleep(60)\n"), path)
 
+class OwnedProcessTest(_OwnedProcessFixture, unittest.TestCase):
     def test_capture_combines_bounded_stdout_and_stderr(self):
         output = self.capture(python("import sys; print('authored stdout',flush=True); print('authored stderr',file=sys.stderr,flush=True)"))
         self.assertEqual(b"authored stdout\nauthored stderr\n", output.replace(b"\r\n", b"\n"))
@@ -373,6 +380,165 @@ class WindowsJobPolicyTest(unittest.TestCase):
         def kill(self): self.events.append("kill-gate")
         def wait(self, timeout): self.events.append("await-gate"); return 1
 
+    def test_windows_fixture_waits_on_a_pinned_handle_and_refuses_wait_errors(self):
+        for result, expected in ((0, False), (258, True), (0xffffffff, None)):
+            events = []
+            kernel = SimpleNamespace(
+                OpenProcess=lambda access, inherit, pid: events.append(("open", access, pid)) or 81,
+                WaitForSingleObject=lambda handle, timeout: events.append(("wait", handle, timeout)) or result,
+                CloseHandle=lambda handle: events.append(("close", handle)) or 1)
+            with self.subTest(result=result), patch.object(os, "name", "nt"), \
+                 patch.object(ctypes, "WinDLL", return_value=kernel, create=True):
+                if expected is None:
+                    with self.assertRaises(OSError):
+                        alive(123, wait_ms=2000)
+                else:
+                    self.assertEqual(expected, alive(123, wait_ms=2000))
+            self.assertEqual([("open", 0x00100000, 123), ("wait", 81, 2000), ("close", 81)], events)
+
+    def test_failure_snapshot_distinguishes_completed_command_from_live_job(self):
+        api = self.Api()
+        api.count = 2
+        job = OWNED._WindowsJob(api)
+        expected = {"listed": 2, "truncated": False, "members": [{"pid": 12, "image": "mspdbsrv.exe"}]}
+        with patch.object(api, "processes", return_value=expected, create=True):
+            result = job.failure_state(SimpleNamespace(completed={"returncode": 0}))
+        self.assertTrue(result["commandCompleted"])
+        self.assertEqual(0, result["commandReturncode"])
+        self.assertEqual(2, result["jobActiveBeforeCleanup"])
+        self.assertEqual(expected, result["processes"])
+        with patch.object(api, "processes", side_effect=OSError("authored private error"), create=True):
+            result = job.failure_state(None)
+        self.assertFalse(result["commandCompleted"])
+        self.assertIsNone(result["commandReturncode"])
+        self.assertEqual("OSError", result["snapshotError"])
+        self.assertNotIn("private", json.dumps(result))
+        job.close()
+
+    def test_process_snapshot_rechecks_job_membership_and_redacts_unknown_images(self):
+        events = []
+        def query(handle, kind, pointer, size, returned):
+            self.assertEqual(3, kind)
+            members = ctypes.cast(pointer, ctypes.POINTER(OWNED._JobProcessIds)).contents
+            members.assigned = members.listed = 3
+            members.ids[:3] = (11, 22, 33)
+            return 1
+        def member(process, job, pointer):
+            ctypes.cast(pointer, ctypes.POINTER(ctypes.c_int)).contents.value = process != 22
+            return 1
+        def image(process, flags, buffer, capacity):
+            events.append(("image", process))
+            buffer.value = "C:/authored-private-dir/" + ("MSBuild.exe" if process == 11 else "authored-private.exe")
+            return 1
+        def close(handle): events.append(("close", handle)); return 1
+        api = object.__new__(OWNED._WindowsApi)
+        api.dll = SimpleNamespace(QueryInformationJobObject=query, OpenProcess=lambda access, inherit, pid: pid,
+            IsProcessInJob=member, QueryFullProcessImageNameW=image, CloseHandle=close)
+        result = api.processes(91)
+        self.assertEqual([{"pid": 11, "image": "msbuild.exe"}, {"pid": 33, "image": "<other>"}], result["members"])
+        self.assertNotIn("private", json.dumps(result))
+        self.assertNotIn(("image", 22), events)
+        self.assertEqual([11, 22, 33], [item[1] for item in events if item[0] == "close"])
+
+    def test_completed_telemetry_termination_requires_exact_image_and_job_membership(self):
+        events = []
+        expected = "C:/authored-msvc/Hostx64/x64/vctip.exe"
+        def query(handle, kind, pointer, size, returned):
+            members = ctypes.cast(pointer, ctypes.POINTER(OWNED._JobProcessIds)).contents
+            members.listed = members.assigned = 4
+            members.ids[:4] = (11, 22, 33, 44)
+            return 1
+        def member(process, job, pointer):
+            ctypes.cast(pointer, ctypes.POINTER(ctypes.c_int)).contents.value = process != 22
+            return 1
+        def image(process, flags, buffer, capacity):
+            events.append(("image", process))
+            buffer.value = expected if process in (11, 22) else (
+                "C:/unrelated/vctip.exe" if process == 33 else "C:/authored-msvc/Hostx64/x64/cl.exe")
+            return 1
+        def opened(access, inherit, pid):
+            self.assertEqual(0x00101001, access)
+            return pid
+        api = object.__new__(OWNED._WindowsApi)
+        api.dll = SimpleNamespace(QueryInformationJobObject=query, OpenProcess=opened,
+            IsProcessInJob=member, QueryFullProcessImageNameW=image,
+            WaitForSingleObject=lambda process, timeout: events.append(("wait", process, timeout)) or (0 if timeout else 258),
+            TerminateProcess=lambda process, code: events.append(("terminate", process, code)) or 1,
+            CloseHandle=lambda process: events.append(("close", process)) or 1)
+        self.assertEqual(1, api.finish_telemetry(91, expected.upper()))
+        self.assertEqual([("terminate", 11, 0)], [e for e in events if e[0] == "terminate"])
+        self.assertIn(("wait", 11, 1000), events)
+        self.assertNotIn(("image", 22), events)
+        self.assertEqual([11, 22, 33, 44], [e[1] for e in events if e[0] == "close"])
+
+    def test_telemetry_termination_failure_closes_handle_and_cannot_claim_success(self):
+        for wait_result in (258, 0xffffffff):
+            closed = []
+            def query(handle, kind, pointer, size, returned):
+                members = ctypes.cast(pointer, ctypes.POINTER(OWNED._JobProcessIds)).contents
+                members.listed = members.assigned = 1
+                members.ids[0] = 11
+                return 1
+            def member(process, job, pointer):
+                ctypes.cast(pointer, ctypes.POINTER(ctypes.c_int)).contents.value = 1
+                return 1
+            def image(process, flags, buffer, capacity):
+                buffer.value = "C:/authored/vctip.exe"
+                return 1
+            api = object.__new__(OWNED._WindowsApi)
+            api.dll = SimpleNamespace(QueryInformationJobObject=query, OpenProcess=lambda *args: 81,
+                IsProcessInJob=member, QueryFullProcessImageNameW=image,
+                WaitForSingleObject=lambda *args: wait_result,
+                TerminateProcess=lambda *args: 0,
+                CloseHandle=lambda handle: closed.append(handle) or 1)
+            with self.subTest(wait_result=wait_result), self.assertRaises(OSError):
+                api.finish_telemetry(91, "C:/authored/vctip.exe")
+            self.assertEqual([81], closed)
+
+    def test_telemetry_completion_rule_requires_successful_exited_command_and_empty_job(self):
+        image = "C:/authored/vctip.exe"
+        for case in ("success", "command-running", "command-failed", "gate-failed", "unrecognized-child", "disabled", "cleanup-failed"):
+            calls = []
+            class Job:
+                count = 1
+                def active(inner): return inner.count
+                def finish_telemetry(inner, expected):
+                    calls.append(expected)
+                    if case == "cleanup-failed":
+                        raise OSError("authored private detail")
+                    if case == "success":
+                        inner.count = 0
+                        return 1
+                    return 0
+            job = Job()
+            message = {"event": "complete", "returncode": 7 if case == "command-failed" else 0, "drained": False}
+            control = SimpleNamespace(take=lambda: [] if case == "command-running" else [message],
+                                      failed=threading.Event(), done=threading.Event())
+            control.done.set()
+            process = SimpleNamespace(poll=lambda: None if case == "command-running" else 3 if case == "gate-failed" else 0)
+            with self.subTest(case=case), patch("sys.stderr", new_callable=io.StringIO) as output:
+                if case == "success":
+                    self.assertEqual(0, OWNED._monitor(process, job, control, None, time.monotonic()+.1, None, image))
+                    self.assertEqual([image], calls)
+                    self.assertEqual(0, job.count)
+                    self.assertIn("owned MSVC telemetry", output.getvalue())
+                else:
+                    with self.assertRaises(OWNED._Stop) as raised:
+                        OWNED._monitor(process, job, control, None, time.monotonic()+.035, None,
+                                       None if case == "disabled" else image)
+                    expected = {"command-failed": "command_failed", "gate-failed": "owner_failed",
+                                "cleanup-failed": "telemetry_cleanup_failed"}.get(case, "timeout")
+                    self.assertEqual(expected, raised.exception.reason)
+                    if case in ("command-running", "command-failed", "gate-failed", "disabled"):
+                        self.assertEqual([], calls)
+                    self.assertNotIn("private", output.getvalue())
+
+    def test_invalid_telemetry_policy_is_refused_before_any_launch(self):
+        with patch.object(OWNED, "_spawn", side_effect=AssertionError("No process may start")):
+            for image in ("vctip.exe", "C:/authored/cl.exe", "C:/authored/../vctip.exe", 42):
+                with self.subTest(image=image), self.assertRaises(ValueError):
+                    OWNED._execute(python("pass"), cwd=ROOT, env={}, timeout=1, completed_telemetry_image=image)
+
     def test_job_has_kill_on_close_without_either_breakaway_flag(self):
         api = self.Api()
         job = OWNED._WindowsJob(api)
@@ -449,10 +615,23 @@ class WindowsJobPolicyTest(unittest.TestCase):
 
 
 @unittest.skipUnless(os.name == "nt", "Actual Windows Job Object execution is required on Windows CI")
-class WindowsActualJobTest(unittest.TestCase):
-    setUp = OwnedProcessTest.setUp
-    tearDown = OwnedProcessTest.tearDown
-    capture = OwnedProcessTest.capture
+class WindowsActualJobTest(_OwnedProcessFixture, unittest.TestCase):
+
+    def test_timeout_snapshot_reports_exited_root_and_remaining_owned_child(self):
+        ids = self.directory / "pids"
+        with self.assertRaises(OWNED.OwnedProcessError) as raised:
+            self.capture(self.tree(ids, exitcode=0), timeout=2.5)
+        failure = raised.exception
+        self.assertEqual("timeout", failure.reason)
+        self.assertTrue(failure.cleanup_complete)
+        state = failure.process_state
+        self.assertTrue(state["commandCompleted"])
+        self.assertEqual(0, state["commandReturncode"])
+        self.assertGreater(state["jobActiveBeforeCleanup"], 0)
+        self.assertTrue(state["processes"]["members"])
+        self.assertTrue(any(member["image"] in ("python.exe", "python3.exe")
+                            for member in state["processes"]["members"]))
+        self.assert_drained(ids)
 
     def test_actual_job_refuses_explicit_breakaway(self):
         code = """import subprocess,sys

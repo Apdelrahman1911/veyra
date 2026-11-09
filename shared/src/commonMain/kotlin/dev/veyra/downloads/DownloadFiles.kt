@@ -7,6 +7,7 @@ import dev.veyra.model.OfflineAssetKind
 import dev.veyra.model.VeyraException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.IO
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
@@ -16,6 +17,7 @@ import okio.FileSystem
 import okio.HashingSource
 import okio.Path
 import okio.Path.Companion.toPath
+import okio.use
 
 internal fun failureFromStorage(error: Exception): VeyraException {
     if (error is VeyraException) return error

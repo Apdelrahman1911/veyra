@@ -1,7 +1,7 @@
 Veyra offline third-party notices
 
 Generated from the actual pinned source and only explicitly supplied production inventories.
-POM license pointers are metadata, not substitutes for complete terms.
+License filenames and POM pointers do not prove complete terms; explicit full-text review is required.
 This file does NOT certify a binary release, native source closure, installation or physical audio.
 
 Inventoried platforms: none yet

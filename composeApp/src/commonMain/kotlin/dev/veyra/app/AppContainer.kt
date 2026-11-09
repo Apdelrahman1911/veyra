@@ -487,11 +487,13 @@ class AppContainer(
     }
 
     /**
-     * Explicit local validation of a retained FAILED physical job. The exact job id and binding
-     * come from the paired persisted download projection; the coordinator still rechecks the
-     * claim/asset/host/offline/native fences. The returned AssetUse is not a playback grant.
+     * Explicit local validation of a retained FAILED physical job. The exact job id and
+     * standalone/batch-member identity come from the paired persisted download projection; the
+     * coordinator still rechecks the claim/asset/host/offline/native fences. The returned
+     * AssetUse is not a playback grant.
      */
-    private suspend fun validateRetainedDownload(downloadId: String, bindingIdValue: String) {
+    private suspend fun validateRetainedDownload(downloadId: String, bindingIdValue: String,
+        batchIdValue: String?, memberPositionValue: Int?, expectedIntentRevisionValue: Long?) {
         val presentation = downloads.acquisitionPresentation.value
         val view = presentation.view
         val state = view.acquisition
@@ -502,11 +504,24 @@ class AppContainer(
             ?: throw VeyraException(AppFailure(FailureCode.NOT_FOUND))
         val bindingId = ExecutionBindingId(bindingIdValue)
         val mediaId = entry.mediaId?.takeIf { it.isNotBlank() }
-        if (entry.origin != DownloadSurfaceOrigin.TYPED_CATALOGUE || entry.status != DownloadStatus.FAILED ||
-            !entry.hasOwnedBytes || entry.cleanupPending || entry.ready || mediaId == null ||
-            entry.bindingId != bindingId.value) {
+        if (entry.origin == DownloadSurfaceOrigin.LEGACY || entry.status != DownloadStatus.FAILED ||
+            !entry.hasOwnedBytes || entry.cleanupPending || entry.ready) {
             throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "retained_validation_evidence_mismatch"))
         }
+        if (entry.origin == DownloadSurfaceOrigin.TYPED_CATALOGUE) {
+            if (mediaId == null || entry.bindingId != bindingId.value) {
+                throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "retained_validation_evidence_mismatch"))
+            }
+        } else if (entry.origin != DownloadSurfaceOrigin.TYPED_SOURCE || mediaId != null || entry.bindingId != null) {
+            throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "retained_validation_evidence_mismatch"))
+        }
+        val targets = listOfNotNull(entry.retainedValidation) + entry.retainedValidationChoices
+        val target = targets.singleOrNull { candidate ->
+            candidate.jobId == downloadId && candidate.bindingId == bindingId.value &&
+                candidate.batchId == batchIdValue && candidate.memberPosition == memberPositionValue &&
+                candidate.expectedIntentRevision == expectedIntentRevisionValue
+        } ?: throw VeyraException(AppFailure(FailureCode.INVALID_STATE,
+            if (targets.isEmpty()) "retained_validation_target_unavailable" else "retained_validation_target_stale"))
         val execution = try {
             state.executionContext(bindingId)
         } catch (failure: VeyraException) {
@@ -514,15 +529,49 @@ class AppContainer(
         } catch (_: Exception) {
             throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "saved_recording_identity_missing"))
         }
-        val captured = (execution.request.metadata as? MediaCapture)?.media
-        val subject = execution.subject as? ExecutableSubject.CatalogMedia
-        if (captured?.id != mediaId || subject?.mediaId != mediaId ||
-            execution.binding.subjectId != subject.id || execution.binding.recordingId == null) {
+        val producer = state.physicalDownloads[downloadId]?.producer as? PhysicalDownloadProducer.Typed
+            ?: throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "retained_validation_identity_mismatch"))
+        if (producer.bindingId != bindingId || producer.recordingId != execution.recording.id ||
+            execution.binding.subjectId != producer.subjectId || execution.binding.recordingId == null) {
             throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "retained_validation_identity_mismatch"))
         }
-        // The shared owner's API performs the owned hash/native validation and atomic exact-use
-        // finish. Its return is deliberately not consumed as playback/native authority.
-        downloads.validateRetainedAssetUse(downloadId, bindingId)
+        when (val subject = execution.subject) {
+            is ExecutableSubject.CatalogMedia -> {
+                val captured = (execution.request.metadata as? MediaCapture)?.media
+                if (entry.origin != DownloadSurfaceOrigin.TYPED_CATALOGUE ||
+                    captured?.id != mediaId || subject.mediaId != mediaId || subject.id != producer.subjectId) {
+                    throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "retained_validation_identity_mismatch"))
+                }
+            }
+            is ExecutableSubject.SourceRecordingSubject -> {
+                if (entry.origin != DownloadSurfaceOrigin.TYPED_SOURCE || subject.id != producer.subjectId ||
+                    subject.recordingId != producer.recordingId) {
+                    throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "retained_validation_identity_mismatch"))
+                }
+            }
+        }
+        // The shared owner performs the owned hash/native validation and atomic exact-use finish.
+        // Its return is deliberately not consumed as playback/native authority. A batch member
+        // is addressed by its exact batch/member/revision, never by first/newest claim.
+        if (target.isBatchMember) {
+            downloads.validateRetainedMemberAssetUse(DownloadBatchId(requireNotNull(target.batchId)),
+                requireNotNull(target.memberPosition), requireNotNull(target.expectedIntentRevision), bindingId)
+        } else {
+            downloads.validateRetainedAssetUse(downloadId, bindingId)
+        }
+    }
+
+    /**
+     * A visible-app Resume action. NEEDS_FOREGROUND is a real foreground announcement
+     * (`resumePending`) of the same host lifecycle that visibility activation uses; ordinary
+     * paused/waiting-network jobs keep their existing serialized `resume(id)` path.
+     */
+    private suspend fun resumeDownload(downloadId: String) {
+        val presentation = downloads.acquisitionPresentation.value
+        val entry = downloadSurface(presentation.view.snapshot, presentation).entries
+            .singleOrNull { it.id == downloadId }
+        if (entry?.status == DownloadStatus.NEEDS_FOREGROUND) downloads.resumePending()
+        else downloads.resume(downloadId)
     }
 
     /**
@@ -786,7 +835,8 @@ class AppContainer(
             MusicUiAction.ImportAudio -> fail(AppFailure(FailureCode.UNSUPPORTED_SOURCE))
             is MusicUiAction.Play -> play(listOf(action.item))
             is MusicUiAction.PlaySaved -> playSaved(action.item, action.bindingId)
-            is MusicUiAction.ValidateRetainedDownload -> validateRetainedDownload(action.downloadId, action.bindingId)
+            is MusicUiAction.ValidateRetainedDownload -> validateRetainedDownload(action.downloadId, action.bindingId,
+                action.batchId, action.memberPosition, action.expectedIntentRevision)
             is MusicUiAction.PlayCollection -> play(action.items, action.shuffle)
             is MusicUiAction.EnqueueCollection -> {
                 require(action.items.isNotEmpty())
@@ -857,7 +907,7 @@ class AppContainer(
                 effects.launch { if (pending.isNotEmpty() && pending.awaitAll().all { it }) inform(TextKey.DownloadsQueued) }
             }
             is MusicUiAction.PauseDownload -> downloadEffect { downloads.pause(action.downloadId) }
-            is MusicUiAction.ResumeDownload -> downloadEffect(requiresCoverage = true) { downloads.resume(action.downloadId) }
+            is MusicUiAction.ResumeDownload -> downloadEffect(requiresCoverage = true) { resumeDownload(action.downloadId) }
             is MusicUiAction.CancelDownload -> downloadEffect { downloads.cancel(action.downloadId) }
             is MusicUiAction.RemoveDownload -> downloadEffect { removeDownload(action.downloadId) }
             MusicUiAction.ManageStorage -> selectDestination(AppDestination.SETTINGS)
@@ -948,7 +998,8 @@ class AppContainer(
             is PodcastAction.ResumeEpisode -> resumeEpisode(action.mediaId, action.bindingId,
                 action.occurrenceId, action.expectedQueueRevision)
             is PodcastAction.PlaySavedEpisode -> playSaved(episode(action.mediaId), action.bindingId)
-            is PodcastAction.ValidateRetainedDownload -> validateRetainedDownload(action.downloadId, action.bindingId)
+            is PodcastAction.ValidateRetainedDownload -> validateRetainedDownload(action.downloadId, action.bindingId,
+                action.batchId, action.memberPosition, action.expectedIntentRevision)
             is PodcastAction.StartOver -> if (!restartCurrentPodcast(action.mediaId)) {
                 play(listOf(episode(action.mediaId)), startFromBeginning = true)
             }
@@ -962,7 +1013,7 @@ class AppContainer(
             PodcastAction.OpenQueue -> navigate { it.copy(queueOpen = true, viewedQueue = QueueContext.PODCAST) }
             is PodcastAction.Download -> download(episode(action.mediaId))
             is PodcastAction.PauseDownload -> downloadEffect { downloads.pause(action.downloadId) }
-            is PodcastAction.ResumeDownload -> downloadEffect(requiresCoverage = true) { downloads.resume(action.downloadId) }
+            is PodcastAction.ResumeDownload -> downloadEffect(requiresCoverage = true) { resumeDownload(action.downloadId) }
             is PodcastAction.CancelDownload -> downloadEffect { downloads.cancel(action.downloadId) }
             is PodcastAction.RemoveDownload -> downloadEffect { removeDownload(action.downloadId) }
             is PodcastAction.OpenPublisher -> openExternalInBackground(action.url)

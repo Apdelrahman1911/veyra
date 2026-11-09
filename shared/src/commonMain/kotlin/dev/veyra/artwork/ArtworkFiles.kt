@@ -8,11 +8,13 @@ import okio.Buffer
 import okio.BufferedSink
 import okio.ByteString.Companion.encodeUtf8
 import okio.FileSystem
-import okio.ForwardingSink
 import okio.HashingSource
 import okio.Path
 import okio.Path.Companion.toPath
+import okio.Sink
+import okio.Timeout
 import okio.buffer
+import okio.use
 
 /** Image-only owned storage. No source execution, audio files, download journals, or HTTP. */
 class ArtworkFiles(directory: String, private val fileSystem: FileSystem = FileSystem.SYSTEM) {
@@ -45,9 +47,10 @@ class ArtworkFiles(directory: String, private val fileSystem: FileSystem = FileS
         val underlying = fileSystem.sink(checked(stage), mustCreate = true)
         // Errors may first surface while a buffer is flushed or closed, well after sink creation.
         // Keep them typed so SafeHttp cannot misclassify disk-full as an HTTP transport failure.
-        object : ForwardingSink(underlying) {
+        object : Sink {
             override fun write(source: Buffer, byteCount: Long) = storage { underlying.write(source, byteCount) }
             override fun flush() = storage { underlying.flush() }
+            override fun timeout(): Timeout = underlying.timeout()
             override fun close() = storage { underlying.close() }
         }.buffer()
     }

@@ -531,10 +531,13 @@ class CentralListeningProofTest {
 
     private fun marker() = CentralProofMarker(
         process = CentralProcessEvidence.current(), mediaId = item.id, completeTitle = title, discoveryVideoId = discoveredId,
-        binding = binding, downloadId = "authored-download", assetId = "authored-asset", sizeBytes = 32,
+        firstResultVideoId = selectedId, firstResultTitle = first.title,
+        requestId = "authored-request", receiptId = "authored-receipt", bindingId = "authored-binding",
+        recordingId = "authored-recording", subjectId = "authored-subject", occurrenceId = "authored-occurrence",
+        downloadId = "authored-download", assetId = "authored-asset", sizeBytes = 32,
         sha256 = "b".repeat(64), representationId = representation, measuredDurationMs = 30_000,
-        entryId = "authored-queue-entry", positionMs = 1_400,
-        native = CentralNativeEvidence(generation = 1, entryId = "authored-queue-entry", durationMs = 30_000,
+        entryId = "authored-occurrence", positionMs = 1_400,
+        native = CentralNativeEvidence(generation = 1, entryId = "authored-occurrence", durationMs = 30_000,
             firstPlayingPositionMs = 600, advancingPositionMs = 2_650, pausedPositionMs = 2_700, resumedPositionMs = 3_250,
             forwardTargetMs = 15_000, forwardConfirmedMs = 15_010, forwardAdvancingPositionMs = 15_550,
             backwardConfirmedMs = 750, backwardAdvancingPositionMs = 1_350, finalPausedPositionMs = 1_400,
@@ -554,7 +557,7 @@ class CentralListeningProofTest {
         assertFalse(content.contains("media.example")); assertFalse(content.contains("authored-secret"))
         Files.list(directory.resolve("verification")).use { stream -> assertEquals(1L, stream.count()) }
         assertFailsWith<VeyraException> { authored.copy(representationId = "").requireValid() }
-        assertFailsWith<VeyraException> { authored.copy(binding = binding.copy(selectionOrdinal = 1)).requireValid() }
+        assertFailsWith<VeyraException> { authored.copy(entryId = "other-occurrence").requireValid() }
         assertFailsWith<VeyraException> { authored.copy(native = authored.native.copy(physicalAudioVerified = true)).requireValid() }
     }
 

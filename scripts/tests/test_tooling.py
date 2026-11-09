@@ -15,13 +15,73 @@ ROOT = Path(__file__).resolve().parents[2]
 TOOLS = ROOT / "scripts"
 TMP = ROOT / ".work" / "tmp"
 TMP.mkdir(parents=True, exist_ok=True)
+BASH = os.environ.get("VEYRA_TRUSTED_BASH") or shutil.which("bash") or "bash"
 
 
 class ScopedToolingTests(unittest.TestCase):
     def test_shell_syntax(self) -> None:
+        bash = BASH
+        if sys.platform.startswith("win"):
+            self.assertNotIn("system32", bash.lower(), "Windows shell resolution must not use the WSL shim")
         for path in TOOLS.glob("*.sh"):
             with self.subTest(script=path.name):
-                subprocess.run(["bash", "-n", str(path)], check=True)
+                subprocess.run([bash, "-n", str(path)], check=True)
+
+    def test_scoped_bash_and_jdk_selection(self) -> None:
+        bash = BASH
+        result = subprocess.run(
+            [bash, str(TOOLS / "dev.sh"), sys.executable, "-B", "-c",
+             "import os,shutil; print(os.environ['VEYRA_TRUSTED_BASH']); "
+             "print(os.environ['JAVA_HOME']); print(shutil.which('bash'))"],
+            check=True, text=True, capture_output=True,
+        )
+        trusted, java_home, resolved_bash = result.stdout.splitlines()[:3]
+        self.assertTrue(Path(trusted).is_file() or shutil.which(trusted))
+        if sys.platform.startswith("win"):
+            self.assertNotIn("system32", trusted.lower(), "trusted bash must be existing Git Bash, not WSL")
+            self.assertEqual(Path(trusted).resolve(), Path(resolved_bash).resolve(),
+                             "Native subprocess PATH must select the trusted Git Bash")
+        self.assertTrue((Path(java_home) / "bin" / ("java.exe" if sys.platform.startswith("win") else "java")).is_file())
+
+    def test_shell_entrypoints_are_executable(self) -> None:
+        for path in TOOLS.glob("*.sh"):
+            with self.subTest(script=path.name):
+                result = subprocess.run(
+                    ["git", "-C", str(ROOT), "ls-files", "-s", str(path.relative_to(ROOT))],
+                    check=True, text=True, capture_output=True,
+                )
+                if not result.stdout.startswith("100755 "):
+                    change = subprocess.run(
+                        ["git", "-C", str(ROOT), "diff", "--summary", "--",
+                         str(path.relative_to(ROOT))],
+                        check=True, text=True, capture_output=True,
+                    ).stdout
+                    self.assertIn("mode change 100644 => 100755", change,
+                                  path.name + " must be executable in the index or be an explicit staged-for-review mode diff")
+                if not sys.platform.startswith("win"):
+                    self.assertTrue(os.access(path, os.X_OK), path.name + " must have an executable mode")
+
+    def test_desktop_tests_continue_after_shared_failure(self) -> None:
+        ci = (TOOLS / "ci.sh").read_text()
+        self.assertIn("--continue :shared:jvmTest :composeApp:desktopTest", ci)
+
+    def test_jdk21_selection_is_shared_not_duplicated(self) -> None:
+        self.assertIn("JAVA_HOME_21_X64", (TOOLS / "env.sh").read_text())
+        self.assertNotIn("JAVA_HOME_21", (TOOLS / "ci.sh").read_text())
+
+    def test_retention_asset_lists_are_canonical_for_windows_bash(self) -> None:
+        script = (TOOLS / "build-retention.sh").read_text()
+        self.assertIn("print(path.as_posix())", script)
+        self.assertIn("value=\"${value%$'\\r'}\"", script)
+
+    def test_windows_crlf_asset_lists_are_stripped(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="crlf-list-", dir=TMP) as directory:
+            listing = Path(directory) / "assets.list"
+            listing.write_bytes(b"first.bin\r\nsecond file.bin\r\n")
+            snippet = 'while IFS= read -r value; do value="${value%$\'\\r\'}"; printf "<%s>\\n" "$value"; done < "$1"'
+            result = subprocess.run([BASH, "-c", snippet, "_", listing.as_posix()],
+                                    check=True, text=True, capture_output=True)
+            self.assertEqual(result.stdout, "<first.bin>\n<second file.bin>\n")
 
     def test_owned_directories_and_parent_environment(self) -> None:
         before = {key: os.environ.get(key) for key in ("HOME", "TMPDIR", "GRADLE_USER_HOME")}
@@ -33,7 +93,7 @@ class ScopedToolingTests(unittest.TestCase):
             "print(json.dumps({n:os.environ[n] for n in names}))"
         )
         result = subprocess.run(
-            ["bash", str(TOOLS / "dev.sh"), sys.executable, "-B", "-c", command],
+            [BASH, str(TOOLS / "dev.sh"), sys.executable, "-B", "-c", command],
             check=True, text=True, capture_output=True,
         )
         values = json.loads(result.stdout)
@@ -47,7 +107,7 @@ class ScopedToolingTests(unittest.TestCase):
     def test_deprecated_android_preference_overrides_are_removed(self) -> None:
         environment = dict(os.environ, ANDROID_PREFS_ROOT="/must-not-be-used", ANDROID_SDK_HOME="/also-unused")
         result = subprocess.run(
-            ["bash", str(TOOLS / "dev.sh"), sys.executable, "-B", "-c",
+            [BASH, str(TOOLS / "dev.sh"), sys.executable, "-B", "-c",
              "import os; assert 'ANDROID_PREFS_ROOT' not in os.environ; "
              "assert 'ANDROID_SDK_HOME' not in os.environ; "
              "assert os.environ['ANDROID_USER_HOME'].endswith('/.work/android/user')"],
@@ -57,11 +117,13 @@ class ScopedToolingTests(unittest.TestCase):
 
     def test_arguments_with_spaces_survive_launcher(self) -> None:
         result = subprocess.run(
-            ["bash", str(TOOLS / "dev.sh"), sys.executable, "-B", "-c",
-             "import sys; print(repr(sys.argv[1:]))", "a b", "Arabic ڤيرا", "--literal"],
-            check=True, text=True, capture_output=True,
+            [BASH, str(TOOLS / "dev.sh"), sys.executable, "-B", "-c",
+             "import json, sys; print(json.dumps(sys.argv[1:], ensure_ascii=True))",
+             "a b", "Arabic ڤيرا", "--literal"],
+            text=True, capture_output=True,
         )
-        self.assertEqual(result.stdout.strip(), repr(["a b", "Arabic ڤيرا", "--literal"]))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), ["a b", "Arabic ڤيرا", "--literal"])
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "Linux guarded display context")
     def test_owned_display_authentication_survives_nested_scoped_wrappers(self) -> None:
@@ -80,7 +142,7 @@ class ScopedToolingTests(unittest.TestCase):
                                XAUTHORITY=str(authority), DISPLAY="127.0.0.1:12345",
                                VEYRA_DISPLAY_MOUNT_NAMESPACE=os.readlink("/proc/self/ns/mnt"))
             result = subprocess.run(
-                ["bash", str(scripts / "dev.sh"), "bash", str(scripts / "dev.sh"),
+                [BASH, str(scripts / "dev.sh"), BASH, str(scripts / "dev.sh"),
                  sys.executable, "-B", "-c", "import os;print(os.environ['XAUTHORITY'])"],
                 env=environment, text=True, capture_output=True,
             )
@@ -112,7 +174,7 @@ class ScopedToolingTests(unittest.TestCase):
             ]
             for changed in cases:
                 with self.subTest(changed=sorted(changed)):
-                    result = subprocess.run(["bash", str(scripts / "dev.sh"), "true"],
+                    result = subprocess.run([BASH, str(scripts / "dev.sh"), "true"],
                                             env=dict(environment, **changed), text=True, capture_output=True)
                     self.assertNotEqual(result.returncode, 0)
                     self.assertIn("invalid owned display", result.stderr)
@@ -132,7 +194,7 @@ class ScopedToolingTests(unittest.TestCase):
                         authority.symlink_to(target)
                     else:
                         os.link(authority, runtime / "second-link")
-                    result = subprocess.run(["bash", str(scripts / "dev.sh"), "true"],
+                    result = subprocess.run([BASH, str(scripts / "dev.sh"), "true"],
                                             env=environment, text=True, capture_output=True)
                     self.assertNotEqual(result.returncode, 0)
                     self.assertIn("invalid owned display", result.stderr)
@@ -141,7 +203,7 @@ class ScopedToolingTests(unittest.TestCase):
         environment = dict(os.environ, XAUTHORITY="/not-an-owned-display-cookie")
         environment.pop("VEYRA_DISPLAY_AUTHORITY", None)
         result = subprocess.run(
-            ["bash", str(TOOLS / "dev.sh"), sys.executable, "-B", "-c",
+            [BASH, str(TOOLS / "dev.sh"), sys.executable, "-B", "-c",
              "import os; print(os.environ['XAUTHORITY'])"],
             env=environment, text=True, capture_output=True,
         )
@@ -153,12 +215,39 @@ class ScopedToolingTests(unittest.TestCase):
         namespace = os.readlink("/proc/self/ns/mnt")
         before = Path("/proc/self/mountinfo").read_bytes()
         result = subprocess.run(
-            ["bash", str(TOOLS / "linux-namespace.sh"), "--inside", namespace,
+            [BASH, str(TOOLS / "linux-namespace.sh"), "--inside", namespace,
              str(os.getuid()), str(os.getgid()), "true"], text=True, capture_output=True,
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Refusing a mount", result.stderr)
         self.assertEqual(before, Path("/proc/self/mountinfo").read_bytes())
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux namespace launcher")
+    def test_podman_launcher_uses_only_owned_state_and_no_container(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="namespace-launcher-", dir=TMP) as directory:
+            tools = Path(directory)
+            capture = tools / "arguments"
+            fake = tools / "podman"
+            fake.write_bytes(b'#!/usr/bin/env bash\nprintf "%s\\0" "$@" > "$AUTHORED_NAMESPACE_ARGS"\nexit 73\n')
+            fake.chmod(0o755)
+            result = subprocess.run([BASH, str(TOOLS / "linux-namespace.sh"), "true"],
+                env=dict(os.environ, PATH=str(tools) + os.pathsep + os.environ["PATH"],
+                         VEYRA_LINUX_NAMESPACE_LAUNCHER="podman", AUTHORED_NAMESPACE_ARGS=str(capture)),
+                text=True, capture_output=True, timeout=10)
+            self.assertEqual(73, result.returncode, result.stderr)
+            args = capture.read_bytes().decode().split("\0")[:-1]
+            for option, suffix in (("--root", "storage"), ("--runroot", "run"), ("--tmpdir", "tmp")):
+                self.assertEqual(str(ROOT / ".work/ns" / suffix), args[args.index(option)+1])
+            self.assertLessEqual(len(args[args.index("--runroot")+1]), 50)
+            self.assertLessEqual(len("/home/runner/work/veyra/veyra/.work/ns/run"), 50)
+            self.assertIn("--storage-driver=vfs", args)
+            self.assertIn("--events-backend=none", args)
+            index = args.index("unshare")
+            self.assertEqual(["unshare", "unshare", "--mount", "--propagation", "unchanged"], args[index:index+5])
+            self.assertNotIn("run", args)
+            self.assertNotIn("pull", args)
+            self.assertNotIn("sudo", args)
+            self.assertEqual("true", args[-1])
 
     def test_escaping_work_directory_is_rejected_before_writes(self) -> None:
         with tempfile.TemporaryDirectory(prefix="boundary-test-", dir=TMP) as directory:
@@ -175,7 +264,7 @@ class ScopedToolingTests(unittest.TestCase):
             except (OSError, NotImplementedError) as error:
                 self.skipTest(f"This host cannot create a test directory symlink: {error}")
             result = subprocess.run(
-                ["bash", str(scripts / "dev.sh"), "true"], text=True, capture_output=True,
+                [BASH, str(scripts / "dev.sh"), "true"], text=True, capture_output=True,
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("out-of-repository", result.stderr)
@@ -196,7 +285,7 @@ assert a.is_relative_to(pathlib.Path(os.environ['VEYRA_PROJECT_ROOT']).resolve()
 print('Java/Node real temporary directory parity: PASS')
 '''
         result = subprocess.run(
-            ["bash", str(TOOLS / "dev.sh"), sys.executable, "-B", "-c", probe],
+            [BASH, str(TOOLS / "dev.sh"), sys.executable, "-B", "-c", probe],
             check=True, text=True, capture_output=True,
         )
         self.assertIn("parity: PASS", result.stdout)

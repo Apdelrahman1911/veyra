@@ -12,7 +12,10 @@ if [ "${1:-}" = --inside ]; then
     [ "$#" -ge 4 ] || exit 2
     original_namespace="$1"; caller_uid="$2"; caller_gid="$3"; shift 3
     current_namespace="$(readlink /proc/self/ns/mnt)"
-    parent_namespace="$(readlink "/proc/$PPID/ns/mnt")"
+    # A process outside the new user namespace can be unreadable through procfs.
+    # The original namespace was captured before isolation; it remains mandatory.
+    [[ "$original_namespace" =~ ^mnt:\[[0-9]+\]$ ]] || exit 2
+    parent_namespace="$(readlink "/proc/$PPID/ns/mnt" 2>/dev/null || true)"
     if [ "$current_namespace" = "$original_namespace" ] || [ "$current_namespace" = "$parent_namespace" ]; then
         printf '%s\n' 'Refusing a mount in the caller/parent namespace.' >&2
         exit 1
@@ -101,7 +104,8 @@ mount('--make-rprivate', '/')
 protected = mountpoints()
 for target in protected:
     if not readonly(target):
-        mount('--bind', target, target)
+        # A user namespace must retain locked descendant mounts (proc/sys/dev).
+        mount('--rbind', target, target)
         mount('-o', 'remount,bind,ro', target)
     if not readonly(target):
         raise SystemExit('Read-only mount verification failed: ' + str(target))
@@ -153,12 +157,27 @@ fi
 command -v unshare >/dev/null 2>&1 || { printf '%s\n' 'Existing unshare required; no uncontained fallback.' >&2; exit 1; }
 original_namespace="$(readlink /proc/self/ns/mnt)"
 caller_uid="$(id -u)"; caller_gid="$(id -g)"
-if [ "$caller_uid" = 0 ]; then
+if [ "${VEYRA_LINUX_NAMESPACE_LAUNCHER:-}" = podman ]; then
+    # Ubuntu's installed podman has an AppArmor attachment permitting user
+    # namespaces. Use its namespace command without an image/container or
+    # network setup; all container-tool state stays in the repository.
+    command -v podman >/dev/null 2>&1 || { printf '%s\n' 'Existing podman required; no installation or uncontained fallback.' >&2; exit 1; }
+    # Podman limits runroot to 50 characters (Unix socket paths). Keep the
+    # state name short even in the hosted runner's nested checkout.
+    namespace_state="$VEYRA_WORK_ROOT/ns"
+    [ "${#namespace_state}" -le 46 ] || { printf '%s\n' 'Repository path is too long for an owned Podman runroot (50-character limit).' >&2; exit 1; }
+    mkdir -p "$namespace_state/storage" "$namespace_state/run" "$namespace_state/tmp"
+    exec podman --root "$namespace_state/storage" --runroot "$namespace_state/run" \
+        --tmpdir "$namespace_state/tmp" --storage-driver=vfs --events-backend=none \
+        unshare unshare --mount --propagation unchanged "$SCRIPT_DIR/linux-namespace.sh" \
+        --inside "$original_namespace" 0 0 "$@"
+elif [ -n "${VEYRA_LINUX_NAMESPACE_LAUNCHER:-}" ]; then
+    printf '%s\n' 'Unreviewed namespace launcher refused.' >&2; exit 2
+elif [ "$caller_uid" = 0 ]; then
     exec unshare --mount --propagation unchanged "$SCRIPT_DIR/linux-namespace.sh" \
         --inside "$original_namespace" "$caller_uid" "$caller_gid" "$@"
 else
-    # No sudo/sysctl/AppArmor workaround: missing capabilities fail closed.
-    # sudo itself may have host-managed log/timestamp side effects.
+    # Missing namespace capabilities fail closed without system-policy changes.
     exec unshare --user --map-current-user --mount --propagation unchanged "$SCRIPT_DIR/linux-namespace.sh" \
         --inside "$original_namespace" "$caller_uid" "$caller_gid" "$@"
 fi

@@ -45,6 +45,7 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import dev.veyra.model.AppFailure
@@ -357,7 +358,16 @@ class MusicSurfacesTest {
         ui.onNodeWithText(strings.text(TextKey.CrossfadeActive)).performScrollTo().assertIsDisplayed()
         ui.onNodeWithText(strings.text(TextKey.IncomingAudioResolution)).performScrollTo().assertIsDisplayed()
         ui.onNodeWithText(incomingReceipt.firstResultTitle).performScrollTo().assertIsDisplayed()
-        ui.onNodeWithTag("crossfade-progress").performScrollTo().assertIsDisplayed()
+        // The Material indicator expands its semantics beyond its 4dp layout. In Compose
+        // 1.9.3, performScrollTo can keep requesting scroll after this pane hits its limit.
+        // Exercise the actual scroll gesture and require the complete progress target to fit.
+        ui.onNodeWithTag("player-details").performTouchInput { swipeUp() }
+        val progress = ui.onNodeWithTag("crossfade-progress").assertIsDisplayed()
+        val progressBounds = progress.getUnclippedBoundsInRoot()
+        val paneBounds = ui.onNodeWithTag("player-details").getUnclippedBoundsInRoot()
+        assertTrue(progressBounds.top >= paneBounds.top && progressBounds.bottom <= paneBounds.bottom,
+            "The complete crossfade progress target must be reachable within the details pane")
+        assertEquals(.35f, progress.fetchSemanticsNode().config[SemanticsProperties.ProgressBarRangeInfo].current)
         captureEvidence("player-en-light-confirmed-crossfade")
         assertEquals(requested, playback.currentItem)
     }

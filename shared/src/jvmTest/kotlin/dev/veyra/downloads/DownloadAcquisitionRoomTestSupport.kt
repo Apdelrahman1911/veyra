@@ -331,6 +331,13 @@ internal class DownloadRoomRepositoryFaults(private val real: AcquisitionLibrary
     @Volatile var afterAttemptFinishHook: (FinishPhysicalDownloadAttempt, PhysicalDownloadCommit<PhysicalDownloadJoin>) -> Unit = { _, _ -> }
     @Volatile var beforeMaintenanceFinishHook: suspend (FinishPhysicalDownloadMaintenance) -> Unit = { }
     @Volatile var afterMaintenanceFinishHook: (FinishPhysicalDownloadMaintenance, PhysicalDownloadCommit<PhysicalDownloadJoin>) -> Unit = { _, _ -> }
+    @Volatile var beforeMaintenanceClaim: suspend (ClaimPhysicalDownloadMaintenance) -> Unit = { }
+    @Volatile var transformMaintenanceClaim: suspend (ClaimPhysicalDownloadMaintenance,
+        PhysicalDownloadCommit<ClaimedPhysicalDownload>) -> PhysicalDownloadCommit<ClaimedPhysicalDownload> = { _, result -> result }
+    override suspend fun claimPhysicalDownloadMaintenance(command: ClaimPhysicalDownloadMaintenance): PhysicalDownloadCommit<ClaimedPhysicalDownload> {
+        beforeMaintenanceClaim(command)
+        return transformMaintenanceClaim(command, real.claimPhysicalDownloadMaintenance(command))
+    }
     @Volatile var afterPrepareHook: (PreparePhysicalDownloadFinalization, PhysicalDownloadCommit<PhysicalDownloadJoin>) -> Unit = { _, _ -> }
     @Volatile var afterPublishHook: (PublishPhysicalDownloadFinalization, PhysicalDownloadCommit<PhysicalDownloadJoin>) -> Unit = { _, _ -> }
     override suspend fun claimPhysicalDownloadAttempt(command: ClaimPhysicalDownloadAttempt): PhysicalDownloadCommit<ClaimedPhysicalDownload> {
@@ -358,6 +365,7 @@ internal class DownloadRoomRepositoryFaults(private val real: AcquisitionLibrary
         afterAttemptClaim = { it }; beforeAttemptFinish = { }
         afterAttemptClaimHook = { _, _ -> }; beforeAttemptFinishHook = { }; afterAttemptFinishHook = { _, _ -> }
         beforeMaintenanceFinishHook = { }; afterMaintenanceFinishHook = { _, _ -> }
+        beforeMaintenanceClaim = { }; transformMaintenanceClaim = { _, result -> result }
         afterPrepareHook = { _, _ -> }; afterPublishHook = { _, _ -> }
     }
 }

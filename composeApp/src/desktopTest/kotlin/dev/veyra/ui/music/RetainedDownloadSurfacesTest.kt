@@ -27,6 +27,7 @@ import dev.veyra.ui.design.VeyraTheme
 import dev.veyra.ui.downloads.DownloadSurface
 import dev.veyra.ui.downloads.DownloadSurfaceEntry
 import dev.veyra.ui.downloads.DownloadSurfaceOrigin
+import dev.veyra.ui.downloads.RetainedValidationTarget
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -40,18 +41,22 @@ class RetainedDownloadSurfacesTest {
     private val item = MediaItem("retained-music", "Retained local music", MediaKind.MUSIC,
         SourceRef(SourceProvider.YOUTUBE, "AAAAAAAAAAA"), durationMs = 100_000L)
 
-    private fun entry(origin: DownloadSurfaceOrigin, bindingId: String?) = DownloadSurfaceEntry(
+    private fun entry(origin: DownloadSurfaceOrigin, bindingId: String?,
+        target: RetainedValidationTarget? = null,
+        choices: List<RetainedValidationTarget> = emptyList()) = DownloadSurfaceEntry(
         id = "retained-job", origin = origin,
         mediaId = if (origin == DownloadSurfaceOrigin.TYPED_CATALOGUE) item.id else null,
         displayTitle = if (origin == DownloadSurfaceOrigin.TYPED_SOURCE) "Captured source title" else null,
         status = DownloadStatus.FAILED, bytesDownloaded = 1_024, totalBytes = 1_024,
-        hasOwnedBytes = true, bindingId = bindingId,
+        hasOwnedBytes = true, bindingId = bindingId, retainedValidation = target,
+        retainedValidationChoices = choices,
     )
 
     @Test
     fun catalogueRetainedFailureOffersValidateAndSeparateConfirmedRemove() {
         val actions = mutableListOf<MusicUiAction>()
-        val surface = DownloadSurface(listOf(entry(DownloadSurfaceOrigin.TYPED_CATALOGUE, "binding-r1")))
+        val surface = DownloadSurface(listOf(entry(DownloadSurfaceOrigin.TYPED_CATALOGUE, "binding-r1",
+            RetainedValidationTarget("retained-job", "binding-r1"))))
         ui.setContent {
             CompositionLocalProvider(LocalDensity provides Density(1f, 1f)) {
                 VeyraTheme(false, LanguagePreference.ENGLISH) {
@@ -71,9 +76,57 @@ class RetainedDownloadSurfacesTest {
     }
 
     @Test
-    fun neutralRetainedFailureStaysUnavailableInArabicAndNeverOffersValidate() {
+    fun batchMemberRetainedFailureCarriesExactBatchMemberAndRevision() {
         val actions = mutableListOf<MusicUiAction>()
-        val surface = DownloadSurface(listOf(entry(DownloadSurfaceOrigin.TYPED_SOURCE, null)))
+        val target = RetainedValidationTarget("retained-job", "binding-r1", "batch-7", 2, 11)
+        val surface = DownloadSurface(listOf(entry(DownloadSurfaceOrigin.TYPED_CATALOGUE, "binding-r1", target)))
+        ui.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(1f, 1f)) {
+                VeyraTheme(false, LanguagePreference.ENGLISH) {
+                    LibraryScreen(dev.veyra.model.AppSnapshot(media = mapOf(item.id to item)),
+                        LibrarySection.DOWNLOADS, { actions += it }, Modifier.size(900.dp, 700.dp),
+                        MusicUiOptions(downloads = surface))
+                }
+            }
+        }
+        ui.onNodeWithTag("downloads-list").performScrollToNode(hasTestTag("download-retained-job"))
+        ui.onNodeWithText(strings.text(TextKey.ValidateDownload)).assertIsDisplayed().performClick()
+        assertEquals(listOf<MusicUiAction>(MusicUiAction.ValidateRetainedDownload(
+            "retained-job", "binding-r1", "batch-7", 2, 11)), actions)
+    }
+
+    @Test
+    fun repeatedMemberRetainedFailureOffersExplicitLocalizedMemberChoices() {
+        val actions = mutableListOf<MusicUiAction>()
+        val choices = listOf(
+            RetainedValidationTarget("retained-job", "binding-r1", "batch-a", 0, 4),
+            RetainedValidationTarget("retained-job", "binding-r1", "batch-b", 1, 7),
+        )
+        val surface = DownloadSurface(listOf(entry(DownloadSurfaceOrigin.TYPED_CATALOGUE, "binding-r1",
+            choices = choices)))
+        ui.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(1f, 1f)) {
+                VeyraTheme(false, LanguagePreference.ENGLISH) {
+                    LibraryScreen(dev.veyra.model.AppSnapshot(media = mapOf(item.id to item)),
+                        LibrarySection.DOWNLOADS, { actions += it }, Modifier.size(900.dp, 700.dp),
+                        MusicUiOptions(downloads = surface))
+                }
+            }
+        }
+        ui.onNodeWithTag("downloads-list").performScrollToNode(hasTestTag("download-retained-job"))
+        ui.onNodeWithText(strings.text(TextKey.ValidateDownload)).performClick()
+        ui.onNodeWithTag("validate-member-retained-job-1").assertIsDisplayed().performClick()
+        assertEquals(listOf<MusicUiAction>(MusicUiAction.ValidateRetainedDownload(
+            "retained-job", "binding-r1", "batch-b", 1, 7)), actions)
+        assertTrue(actions.none { it is MusicUiAction.ValidateRetainedDownload &&
+            it.batchId == "batch-a" }, "The first projected member is never chosen implicitly")
+    }
+
+    @Test
+    fun neutralRetainedFailureOffersExactLocalValidateInArabicWithoutCatalogueAuthority() {
+        val actions = mutableListOf<MusicUiAction>()
+        val target = RetainedValidationTarget("retained-job", "neutral-binding")
+        val surface = DownloadSurface(listOf(entry(DownloadSurfaceOrigin.TYPED_SOURCE, null, target)))
         ui.setContent {
             CompositionLocalProvider(LocalDensity provides Density(1f, 1.75f)) {
                 VeyraTheme(true, LanguagePreference.ARABIC) {
@@ -85,8 +138,10 @@ class RetainedDownloadSurfacesTest {
         }
         val arabic = AppStrings(LanguagePreference.ARABIC)
         ui.onNodeWithTag("downloads-list").performScrollToNode(hasTestTag("download-retained-job"))
-        ui.onNodeWithText(arabic.text(TextKey.ValidateDownload)).assertDoesNotExist()
-        ui.onNodeWithText(arabic.text(TextKey.RetainedValidationUnavailable)).performScrollTo().assertIsDisplayed()
-        assertTrue(actions.isEmpty())
+        ui.onNodeWithText(arabic.text(TextKey.ValidateDownload)).assertIsDisplayed().performClick()
+        assertEquals(listOf<MusicUiAction>(MusicUiAction.ValidateRetainedDownload(
+            "retained-job", "neutral-binding")), actions)
+        ui.onNodeWithText(arabic.text(TextKey.Play)).assertDoesNotExist()
+        ui.onNodeWithText(arabic.text(TextKey.ReadyOffline)).assertDoesNotExist()
     }
 }
