@@ -49,6 +49,7 @@ python3 -B scripts/verify-design-resources.py
 
 case "$mode" in
     desktop)
+        python3 -B scripts/tests/test_linux_audio_test_deps.py
         python3 -B native/test_bundle.py
         python3 -B native/test_windows_toolchain.py
         python3 -B native/ffmpeg/test_build.py
@@ -56,6 +57,12 @@ case "$mode" in
         # never apt. A verified private read-only mount guard gives Xorg's
         # hard-coded scratch paths repository backing; there is no fallback.
         if [ "$(uname -s)" = Linux ]; then
+            # Missing host audio client libraries are extracted under .work from
+            # pinned Ubuntu metadata, never installed globally.
+            audio_libraries="$(python3 -B "$SCRIPT_DIR/linux-audio-test-deps.py")"
+            if [ -n "$audio_libraries" ]; then
+                export LD_LIBRARY_PATH="$audio_libraries${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+            fi
             "$SCRIPT_DIR/with-display.sh" "$SCRIPT_DIR/gradle.sh" --continue :shared:jvmTest :composeApp:desktopTest
         else
             "$SCRIPT_DIR/gradle.sh" --continue :shared:jvmTest :composeApp:desktopTest

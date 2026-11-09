@@ -218,8 +218,19 @@ internal class DownloadPhysicalCommands(
                 // Never look up/cancel "latest": another owner may already have admitted a
                 // newer generation. ACK only the original epoch or OUR exact cleanup epoch.
                 val settled = cleaned ?: pending.epoch
-                if (cleaned == null && !stopped || cleaned != null && !runtime.epochs.drain(cleaned))
+                if (cleaned == null && !stopped || cleaned != null && !runtime.epochs.drain(cleaned)) {
+                    val state = host.state()
+                    if (discard && remove && state.started && !state.closed && !state.suspended &&
+                        state.drainsInFlight == 0 && state.failure == null) {
+                        // An expired foreground epoch may refuse its own ACK after a new
+                        // foreground epoch has resumed. The active caller can still await
+                        // authoritative removal by that healthy host; never infer deletion
+                        // from the old owner's cancellation or consume its failed receipt.
+                        awaitRemoval(id, tolerateTransientCleanupFailure = true)
+                        return
+                    }
                     fail(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")
+                }
                 // A normal remove return must mean actual authoritative removal for EVERY
                 // retained/staged/finalization shape, not just a prior failure-backed row.
                 if (discard && remove && repository.physicalDownload(id)?.job?.cleanupPending == true) {

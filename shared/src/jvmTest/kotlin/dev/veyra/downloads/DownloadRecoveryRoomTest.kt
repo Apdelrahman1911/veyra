@@ -113,7 +113,21 @@ class DownloadRecoveryRoomTest {
         assertTrue(a.coordinator.dependencyReleaseSafeAfterClose)
         advance(5_100)
         val cancelled = try {
-            awaitJob(b, id) { it.job.status == DownloadStatus.CANCELLED && !it.job.cleanupPending }
+            withTimeout(15_000) {
+                while (true) {
+                    val current = join(b, id)
+                    if (current.job.status == DownloadStatus.CANCELLED && !current.job.cleanupPending) break
+                    // B may first observe A's held path just AFTER the single clock advance.
+                    // Follow its actual local wake deadline instead of freezing the fake clock
+                    // before that backoff. Never expire an admitted maintenance owner.
+                    if (current.job.leaseOwner == null) {
+                        val due = b.coordinator.schedulingPlan().nextLocalEpochMs
+                        if (due != null && due > clock.epochMs()) advance(due - clock.epochMs())
+                    }
+                    delay(20)
+                }
+                join(b, id)
+            }
         } catch (timeout: TimeoutCancellationException) {
             val observed = join(b, id).job
             throw AssertionError("Cleanup timed out: status=${observed.status}, pending=${observed.cleanupPending}, " +

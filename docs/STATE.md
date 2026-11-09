@@ -4,6 +4,22 @@ Updated 2026-11-07 UTC. Formal Goal tool currently reports **blocked/incomplete*
 
 ## Current Task B continuation — 2026-11-09
 
+Five-platform run `42615340845` at `c4a3f1e` completed with Android and macOS x64
+passing; Linux, Windows and macOS arm64 failed. All five lane support archives,
+indexed hashes and exact unpublished draft tags independently verify. Linux now
+runs actual tests: the remaining failures are missing host `libpulse.so.0` and
+one playback shutdown channel race. Windows configure completed, exposing a
+Git Bash absolute Makefile path error; one crash test fails at OS lease admission.
+Both Windows/ARM share a fake-clock cleanup test race; ARM also found a resumed
+foreground removal ACK race and a one-worker composite packaging stall. The lead
+batched direct corrections in the existing checkout. Local final gates pass
+36 shared + 49 desktop regressions, Android compilation, 873 Android unit tests,
+lint/debug APK, and 10 silent native audio tests using exact extracted Ubuntu
+libraries; 73 focused script tests pass. See
+`verification/task-b-completed-run-42615340845.md`. No acceptance or successor
+hosted pass is implied.
+
+
 Combined run `42610626351` at `c552395` completed: Android again passed
 873 tests, lint and APK/AAB generation; the three lane packets and independent
 readback verify. Linux built and retained its DEB and inventory, but GUI tests

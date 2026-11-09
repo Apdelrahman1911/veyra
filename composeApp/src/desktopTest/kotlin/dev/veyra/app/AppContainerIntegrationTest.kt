@@ -540,7 +540,7 @@ class AppContainerIntegrationTest {
                 val expected = expectedCloseFailure ?: throw failure
                 assertEquals(expected, failure.failure, "Cleanup must preserve the already asserted sticky close failure")
             } finally { lifetime.cancelAndJoin() }
-            assertTrue(uncaught.isEmpty(), "An app-lifetime coroutine failed: ${uncaught.map { it::class.simpleName }}")
+            assertTrue(uncaught.isEmpty(), "An app-lifetime coroutine failed: ${uncaught.joinToString("\n") { it.stackTraceToString() }}")
         }
         fun assertNoNetwork() {
             assertTrue(http.requests.isEmpty(), "No metadata or artwork HTTP request was authorized")

@@ -37,7 +37,9 @@ python3 -B scripts/desktop-package-legal.py validate-legal-dir --directory "$leg
 # Installer tasks can create their image only in a temporary jpackage tree.
 # Request the persistent image explicitly so its actual legal bytes can be
 # checked on a fresh checkout, without relying on an earlier local build.
-"$SCRIPT_DIR/gradle.sh" :composeApp:createDistributable ":composeApp:$task" "-Pveyra.desktopLegalDir=$legal"
+# A single worker can stall Gradle's composite-build handoff on macOS even
+# after the included JAR completes. Keep this packaging graph bounded to two.
+VEYRA_GRADLE_WORKERS=2 "$SCRIPT_DIR/gradle.sh" --stacktrace :composeApp:createDistributable ":composeApp:$task" "-Pveyra.desktopLegalDir=$legal"
 app_jar="$(python3 -B scripts/desktop-package-legal.py locate-app-jar --platform "$platform")"
 python3 -B scripts/package-manifest.py --newer-than "$marker" \
     --expected-source-sha "${GITHUB_SHA:-}" --repository "${GITHUB_REPOSITORY:-}" --task "$task" \

@@ -423,8 +423,11 @@ def build(source_argument: Path | None, jobs: str, *, verify_only: bool = False)
     work = Path(tempfile.mkdtemp(prefix="build-" + target + "-", dir=base))
     source, epoch = extract_source(source_archive, work / "source", insensitive=platform.system() in ("Windows", "Darwin"))
     require_release(source)
-    build_directory = work / "build"
-    build_directory.mkdir()
+    # Git Bash writes /d/... into out-of-tree Makefiles, which native GNU
+    # make cannot resolve. FFmpeg supports an in-source build with SRC_PATH=.
+    # The extracted tree is private scratch; the pinned source archive is unchanged.
+    build_directory = source if target == "windows-x64" else work / "build"
+    build_directory.mkdir(exist_ok=target == "windows-x64")
     env = build_environment(target, epoch, dict(os.environ))
     configure = expected["configure"]
     started = time.monotonic()

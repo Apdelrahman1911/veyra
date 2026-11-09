@@ -29,6 +29,25 @@ class ProductionFfmpegBuildTest(unittest.TestCase):
         self.work = self.root / ".work"
         self.work.mkdir()
 
+    def test_windows_in_source_build_avoids_msys_absolute_make_include(self):
+        # Exercise FFmpeg's actual path selection from the retained pinned source
+        # through an authored Makefile: native make sees only a relative include.
+        source = self.work / "source"
+        source.mkdir()
+        (source / "Makefile").write_text("all:\n\t@echo authored-relative-source-ok\n")
+        wrapper = self.work / "build"
+        wrapper.mkdir()
+        (wrapper / "Makefile").write_text("include /d/author-only/source/Makefile\n")
+        make = shutil.which("make")
+        if make is None:
+            self.skipTest("Existing make unavailable")
+        good = __import__("subprocess").run([make], cwd=source, capture_output=True)
+        bad = __import__("subprocess").run([make], cwd=wrapper, capture_output=True)
+        self.assertEqual(0, good.returncode)
+        self.assertNotEqual(0, bad.returncode)
+        self.assertIn(b"authored-relative-source-ok", good.stdout)
+        self.assertIn('build_directory = source if target == "windows-x64"', Path(BUILD.__file__).read_text())
+
     def test_inner_compile_failure_reports_the_actual_log_without_leaking_or_masking(self):
         log = self.work / "build.log"
         original = (b"authored.c:9: error: authored compiler discriminator\n"
