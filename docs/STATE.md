@@ -29,12 +29,22 @@ Android and iOS stopped on pinned distribution HTTP 504 responses; one Android
 retry repeated the failure. Linux GUI namespace containment remains blocked.
 No repeated full matrix was dispatched.
 The desktop legal-embedding patch now passes a gated local Gradle desktop JAR
-check: 161 components, 28 documents and all 34 indexed files match the retained
+check: 161 components, 28 documents and all 35 resources (34 hashed payloads plus index) match the retained
 Linux projection exactly; six legal gaps remain. This is resource-wiring proof,
 not a fresh inventory or installer gate. Two Gradle DSL errors were corrected
 before this pass. Fresh inventory/app-image/installer verification remains pending
 on the next scoped Windows run; details are in
 `verification/task-b-desktop-legal-embedding.md`.
+Scoped Windows run `42583592086` at `0bf9ace` failed: a test-only LF/CRLF
+assertion was corrected locally (19/19 manifest tests), while packaging and
+inventory stopped at the pinned Gradle distribution HTTP 504 before configuration.
+Its diagnostic-only draft packet was independently verified; no installer or JVM
+test result exists. No unchanged retry was dispatched. The small test correction
+is batched with four newly reviewed exact-coordinate records. The tracked registry
+now covers 85 coordinates/92 records; the retained Linux inventory projection has
+two missing-text issues, down from six. Atomicfu and the three mediamp native
+runtime coordinates remain unresolved in the platform union. Readiness remains
+false; no fresh installer or native/JDK/source closure follows from this update.
 The live source still refuses playback preparation with
 `PROVIDER_ACCESS_REQUIRED / YOUTUBE_ACCESS_REQUIRED`; no media transfer or offline
 proof occurred. Installation, physical audio, five-platform success, signing and

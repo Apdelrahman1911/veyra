@@ -258,7 +258,7 @@ resource compared with the generated directory and index:
 - JAR: `composeApp/build/libs/composeApp-desktop-1.0.0.jar`;
 - JAR SHA-256: `f0be3ec74c52c76a11e3a0300d8d94aabecdca7eae73007ff0ca5c1a327d5fc2`;
 - embedded index SHA-256: `bea608038fec5fdbb661901d456e456a0950035c7e5918ed01b9ca1fd4d1c979`;
-- 161 components, 28 documents, 34 indexed files including the index,
+- 161 components, 28 documents, 35 resources (34 hashed payloads plus the index),
   six unresolved coverage issues;
 - exact generated-directory byte equality; source-only preview hash remains
   distinct and the tracked legal previews were not replaced.
@@ -276,3 +276,83 @@ The next scoped hosted Windows run must verify the fresh inventory, JAR/app-imag
 and installer path together. No fresh installer, Windows execution, installer
 re-open, native build, legal closure, installation, signing, physical audio or
 Task B acceptance follows from this focused check.
+
+
+## 9. Scoped Windows run 42583592086 — failed before build configuration
+
+Exact clean source `0bf9aceda974b028c553f5926e5e5c5c1fabc74d` was dispatched
+Windows-only with packaging and draft retention. The run completed failed.
+Step conclusions masked by `continue-on-error` are not acceptance; final outcome
+enforcement correctly failed the lane.
+
+The package-notice suite passed 74/74. The package-manifest suite failed 1/18
+in an authored assertion expecting the LF hash of `{}` plus newline. On Windows
+`write_text` created CRLF bytes; the manifest correctly hashed those actual bytes.
+The observed hashes were reproduced exactly: LF `ca3d163b...`, CRLF `e3566b3a...`.
+The lead correction compares the actual source fixture bytes and adds an explicit
+CRLF preservation regression. Local corrected suite: 19/19. This test correction
+is batched with the four additional exact-coordinate notice records described
+in section 10; no manifest production behavior was changed.
+
+Independent packaging and the inventory fallback each failed while downloading
+the pinned Gradle 8.13 distribution, HTTP 504 at the GitHub distribution URL.
+No Gradle configuration, JVM testing, native build, fresh inventory, legal JAR,
+app-image or installer proof was reached. A bounded lead-host range probe reached
+the official distribution and checksum, but does not prove a whole download or
+Windows availability. No distribution URL/checksum was changed and no unchanged
+hosted retry was dispatched.
+
+Retention and fresh hosted readback succeeded. The lead independently downloaded
+and verified the diagnostic-only packet through the release-id asset API:
+
+- unpublished draft/prerelease `438868262`;
+- tag `veyra-draft-42583592086-1-desktop-windows-x64` resolves directly to
+  `0bf9aceda974b028c553f5926e5e5c5c1fabc74d`;
+- `manifest.json` 1,636 bytes and `support.zip` 921 bytes;
+- support SHA-256 `df0b57b1bf16d098880571876706c7e51b5ac56cbe33100ff506a24f2bc6520a`;
+- verified failed-lane outcome, zero packages.
+
+Evidence is under `.work/verification/task-b-desktop-legal-embedding/windows-42583592086/`:
+`windows.log`, `lead-assessment.json`, `manifest-tests.log`, `verification.json`,
+`release-api.json`, `tag-api.json`, `packet/` and the bounded network probe.
+The prior local focused JAR proof remains valid within its stated projection
+scope. Task B remains incomplete.
+
+
+## 10. Batched exact-version notice and Windows assertion correction
+
+The lead accepted four additional retained-license records after independently
+checking all research evidence seals, the four binary artifact hashes, the four
+published sources-JAR hashes and all eight cited source-entry byte matches.
+The accepted coordinates are core-common 2.2.0, lifecycle-runtime-compose-desktop
+2.9.6, savedstate-compose-desktop 1.3.6 and material3-desktop 1.9.0. The immutable
+release/commit mappings and their limits are recorded in
+`task-b-remaining-publisher-notices.md`. Source-JAR matches are not reproduced
+binary builds. The two Compose compatibility stubs have their own coordinate
+records; no license is inferred for a different implementation coordinate.
+
+`third_party/notices/desktop-reviewed.json` now has 85 exact coordinates and
+92 records. Each new record uses the already-retained original 10,175-byte
+publisher terms; no generic global assignment, text normalization or new text
+payload was introduced. The four remaining union coordinates are atomicfu
+0.23.2 and the Linux/macOS arm64/macOS x64 mediamp runtime 0.5.3 artifacts.
+The 596-byte atomicfu header and its NOTICE remain research evidence, not a
+substitute for retained complete terms. The mediamp project license is not
+substituted for its bundled MPV/FFmpeg and other native-library obligations.
+
+Lead generation with the tracked registry and retained-inventory harness yields
+161 Linux components, 83 with retained complete-license terms, 28 documents and
+two open text issues (atomicfu and Linux mediamp). The result contains 35 total
+resources: 34 hash-indexed payloads plus `index.json`. This corrects the earlier
+section-8 prose count that incorrectly included the index in 34; the original
+JAR verifier receipt always contained all 35 resources. Both readiness flags
+remain false. This projection is not a new host inventory or rebuilt installer.
+
+Proportional checks passed: package notices 74/74, manifest 19/19 (including the
+explicit CRLF-byte regression), regenerated projection `--check`, source-only
+preview `--check`, and diff check. Evidence is under
+`.work/verification/task-b-remaining-publisher-notices/lead-integration/`.
+Historical reports, run receipts and research seals are unchanged. The next
+Windows-only attempt must exercise the corrected authored test and, if the
+pinned Gradle download is available, the fresh inventory/package path. No full
+matrix or local native build was repeated for this data/test-only batch.

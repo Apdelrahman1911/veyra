@@ -151,6 +151,16 @@ class PackageManifestTest(unittest.TestCase):
         self.assertFalse(value["packages"][0]["embeddedLegalVerified"])
         self.assertEqual(package.relative_to(self.root).as_posix(), value["packages"][0]["path"])
 
+    def test_source_preview_hash_preserves_crlf_bytes(self):
+        self.package()
+        source_preview = self.root / "composeApp/src/commonMain/composeResources/files/legal/index.json"
+        source_preview.write_bytes(b"{}\r\n")
+        result = self.run_manifest()
+        self.assertEqual(0, result.returncode, result.stderr)
+        value = json.loads((self.root / ".work/verification/packages.json").read_text())
+        self.assertEqual(hexdigest(b"{}\r\n"), value["source"]["legalIndexSourceTreeSha256"])
+        self.assertNotEqual(hexdigest(b"{}\n"), value["source"]["legalIndexSourceTreeSha256"])
+
     def test_embedded_legal_binds_actual_jar_bytes_and_generated_source(self):
         self.package()
         jar, generated, index_bytes = self.legal_fixture()
@@ -161,7 +171,9 @@ class PackageManifestTest(unittest.TestCase):
         self.assertTrue(embedded["verified"])
         self.assertEqual("verified-embedded-app-jar", value["source"]["legalIndexScope"])
         self.assertEqual(hexdigest(index_bytes), value["source"]["legalIndexSha256"])
-        self.assertEqual(hexdigest(b"{}\n"), value["source"]["legalIndexSourceTreeSha256"])
+        source_preview = self.root / "composeApp/src/commonMain/composeResources/files/legal/index.json"
+        self.assertEqual(hexdigest(source_preview.read_bytes()),
+                         value["source"]["legalIndexSourceTreeSha256"])
         self.assertNotEqual(value["source"]["legalIndexSha256"],
                             value["source"]["legalIndexSourceTreeSha256"])
         self.assertEqual(hexdigest(index_bytes), embedded["indexSha256"])

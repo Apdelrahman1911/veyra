@@ -10,6 +10,16 @@
         "sha256": "809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0"
       }
     ],
+    "androidx.arch.core:core-common:2.2.0": [
+      {
+        "bytes": 10175,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0.txt",
+        "provenance": "license from AOSP platform/frameworks/support release branch at androidx-arch-core-release (commit d00300b06c00dbf348f871980400948cdf7b10dc); url=https://android.googlesource.com/platform/frameworks/support/+/d00300b06c00dbf348f871980400948cdf7b10dc/LICENSE.txt?format=TEXT; sha256=809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0; bytes=10175; exact-version mapping: release-branch libraryversions.toml declares ARCH_CORE=2.2.0 and the exact core-common-2.2.0-sources.jar entries match this commit byte-for-byte; this is a release-branch commit, not a tag. Exact artifact androidx.arch.core:core-common:2.2.0 SHA-256=65308a06b1c00ee186cb9e19321383f043b993813f1522c47f4a3e3303bdba41; published sources JAR SHA-256=563d430880d847890029234386ef03adb95403c34f3c9dec3a7002e2f4007ae4; SafeIterableMap.java, FastSafeIterableMap.java and Function.java match. Complete Apache-2.0 terms reviewed. The exact-version tag was not found; the release-branch commit is immutable but the branch ref is mutable. Source-to-binary correspondence is source-JAR-level, not a reproduced build attestation; transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision. Lead accepted retained full terms and the stated source-JAR mapping on 2026-11-09; no reproduced binary build or broader license compatibility acceptance.",
+        "role": "license",
+        "sha256": "809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0"
+      }
+    ],
     "androidx.collection:collection-jvm:1.5.0": [
       {
         "bytes": 10175,
@@ -448,6 +458,26 @@
         "sha256": "b1d2870f1a00e4d7f56576e5f0870cba109e041f8af66866cf5b499478e654e7"
       }
     ],
+    "org.jetbrains.androidx.lifecycle:lifecycle-runtime-compose-desktop:2.9.6": [
+      {
+        "bytes": 10175,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0.txt",
+        "provenance": "license from JetBrains/compose-multiplatform-core at release tag v1.9.3 (commit 278178153c9189353ca7bb03f0904ddd9d995ce3); url=https://raw.githubusercontent.com/JetBrains/compose-multiplatform-core/278178153c9189353ca7bb03f0904ddd9d995ce3/LICENSE.txt; sha256=809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0; bytes=10175; exact-version mapping: Compose Multiplatform 1.9.3 release notes map org.jetbrains.androidx.lifecycle:lifecycle-*:2.9.6 and the published sources JAR commonMain/EmptyFile.kt matches this tag byte-for-byte. Exact artifact org.jetbrains.androidx.lifecycle:lifecycle-runtime-compose-desktop:2.9.6 SHA-256=31c3c4b6dea38f078c46829dee2c43abba2bf8757b7ee8a0f660f31217364898; published sources JAR SHA-256=6f27472e1e5fe26259f156b498f6745feb57b651b673d65fe9938a7fec2d9065; commonMain/EmptyFile.kt matches. Complete Apache-2.0 terms reviewed. The binary is an empty compatibility stub; the implementation redirects to androidx.lifecycle 2.9.4, a separate coordinate with its own artifact-embedded license. Source-to-binary correspondence is source-JAR-level, not a reproduced build attestation; transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision. Lead accepted retained full terms and the stated source-JAR mapping on 2026-11-09; no reproduced binary build or broader license compatibility acceptance.",
+        "role": "license",
+        "sha256": "809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0"
+      }
+    ],
+    "org.jetbrains.androidx.savedstate:savedstate-compose-desktop:1.3.6": [
+      {
+        "bytes": 10175,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0.txt",
+        "provenance": "license from JetBrains/compose-multiplatform-core at release tag v1.9.3 (commit 278178153c9189353ca7bb03f0904ddd9d995ce3); url=https://raw.githubusercontent.com/JetBrains/compose-multiplatform-core/278178153c9189353ca7bb03f0904ddd9d995ce3/LICENSE.txt; sha256=809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0; bytes=10175; exact-version mapping: Compose Multiplatform 1.9.3 release notes map org.jetbrains.androidx.savedstate:savedstate*:1.3.6 and the published sources JAR commonMain/EmptyFile.kt matches this tag byte-for-byte. Exact artifact org.jetbrains.androidx.savedstate:savedstate-compose-desktop:1.3.6 SHA-256=0f3d045c5fd7e1301ab6c38cd0778067b0484cf39acac1233be71a723a6a8075; published sources JAR SHA-256=6f27472e1e5fe26259f156b498f6745feb57b651b673d65fe9938a7fec2d9065; commonMain/EmptyFile.kt matches. Complete Apache-2.0 terms reviewed. The binary is an empty compatibility stub; the implementation redirects to androidx.savedstate 1.3.3, a separate coordinate with its own artifact-embedded license. Source-to-binary correspondence is source-JAR-level, not a reproduced build attestation; transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision. Lead accepted retained full terms and the stated source-JAR mapping on 2026-11-09; no reproduced binary build or broader license compatibility acceptance.",
+        "role": "license",
+        "sha256": "809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0"
+      }
+    ],
     "org.jetbrains.compose.animation:animation-core-desktop:1.9.3": [
       {
         "bytes": 11394,
@@ -506,6 +536,16 @@
         "provenance": "license from JetBrains/compose-multiplatform at release tag v1.9.3 (commit 110ea3937e6edf1b0290d5a132dab5d520b80372); url=https://raw.githubusercontent.com/JetBrains/compose-multiplatform/110ea3937e6edf1b0290d5a132dab5d520b80372/LICENSE.txt; sha256=f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50; bytes=11394; exact-version mapping: Maven org.jetbrains.compose.* version 1.9.3 equals release tag v1.9.3; Compose Multiplatform publishes this artifact family from the tagged release. Retained byte-for-byte on 2026-11-09. Full license terms reviewed; source-to-binary correspondence, transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision.",
         "role": "license",
         "sha256": "f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50"
+      }
+    ],
+    "org.jetbrains.compose.material3:material3-desktop:1.9.0": [
+      {
+        "bytes": 10175,
+        "completeTextVerified": true,
+        "path": "third_party/notices/texts/809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0.txt",
+        "provenance": "license from JetBrains/compose-multiplatform-core at release tag v1.9.1 (commit 6ba48befdf216eca527ea4209ec37bdf2ed838c9); url=https://raw.githubusercontent.com/JetBrains/compose-multiplatform-core/6ba48befdf216eca527ea4209ec37bdf2ed838c9/LICENSE.txt; sha256=809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0; bytes=10175; exact-version mapping: Compose Multiplatform 1.9.1 release notes map org.jetbrains.compose.material3:material3*:1.9.0 and three published sources JAR entries match this tag byte-for-byte. Exact artifact org.jetbrains.compose.material3:material3-desktop:1.9.0 SHA-256=78f0787a1c6d20f9b2460a387f51ecf554e211d3c874b22d66530a540390b811; published sources JAR SHA-256=343fffb5881a3b173235dda4f256264617141fa67ebaca3027a5cd8c8e4cc54b; ContentColor.kt, ExperimentalMaterial3Api.kt and TimeFormat.kt match. Complete Apache-2.0 terms reviewed. The exact-version tag is v1.9.1 (the CMP release that ships material3 1.9.0), not a material3-specific tag. Source-to-binary correspondence is source-JAR-level, not a reproduced build attestation; transitive NOTICE and native/JDK closure are NOT verified; draft evidence only, not legal advice or a compatibility decision. Lead accepted retained full terms and the stated source-JAR mapping on 2026-11-09; no reproduced binary build or broader license compatibility acceptance.",
+        "role": "license",
+        "sha256": "809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0"
       }
     ],
     "org.jetbrains.compose.material:material-desktop:1.9.3": [
