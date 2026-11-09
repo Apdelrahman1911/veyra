@@ -4,10 +4,15 @@ import dev.kmpyt.YouTubeClient
 import dev.kmpyt.extraction.ResearchRequest
 import dev.kmpyt.extraction.ResearchTransport
 import dev.veyra.acquisition.AcquisitionCaptureFactory
+import dev.veyra.acquisition.AcquisitionAdmissionFactory
 import dev.veyra.acquisition.AcquisitionCoordinator
+import dev.veyra.acquisition.AcquisitionDownloadAdapter
+import dev.veyra.acquisition.AcquisitionDownloadAssetCheck
 import dev.veyra.acquisition.AcquisitionResolution
+import dev.veyra.acquisition.DownloadBatchCoordinator
 import dev.veyra.data.LibraryStore
 import dev.veyra.data.createPlatformLibraryStore
+import dev.veyra.downloads.DownloadAcquisitionPresentation
 import dev.veyra.model.*
 import dev.veyra.playback.*
 import dev.veyra.source.ResolvePurpose
@@ -18,10 +23,14 @@ import dev.veyra.source.youtube.YouTubeTransferResult
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.test.assertFailsWith
+import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 
 internal data class QueuedNeutralDownload(
     val jobId: String,
@@ -66,6 +75,51 @@ internal class TypedDownloadPresentationSupport(val directory: Path) {
     suspend fun close() {
         try { app.close() } finally { lifetime.cancelAndJoin() }
     }
+
+    /**
+     * Test-only canonical batch admission over the SAME Room owner and authored gateway. The
+     * app's existing batch work runtime still selects/resolves/admits members and owns transfers.
+     */
+    private val testAcquisition = AcquisitionCoordinator(store.acquisition, gateway,
+        AcquisitionCaptureFactory(), SystemClock(), offline = { false })
+    private val testBatches = DownloadBatchCoordinator(store.acquisition, testAcquisition, SystemClock())
+    private val testAdmissions = AcquisitionAdmissionFactory()
+
+    suspend fun admitCatalogueBatch(item: MediaItem, count: Int = 1): List<DownloadBatch> {
+        val request = AcquisitionCaptureFactory().media(item, store.state.value)
+        return (0 until count).map {
+            // The second admission may occur after the first batch advanced the library revision;
+            // the exact same immutable request/capture is intentionally reused.
+            testBatches.admit(testAdmissions.catalogLeavesPreservingCaptures(listOf(request),
+                PlaybackControlsMode.MUSIC, store.state.value.revision))
+        }
+    }
+
+    suspend fun awaitPresentation(predicate: (DownloadAcquisitionPresentation) -> Boolean): DownloadAcquisitionPresentation =
+        withTimeout(40_000L) { app.downloads.acquisitionPresentation.first(predicate) }
+
+    suspend fun failRetainedStandalone(jobId: String, bindingId: ExecutionBindingId,
+        failure: AppFailure = AppFailure(FailureCode.CORRUPT_MEDIA, "authored_task_a_retained_negative")) {
+        platform.validateLocal = { AssetValidation.Invalid(failure) }
+        assertFailsWith<VeyraException> { app.downloads.validateStandaloneAssetUse(jobId, bindingId) }
+        awaitPresentation { it.states[jobId]?.status == DownloadStatus.FAILED }
+    }
+
+    suspend fun failRetainedMember(batchId: DownloadBatchId, memberPosition: Int, intentRevision: Long,
+        bindingId: ExecutionBindingId,
+        failure: AppFailure = AppFailure(FailureCode.CORRUPT_MEDIA, "authored_task_a_retained_negative")) {
+        val asset = assertNotNull(app.downloads.acquisitionPresentation.value.view.acquisition.physicalDownloads.values
+            .singleOrNull { it.producer.bindingId == bindingId }?.assetId)
+        platform.validateLocal = { AssetValidation.Invalid(failure) }
+        val adapter = AcquisitionDownloadAdapter(store.acquisition, testAcquisition, app.downloads.acquisitionExecutor)
+        val result = adapter.validateMemberAsset(batchId, memberPosition, intentRevision, asset)
+        assertIs<AcquisitionDownloadAssetCheck.Unavailable>(result)
+        awaitPresentation { it.states.values.any { job -> job.status == DownloadStatus.FAILED } }
+    }
+
+    suspend fun setBatchIntent(batchId: DownloadBatchId, expectedIntentRevision: Long,
+        intent: DownloadBatchIntent, retainCompletedAssets: Boolean): DownloadBatch =
+        testBatches.setIntent(batchId, expectedIntentRevision, intent, retainCompletedAssets)
 
     companion object {
         val NON_AUDIO = "Authored typed download presentation fixture. NOT AUDIO; native validation is deliberately fake."

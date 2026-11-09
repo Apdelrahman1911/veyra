@@ -16,6 +16,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -257,14 +259,38 @@ private fun TrackDownloadSection(item: MediaItem, record: DownloadSurfaceEntry?,
                 DownloadStatus.QUEUED, DownloadStatus.RESOLVING, DownloadStatus.RUNNING -> TextButton({ onAction(MusicUiAction.PauseDownload(record.id)) }, modifier = Modifier.heightIn(min = 48.dp).testTag("track-download-pause")) { Text(strings.text(TextKey.PauseDownload)) }
                 DownloadStatus.PAUSED, DownloadStatus.WAITING_NETWORK, DownloadStatus.NEEDS_FOREGROUND -> TextButton({ onAction(MusicUiAction.ResumeDownload(record.id)) }, enabled = supported && !offline, modifier = Modifier.heightIn(min = 48.dp).testTag("track-download-resume")) { Text(strings.text(TextKey.ResumeDownload)) }
                 DownloadStatus.FAILED -> if (retainedFailure) {
-                    val binding = record.bindingId?.takeIf {
-                        record.origin == DownloadSurfaceOrigin.TYPED_CATALOGUE
-                    }
-                    if (binding != null) TextButton(
-                        { onAction(MusicUiAction.ValidateRetainedDownload(record.id, binding)) },
+                    val target = record.retainedValidation
+                    val choices = record.retainedValidationChoices
+                    if (target != null) TextButton(
+                        { onAction(MusicUiAction.ValidateRetainedDownload(target.jobId, target.bindingId,
+                            target.batchId, target.memberPosition, target.expectedIntentRevision)) },
                         modifier = Modifier.heightIn(min = 48.dp).testTag("track-download-validate"),
                     ) { Text(strings.text(TextKey.ValidateDownload)) }
-                    else Text(strings.text(TextKey.RetainedValidationUnavailable), style = MaterialTheme.typography.bodySmall,
+                    else if (choices.isNotEmpty()) {
+                        var memberMenu by remember(record.id) { mutableStateOf(false) }
+                        Box {
+                            TextButton({ memberMenu = true },
+                                modifier = Modifier.heightIn(min = 48.dp).testTag("track-download-validate")) {
+                                Text(strings.text(TextKey.ValidateDownload))
+                            }
+                            DropdownMenu(expanded = memberMenu, onDismissRequest = { memberMenu = false }) {
+                                choices.forEachIndexed { index, choice ->
+                                    DropdownMenuItem(
+                                        text = { Text(strings.format(TextKey.ValidateDownloadMember,
+                                            strings.number((index + 1).toLong()))) },
+                                        onClick = {
+                                            memberMenu = false
+                                            onAction(MusicUiAction.ValidateRetainedDownload(choice.jobId,
+                                                choice.bindingId, choice.batchId, choice.memberPosition,
+                                                choice.expectedIntentRevision))
+                                        },
+                                        modifier = Modifier.testTag(
+                                            "track-download-validate-member-${choice.memberPosition}"),
+                                    )
+                                }
+                            }
+                        }
+                    } else Text(strings.text(TextKey.RetainedValidationUnavailable), style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("track-download-validate-unavailable"))
                 } else TextButton({ onAction(MusicUiAction.ResumeDownload(record.id)) }, enabled = supported && !offline, modifier = Modifier.heightIn(min = 48.dp).testTag("track-download-retry")) { Text(strings.text(TextKey.Retry)) }
                 DownloadStatus.VERIFYING -> Unit

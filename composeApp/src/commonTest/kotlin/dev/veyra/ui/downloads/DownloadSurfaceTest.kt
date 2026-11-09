@@ -8,9 +8,14 @@ import dev.veyra.model.AcquisitionOutcome
 import dev.veyra.model.AcquisitionRequest
 import dev.veyra.model.AcquisitionRequestId
 import dev.veyra.model.AcquisitionEntryKind
+import dev.veyra.model.AdmissionScopeId
 import dev.veyra.model.AssetUse
 import dev.veyra.model.AppSnapshot
+import dev.veyra.model.DownloadBatch
+import dev.veyra.model.DownloadBatchId
 import dev.veyra.model.DownloadBatchIntent
+import dev.veyra.model.DownloadBatchMember
+import dev.veyra.model.DownloadBatchMemberState
 import dev.veyra.model.DownloadClaim
 import dev.veyra.model.DownloadClaimId
 import dev.veyra.model.DownloadClaimOwner
@@ -21,6 +26,7 @@ import dev.veyra.model.ExecutableSubjectId
 import dev.veyra.model.ExecutionBinding
 import dev.veyra.model.ExecutionBindingId
 import dev.veyra.model.ExecutionBindingOrigin
+import dev.veyra.model.ExecutionOccurrenceId
 import dev.veyra.model.FirstResultObservation
 import dev.veyra.model.FirstResultReceipt
 import dev.veyra.model.FirstResultReceiptId
@@ -337,6 +343,71 @@ class DownloadSurfaceTest {
     }
 
     @Test
+    fun retainedStandaloneFailureExposesOnlyTheExactPersistedBinding() {
+        val built = catalogueState(complete = true)
+        val failed = built.job.copy(status = DownloadStatus.FAILED, failure = null)
+        val surface = downloadSurface(AppSnapshot(), presentation(built, mapOf(built.job.id to failed)))
+        val target = assertNotNull(surface.entries.single().retainedValidation)
+        assertEquals(RetainedValidationTarget(built.job.id, "binding-r1"), target)
+        assertFalse(target.isBatchMember)
+        assertNull(surface.entries.single().retainedValidation?.batchId)
+    }
+
+    @Test
+    fun retainedBatchFailureCarriesExactMemberAndRevision() {
+        val built = catalogueState(complete = true)
+        val claim = DownloadClaim(DownloadClaimId("claim-member"), DownloadClaimOwner.BatchMember(
+            DownloadBatchId("batch-1"), 0), built.job.id, built.bindingId, DownloadBatchIntent.ACTIVE, true, 11,
+            generation = 1, ownerIntentRevision = 4)
+        val member = DownloadBatchMember(0, 0, ExecutionOccurrenceId("occurrence-1"),
+            AcquisitionRequestId("request-r1"), built.bindingId, claim.id, DownloadBatchMemberState.AVAILABLE)
+        val batch = DownloadBatch(DownloadBatchId("batch-1"), AdmissionScopeId("scope-1"),
+            DownloadBatchIntent.ACTIVE, 4, listOf(member), 1, 2)
+        val state = built.state.copy(claims = mapOf(claim.id to claim), batches = mapOf(batch.id to batch))
+        val failed = built.job.copy(status = DownloadStatus.FAILED)
+        val surface = downloadSurface(AppSnapshot(), DownloadAcquisitionPresentation(
+            LibraryAcquisitionView(AppSnapshot(revision = 1), state), mapOf(failed.id to failed)))
+        assertEquals(RetainedValidationTarget(built.job.id, "binding-r1", "batch-1", 0, 4),
+            surface.entries.single().retainedValidation)
+    }
+
+    @Test
+    fun repeatedBatchIdentityExposesExactChoicesWhileStaleIdentityIsOmitted() {
+        val built = catalogueState(complete = true)
+        fun claim(id: String, batch: String, revision: Long) = DownloadClaim(DownloadClaimId(id),
+            DownloadClaimOwner.BatchMember(DownloadBatchId(batch), 0), built.job.id, built.bindingId,
+            DownloadBatchIntent.ACTIVE, true, 11, generation = 1, ownerIntentRevision = revision)
+        fun batch(id: String, claimId: String, revision: Long) = DownloadBatch(DownloadBatchId(id),
+            AdmissionScopeId("scope-$id"), DownloadBatchIntent.ACTIVE, revision,
+            listOf(DownloadBatchMember(0, 0, ExecutionOccurrenceId("occurrence-$id"),
+                AcquisitionRequestId("request-r1"), built.bindingId, DownloadClaimId(claimId),
+                DownloadBatchMemberState.AVAILABLE)), 1, 2)
+        val first = claim("claim-first", "batch-first", 4)
+        val repeated = claim("claim-repeated", "batch-repeated", 4)
+        val repeatedState = built.state.copy(
+            claims = mapOf(first.id to first, repeated.id to repeated),
+            batches = mapOf(DownloadBatchId("batch-first") to batch("batch-first", "claim-first", 4),
+                DownloadBatchId("batch-repeated") to batch("batch-repeated", "claim-repeated", 4)))
+        val failed = built.job.copy(status = DownloadStatus.FAILED)
+        val repeatedEntry = downloadSurface(AppSnapshot(), DownloadAcquisitionPresentation(
+            LibraryAcquisitionView(AppSnapshot(revision = 1), repeatedState), mapOf(failed.id to failed))).entries.single()
+        assertNull(repeatedEntry.retainedValidation,
+            "Multiple targets must not be silently collapsed to a newest/first member")
+        assertEquals(setOf("batch-first", "batch-repeated"),
+            repeatedEntry.retainedValidationChoices.mapNotNull { it.batchId }.toSet())
+        assertEquals(listOf(0, 0), repeatedEntry.retainedValidationChoices.map { requireNotNull(it.memberPosition) })
+
+        val stale = claim("claim-stale", "batch-stale", 3)
+        val staleState = built.state.copy(claims = mapOf(stale.id to stale),
+            batches = mapOf(DownloadBatchId("batch-stale") to batch("batch-stale", "claim-stale", 4)))
+        val staleEntry = downloadSurface(AppSnapshot(), DownloadAcquisitionPresentation(
+            LibraryAcquisitionView(AppSnapshot(revision = 1), staleState), mapOf(failed.id to failed))).entries.single()
+        assertNull(staleEntry.retainedValidation,
+            "A changed batch intent revision must invalidate the persisted row action")
+        assertTrue(staleEntry.retainedValidationChoices.isEmpty())
+    }
+
+    @Test
     fun sharedAssetBytesCountOnceAndSchema2LegacyReadinessIsRetained() {
         val shared = catalogueState(complete = true, useR1 = true, useR2 = true)
         val surface = downloadSurface(AppSnapshot(), presentation(shared))
@@ -350,5 +421,46 @@ class DownloadSurfaceTest {
         assertTrue(legacySurface.isDownloaded(media.id))
         assertEquals(2_048L, legacySurface.storageBytes())
         assertEquals("legacy", legacySurface.forMedia(media.id)?.id)
+    }
+
+    @Test
+    fun neutralRetainedFailureNeverExposesAValidationBinding() {
+        val sourceCapture = SourceCollectionCapture(SourceCollectionMetadata(SourceProvider.YOUTUBE, "captured",
+            sourceTitle, "https://www.youtube.com/playlist?list=authored", AcquisitionEntryKind.PLAYLIST, null))
+        val request = AcquisitionRequest(AcquisitionRequestId("neutral-request"), sourceTitle, sourceCapture, 1)
+        val raw = SourceEntry(AcquisitionEntryKind.VIDEO, "CCCCCCCCCCC", "Observed neutral recording",
+            "https://www.youtube.com/watch?v=CCCCCCCCCCC", ordinal = 0)
+        val receipt = FirstResultReceipt.Observed(FirstResultReceiptId("neutral-receipt"),
+            FirstResultObservation(request.id, sourceTitle, raw, raw.publicUrl), 2)
+        val recording = SourceRecording(SourceRecordingId("neutral-recording"), "CCCCCCCCCCC",
+            requireNotNull(raw.publicUrl))
+        val subject = ExecutableSubject.SourceRecordingSubject(ExecutableSubjectId("neutral-subject"), recording.id)
+        val binding = ExecutionBinding(ExecutionBindingId("neutral-binding"), subject.id, receipt.id, recording.id,
+            ExecutionBindingOrigin.TYPED)
+        val producer = PhysicalDownloadProducer.Typed(subject.id, binding.id, recording.id)
+        val asset = MaterializationAsset(MaterializationAssetId("neutral-asset"), producer, "/owned/neutral", 4_096,
+            kind = OfflineAssetKind.FILE, representationId = "neutral-representation", completedEpochMs = 9)
+        val job = PhysicalDownloadJob("neutral-job", producer, status = DownloadStatus.FAILED,
+            bytesDownloaded = 4_096, totalBytes = 4_096, assetId = asset.id,
+            representationId = asset.representationId, updatedEpochMs = 10, ownershipGeneration = 1)
+        val claim = DownloadClaim(DownloadClaimId("neutral-claim"), DownloadClaimOwner.Standalone(job.id), job.id,
+            binding.id, DownloadBatchIntent.ACTIVE, true, 11)
+        val state = AcquisitionRepositoryState(1,
+            requests = mapOf(request.id to dev.veyra.model.AcquisitionRecord(request, AcquisitionJobState.COMMITTED,
+                outcome = AcquisitionOutcome.Single(request.id, receipt.id, binding.id), updatedEpochMs = 3)),
+            receipts = mapOf(receipt.id to receipt), recordings = mapOf(recording.id to recording),
+            subjects = mapOf(subject.id to subject), bindings = mapOf(binding.id to binding),
+            claims = mapOf(claim.id to claim), physicalDownloads = mapOf(job.id to job),
+            materializations = mapOf(asset.id to asset), materializationReceipts = mapOf(asset.id to asset.receipt()))
+        val entry = downloadSurface(AppSnapshot(), DownloadAcquisitionPresentation(
+            LibraryAcquisitionView(AppSnapshot(revision = 1), state), mapOf(job.id to job))).entries.single()
+        assertEquals(DownloadSurfaceOrigin.TYPED_SOURCE, entry.origin)
+        assertNull(entry.bindingId)
+        val target = assertNotNull(entry.retainedValidation)
+        assertEquals("neutral-binding", target.bindingId)
+        assertNull(target.batchId)
+        assertTrue(entry.retainedValidationChoices.isEmpty())
+        assertNull(entry.mediaId)
+        assertFalse(entry.ready)
     }
 }

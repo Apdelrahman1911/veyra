@@ -213,14 +213,24 @@ internal fun MediaActionsMenu(
                     DownloadStatus.QUEUED, DownloadStatus.RESOLVING, DownloadStatus.RUNNING -> DropdownMenuItem(text = { Text(strings.text(TextKey.PauseDownload)) }, onClick = { dispatch(MusicUiAction.PauseDownload(download.id)) })
                     DownloadStatus.PAUSED, DownloadStatus.WAITING_NETWORK, DownloadStatus.NEEDS_FOREGROUND -> DropdownMenuItem(text = { Text(strings.text(TextKey.ResumeDownload)) }, onClick = { dispatch(MusicUiAction.ResumeDownload(download.id)) })
                     DownloadStatus.FAILED -> if (retainedFailure) {
-                        val binding = download.bindingId?.takeIf {
-                            download.origin == DownloadSurfaceOrigin.TYPED_CATALOGUE
-                        }
-                        if (binding != null) DropdownMenuItem(
+                        val target = download.retainedValidation
+                        val choices = download.retainedValidationChoices
+                        if (target != null) DropdownMenuItem(
                             text = { Text(strings.text(TextKey.ValidateDownload)) },
-                            onClick = { dispatch(MusicUiAction.ValidateRetainedDownload(download.id, binding)) },
+                            onClick = { dispatch(MusicUiAction.ValidateRetainedDownload(target.jobId,
+                                target.bindingId, target.batchId, target.memberPosition,
+                                target.expectedIntentRevision)) },
                             modifier = Modifier.testTag("menu-validate-${item.id}"),
-                        ) else DropdownMenuItem(
+                        ) else if (choices.isNotEmpty()) choices.forEachIndexed { index, choice ->
+                            DropdownMenuItem(
+                                text = { Text(strings.format(TextKey.ValidateDownloadMember,
+                                    strings.number((index + 1).toLong()))) },
+                                onClick = { dispatch(MusicUiAction.ValidateRetainedDownload(choice.jobId,
+                                    choice.bindingId, choice.batchId, choice.memberPosition,
+                                    choice.expectedIntentRevision)) },
+                                modifier = Modifier.testTag("menu-validate-member-${item.id}-${choice.memberPosition}"),
+                            )
+                        } else DropdownMenuItem(
                             text = { Text(strings.text(TextKey.RetainedValidationUnavailable)) },
                             onClick = {}, enabled = false,
                             modifier = Modifier.testTag("menu-validate-unavailable-${item.id}"),

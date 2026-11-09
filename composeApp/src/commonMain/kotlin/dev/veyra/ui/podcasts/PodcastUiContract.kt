@@ -100,8 +100,16 @@ sealed interface PodcastAction {
     data object OpenQueue : PodcastAction
     data class Download(val mediaId: String) : PodcastAction
     data class PauseDownload(val downloadId: String) : PodcastAction
-    /** Explicit local validation of retained FAILED bytes under the exact persisted binding. */
-    data class ValidateRetainedDownload(val downloadId: String, val bindingId: String) : PodcastAction
+    /** Explicit local validation of retained FAILED bytes under the exact persisted binding/member. */
+    data class ValidateRetainedDownload(
+        val downloadId: String,
+        val bindingId: String,
+        val batchId: String? = null,
+        val memberPosition: Int? = null,
+        val expectedIntentRevision: Long? = null,
+    ) : PodcastAction {
+        init { require((batchId == null) == (memberPosition == null && expectedIntentRevision == null)) }
+    }
     data class ResumeDownload(val downloadId: String) : PodcastAction
     data class CancelDownload(val downloadId: String) : PodcastAction
     data class RemoveDownload(val downloadId: String) : PodcastAction

@@ -1,6 +1,7 @@
 package dev.veyra.ui.music
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -14,6 +15,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -327,14 +330,39 @@ private fun DownloadRow(entry: DownloadSurfaceEntry, snapshot: AppSnapshot, onAc
                     DownloadStatus.RUNNING, DownloadStatus.QUEUED, DownloadStatus.RESOLVING -> TextButton({ onAction(MusicUiAction.PauseDownload(entry.id)) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.PauseDownload)) }
                     DownloadStatus.PAUSED, DownloadStatus.WAITING_NETWORK, DownloadStatus.NEEDS_FOREGROUND -> TextButton({ onAction(MusicUiAction.ResumeDownload(entry.id)) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.ResumeDownload)) }
                     DownloadStatus.FAILED -> if (retainedFailure) {
-                        val binding = entry.bindingId?.takeIf {
-                            entry.origin == DownloadSurfaceOrigin.TYPED_CATALOGUE
-                        }
-                        if (binding != null) TextButton(
-                            { onAction(MusicUiAction.ValidateRetainedDownload(entry.id, binding)) },
+                        val target = entry.retainedValidation
+                        val choices = entry.retainedValidationChoices
+                        if (target != null) TextButton(
+                            { onAction(MusicUiAction.ValidateRetainedDownload(target.jobId,
+                                target.bindingId, target.batchId, target.memberPosition,
+                                target.expectedIntentRevision)) },
                             modifier = Modifier.heightIn(min = 48.dp).testTag("validate-${entry.id}"),
                         ) { Text(strings.text(TextKey.ValidateDownload)) }
-                        else Text(
+                        else if (choices.isNotEmpty()) {
+                            var memberMenu by remember(entry.id) { mutableStateOf(false) }
+                            Box {
+                                TextButton({ memberMenu = true },
+                                    modifier = Modifier.heightIn(min = 48.dp).testTag("validate-${entry.id}")) {
+                                    Text(strings.text(TextKey.ValidateDownload))
+                                }
+                                DropdownMenu(expanded = memberMenu, onDismissRequest = { memberMenu = false }) {
+                                    choices.forEachIndexed { index, choice ->
+                                        DropdownMenuItem(
+                                            text = { Text(strings.format(TextKey.ValidateDownloadMember,
+                                                strings.number((index + 1).toLong()))) },
+                                            onClick = {
+                                                memberMenu = false
+                                                onAction(MusicUiAction.ValidateRetainedDownload(choice.jobId,
+                                                    choice.bindingId, choice.batchId, choice.memberPosition,
+                                                    choice.expectedIntentRevision))
+                                            },
+                                            modifier = Modifier.testTag(
+                                                "validate-member-${entry.id}-${choice.memberPosition}"),
+                                        )
+                                    }
+                                }
+                            }
+                        } else Text(
                             strings.text(TextKey.RetainedValidationUnavailable),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error,

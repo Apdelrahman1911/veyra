@@ -25,13 +25,15 @@ The canonical fence is constrained, but the claim set is **not** immutable:
   is the mandatory real-Room discriminator. A real in-progress staged transfer is drained without
   deleting its bytes; a canonical CANCELLED/retain=true intent creates the retaining cleanupPending
   state. The controlled runtime host invokes the production
-  `cleanupStoppedStandalone(expectedOwner)` path. In the existing `beforeMaintenanceClaim` hook, after
+  `cleanupStoppedStandalone(expectedOwner)` path. In the acquisition-fixture `beforeMaintenanceClaim` hook added by this change, after
   the runtime pre-read and before the actual Room claim, a canonical CANCELLED/retain=false command
   drops retention and increments the claim generation/revision. The test asserts the committed claim
   set differs from the retaining pre-read, the runtime takes its post-read mismatch rollback, the
   finish receives exactly the returned committed fence/claims, the lease is not stranded, the
-  reservation/staging bytes/path ownership remain, and a subsequent exact cleanup deletes the staged
-  generation and releases owned resources.
+  cleanupPending state, exact committed claims and staging-file existence remain, and a subsequent
+  exact cleanup deletes the known staged generation and releases owned resources. The Room test
+  distinguishes changed claims; the divergent returned fence is separately covered by the defensive
+  fake oracle. It does not separately assert preserved byte contents or every path-ownership field.
 - The existing `committedCleanupClaimJoinChangeRollsBackReturnedFenceAndRetriesWithoutStickyLease` remains
   as the reachable post-read path-change case.
 - `DownloadCommittedCleanupIdentityCorrectionsTest` remains a deliberately coherent **runtime fake
@@ -184,7 +186,10 @@ The docs-only successor after `ae28140` changes only this verification document.
   experiments; retained. They include compile/type stops and a scheduler-owned path with no
   expectedOwner mismatch; not acceptance evidence.
 - `r1-retain-room-1` through `r1-retain-room-6`: real-Room controlled-runtime host experiments; `-6` is
-  the green retaining-to-nonretaining discriminator. Earlier attempts retain setup/compile stops.
+  the green retaining-to-nonretaining discriminator. Earlier attempts include setup/compile stops
+  and real assertion failures (`-4` and `-5`, each 1 test / 1 failure).
+- `r1-retaining-debug-1`: 1 test / 1 failure, `Expected a cleanup rollback finish; finishes=[]`,
+  at `68ea74e` plus dirty runtime/test inputs whose raw bytes were not retained; not acceptance evidence.
 
 ## Limits
 

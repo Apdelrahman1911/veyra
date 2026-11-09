@@ -33,7 +33,7 @@ class DownloadRetainingCleanupIdentityRoomTest {
         withTimeout(10_000) { transferStarted.await() }
         // Stop the scheduler/transfer without deleting the staged generation. The canonical
         // command below then creates the legitimate retaining cleanupPending state.
-        runCatching { owner.coordinator.drainForBackground() }
+        owner.coordinator.drainForBackground()
         val afterDrain = assertNotNull(owner.repository.physicalDownload(id))
         val staging = afterDrain.job.stagingPath ?: afterDrain.attempts.lastOrNull()?.stagingPath
         val stagingPath = assertNotNull(staging, "The interrupted transfer must retain its staged path")

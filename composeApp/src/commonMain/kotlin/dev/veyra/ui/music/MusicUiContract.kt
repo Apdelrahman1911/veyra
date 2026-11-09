@@ -108,8 +108,16 @@ sealed interface MusicUiAction {
     data class Download(val item: MediaItem) : MusicUiAction
     data class DownloadCollection(val items: List<MediaItem>) : MusicUiAction
     data class PauseDownload(val downloadId: String) : MusicUiAction
-    /** Explicit local validation of retained FAILED bytes under the exact persisted binding. */
-    data class ValidateRetainedDownload(val downloadId: String, val bindingId: String) : MusicUiAction
+    /** Explicit local validation of retained FAILED bytes under the exact persisted binding/member. */
+    data class ValidateRetainedDownload(
+        val downloadId: String,
+        val bindingId: String,
+        val batchId: String? = null,
+        val memberPosition: Int? = null,
+        val expectedIntentRevision: Long? = null,
+    ) : MusicUiAction {
+        init { require((batchId == null) == (memberPosition == null && expectedIntentRevision == null)) }
+    }
     data class ResumeDownload(val downloadId: String) : MusicUiAction
     data class CancelDownload(val downloadId: String) : MusicUiAction
     data class RemoveDownload(val downloadId: String) : MusicUiAction

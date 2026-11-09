@@ -3,6 +3,8 @@ package dev.veyra.ui.downloads
 import dev.veyra.data.executionContext
 import dev.veyra.downloads.DownloadAcquisitionPresentation
 import dev.veyra.model.AppFailure
+import dev.veyra.model.DownloadBatchIntent
+import dev.veyra.model.DownloadClaimOwner
 import dev.veyra.model.DownloadStatus
 import dev.veyra.model.ExecutableSubject
 import dev.veyra.model.ExecutionBindingId
@@ -23,12 +25,36 @@ import dev.veyra.model.receipt
 enum class DownloadSurfaceOrigin { LEGACY, TYPED_CATALOGUE, TYPED_SOURCE }
 
 /**
+ * Exact persisted target for the one explicit local Validate action of a retained FAILED job.
+ * A standalone owner carries only the binding; a batch member also carries its exact batch,
+ * member position and current intent revision. This is durable evidence only: it is not an
+ * `AssetUse`, playback binding or native permission, and no sibling/member may be inferred.
+ */
+data class RetainedValidationTarget(
+    val jobId: String,
+    val bindingId: String,
+    val batchId: String? = null,
+    val memberPosition: Int? = null,
+    val expectedIntentRevision: Long? = null,
+) {
+    init {
+        require(jobId.isNotBlank() && bindingId.isNotBlank())
+        require((batchId == null) == (memberPosition == null && expectedIntentRevision == null))
+        require(batchId == null || (batchId.isNotBlank() && memberPosition != null && memberPosition >= 0 &&
+            expectedIntentRevision != null && expectedIntentRevision >= 0))
+    }
+    val isBatchMember: Boolean get() = batchId != null
+}
+
+/**
  * [ready] is row-level exact-use checked physical readiness for ANY producer: the existing
  * schema2 readiness for legacy rows, or a typed job whose paired current-process states and exact
  * `AssetUse`/claim/asset/receipt proof all match. A neutral source row can therefore be physically
  * verified/removable/stored, but it has no [mediaId], no catalogue binding, no catalogue
  * membership and no Play action; catalogue playback readiness remains [readyMediaIds] over a
- * non-null mediaId. A historical `COMPLETE` flag, a persisted materialization, a process-history
+ * non-null mediaId. [retainedValidation]/[retainedValidationChoices] are durable local-validation
+ * targets only, never a playback grant or fabricated catalogue membership. A historical `COMPLETE`
+ * flag, a persisted materialization, a process-history
  * check or a producer completion are not enough. [checking] means owned bytes exist and this
  * process is currently verifying/blocked. [displayTitle] is only the real captured
  * request/observed title of a neutral source row; it never creates an RSS/catalogue item. No
@@ -52,6 +78,14 @@ data class DownloadSurfaceEntry(
     val measuredDurationMs: Long? = null,
     val assetId: String? = null,
     val assetSizeBytes: Long? = null,
+    /** Exact standalone/member target for explicit retained local validation; null when multiple. */
+    val retainedValidation: RetainedValidationTarget? = null,
+    /**
+     * Every exact persisted batch-member target when more than one legitimate retained member
+     * shares this physical row. The UI must present an explicit localized choice; it must never
+     * pick the first/newest member or infer sibling grants.
+     */
+    val retainedValidationChoices: List<RetainedValidationTarget> = emptyList(),
 ) {
     init {
         require(id.isNotBlank() && bytesDownloaded >= 0 && (totalBytes == null || totalBytes >= 0))
@@ -156,6 +190,7 @@ private fun typedEntries(presentation: DownloadAcquisitionPresentation,
         val asset = canonical.assetId?.let(state.materializations::get)
         val mediaId = (state.subjects[producer.subjectId] as? ExecutableSubject.CatalogMedia)?.mediaId
         val verified = verifiedByJob[canonical.id]
+        val validationTargets = retainedValidationTargets(presentation, projected, producer)
         DownloadSurfaceEntry(
             id = canonical.id,
             origin = if (mediaId == null) DownloadSurfaceOrigin.TYPED_SOURCE else DownloadSurfaceOrigin.TYPED_CATALOGUE,
@@ -178,8 +213,49 @@ private fun typedEntries(presentation: DownloadAcquisitionPresentation,
             measuredDurationMs = asset?.measuredDurationMs,
             assetId = asset?.id?.value,
             assetSizeBytes = asset?.sizeBytes,
+            retainedValidation = validationTargets.singleOrNull(),
+            retainedValidationChoices = if (validationTargets.size > 1) validationTargets else emptyList(),
         )
     }
+}
+
+/**
+ * Resolve every exact persisted validation target for the failed row. Repeated members that
+ * request the same binding may share one physical job; the UI must present an explicit localized
+ * choice among these exact member identities. Never choose a newest/first member. A changed batch
+ * revision or mismatched member claim is omitted rather than acted on stale identity.
+ */
+private fun retainedValidationTargets(presentation: DownloadAcquisitionPresentation,
+    job: dev.veyra.model.PhysicalDownloadJob,
+    producer: PhysicalDownloadProducer.Typed,
+): List<RetainedValidationTarget> {
+    val state = presentation.view.acquisition
+    if (presentation.view.snapshot.revision != state.libraryRevision) return emptyList()
+    if (job.status != DownloadStatus.FAILED || job.assetId == null || job.cleanupPending) return emptyList()
+    val bindingId = producer.bindingId
+    return state.claims.values.asSequence()
+        .filter { claim ->
+            claim.physicalJobId == job.id && claim.requestedBindingId == bindingId &&
+                (claim.intent != DownloadBatchIntent.CANCELLED || claim.retainCompletedAsset)
+        }
+        .mapNotNull { claim ->
+            when (val owner = claim.owner) {
+                is DownloadClaimOwner.Standalone, is DownloadClaimOwner.Schema2Standalone ->
+                    RetainedValidationTarget(job.id, bindingId.value)
+                is DownloadClaimOwner.BatchMember -> {
+                    val batch = state.batches[owner.batchId] ?: return@mapNotNull null
+                    val member = batch.members.singleOrNull { it.position == owner.position }
+                        ?: return@mapNotNull null
+                    if (batch.intentRevision != claim.ownerIntentRevision ||
+                        member.claimId != claim.id || member.requiredBindingId != bindingId) return@mapNotNull null
+                    RetainedValidationTarget(job.id, bindingId.value, batch.id.value, owner.position,
+                        batch.intentRevision)
+                }
+            }
+        }
+        .distinct()
+        .sortedWith(compareBy<RetainedValidationTarget> { it.memberPosition ?: -1 }.thenBy { it.batchId ?: "" })
+        .toList()
 }
 
 /** Captured request title, then the actual observed entry title; never a synthesized catalogue row. */

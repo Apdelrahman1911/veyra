@@ -8,6 +8,7 @@ import dev.veyra.model.SourceRef
 import dev.veyra.ui.design.TextKey
 import dev.veyra.ui.downloads.DownloadSurfaceEntry
 import dev.veyra.ui.downloads.DownloadSurfaceOrigin
+import dev.veyra.ui.downloads.RetainedValidationTarget
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -21,7 +22,9 @@ class RetainedValidationActionTest {
         SourceRef(SourceProvider.YOUTUBE, "AAAAAAAAAAA"), showId = "show", durationMs = 100_000L)
 
     private fun failed(origin: DownloadSurfaceOrigin = DownloadSurfaceOrigin.TYPED_CATALOGUE,
-        bindingId: String? = "binding-r1", hasOwnedBytes: Boolean = true) = DownloadSurfaceEntry(
+        bindingId: String? = "binding-r1", hasOwnedBytes: Boolean = true,
+        target: RetainedValidationTarget? = if (origin == DownloadSurfaceOrigin.TYPED_CATALOGUE && bindingId != null)
+            RetainedValidationTarget("job-retained", bindingId) else null) = DownloadSurfaceEntry(
         id = "job-retained",
         origin = origin,
         mediaId = if (origin == DownloadSurfaceOrigin.TYPED_CATALOGUE) episode.id else null,
@@ -30,6 +33,7 @@ class RetainedValidationActionTest {
         totalBytes = 1_024,
         hasOwnedBytes = hasOwnedBytes,
         bindingId = bindingId,
+        retainedValidation = target,
     )
 
     private fun state(entry: DownloadSurfaceEntry, offline: Boolean = false) = PodcastEpisodeUiState(
@@ -50,13 +54,43 @@ class RetainedValidationActionTest {
     }
 
     @Test
-    fun retainedNeutralFailureNeverFabricatesABindingOrValidateAction() {
-        val neutral = failed(origin = DownloadSurfaceOrigin.TYPED_SOURCE, bindingId = null)
+    fun retainedBatchMemberFailureCarriesExactMemberRevisionNotABindingOnlyGuess() {
+        val target = RetainedValidationTarget("job-retained", "binding-r1", "batch-9", 3, 21)
+        val action = podcastDownloadAction(state(failed(target = target)))
+        assertEquals(TextKey.ValidateDownload, action.label)
+        assertEquals(PodcastAction.ValidateRetainedDownload("job-retained", "binding-r1", "batch-9", 3, 21),
+            action.action)
+    }
+
+    @Test
+    fun retainedNeutralFailureOffersExactLocalValidateWithoutCatalogueAuthority() {
+        val neutral = failed(origin = DownloadSurfaceOrigin.TYPED_SOURCE, bindingId = null,
+            target = RetainedValidationTarget("job-retained", "neutral-binding"))
         val action = podcastDownloadAction(state(neutral))
-        assertEquals(TextKey.RetainedValidationUnavailable, action.label)
+        assertEquals(TextKey.ValidateDownload, action.label)
+        assertEquals(PodcastAction.ValidateRetainedDownload("job-retained", "neutral-binding"), action.action)
+        assertNull(neutral.mediaId)
+        assertNull(neutral.bindingId)
+    }
+
+    @Test
+    fun repeatedMemberFailureExposesExplicitChoicesInsteadOfSelectingOne() {
+        val choices = listOf(
+            RetainedValidationTarget("job-retained", "binding-r1", "batch-a", 0, 4),
+            RetainedValidationTarget("job-retained", "binding-r1", "batch-b", 1, 7),
+        )
+        val entry = failed(target = null).copy(retainedValidationChoices = choices)
+        val action = podcastDownloadAction(state(entry))
         assertNull(action.action)
-        assertFalse(action.enabled)
-        assertEquals(TextKey.RemoveDownload, podcastRetainedAssetRemovalAction(state(neutral))?.label)
+        assertEquals(TextKey.ValidateDownload, action.label)
+        assertEquals(listOf(0, 1), action.memberActions.map { it.memberPosition })
+        assertEquals(listOf(TextKey.ValidateDownloadMember, TextKey.ValidateDownloadMember),
+            action.memberActions.map { it.label })
+        assertEquals(PodcastAction.ValidateRetainedDownload("job-retained", "binding-r1", "batch-b", 1, 7),
+            action.memberActions[1].action)
+        assertEquals(choices.map { it.batchId }, action.memberActions.map {
+            (it.action as PodcastAction.ValidateRetainedDownload).batchId
+        })
     }
 
     @Test
