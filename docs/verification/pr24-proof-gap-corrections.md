@@ -65,6 +65,41 @@ Probe `strategy-probe-2` compiled at the current source and logged
 the test compile, with `drain.after` zero. This is configuration plus a positive process sample, not a
 full worker-exec trace. The final committed-source compile/focused/full results are recorded below.
 
+## Final same-commit evidence (source `7825b9a5adb6a9825fac81408ba98dc7a2927d3c`)
+
+All final attempts use the new exact-bounds init, the existing project lock, one worker, the single
+literal JVM argument, fresh unique directories, clean HEAD/status, complete before/after input manifests,
+actual `/proc/locks`/`lslocks` holder identity, an in-lock gate-admission prefix seal, and positive
+argv/cwd/fd drains. The full `gate.log` is outside the in-gate attempt seal; `gate.log.outside.meta`
+records its post-wrapper hash/bytes separately.
+
+- `final3-compile-1`: exit 0; actual `:kmpYT:kmpyt:compileKotlinJvm`, `:shared:compileKotlinJvm` and
+  `:shared:compileTestKotlinJvm` under `--rerun-tasks`. All three logged
+  `VEYRA_KOTLIN_STRATEGY ... value=in-process`; `drain.before/after/done` all report zero matches
+  (no Kotlin compiler daemon observed). `run.log` SHA-256
+  `0707e9a26e48f5805cd95cdbc940234a43455d8b0f8eb38c68224e85fa5a0282`, attempt seal
+  `a19beee18b797e2d7de59f31a44c98879993d665408c2f37ab0309332b0bbefb`, admission-prefix seal
+  `8b2810f77c7973328f95aa0c5007dff63942f7038faf8b94cee017ffbfdc14fb`.
+- `final3-focused-1`: exit 0; 122 tests / 13 suites / 0 failures / 0 errors / 0 skipped. Includes the
+  real committed-claim invariant, coherent runtime identity oracle, scheduler-owned adoption barrier,
+  shared-sibling removal, and all inherited cleanup/adoption/ownership/maintenance/retained classes.
+  `run.log` `1a0985ebc2185b1c3756bd81871d4571af3094e5bd8b520d31bfe2169f4f30c6`, XML seal
+  `c7ad32185db5052d32a998b7f76b689b4b74a3ed55273a0bf20175b561b93c08`, attempt seal
+  `144d138c9a3eea05baf8e9a1383daa2db3b5050b8d04fe0b23d2bf645be432c7`, admission-prefix seal
+  `ac73e5ada8672c31393413896cac14db222440ca2f4ade0deee6164d8cb5804c`.
+- `final3-full-1`: exit 0; 1,198 tests / 104 suites / 0 failures / 0 errors / 0 skipped. `run.log`
+  `85511cb47f611fd8555c7caecf04de39771fc3efe736b7cda54937a772452ea0`, XML seal
+  `ccf1a3859ab71698f6d8133370f522f222f25331bab36a771250b90752ac7362`, attempt seal
+  `f5b318c56e11ca3eaaff65ab80974b3eaa30b5653a9edfd97d21c616542b71c9`, admission-prefix seal
+  `596225373882fbc33e095cfd0a82f730b634b2427264e3796c217a0ac6f4466c`.
+- Pin `c0a08090fe7dbd76e20216559b8184ad2cccde63` (file/indexed gitlink/actual submodule) and schema3
+  `aab30e43a35a431a25a7ecbb7ebccefd849811f688957054304b02d3caf6d367`; `inputs_equal=0`; worktree clean.
+  `harness.bytes.sha256` for the runner/init is
+  `546fe746f337956913ec959c83208fe02bcb0c62d4e4a14669bd6aba46047ada`.
+
+The docs-only successor changes only this verification document. The tested source is `7825b9a`;
+PR24 remains frozen at `b600628` (tested `55931d5`).
+
 ## Related LOW corrections
 
 - **R4:** `gate.log` is not sealed by `attempt.sha256`; new attempts seal only the stable in-lock admission
@@ -98,8 +133,9 @@ full worker-exec trace. The final committed-source compile/focused/full results 
 - `prefinal-focused-1`: 122 tests / 13 suites / 2 load-sensitive inherited failures
   (`cleanupExpiration...` retry and `sqliteRollback...` timeout); preserved as pre-final evidence, not
   acceptance.
-- Final committed-source compile/focused/full attempts are recorded after the source commit and before
-  the docs-only successor commit.
+- `final3-compile-1`, `final3-focused-1`, `final3-full-1`: the final committed-source executed gates at
+  `7825b9a`; results, hashes, admission-prefix seals, lock holder snapshots and zero-drain evidence are
+  recorded above and in `attempts/final3-*`.
 
 ## Limits
 
