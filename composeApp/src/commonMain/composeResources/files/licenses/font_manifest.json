@@ -1,0 +1,42 @@
+{
+  "family": "IBM Plex Sans Arabic",
+  "license": "SIL Open Font License 1.1",
+  "copyright": "Copyright © 2017 IBM Corp. with Reserved Font Name \"Plex\"",
+  "source_repository": "https://github.com/google/fonts",
+  "source_revision": "702964cf46bd1bf33d0745d24bbaac33edf8b8af",
+  "source_directory": "ofl/ibmplexsansarabic",
+  "modified": false,
+  "files": [
+    {
+      "original_filename": "IBMPlexSansArabic-Regular.ttf",
+      "resource_path": "font/ibm_plex_sans_arabic_regular.ttf",
+      "source_url": "https://raw.githubusercontent.com/google/fonts/702964cf46bd1bf33d0745d24bbaac33edf8b8af/ofl/ibmplexsansarabic/IBMPlexSansArabic-Regular.ttf",
+      "bytes": 235924,
+      "sha256": "6f611412270a132bbac838da9259d4c68569b4175f3b3b8fa3fa36a30b56dab9",
+      "weight": 400
+    },
+    {
+      "original_filename": "IBMPlexSansArabic-Medium.ttf",
+      "resource_path": "font/ibm_plex_sans_arabic_medium.ttf",
+      "source_url": "https://raw.githubusercontent.com/google/fonts/702964cf46bd1bf33d0745d24bbaac33edf8b8af/ofl/ibmplexsansarabic/IBMPlexSansArabic-Medium.ttf",
+      "bytes": 242100,
+      "sha256": "b8363ab9f733dfa4f8e96b8b2102c24b5cf4110fb96d1d3d9a9412f6fb49cf74",
+      "weight": 500
+    },
+    {
+      "original_filename": "IBMPlexSansArabic-SemiBold.ttf",
+      "resource_path": "font/ibm_plex_sans_arabic_semibold.ttf",
+      "source_url": "https://raw.githubusercontent.com/google/fonts/702964cf46bd1bf33d0745d24bbaac33edf8b8af/ofl/ibmplexsansarabic/IBMPlexSansArabic-SemiBold.ttf",
+      "bytes": 244616,
+      "sha256": "597bd5502e5997be4414e4c9c88834b30ff3784250c84f20bce2b20e53ebd467",
+      "weight": 600
+    },
+    {
+      "original_filename": "OFL.txt",
+      "resource_path": "files/licenses/ibm_plex_sans_arabic_ofl.txt",
+      "source_url": "https://raw.githubusercontent.com/google/fonts/702964cf46bd1bf33d0745d24bbaac33edf8b8af/ofl/ibmplexsansarabic/OFL.txt",
+      "bytes": 4456,
+      "sha256": "7e6b2818edbd8f6a01ae80641cc8f16a51080d08fb4e532be3a0b6f74adb07da"
+    }
+  ]
+}

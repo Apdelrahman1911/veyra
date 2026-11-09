@@ -1,0 +1,30 @@
+{
+  "platform": "windows-x64",
+  "component": "node",
+  "version": "22.23.4",
+  "url": "https://nodejs.org/dist/v22.23.4/node-v22.23.4-win-x64.zip",
+  "archiveSha256": "cbc74b5e0982c9dbb41525fd8fb5dcd32fbee237863f7829072f4639a1ce5f20",
+  "archiveBytes": 35604229,
+  "expandedBytes": 99119403,
+  "archiveRoot": "node-v22.23.4-win-x64",
+  "format": "zip",
+  "executable": "node.exe",
+  "selection": {
+    "node.exe": "node.exe",
+    "LICENSE": "LICENSE"
+  },
+  "entries": [
+    {
+      "path": "LICENSE",
+      "size": 148217,
+      "sha256": "8cc9bb466b19fc7e7cc99d03e9df1132021fda8b01eea2624c58bb372dbef576",
+      "executable": false
+    },
+    {
+      "path": "node.exe",
+      "size": 87034184,
+      "sha256": "dccc52de28d8df2ee22d2062424f8c563070d95d8ad70c54c4bf01d590dec14f",
+      "executable": true
+    }
+  ]
+}

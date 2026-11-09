@@ -111,6 +111,169 @@ The lead explicitly resolved the following before implementation. These supersed
 
 The timer visibility and source-restriction challenges above are additional implementation checks. No native application behavior has been verified by this report.
 
+## 9. Later owner scope revision and implemented presentation contract
+
+The lead relayed a subsequent explicit owner revision during implementation. It supersedes the
+earlier execution-source recommendation above; it is a product requirement, **not evidence that
+title matching is reliable**:
+
+- All playback/download execution respects the **complete selected title → first kmpYT
+  result**. External music/podcast sources supply discovery metadata only. No selection of a later
+  result to improve a match, no hidden direct-enclosure/Commons fallback, and no fabricated audio
+  when the first result is restricted or unusable.
+  Local references/import do not create an independent execution bypass; offline reopening still
+  uses the validated owned file and exact acquisition receipt rather than new network resolution.
+- Requested discovery identity, resolved audio identity, and file identity are distinct. The full
+  player receives its immutable receipt from `PlaybackState.executionBinding`; a Ready download
+  receives its receipt through `OfflineAsset.executionBindingId`. An arbitrary newest receipt is
+  never evidence about the current session or an older downloaded file. Different titles trigger
+  a textual-mismatch warning; equal titles still do not verify that recordings/episodes match.
+  Original listing licences do not establish the rights of a different resolved recording.
+- The normalized persistent implementation is now **Room**, not the earlier JSON proposal.
+  Presentational screens retain `AppSnapshot` only as the root-supplied read model. Actual album
+  entities/collections must retain source identity; UI does not invent albums from song titles.
+- Music crossfade is mandatory across target engines. Settings belong to the root; the player
+  presents typed PREPARING/READY/OVERLAPPING state. Only confirmed OVERLAPPING is labeled active
+  and shown with the engine/coordinator's fraction. Outgoing identity stays current until atomic
+  promotion; podcast controls never inherit music crossfade/shuffle/repeat.
+
+Owned presentation sources now cover Listen, Search, Library/playlists/downloads, nonplaying track
+details, real source collection details, mini/full players, two-context queue inspection, and receipt
+disclosure. Track details keep complete requested metadata and listing duration separate from the
+native current duration and validated file duration. Current, downloaded, and previous-search
+receipts are labeled independently; opening details does not dispatch playback. Public source and
+licence links dispatch root-validated intents and remain disabled under offline policy. Incoming
+crossfade receipts now use the supplied `incomingExecutionBinding` and an explicit incoming-audio
+label, never a guessed current recording.
+Whole-collection actions do not silently operate on just the first page: pagination must complete
+before a whole-list action is enabled, with an explicit reason and per-item actions still exposed.
+Queue actions identify occurrences, while `Clear upcoming` requires confirmation and a distinct
+coordinator command preserving the current occurrence/history.
+
+## 10. Executed fixture evidence and pending UI repair — 2026-11-06
+
+The **second** combined guarded invocation compiled production/tests and recorded **249 JUnit
+records: 240 passes, 9 failures, zero errors/skips**. It used `scripts/with-display.sh
+scripts/gradle.sh`, a command-local 1280MiB heap/512MiB metaspace/SerialGC/two processors, and
+filters `dev.veyra.app.*`, `dev.veyra.ui.*`, and `dev.veyra.desktop.*`. The original log is
+`.work/music-ui-tests-second.log`; preserved log, XML, invocation and input-hash records are under
+`.work/music-ui-evidence/second/`. This was not a green batch or a final-revision claim.
+
+Owned results from that exact run:
+
+| Fixture group | Passed / executed | Scope |
+|---|---:|---|
+| Music pure presentation | 20 / 20 | Intent/status/occurrence helpers, including existing-asset recheck predicate |
+| Root-authorized navigation | 16 / 16 | Pure Back/restoration/route/overlay invariants |
+| Music desktop surfaces | 28 / 29 | Authored UI interactions, not native audio |
+| Connected CoreShell | 5 / 9 | Actual VeyraApp/AppContainer/controller/Room with simulated engine/gateway |
+| **Owned total** | **69 / 74** | **Five remaining failures below** |
+
+The existing-asset recheck correction passed its additional pure and four GUI cases. Music rows,
+track details and overflow menus show `VERIFYING`/`NEEDS_FOREGROUND` plus **confirmed Remove**, not
+ineffective transfer Cancel/Resume, when an asset exists and cleanup is not pending. This never
+validates an asset or grants Ready/offline playback. Asset-null active finalization remains
+cancellable; a foreground-restricted asset-null transfer retains Resume/Cancel.
+
+### Failure diagnosis, without weakened accessibility assertions
+
+1. **Typed Space:** timeout waiting for `fixture ` after a focused Search field received a
+   synthetic keydown/up. Exact Compose 1.9.3 desktop Foundation source requires a native AWT
+   `KEY_TYPED` to recognize printable text; a code point alone is insufficient. The candidate test
+   now sends down → native-backed synthetic typed event → up through the scene. It still checks
+   the space reaches the actual Search state and does not pause/toggle audio.
+2. **Dialog Escape:** the semantic-node injector calls `RootNodeOwner` directly, while Compose's
+   default Dialog dismissal listener belongs to its focusable **scene layer**. The candidate
+   test now uses `DesktopComposeTestRule.scene.sendKeyEvent`, retaining dialog → queue → player
+   dismissal and unchanged audio-owner checks. No extra production Escape handler was added to
+   compensate for a bypassed test-driver layer. These are synthetic scene events, **not evidence
+   of an actual desktop OS keyboard**.
+3. **Short-landscape Library item:** direct `performScrollTo` queried a virtualized item that
+   was not yet composed after filtering. The candidate scrolls the LazyColumn to the tagged
+   descendant first, then checks display. Original unclipped input/rail/mini-player assertions
+   remain, including the runtime-error state.
+4. **Arabic selected navigation label:** genuine `TextLayoutResult.hasVisualOverflow` at
+   320dp/175% text. Material3 1.9.0 unconditionally gives its item `weight(1f)`; simply supplying a
+   different item weight is not a reliable fix. The candidate uses separate Row slots: inactive
+   compact icons retain 48dp targets and the selected full label gets the remaining width. It
+   neither shrinks nor ellipsizes that label. New coverage selects all four destinations in both
+   English and Arabic at 200%, preserving min-target, full-bounds and no-text-overflow assertions.
+5. **Incoming crossfade receipt:** the test scrolled to the incoming section heading and then
+   required a title below it to be visible without further scrolling. The candidate scrolls to
+   the title itself. Requested/resolved distinction, exact supplied incoming receipt, non-first
+   result diagnostics and confirmed-only overlap/progress assertions remain intact.
+
+The exact reviewed API source jars are kept in `.work/music-api-review/`: Compose UI/Test/
+Foundation 1.9.3 and Material3 desktop 1.9.0. In particular see Foundation's
+`TextFieldKeyInput.desktop.kt`, UI Test's `KeyInputHelpers.kt`/`InputDispatcher.skiko.kt`, UI's
+`RootNodeOwner.skiko.kt`/`CanvasLayersComposeScene.skiko.kt`/`Dialog.skiko.kt`, and Material3's
+`NavigationBar.kt`. These source facts explain the repair; **the repaired tests have not run yet**.
+
+### Rendered evidence and transport-priority correction
+
+UI2 produced seven music PNGs plus four design PNGs. All eleven PNGs and seven sidecars were
+preserved under `.work/music-ui-evidence/second/screenshots/`, with `screenshots.sha256`. The
+music captures are authored metadata/engine fixtures, not downloaded copyrighted media, real
+source, native decoding or physical audible evidence. Lead and independent podcast review
+corroborated the full-player issue below.
+
+- `music/core-shell/fixture-shell-en-light-occurrence-queue.png`: current/upcoming occurrence
+  grouping and reference-only actions are visible; the mini-player still describes the active
+  music recording rather than a viewed queue. The list is captured at its test scroll position.
+- `music/core-shell/fixture-shell-en-light-episode-player.png`: actual English light full player
+  shows explicit provenance, but the verbose card pushes transport below the 720px viewport;
+  pause is visibly cropped. This is a **real usability defect**, not excused by scrollability.
+- `music/core-shell/fixture-label-clipping-nav-library.png`: corroborates the narrow Arabic
+  selected-label overflow, despite correctly mirrored navigation and sized click targets.
+- `music/player-ar-dark-large-top.png` and `player-ar-dark-large-controls.png`: correct dark RTL
+  presentation and LTR media controls/time, but top-state artwork/metadata hides transport until
+  scrolling. The control capture includes a keyboard-focus tooltip over time text and is not
+  evidence of a clean resting layout. Pinned Material3 keeps that tooltip until focus loss, not
+  merely until pointer movement; the candidate asserts keyboard behavior before clearing focus
+  only for its resting-layout capture.
+- `music/track-ar-dark-large-{top,actions}.png`: these standalone fixtures omitted the app's
+  hosting Surface, leaving transparent background and default black implicit text. They are
+  **defective visual fixtures**, not valid title/contrast review. The real VeyraApp supplies its
+  Surface; the candidate capture fixture now does too, and clears mouse hover before capture.
+
+The full-player candidate keeps **seek/pause/skip fixed below the scrollable metadata area**.
+Complete existing requested/resolved/source/mismatch disclosure is unchanged and remains readable
+by scrolling/expansion. Decorative portrait artwork becomes compact for short/large-text panes.
+A new connected fixture resizes long requested/resolved titles and a long creator credit from
+960×720 to 720×360 to Arabic/dark/200% at 320×760. These are app-content sizes inside the default
+1024×768 synthetic Compose scene, not native OS-window or independent-modal scene resizing.
+It requires all essential transport targets to
+be fully in-bounds **before scrolling** and while reading the complete expanded receipt. Existing
+podcast transport checks also now require initial full visibility. This adds two CoreShell methods
+(11 authored, versus 9 in UI2); the next owned total is 76 authored cases, **not 76 passes**.
+Capture helpers move the pointer away and allow tooltip dismissal before saving new evidence.
+The design owner's runtime indicator was extracted to `app/MediaRuntimeDetails.kt`; the old
+private implementation was removed from the shell, keeping the same production call.
+
+### Input/evidence limitations and prior run
+
+The post-run hash check matched **244 of 247** recorded inputs, including all compiled common/
+desktop/shared JVM inputs. Two Android-only files changed after the run; `linux-namespace.sh`
+changed during it for the CI owner's Stage0 `/run` mask work. Its before SHA was
+`7c2f4113f7b994c4237d70146ce312433be7a9ebcd65c99277ec4a58128b37df`, after SHA
+`1a00dc42b88f4988f25c492f46e9063f77f118161e60c96a71a778384dab9f3f`.
+The wrapper flow consumes namespace setup before executing the guarded display/Gradle child and
+would not reread that edited script in this already-created namespace. Nevertheless an exact
+pre-edit wrapper copy was not retained; **do not call all 247 inputs unchanged**. See
+`inputs-after-check.json`. Current candidate source edits require a new frozen-input run.
+
+The **first** guarded batch is historical: 196 records, 127 passes, 69 failures, no skips
+(`.work/music-ui-tests-first.log`, `.work/music-ui-evidence/first/`). Of those failures, 67 were
+X11 authentication/AWT initialization failures before GUI bodies ran, and two were native JUnit
+class-validation failures. It produced no PNGs; only 35 owned pure/helper navigation methods
+passed then. The guard authentication and class-signature fixes allowed UI2 to execute, without
+an unguarded display fallback. Main-surface fixture sizes do not validate independently layered
+modal sizes; the design owner's true-scene-sized dialog fixtures cover that separate boundary.
+
+Remaining gates include the candidate rerun and fresh visual review, actual keyboard/focus on
+platform windows, real compliant central source→play→download→offline restart, native transport,
+and mandatory physical-device audible crossfade. None is inferred from these authored fixtures.
+
 ## Primary references
 
 - [S1] Spotify — Search: <https://support.spotify.com/us/article/search/>

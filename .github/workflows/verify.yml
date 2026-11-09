@@ -1,0 +1,891 @@
+name: Veyra manual verification
+
+# Manual/reusable entry points; installer builds preserve independent package checks.
+# No publish, pull_request_target, paid runner, cache, or artifact-storage action.
+on:
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: Target group to verify
+        type: choice
+        options: [all, desktop, android-desktop, android-linux-windows, windows, windows-recovery, windows-macos-arm64, windows-session-probe, installers, android, ios]
+        default: all
+      package_desktop:
+        description: Generate native installers (no upload or OS installation)
+        type: boolean
+        default: false
+      retention_canary:
+        description: Run only the nonproduction draft-Release retention canary
+        type: boolean
+        default: false
+      retain_builds:
+        description: Retain built packages/evidence in per-platform draft prereleases
+        type: boolean
+        default: false
+
+  workflow_call:
+    inputs:
+      scope:
+        required: true
+        type: string
+      package_desktop:
+        type: boolean
+        default: false
+      retention_canary:
+        type: boolean
+        default: false
+      retain_builds:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  # Retained runs own separate workspaces/releases and must not queue behind each other.
+  group: veyra-verify-${{ github.ref }}-${{ (inputs.retention_canary || inputs.retain_builds) && github.run_id || inputs.scope }}
+  cancel-in-progress: ${{ !inputs.retention_canary && !inputs.retain_builds }}
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CI: 'true'
+  VEYRA_GRADLE_WORKERS: '1'
+
+jobs:
+  windows-session-probe:
+    if: ${{ github.event.repository.private == false && inputs.scope == 'windows-session-probe' && inputs.retention_canary != true && inputs.retain_builds != true }}
+    name: Windows native session probe
+    runs-on: windows-2022
+    timeout-minutes: 8
+    steps:
+      - name: Checkout probe source without retained credentials
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          persist-credentials: false
+          set-safe-directory: false
+          submodules: false
+      - name: Check owned-process diagnostics and configure the session helper
+        run: |
+          scripts/dev.sh python3 -B native/test_owned_process.py
+          scripts/dev.sh python3 -B native/test_bundle.py
+          scripts/dev.sh python3 -B - <<'PY'
+          import platform
+          from native.bundle import ROOT, host_target, preparation_lock, session_helper
+          target = host_target(platform.system(), platform.machine())
+          if target != "windows-x64":
+              raise SystemExit("Windows x64 host required")
+          with preparation_lock(ROOT / ".work/desktop-native"):
+              session_helper(target)
+          PY
+
+  desktop:
+    if: ${{ github.event.repository.private == false && inputs.retention_canary != true && (inputs.scope == 'all' || inputs.scope == 'installers' || inputs.scope == 'desktop' || inputs.scope == 'android-desktop' || inputs.scope == 'android-linux-windows' || inputs.scope == 'windows' || inputs.scope == 'windows-recovery' || inputs.scope == 'windows-macos-arm64') }}
+    name: Desktop (${{ matrix.label }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ inputs.scope == 'installers' && 4 || 2 }}
+      matrix:
+        include: ${{ fromJSON((inputs.scope == 'windows' || inputs.scope == 'windows-recovery') && '[{"label":"Windows x64","runner":"windows-2022","system":"Windows","arch":"x64","platform":"desktop-windows-x64"}]' || inputs.scope == 'windows-macos-arm64' && '[{"label":"Windows x64","runner":"windows-2022","system":"Windows","arch":"x64","platform":"desktop-windows-x64"},{"label":"macOS arm64","runner":"macos-15","system":"Darwin","arch":"arm64","platform":"desktop-macos-arm64"}]' || inputs.scope == 'android-linux-windows' && '[{"label":"Linux x64","runner":"ubuntu-24.04","system":"Linux","arch":"x64","platform":"desktop-linux-x64"},{"label":"Windows x64","runner":"windows-2022","system":"Windows","arch":"x64","platform":"desktop-windows-x64"}]' || '[{"label":"Linux x64","runner":"ubuntu-24.04","system":"Linux","arch":"x64","platform":"desktop-linux-x64"},{"label":"Windows x64","runner":"windows-2022","system":"Windows","arch":"x64","platform":"desktop-windows-x64"},{"label":"macOS arm64","runner":"macos-15","system":"Darwin","arch":"arm64","platform":"desktop-macos-arm64"},{"label":"macOS x64","runner":"macos-15-intel","system":"Darwin","arch":"x64","platform":"desktop-macos-x64"}]') }}
+    env:
+      VEYRA_EXPECTED_OS: ${{ matrix.system }}
+      VEYRA_EXPECTED_ARCH: ${{ matrix.arch }}
+      BUILD_PACKAGES: ${{ inputs.package_desktop }}
+      VEYRA_VERIFY_SCOPE: ${{ inputs.scope }}
+      # Use the installed namespace launcher; no image, install or policy writes.
+      VEYRA_LINUX_NAMESPACE_LAUNCHER: ${{ matrix.system == 'Linux' && 'podman' || '' }}
+    steps:
+      - name: Checkout without global Git configuration or retained credentials
+        id: checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1; reviewed workspace-only auth path
+        with:
+          persist-credentials: false
+          set-safe-directory: false
+          submodules: false
+      - name: Initialize the pinned public source dependency in an owned environment
+        id: bootstrap
+        run: scripts/checkout-submodule.sh
+      - name: Run bounded desktop tests
+        id: desktop_tests
+        if: ${{ inputs.scope != 'installers' }}
+        # The Intel macOS cold build reached desktop test compilation at 20 min.
+        timeout-minutes: 35
+        continue-on-error: true
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then
+            export DEVELOPER_DIR=/Applications/Xcode_26.0.1.app/Contents/Developer
+            test -d "$DEVELOPER_DIR"
+          fi
+          if [ "$VEYRA_VERIFY_SCOPE" = windows-recovery ] || { [ "$VEYRA_VERIFY_SCOPE" = android-linux-windows ] && [ "$RUNNER_OS" = Windows ]; }; then
+            # Targeted crash recovery and retry policy; never a full-suite claim.
+            scripts/dev.sh python3 -B scripts/tests/test_gradle_bootstrap.py
+            scripts/dev.sh python3 -B native/test_bundle.py
+            scripts/dev.sh python3 -B native/ffmpeg/test_build.py
+            scripts/gradle.sh :shared:jvmTest \
+              --tests 'dev.veyra.data.RoomProcessRecoveryTest*' \
+              --tests 'dev.veyra.data.WindowsWalRecoveryTest*' \
+              --tests 'dev.veyra.downloads.DownloadRecoveryRoomTest.failedReturnAfterDurableIntentInsertionCanBeCancelledWithoutLostFileReferences*'
+          else
+            scripts/ci.sh desktop
+          fi
+      - name: Build desktop installer independently of test outcome
+        id: desktop_package
+        if: ${{ always() && inputs.package_desktop == true && steps.bootstrap.outcome == 'success' }}
+        timeout-minutes: 45
+        continue-on-error: true
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then
+            export DEVELOPER_DIR=/Applications/Xcode_26.0.1.app/Contents/Developer
+            test -d "$DEVELOPER_DIR"
+          fi
+          scripts/package.sh
+      - name: Verify or generate native inventory and inventory-backed legal copy
+        id: desktop_inventory
+        if: ${{ always() && inputs.retain_builds == true && inputs.package_desktop == true && steps.bootstrap.outcome == 'success' }}
+        timeout-minutes: 20
+        continue-on-error: true
+        env:
+          VEYRA_INVENTORY_PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          inventory=".work/verification/runtime-inventory/$VEYRA_INVENTORY_PLATFORM.json"
+          package_legal=".work/verification/desktop-legal/$VEYRA_INVENTORY_PLATFORM"
+          # A successful package path already generated and embedded this exact
+          # inventory/legal set. Re-check the bytes instead of resolving Gradle
+          # again; only an early package failure falls back to diagnostics.
+          if [ -f "$package_legal/index.json" ] && [ -f "$inventory" ]; then
+            if [ -f .work/verification/packages.json ]; then
+              python3 -B -c 'import json, os; value = json.load(open(".work/verification/packages.json")); assert value["embeddedLegal"]["verified"] is True and value["source"]["commitSha"] == os.environ["GITHUB_SHA"]'
+            fi
+            python3 -B scripts/package-notices.py \
+              --inventory "$inventory" \
+              --supplement third_party/notices/desktop-reviewed.json \
+              --output "$package_legal" --check
+          else
+            scripts/gradle.sh -I scripts/runtime-inventory.init.gradle \
+              :composeApp:exportProductionInventory \
+              -Pveyra.inventory.platform="$VEYRA_INVENTORY_PLATFORM"
+            python3 -B scripts/package-notices.py \
+              --inventory "$inventory" \
+              --supplement third_party/notices/desktop-reviewed.json \
+              --output ".work/verification/legal-inventory/$VEYRA_INVENTORY_PLATFORM"
+          fi
+      - name: Retain this desktop lane in a draft prerelease
+        id: retain
+        if: ${{ always() && inputs.retain_builds == true && inputs.package_desktop == true && steps.bootstrap.outcome == 'success' }}
+        timeout-minutes: 15
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VEYRA_INVENTORY_PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          outcome=success
+          expected_tests=success
+          if [ "$VEYRA_VERIFY_SCOPE" = installers ]; then expected_tests=skipped; fi
+          if [ "${{ steps.desktop_tests.outcome }}" != "$expected_tests" ]; then outcome=failed; fi
+          if [ "${{ inputs.package_desktop }}" = true ] && [ "${{ steps.desktop_package.outcome }}" != success ]; then outcome=failed; fi
+          if [ "${{ steps.desktop_inventory.outcome }}" != success ]; then outcome=failed; fi
+          args=(--platform "$VEYRA_INVENTORY_PLATFORM" --lane-outcome "$outcome"
+            --diagnostic "scope=$VEYRA_VERIFY_SCOPE tests=${{ steps.desktop_tests.outcome }} package=${{ steps.desktop_package.outcome }} inventory=${{ steps.desktop_inventory.outcome }}")
+          for results in shared/build/test-results composeApp/build/test-results; do
+            [ -d "$results" ] && args+=(--xml-root "$results")
+          done
+          legal=""
+          # Prefer the legal set actually bound to the verified package JAR; a
+          # failed package falls back to the independent diagnostic legal copy.
+          if [ -f .work/verification/packages.json ] && \
+             python3 -B -c 'import json, os; value = json.load(open(".work/verification/packages.json")); assert value["embeddedLegal"]["verified"] is True and value["source"]["commitSha"] == os.environ["GITHUB_SHA"]'; then
+            legal=".work/verification/desktop-legal/$VEYRA_INVENTORY_PLATFORM"
+          elif [ -f ".work/verification/legal-inventory/$VEYRA_INVENTORY_PLATFORM/index.json" ]; then
+            legal=".work/verification/legal-inventory/$VEYRA_INVENTORY_PLATFORM"
+          elif [ -f ".work/verification/desktop-legal/$VEYRA_INVENTORY_PLATFORM/index.json" ]; then
+            legal=".work/verification/desktop-legal/$VEYRA_INVENTORY_PLATFORM"
+          fi
+          [ -n "$legal" ] && args+=(--legal "$legal")
+          inventory=".work/verification/runtime-inventory/$VEYRA_INVENTORY_PLATFORM.json"
+          [ -f "$inventory" ] && args+=(--inventory "$inventory")
+          [ -f .work/verification/native-build-diagnostic.json ] && \
+            args+=(--native-diagnostic .work/verification/native-build-diagnostic.json)
+          # Only packages.json's exact fresh paths/hashes are retained; never scan
+          # the package tree for arbitrary older files.
+          [ -f .work/verification/packages.json ] && args+=(--packages-json .work/verification/packages.json)
+          scripts/build-retention.sh "${args[@]}"
+      - name: Enforce desktop test/package/inventory outcomes
+        if: ${{ always() }}
+        run: |
+          expected_tests=success
+          if [ "$VEYRA_VERIFY_SCOPE" = installers ]; then
+            expected_tests=skipped
+            test "${{ inputs.package_desktop }}" = true
+            test "${{ inputs.retain_builds }}" = true
+          fi
+          test "${{ steps.desktop_tests.outcome }}" = "$expected_tests"
+          if [ "${{ inputs.package_desktop }}" = true ]; then
+            test "${{ steps.desktop_package.outcome }}" = success
+          fi
+          if [ "${{ inputs.retain_builds }}" = true ] && [ "${{ inputs.package_desktop }}" = true ]; then
+            test "${{ steps.desktop_inventory.outcome }}" = success
+          fi
+      - name: Report actual discovered tests and remaining physical gates
+        if: ${{ always() && steps.checkout.outcome == 'success' }}
+        env:
+          VEYRA_JOB_STATUS: ${{ job.status }}
+        run: scripts/dev.sh python3 -B scripts/verification-summary.py --phase desktop
+
+  android:
+    if: ${{ github.event.repository.private == false && inputs.retention_canary != true && (inputs.scope == 'all' || inputs.scope == 'installers' || inputs.scope == 'android' || inputs.scope == 'android-desktop' || inputs.scope == 'android-linux-windows') }}
+    name: Android compile, unit tests and lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    env:
+      VEYRA_EXPECTED_OS: Linux
+      VEYRA_EXPECTED_ARCH: x64
+      VEYRA_VERIFY_SCOPE: ${{ inputs.scope }}
+    steps:
+      - name: Checkout without global Git configuration or retained credentials
+        id: checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+          set-safe-directory: false
+          submodules: false
+      - name: Initialize the pinned public source dependency in an owned environment
+        id: bootstrap
+        run: scripts/checkout-submodule.sh
+      - name: Build APK and execute JVM Android tests (not instrumentation)
+        id: android_tests
+        if: ${{ inputs.scope != 'installers' }}
+        timeout-minutes: 25
+        continue-on-error: true
+        run: scripts/ci.sh android
+      - name: Build Android debug and unsigned release outputs independently of test outcome
+        id: android_package
+        if: ${{ always() && inputs.retain_builds == true && steps.bootstrap.outcome == 'success' }}
+        timeout-minutes: 20
+        continue-on-error: true
+        run: |
+          if [ "$VEYRA_VERIFY_SCOPE" = installers ]; then
+            scripts/gradle.sh :composeApp:assembleDebug
+          else
+            scripts/gradle.sh :composeApp:assembleDebug :composeApp:assembleRelease :composeApp:bundleRelease
+          fi
+      - name: Generate Android inventory and inventory-backed legal copy
+        id: android_inventory
+        if: ${{ always() && inputs.retain_builds == true && steps.bootstrap.outcome == 'success' }}
+        timeout-minutes: 20
+        continue-on-error: true
+        run: |
+          scripts/gradle.sh -I scripts/runtime-inventory.init.gradle \
+            :composeApp:exportProductionInventory \
+            -Pveyra.inventory.platform=android-debug
+          python3 -B scripts/package-notices.py \
+            --inventory .work/verification/runtime-inventory/android-debug.json \
+            --output .work/verification/legal-inventory/android-debug
+      - name: Retain Android lane in a draft prerelease
+        id: retain
+        if: ${{ always() && inputs.retain_builds == true && steps.bootstrap.outcome == 'success' }}
+        timeout-minutes: 15
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          apk=composeApp/build/outputs/apk/debug/composeApp-debug.apk
+          outcome=success
+          expected_tests=success
+          if [ "$VEYRA_VERIFY_SCOPE" = installers ]; then expected_tests=skipped; fi
+          if [ "${{ steps.android_tests.outcome }}" != "$expected_tests" ] || [ "${{ steps.android_package.outcome }}" != success ] || [ ! -f "$apk" ] || \
+             [ "${{ steps.android_inventory.outcome }}" != success ]; then outcome=failed; fi
+          args=(--platform android --lane-outcome "$outcome"
+            --diagnostic "scope=$VEYRA_VERIFY_SCOPE tests=${{ steps.android_tests.outcome }} package=${{ steps.android_package.outcome }} inventory=${{ steps.android_inventory.outcome }} apk=$([ -f "$apk" ] && echo present || echo missing)")
+          [ -f "$apk" ] && args+=(--package "$apk")
+          for release in composeApp/build/outputs/apk/release/composeApp-release-unsigned.apk composeApp/build/outputs/bundle/release/composeApp-release.aab; do
+            [ -f "$release" ] && args+=(--package "$release")
+          done
+          for results in shared/build/test-results composeApp/build/test-results; do
+            [ -d "$results" ] && args+=(--xml-root "$results")
+          done
+          args+=(--legal composeApp/src/commonMain/composeResources/files/legal)
+          [ -d .work/verification/legal-inventory/android-debug ] && \
+            args+=(--legal .work/verification/legal-inventory/android-debug)
+          [ -f .work/verification/runtime-inventory/android-debug.json ] && \
+            args+=(--inventory .work/verification/runtime-inventory/android-debug.json)
+          scripts/build-retention.sh "${args[@]}"
+      - name: Enforce Android test/inventory/APK outcomes
+        if: ${{ always() }}
+        run: |
+          expected_tests=success
+          if [ "$VEYRA_VERIFY_SCOPE" = installers ]; then
+            expected_tests=skipped
+            test "${{ inputs.retain_builds }}" = true
+          fi
+          test "${{ steps.android_tests.outcome }}" = "$expected_tests"
+          if [ "${{ inputs.retain_builds }}" = true ]; then
+            test "${{ steps.android_inventory.outcome }}" = success
+            test "${{ steps.android_package.outcome }}" = success
+            test -f composeApp/build/outputs/apk/debug/composeApp-debug.apk
+          fi
+      - name: Report exact verification level
+        if: ${{ always() && steps.checkout.outcome == 'success' }}
+        env:
+          VEYRA_JOB_STATUS: ${{ job.status }}
+        run: scripts/dev.sh python3 -B scripts/verification-summary.py --phase android
+
+  ios:
+    if: ${{ github.event.repository.private == false && inputs.retention_canary != true && (inputs.scope == 'all' || inputs.scope == 'ios') }}
+    name: iOS full Swift host compile (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 150
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - {runner: macos-15, arch: arm64, simulator_platform: ios-simulator-arm64, retain_device: true}
+          - {runner: macos-15-intel, arch: x64, simulator_platform: ios-simulator-x64, retain_device: false}
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.0.1.app/Contents/Developer
+      VEYRA_EXPECTED_OS: Darwin
+      VEYRA_EXPECTED_ARCH: ${{ matrix.arch }}
+    steps:
+      - name: Checkout without global Git configuration or retained credentials
+        id: checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+          set-safe-directory: false
+          submodules: false
+      - name: Initialize the pinned public source dependency in an owned environment
+        id: bootstrap
+        run: scripts/checkout-submodule.sh
+      - name: Compile native tests and full unsigned simulator/device applications
+        id: ios_tests
+        timeout-minutes: 45
+        continue-on-error: true
+        run: scripts/ci.sh ios
+      - name: Rebuild unsigned iOS outputs independently of test outcome
+        id: ios_build
+        if: ${{ always() && inputs.retain_builds == true && steps.bootstrap.outcome == 'success' }}
+        timeout-minutes: 40
+        continue-on-error: true
+        run: |
+          scripts/build-ios.sh simulator
+          if [ "${{ matrix.retain_device }}" = true ]; then scripts/build-ios.sh device; fi
+      - name: Generate iOS inventory and inventory-backed legal copy
+        id: ios_inventory
+        if: ${{ always() && inputs.retain_builds == true && steps.bootstrap.outcome == 'success' }}
+        timeout-minutes: 25
+        continue-on-error: true
+        run: |
+          scripts/gradle.sh -I scripts/runtime-inventory.init.gradle \
+            :composeApp:exportProductionInventory \
+            -Pveyra.inventory.platform="${{ matrix.simulator_platform }}"
+          python3 -B scripts/package-notices.py \
+            --inventory ".work/verification/runtime-inventory/${{ matrix.simulator_platform }}.json" \
+            --output ".work/verification/legal-inventory/${{ matrix.simulator_platform }}"
+          if [ "${{ matrix.retain_device }}" = true ]; then
+            scripts/gradle.sh -I scripts/runtime-inventory.init.gradle \
+              :composeApp:exportProductionInventory -Pveyra.inventory.platform=ios-arm64
+            python3 -B scripts/package-notices.py \
+              --inventory .work/verification/runtime-inventory/ios-arm64.json \
+              --output .work/verification/legal-inventory/ios-arm64
+          fi
+      - name: Retain iOS simulator lane in a draft prerelease
+        id: retain_simulator
+        if: ${{ always() && inputs.retain_builds == true && steps.bootstrap.outcome == 'success' }}
+        timeout-minutes: 20
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          platform="${{ matrix.simulator_platform }}"
+          app="$(find .work/xcode -type d -path "*DerivedData-simulator-${{ matrix.arch }}/Build/Products/*-iphonesimulator/Veyra.app" -print -quit 2>/dev/null || true)"
+          if [ "${{ matrix.arch }}" = arm64 ]; then
+            framework=shared/build/bin/iosSimulatorArm64/debugFramework/Veyra.framework
+          else
+            framework=shared/build/bin/iosX64/debugFramework/Veyra.framework
+          fi
+          outcome=success
+          if [ "${{ steps.ios_tests.outcome }}" != success ] || [ "${{ steps.ios_build.outcome }}" != success ] || \
+             [ "${{ steps.ios_inventory.outcome }}" != success ] || [ -z "$app" ]; then outcome=failed; fi
+          args=(--platform "$platform" --lane-outcome "$outcome"
+            --diagnostic "tests=${{ steps.ios_tests.outcome }} build=${{ steps.ios_build.outcome }} inventory=${{ steps.ios_inventory.outcome }} app=$([ -n "$app" ] && echo present || echo missing)")
+          [ -n "$app" ] && args+=(--directory "simulator-app=$app")
+          [ -d "$framework" ] && args+=(--directory "simulator-framework=$framework")
+          for results in shared/build/test-results composeApp/build/test-results; do
+            [ -d "$results" ] && args+=(--xml-root "$results")
+          done
+          args+=(--legal composeApp/src/commonMain/composeResources/files/legal)
+          [ -d ".work/verification/legal-inventory/$platform" ] && \
+            args+=(--legal ".work/verification/legal-inventory/$platform")
+          [ -f ".work/verification/runtime-inventory/$platform.json" ] && \
+            args+=(--inventory ".work/verification/runtime-inventory/$platform.json")
+          scripts/build-retention.sh "${args[@]}"
+      - name: Retain iOS device arm64 lane in a draft prerelease
+        id: retain_device
+        if: ${{ always() && inputs.retain_builds == true && matrix.retain_device == true && steps.bootstrap.outcome == 'success' }}
+        timeout-minutes: 20
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          platform=ios-device-arm64
+          app="$(find .work/xcode -type d -path "*DerivedData-device-arm64/Build/Products/*-iphoneos/Veyra.app" -print -quit 2>/dev/null || true)"
+          framework=shared/build/bin/iosArm64/debugFramework/Veyra.framework
+          outcome=success
+          if [ "${{ steps.ios_tests.outcome }}" != success ] || [ "${{ steps.ios_build.outcome }}" != success ] || \
+             [ "${{ steps.ios_inventory.outcome }}" != success ] || [ -z "$app" ]; then outcome=failed; fi
+          args=(--platform "$platform" --lane-outcome "$outcome"
+            --diagnostic "tests=${{ steps.ios_tests.outcome }} build=${{ steps.ios_build.outcome }} inventory=${{ steps.ios_inventory.outcome }} app=$([ -n "$app" ] && echo present || echo missing) classification=unsigned-compile-only")
+          [ -n "$app" ] && args+=(--directory "device-app=$app")
+          [ -d "$framework" ] && args+=(--directory "device-framework=$framework")
+          args+=(--legal composeApp/src/commonMain/composeResources/files/legal)
+          [ -d .work/verification/legal-inventory/ios-arm64 ] && \
+            args+=(--legal .work/verification/legal-inventory/ios-arm64)
+          [ -f .work/verification/runtime-inventory/ios-arm64.json ] && \
+            args+=(--inventory .work/verification/runtime-inventory/ios-arm64.json)
+          scripts/build-retention.sh "${args[@]}"
+      - name: Enforce iOS compile/build/inventory outcomes
+        if: ${{ always() }}
+        run: |
+          test "${{ steps.ios_tests.outcome }}" = success
+          if [ "${{ inputs.retain_builds }}" = true ]; then
+            test "${{ steps.ios_build.outcome }}" = success
+            test "${{ steps.ios_inventory.outcome }}" = success
+            find .work/xcode -type d -path "*DerivedData-simulator-${{ matrix.arch }}/Build/Products/*-iphonesimulator/Veyra.app" -print -quit | grep -q .
+            if [ "${{ matrix.retain_device }}" = true ]; then
+              find .work/xcode -type d -path "*DerivedData-device-arm64/Build/Products/*-iphoneos/Veyra.app" -print -quit | grep -q .
+            fi
+          fi
+      - name: Report compile-only native status (no simulator or physical run)
+        if: ${{ always() && steps.checkout.outcome == 'success' }}
+        env:
+          VEYRA_JOB_STATUS: ${{ job.status }}
+        run: scripts/dev.sh python3 -B scripts/verification-summary.py --phase ios
+
+  # Nonproduction canary for the operational draft-Release retention route.
+  # It uploads only authored small non-audio bytes and provenance, never packages,
+  # credentials, signed URLs or application artifacts. The release stays draft.
+  retention-canary:
+    if: ${{ github.event.repository.private == false && inputs.retention_canary == true }}
+    name: Draft Release retention canary
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.publish.outputs.tag }}
+      release_id: ${{ steps.publish.outputs.release_id }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      TAG: veyra-draft-canary-${{ github.run_id }}-${{ github.run_attempt }}
+      RETENTION_ROOT: ${{ github.workspace }}/.work/verification/retention-canary/${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Checkout exact canary revision without retained credentials
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+          set-safe-directory: false
+          submodules: false
+      - name: Verify exact public candidate identity and packet regressions
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain=v1)"
+          test "$(cat gradle/kmpyt.commit)" = "6805d4db8077650992d342e5395b1f0d7c80e984"
+          test "$(sha256sum shared/schemas/dev.veyra.data.room.VeyraDatabase/3.json | cut -d' ' -f1)" \
+            = "aab30e43a35a431a25a7ecbb7ebccefd849811f688957054304b02d3caf6d367"
+          python3 -B scripts/tests/test_retention_packet.py
+      - name: Create bounded nonproduction canary packet
+        run: |
+          set -euo pipefail
+          mkdir -p "$RETENTION_ROOT"
+          packet="$RETENTION_ROOT/retention-packet"
+          python3 -B scripts/retention-packet.py create \
+            --output "$packet" \
+            --repository "$REPO" \
+            --commit-sha "$GITHUB_SHA" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --release-tag "$TAG" \
+            --workflow-ref "$GITHUB_WORKFLOW_REF" \
+            --ref "$GITHUB_REF" \
+            --pin "$(cat gradle/kmpyt.commit)" \
+            --schema-sha256 "$(sha256sum shared/schemas/dev.veyra.data.room.VeyraDatabase/3.json | cut -d' ' -f1)" \
+            --host-label "${ImageOS:-unknown}-${RUNNER_ARCH:-unknown}" \
+            --java-version "$(java -version 2>&1 | head -n1)" \
+            --git-version "$(git --version)" \
+            --gh-version "$(gh --version | head -n1)" > "$RETENTION_ROOT/packet-receipt.json"
+          cat "$RETENTION_ROOT/packet-receipt.json"
+      - name: Refuse tag reuse and create exact draft prerelease
+        id: publish
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            printf 'Refusing to reuse an existing release/tag: %s\n' "$TAG" >&2
+            exit 1
+          fi
+          if gh api "repos/$REPO/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            printf 'Refusing to move/reuse an existing tag: %s\n' "$TAG" >&2
+            exit 1
+          fi
+          gh api --method POST "repos/$REPO/git/refs" \
+            -f ref="refs/tags/$TAG" -f sha="$GITHUB_SHA" >/dev/null
+          test "$(gh api "repos/$REPO/git/ref/tags/$TAG" --jq .object.sha)" = "$GITHUB_SHA"
+          gh release create "$TAG" --repo "$REPO" --verify-tag --draft --prerelease \
+            --title "Veyra draft retention canary $TAG" \
+            --notes "Nonproduction retention canary at exact commit $GITHUB_SHA (run $GITHUB_RUN_ID/$GITHUB_RUN_ATTEMPT). Authored non-audio bytes and provenance only. Draft and unpublished; not a release or verification claim."
+          release_id="$(gh release view "$TAG" --repo "$REPO" --json databaseId --jq .databaseId)"
+          test -n "$release_id"
+          printf 'tag=%s\nrelease_id=%s\n' "$TAG" "$release_id" >> "$GITHUB_OUTPUT"
+      - name: Upload bounded packet assets directly to the draft release
+        run: |
+          set -euo pipefail
+          packet="$RETENTION_ROOT/retention-packet"
+          python3 -B - "$packet" <<'PY'
+          import os, stat, sys
+          from pathlib import Path
+          root = Path(sys.argv[1])
+          expected = {"payload.bin", "identity.json", "manifest.json", "SHA256SUMS"}
+          actual = {path.name for path in root.iterdir()}
+          if actual != expected:
+              raise SystemExit("unexpected canary asset set")
+          total = 0
+          for name in sorted(expected):
+              path = root / name
+              info = path.lstat()
+              if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= 16 * 1024:
+                  raise SystemExit("invalid canary asset: " + name)
+              total += info.st_size
+          if total > 64 * 1024:
+              raise SystemExit("canary packet exceeds total bound")
+          PY
+          gh release upload "$TAG" \
+            "$packet/payload.bin" "$packet/identity.json" "$packet/manifest.json" "$packet/SHA256SUMS" \
+            --repo "$REPO"
+      - name: Verify draft state, exact tag target and remote asset identities
+        run: |
+          set -euo pipefail
+          release_id="${{ steps.publish.outputs.release_id }}"
+          test -n "$release_id"
+          gh api "repos/$REPO/releases/$release_id" > "$RETENTION_ROOT/release.json"
+          gh release view "$TAG" --repo "$REPO" --json assets > "$RETENTION_ROOT/assets.json"
+          python3 -B - "$RETENTION_ROOT/release.json" "$RETENTION_ROOT/assets.json" \
+            "$RETENTION_ROOT/retention-packet" "$TAG" <<'PY'
+          import hashlib, json, sys
+          from pathlib import Path
+          release = json.loads(Path(sys.argv[1]).read_text())
+          assets = json.loads(Path(sys.argv[2]).read_text())["assets"]
+          packet = Path(sys.argv[3])
+          tag = sys.argv[4]
+          if release.get("draft") is not True or release.get("prerelease") is not True:
+              raise SystemExit("release is not draft prerelease")
+          if release.get("tag_name") != tag:
+              raise SystemExit("release tag mismatch")
+          expected = {}
+          for name in ("payload.bin", "identity.json", "manifest.json", "SHA256SUMS"):
+              data = (packet / name).read_bytes()
+              expected[name] = len(data)
+          actual = {item["name"]: item["size"] for item in assets}
+          if actual != expected:
+              raise SystemExit(f"remote asset set/size mismatch: {actual} != {expected}")
+          for item in assets:
+              remote = item.get("digest")
+              local = "sha256:" + hashlib.sha256((packet / item["name"]).read_bytes()).hexdigest()
+              if remote and remote != local:
+                  raise SystemExit("remote asset digest mismatch: " + item["name"])
+          print("remote draft asset identities verified: " + ", ".join(sorted(actual)))
+          PY
+          ref_type="$(gh api "repos/$REPO/git/ref/tags/$TAG" --jq .object.type)"
+          ref_sha="$(gh api "repos/$REPO/git/ref/tags/$TAG" --jq .object.sha)"
+          if [ "$ref_type" = tag ]; then
+            ref_sha="$(gh api "repos/$REPO/git/tags/$ref_sha" --jq .object.sha)"
+          elif [ "$ref_type" != commit ]; then
+            printf 'Unexpected tag object type: %s\n' "$ref_type" >&2
+            exit 1
+          fi
+          test "$ref_sha" = "$GITHUB_SHA"
+          printf 'Verified draft release %s id=%s at exact commit %s\n' "$TAG" "$release_id" "$GITHUB_SHA"
+      - name: Write sanitized canary receipt without publishing
+        run: |
+          set -euo pipefail
+          {
+            printf '### Draft Release retention canary\\n\\n'
+            printf -- '- Release: `%s` (draft, prerelease, unpublished)\\n' "$TAG"
+            printf -- '- Release id: `%s`\\n' "${{ steps.publish.outputs.release_id }}"
+            printf -- '- Exact commit: `%s`\\n' "$GITHUB_SHA"
+            printf -- '- Assets: 4 authored non-audio files, each <=16 KiB, total <=64 KiB\\n'
+            printf -- '- Packet receipt: see the job log; no artifact, cache or package was uploaded.\\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  retention-readback:
+    if: ${{ always() && github.event.repository.private == false && inputs.retention_canary == true && needs.retention-canary.result == 'success' }}
+    needs: retention-canary
+    name: Independent draft Release retention readback
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # Draft releases are invisible to contents:read tokens; this job only reads,
+    # but GitHub requires repository write visibility for an unpublished draft.
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      TAG: ${{ needs.retention-canary.outputs.tag }}
+      EXPECTED_RELEASE_ID: ${{ needs.retention-canary.outputs.release_id }}
+      RETENTION_ROOT: ${{ github.workspace }}/.work/verification/retention-canary-readback/${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Checkout exact readback revision without retained credentials
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+          set-safe-directory: false
+          submodules: false
+      - name: Verify exact readback revision
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain=v1)"
+          test "$(cat gradle/kmpyt.commit)" = "6805d4db8077650992d342e5395b1f0d7c80e984"
+          test "$(sha256sum shared/schemas/dev.veyra.data.room.VeyraDatabase/3.json | cut -d' ' -f1)" \
+            = "aab30e43a35a431a25a7ecbb7ebccefd849811f688957054304b02d3caf6d367"
+      - name: Download the draft assets independently
+        run: |
+          set -euo pipefail
+          mkdir -p "$RETENTION_ROOT/readback"
+          # Draft releases are not addressable via the published tag endpoint, and
+          # `gh release download` uses that path. Fetch the exact release-id assets
+          # through the API with the octet-stream media type instead.
+          gh api "repos/$REPO/releases/$EXPECTED_RELEASE_ID/assets" > "$RETENTION_ROOT/assets-list.json"
+          for name in payload.bin identity.json manifest.json SHA256SUMS; do
+            asset_id="$(python3 -B - "$RETENTION_ROOT/assets-list.json" "$name" <<'PY'
+          import json, sys
+          items = json.load(open(sys.argv[1]))
+          matches = [item for item in items if item.get("name") == sys.argv[2]]
+          if len(matches) != 1:
+              raise SystemExit("expected exactly one asset named " + sys.argv[2])
+          print(matches[0]["id"])
+          PY
+          )"
+            test -n "$asset_id"
+            gh api -H "Accept: application/octet-stream" \
+              "repos/$REPO/releases/assets/$asset_id" > "$RETENTION_ROOT/readback/$name"
+          done
+          test "$(find "$RETENTION_ROOT/readback" -maxdepth 1 -type f | wc -l)" -eq 4
+      - name: Verify remote draft identity, exact tag target and independent hashes
+        run: |
+          set -euo pipefail
+          gh api "repos/$REPO/releases/$EXPECTED_RELEASE_ID" > "$RETENTION_ROOT/release.json"
+          gh release view "$TAG" --repo "$REPO" --json assets > "$RETENTION_ROOT/assets.json"
+          python3 -B - "$RETENTION_ROOT/release.json" "$TAG" "$EXPECTED_RELEASE_ID" <<'PY'
+          import json, sys
+          from pathlib import Path
+          release = json.loads(Path(sys.argv[1]).read_text())
+          if str(release.get("id")) != sys.argv[3]:
+              raise SystemExit("release id changed")
+          if release.get("draft") is not True or release.get("prerelease") is not True:
+              raise SystemExit("release lost draft/prerelease state")
+          if release.get("tag_name") != sys.argv[2]:
+              raise SystemExit("release tag changed")
+          if release.get("published_at") is not None:
+              raise SystemExit("draft release unexpectedly has published_at")
+          PY
+          ref_type="$(gh api "repos/$REPO/git/ref/tags/$TAG" --jq .object.type)"
+          ref_sha="$(gh api "repos/$REPO/git/ref/tags/$TAG" --jq .object.sha)"
+          if [ "$ref_type" = tag ]; then
+            ref_sha="$(gh api "repos/$REPO/git/tags/$ref_sha" --jq .object.sha)"
+          elif [ "$ref_type" != commit ]; then
+            printf 'Unexpected tag object type: %s\n' "$ref_type" >&2
+            exit 1
+          fi
+          test "$ref_sha" = "$GITHUB_SHA"
+          python3 -B - "$RETENTION_ROOT/assets.json" "$RETENTION_ROOT/readback" <<'PY'
+          import json, sys
+          from pathlib import Path
+          assets = json.loads(Path(sys.argv[1]).read_text())["assets"]
+          directory = Path(sys.argv[2])
+          expected = {"payload.bin", "identity.json", "manifest.json", "SHA256SUMS"}
+          if {item["name"] for item in assets} != expected:
+              raise SystemExit("remote asset set is not exact")
+          if {path.name for path in directory.iterdir()} != expected:
+              raise SystemExit("downloaded asset set is not exact")
+          for item in assets:
+              local = directory / item["name"]
+              if local.stat().st_size != item["size"] or not 0 < item["size"] <= 16 * 1024:
+                  raise SystemExit("downloaded asset size mismatch: " + item["name"])
+          if sum(item["size"] for item in assets) > 64 * 1024:
+              raise SystemExit("remote packet exceeds total bound")
+          PY
+          python3 -B scripts/retention-packet.py verify \
+            --directory "$RETENTION_ROOT/readback" \
+            --expected-sha "$GITHUB_SHA" \
+            --expected-tag "$TAG" \
+            --expected-run-id "$GITHUB_RUN_ID" \
+            --expected-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --expected-repository "$REPO" \
+            --expected-pin "$(cat gradle/kmpyt.commit)" \
+            --expected-schema-sha256 "$(sha256sum shared/schemas/dev.veyra.data.room.VeyraDatabase/3.json | cut -d' ' -f1)"
+      - name: Write sanitized readback receipt
+        run: |
+          set -euo pipefail
+          {
+            printf '### Independent retention readback\\n\\n'
+            printf -- '- Downloaded and hashed the draft assets on a fresh runner.\\n'
+            printf -- '- Release: `%s` id=`%s`, draft/prerelease, exact tag target `%s`.\\n' "$TAG" "$EXPECTED_RELEASE_ID" "$GITHUB_SHA"
+            printf -- '- Packet identity, SHA256SUMS and independent asset sizes/hashes verified.\\n'
+            printf -- '- No release was published and no artifact/cache action was used.\\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  retention-plan:
+    if: ${{ github.event.repository.private == false && inputs.retention_canary != true && inputs.retain_builds == true }}
+    name: Plan production build retention lanes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      platforms: ${{ steps.plan.outputs.platforms }}
+    steps:
+      - name: Compute exact expected lane set
+        id: plan
+        env:
+          SCOPE: ${{ inputs.scope }}
+          PACKAGE_DESKTOP: ${{ inputs.package_desktop }}
+        run: |
+          python3 -B - <<'PY'
+          import json, os
+          scope = os.environ["SCOPE"]
+          package = os.environ["PACKAGE_DESKTOP"] == "true"
+          platforms = []
+          if scope == "installers" and not package:
+              raise SystemExit("installer scope requires desktop packaging")
+          if scope in ("all", "desktop", "android-desktop", "installers") and package:
+              platforms += ["desktop-linux-x64", "desktop-windows-x64", "desktop-macos-arm64", "desktop-macos-x64"]
+          if scope in ("windows", "windows-recovery") and package:
+              platforms += ["desktop-windows-x64"]
+          if scope == "windows-macos-arm64" and package:
+              platforms += ["desktop-windows-x64", "desktop-macos-arm64"]
+          if scope == "android-linux-windows" and package:
+              platforms += ["desktop-linux-x64", "desktop-windows-x64"]
+          if scope in ("all", "android", "android-desktop", "android-linux-windows", "installers"):
+              platforms += ["android"]
+          if scope in ("all", "ios"):
+              platforms += ["ios-simulator-arm64", "ios-simulator-x64", "ios-device-arm64"]
+          if not platforms:
+              raise SystemExit("retain_builds requested but no eligible lanes")
+          value = json.dumps(platforms, separators=(",", ":"))
+          print(value)
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as stream:
+              stream.write("platforms=" + value + "\n")
+          PY
+
+  production-retention-readback:
+    if: ${{ always() && github.event.repository.private == false && inputs.retention_canary != true && inputs.retain_builds == true && needs.retention-plan.result == 'success' }}
+    needs: [retention-plan, desktop, android, ios]
+    name: Independent production lane readback
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      EXPECTED_PLATFORMS: ${{ needs.retention-plan.outputs.platforms }}
+      RETENTION_ROOT: ${{ github.workspace }}/.work/verification/build-retention-readback/${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Checkout exact readback revision without retained credentials
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+          set-safe-directory: false
+          submodules: false
+      - name: Verify exact readback revision and source identity
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain=v1)"
+          test "$(cat gradle/kmpyt.commit)" = "6805d4db8077650992d342e5395b1f0d7c80e984"
+          test "$(sha256sum shared/schemas/dev.veyra.data.room.VeyraDatabase/3.json | cut -d' ' -f1)" \
+            = "aab30e43a35a431a25a7ecbb7ebccefd849811f688957054304b02d3caf6d367"
+      - name: Independently download and verify every lane draft release
+        run: |
+          set -euo pipefail
+          mkdir -p "$RETENTION_ROOT"
+          prefix="veyra-draft-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-"
+          receipts="$RETENTION_ROOT/readback-receipts"
+          mkdir -p "$receipts"
+          while IFS= read -r platform; do
+            [ -n "$platform" ] || continue
+            tag="${prefix}${platform}"
+            release_id="$(gh release view "$tag" --repo "$REPO" --json databaseId --jq .databaseId)"
+            test -n "$release_id"
+            gh api "repos/$REPO/releases/$release_id" > "$RETENTION_ROOT/release-$platform.json"
+            python3 -B - "$RETENTION_ROOT/release-$platform.json" "$tag" <<'PY'
+          import json, sys
+          release = json.load(open(sys.argv[1]))
+          if release.get("tag_name") != sys.argv[2]:
+              raise SystemExit("release tag mismatch")
+          if release.get("draft") is not True or release.get("prerelease") is not True:
+              raise SystemExit("lane release lost draft/prerelease state")
+          if release.get("published_at") is not None:
+              raise SystemExit("lane release unexpectedly published")
+          PY
+            ref_type="$(gh api "repos/$REPO/git/ref/tags/$tag" --jq .object.type)"
+            ref_sha="$(gh api "repos/$REPO/git/ref/tags/$tag" --jq .object.sha)"
+            if [ "$ref_type" = tag ]; then
+              ref_sha="$(gh api "repos/$REPO/git/tags/$ref_sha" --jq .object.sha)"
+            elif [ "$ref_type" != commit ]; then
+              printf 'Unexpected tag object type: %s\n' "$ref_type" >&2; exit 1
+            fi
+            test "$ref_sha" = "$GITHUB_SHA"
+            directory="$RETENTION_ROOT/readback/$platform"
+            mkdir -p "$directory"
+            gh api "repos/$REPO/releases/$release_id/assets" > "$RETENTION_ROOT/assets-$platform.json"
+            python3 -B - "$RETENTION_ROOT/assets-$platform.json" > "$RETENTION_ROOT/assets-$platform.list" <<'PY'
+          import json, sys
+          items = json.load(open(sys.argv[1]))
+          if not items:
+              raise SystemExit("lane release has no assets")
+          for item in items:
+              name = item.get("name")
+              if not isinstance(name, str) or not name or "/" in name or "\\" in name or ":" in name:
+                  raise SystemExit("unsafe remote asset name")
+              print(str(item["id"]) + "\t" + name)
+          PY
+            while IFS=$'\t' read -r asset_id name; do
+              gh api -H "Accept: application/octet-stream" \
+                "repos/$REPO/releases/assets/$asset_id" > "$directory/$name"
+            done < "$RETENTION_ROOT/assets-$platform.list"
+            python3 -B scripts/build-retention.py verify \
+              --directory "$directory" \
+              --expected-platform "$platform" \
+              --expected-sha "$GITHUB_SHA" \
+              --expected-tag "$tag" \
+              --expected-run-id "$GITHUB_RUN_ID" \
+              --expected-run-attempt "$GITHUB_RUN_ATTEMPT" \
+              --expected-repository "$REPO" \
+              --expected-pin "$(cat gradle/kmpyt.commit)" \
+              --expected-schema-sha256 "$(sha256sum shared/schemas/dev.veyra.data.room.VeyraDatabase/3.json | cut -d' ' -f1)" \
+              > "$receipts/$platform.json"
+            cat "$receipts/$platform.json"
+          done < <(python3 -B -c 'import json,sys; print("\n".join(json.loads(sys.argv[1])))' "$EXPECTED_PLATFORMS")
+          expected_count="$(python3 -B -c 'import json,sys; print(len(json.loads(sys.argv[1])))' "$EXPECTED_PLATFORMS")"
+          actual_count="$(find "$receipts" -maxdepth 1 -type f -name '*.json' | wc -l)"
+          test "$actual_count" -eq "$expected_count"
+          {
+            printf '### Independent production lane readback\n\n'
+            printf -- '- Fresh runner downloaded and verified %s lane draft releases at exact commit `%s`.\n' "$actual_count" "$GITHUB_SHA"
+            printf -- '- Every lane release is draft/prerelease, unpublished, tagged at the exact commit, and has exact assets/sizes/hashes/provenance.\n'
+            printf -- '- Lane outcomes and any failed-lane diagnostic summaries are preserved in the manifests; job statuses remain authoritative.\n'
+            printf -- '- No release was published and no artifact/cache action was used.\n'
+          } >> "$GITHUB_STEP_SUMMARY"

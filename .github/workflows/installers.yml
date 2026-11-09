@@ -1,0 +1,20 @@
+name: Veyra trial installers (APK, EXE, DMG, DEB)
+run-name: Trial installers from ${{ github.ref_name }}
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  installers:
+    if: ${{ github.event.repository.private == false }}
+    permissions:
+      contents: write
+    uses: ./.github/workflows/verify.yml
+    with:
+      scope: installers
+      package_desktop: true
+      retain_builds: true
+      retention_canary: false

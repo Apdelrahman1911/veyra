@@ -1,0 +1,2133 @@
+{
+  "platform": "macos-x64",
+  "component": "chromium",
+  "version": "1737266",
+  "url": "https://storage.googleapis.com/chromium-browser-snapshots/Mac/1737266/chrome-mac.zip",
+  "archiveSha256": "840c1cca12dbf1b7c29990da762efbf14105799443c9987faef2b8e05540b443",
+  "archiveBytes": 205961875,
+  "expandedBytes": 432559917,
+  "archiveRoot": "chrome-mac",
+  "format": "zip",
+  "executable": "Chromium.app/Contents/MacOS/Chromium",
+  "selection": {},
+  "entries": [
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Chromium Framework",
+      "size": 0,
+      "link": "Versions/Current/Chromium Framework",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Helpers",
+      "size": 0,
+      "link": "Versions/Current/Helpers",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Libraries",
+      "size": 0,
+      "link": "Versions/Current/Libraries",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Resources",
+      "size": 0,
+      "link": "Versions/Current/Resources",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Chromium Framework",
+      "size": 327620968,
+      "sha256": "76634364a3b50863475df0f726323200f322afc3c17c3266ceb949084f9ccea7",
+      "executable": true
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Helpers/Chromium Helper (Alerts).app/Contents/Info.plist",
+      "size": 1843,
+      "sha256": "a7adb69621f2058376e17cbaae1811e45f94a77491afe684aae24c5ccfc9ae16",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Helpers/Chromium Helper (Alerts).app/Contents/MacOS/Chromium Helper (Alerts)",
+      "size": 44928,
+      "sha256": "9ca87f195deaefd155b16b4e5745a89b218e82c16e205188e2f4ec68b6976d28",
+      "executable": true
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Helpers/Chromium Helper (Alerts).app/Contents/PkgInfo",
+      "size": 8,
+      "sha256": "82502191c9484b04d685374f9879a0066069c49b8acae7a04b01d38d07e8eca0",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Helpers/Chromium Helper (Alerts).app/Contents/Resources/Assets.car",
+      "size": 437192,
+      "sha256": "961218f6eef627cad9b6ef7401f1774efd9c1cbcd3eebd299d7843415a1fcbb7",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Helpers/Chromium Helper (Alerts).app/Contents/Resources/app.icns",
+      "size": 85977,
+      "sha256": "a1c2b17191234ee4ab1259d4fb5056ef340cc64345c1a7d2b504c632812ff062",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Helpers/Chromium Helper (Alerts).app/Contents/Resources/base.lproj/InfoPlist.strings",
+      "size": 77,
+      "sha256": "0eac983c68bd9edf1994a988643229899767361b2fd6c674f62e89945aed7930",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Helpers/Chromium Helper (Aperitif Alerts).app/Contents/Info.plist",
+      "size": 1870,
+      "sha256": "4615443bab0bb702cdd35439976c9bb52b50eeca5232616bb16b5b9310d6ef59",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Helpers/Chromium Helper (Aperitif Alerts).app/Contents/MacOS/Chromium Helper (Aperitif Alerts)",
+      "size": 26472,
+      "sha256": "4d70fe396448b0175cea941f1f8d648a538cdf143223b4bc5b016646175346c7",
+      "executable": true
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Helpers/Chromium Helper (Aperitif Alerts).app/Contents/PkgInfo",
+      "size": 8,
+      "sha256": "82502191c9484b04d685374f9879a0066069c49b8acae7a04b01d38d07e8eca0",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Helpers/Chromium Helper (Aperitif Alerts).app/Contents/Resources/Assets.car",
+      "size": 437192,
+      "sha256": "961218f6eef627cad9b6ef7401f1774efd9c1cbcd3eebd299d7843415a1fcbb7",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Helpers/Chromium Helper (Aperitif Alerts).app/Contents/Resources/app.icns",
+      "size": 85977,
+      "sha256": "a1c2b17191234ee4ab1259d4fb5056ef340cc64345c1a7d2b504c632812ff062",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Helpers/Chromium Helper (Aperitif Alerts).app/Contents/Resources/base.lproj/InfoPlist.strings",
+      "size": 77,
+      "sha256": "0eac983c68bd9edf1994a988643229899767361b2fd6c674f62e89945aed7930",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Helpers/Chromium Helper (Aperitif GPU).app/Contents/Info.plist",
+      "size": 1547,
+      "sha256": "9312afe768bdd51ac918754438861c5758bba853f997d6109af7f243438f0656",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Helpers/Chromium Helper (Aperitif GPU).app/Contents/MacOS/Chromium Helper (Aperitif GPU)",
+      "size": 26472,
+      "sha256": "24e5019895bb68638c44fd793e35b8329dacd6ee953c2c3a8b20be20ef9e682a",
+      "executable": true
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Helpers/Chromium Helper (Aperitif GPU).app/Contents/PkgInfo",
+      "size": 8,
+      "sha256": "82502191c9484b04d685374f9879a0066069c49b8acae7a04b01d38d07e8eca0",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Helpers/Chromium Helper (Aperitif Renderer).app/Contents/Info.plist",
+      "size": 1571,
+      "sha256": "4f59b15b0fa52338318b99a98c1110dad63f457baf21d7b84e7d1019c49f080a",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Helpers/Chromium Helper (Aperitif Renderer).app/Contents/MacOS/Chromium Helper (Aperitif Renderer)",
+      "size": 26472,
+      "sha256": "da11d4318ce15a005a6e936a09f2480062db92354cdf629d1b98fc6d2b0480e4",
+      "executable": true
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Helpers/Chromium Helper (Aperitif Renderer).app/Contents/PkgInfo",
+      "size": 8,
+      "sha256": "82502191c9484b04d685374f9879a0066069c49b8acae7a04b01d38d07e8eca0",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Helpers/Chromium Helper (Aperitif).app/Contents/Info.plist",
+      "size": 1535,
+      "sha256": "582223b2c604e99ddd68c52329906f1daf468a074d07d2e910cebf6dfc5a6993",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Helpers/Chromium Helper (Aperitif).app/Contents/MacOS/Chromium Helper (Aperitif)",
+      "size": 26472,
+      "sha256": "e9d55b5c44e219cedefc2695eb327df8ecb2d52a929468203d7cc4b238b43e3b",
+      "executable": true
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Helpers/Chromium Helper (Aperitif).app/Contents/PkgInfo",
+      "size": 8,
+      "sha256": "82502191c9484b04d685374f9879a0066069c49b8acae7a04b01d38d07e8eca0",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Helpers/Chromium Helper (GPU).app/Contents/Info.plist",
+      "size": 1520,
+      "sha256": "1548bfae2842cc7a7134dd756815efc061dec5d39b109b7e3dc9ba320891e059",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Helpers/Chromium Helper (GPU).app/Contents/MacOS/Chromium Helper (GPU)",
+      "size": 44928,
+      "sha256": "495d5a0c32ae200b910072df642c73a6a5c454d3dc1af1286c86b79d3c579a81",
+      "executable": true
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Helpers/Chromium Helper (GPU).app/Contents/PkgInfo",
+      "size": 8,
+      "sha256": "82502191c9484b04d685374f9879a0066069c49b8acae7a04b01d38d07e8eca0",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Helpers/Chromium Helper (Renderer).app/Contents/Info.plist",
+      "size": 1544,
+      "sha256": "5f33d0b3d4965ff1e45d9c13fbf754158e74827525f35504b2833fe863e4564b",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Helpers/Chromium Helper (Renderer).app/Contents/MacOS/Chromium Helper (Renderer)",
+      "size": 44928,
+      "sha256": "d6df951027a2a6a4a448a4c29e0b42e94d27cc0dd1a9255a473d0c0254ea20a5",
+      "executable": true
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Helpers/Chromium Helper (Renderer).app/Contents/PkgInfo",
+      "size": 8,
+      "sha256": "82502191c9484b04d685374f9879a0066069c49b8acae7a04b01d38d07e8eca0",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Helpers/Chromium Helper.app/Contents/Info.plist",
+      "size": 1502,
+      "sha256": "030fb349c8b52da0a4cfdf4f0f0be4ed64bb25af62f282b7465ff2078964de97",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Helpers/Chromium Helper.app/Contents/MacOS/Chromium Helper",
+      "size": 44928,
+      "sha256": "4dd4631193a91a018392b0de2e21b51c5a17e526433caeccdd2f16ee4409fcd8",
+      "executable": true
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Helpers/Chromium Helper.app/Contents/PkgInfo",
+      "size": 8,
+      "sha256": "82502191c9484b04d685374f9879a0066069c49b8acae7a04b01d38d07e8eca0",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Helpers/app_mode_loader",
+      "size": 979320,
+      "sha256": "838599cdb856dec0595d5dd7f636db6b0ab84a21bdb37fe3e5a8e150b59537ec",
+      "executable": true
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Helpers/chrome_crashpad_handler",
+      "size": 1788416,
+      "sha256": "a6a973897c6abab5e65998a63bd3fb5a9bbddb30cd6fcdf0f5d6b8b656a7316a",
+      "executable": true
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Helpers/web_app_shortcut_copier",
+      "size": 26384,
+      "sha256": "3fce1df1be7af959181b12954e1687c76ea2a31d69d4d5725eac72b71d85d116",
+      "executable": true
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Libraries/IwaKeyDistribution/iwa-key-distribution.pb",
+      "size": 3917,
+      "sha256": "274f2cc20e5627c35d54cef0b5798f0a43bbc560fd52aa61a044a518c881a7d6",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Libraries/IwaKeyDistribution/manifest.json",
+      "size": 115,
+      "sha256": "313d7ea9fb517aea7819f0f70ad56a26a7410cae164433ce80f9e88c5be4379c",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Libraries/MEIPreload/manifest.json",
+      "size": 238,
+      "sha256": "44844cf3dde6e80087ae0e6bf0d9326d7ef7d23326d24ac83af0850be26923d2",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Libraries/MEIPreload/preloaded_data.pb",
+      "size": 8254,
+      "sha256": "c6070a157b4e28d16fbccbd233e93846ddb070c85e1a1bc64469b7a5f1424fad",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Libraries/PrivacySandboxAttestationsPreloaded/manifest.json",
+      "size": 122,
+      "sha256": "51c311a4ba03140bcd1c827f8d93dba50cadda736925903b26e95609275dbffd",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Libraries/PrivacySandboxAttestationsPreloaded/privacy-sandbox-attestations.dat",
+      "size": 7624,
+      "sha256": "59e345dc13aedee9ea46b92e58300ecaca944aaea9384c7af885400ac2ae8806",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Libraries/libaperitif.dylib",
+      "size": 44920,
+      "sha256": "ecdf5f146e2c69d38ab1d61d8a9dcc2784af4bbbd2e51689fc9431364969c375",
+      "executable": true
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Libraries/libvk_swiftshader.dylib",
+      "size": 4944696,
+      "sha256": "61d74771a8766425d7f99604dcc789641b523aa998de3d6d9e0a726fa6d0675c",
+      "executable": true
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Libraries/libvulkan.dylib",
+      "size": 424048,
+      "sha256": "e268aed94dd24d05a15daa53169924aeca70f343c6b78640026dcfbd5ad26a47",
+      "executable": true
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Libraries/vk_swiftshader_icd.json",
+      "size": 110,
+      "sha256": "d717d915e31e7c27948b80b36ab34e2d897888114c5c7d0af835f93eb53e58f5",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/Info.plist",
+      "size": 1070,
+      "sha256": "9b3732b6c1d9a87817fd19b595d161a9242188957490115aabe630f17576a1a8",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/af.lproj/locale.pak",
+      "size": 655831,
+      "sha256": "db214c9ef4994994439763923261c7089e1be02412fa6778cb32838930cf1df0",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/af_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/af_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/af_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/am.lproj/locale.pak",
+      "size": 1056917,
+      "sha256": "13214ea2083d9e0d48cfdbf941a358a571b2f2219834ae4dc41e75570dceafd6",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/am_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/am_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/am_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/app_mode-Info.plist",
+      "size": 1591,
+      "sha256": "80355d3ac4cf5e635b702877cbea68fe0bc96c76f147f33389cabaac9d5c3b58",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/ar.lproj/locale.pak",
+      "size": 1176442,
+      "sha256": "f066451e30e14dffac173e7b9c666267bacf82a6ca7216e9fbd788b5dd471187",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/ar_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/ar_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/ar_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/ar_XB.lproj/locale.pak",
+      "size": 1082994,
+      "sha256": "a67eae5f801354c343e1735b3dad6d2ca49ea9d1856b2f367f64b0eba3129903",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/ar_XB_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/ar_XB_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/ar_XB_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/bg.lproj/locale.pak",
+      "size": 1207868,
+      "sha256": "4686de87cf7a7237decfd3c43056dd584b5aba67a019a960a222649b486aeffe",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/bg_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/bg_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/bg_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/bn.lproj/locale.pak",
+      "size": 1541688,
+      "sha256": "32a91f027fc7afbebbe5d815a360cbc52ff893d3db538972be3002090229b516",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/bn_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/bn_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/bn_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/ca.lproj/locale.pak",
+      "size": 746383,
+      "sha256": "0feaf1460c6d72ba10b440d753c703490b08948baf7a069e74fabd33318adeda",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/ca_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/ca_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/ca_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/chrome_100_percent.pak",
+      "size": 520123,
+      "sha256": "8a2e58b7c253d2d2a6e5e4353d8551129136f64b16d7a13d63b5c3fbe7f5e9a0",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/chrome_200_percent.pak",
+      "size": 1002665,
+      "sha256": "14e3cbdabcf4396086a5f610b9f73b7510def0ab64a5b1d7d731e2b5db6af575",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/cs.lproj/locale.pak",
+      "size": 772837,
+      "sha256": "4ccae6f39aaa8dff0313df48465f1748e0b0790989a2f4725dd33ddf8e2618f7",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/cs_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/cs_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/cs_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/da.lproj/locale.pak",
+      "size": 694436,
+      "sha256": "46c224b116cb54fd5e950305bda28d2ea44ae588f945a50b3f66e1ff6d418807",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/da_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/da_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/da_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/de.lproj/locale.pak",
+      "size": 750068,
+      "sha256": "8ca3ad309f62539da027337715e04213bf017cfd795506efb8cb70a6475f4f5d",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/de_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/de_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/de_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/el.lproj/locale.pak",
+      "size": 1322731,
+      "sha256": "872af90be8d6195f2a529332564a15f8ffa0a964f617973b15e68a24cf4d8fbb",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/el_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/el_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/el_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/en.lproj/locale.pak",
+      "size": 608994,
+      "sha256": "7da24d35a91287a484365f91e74463e20a8183700393540c464ff6f54e95fe96",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/en_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/en_GB.lproj/locale.pak",
+      "size": 600118,
+      "sha256": "b9f56a6592f20be369bafcd1f2ec561ddc665ba6d8fa66bfdb2aedc7bae8e485",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/en_GB_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/en_GB_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/en_GB_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/en_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/en_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/en_XA.lproj/locale.pak",
+      "size": 1352030,
+      "sha256": "079c7e128ded83a02a9b283d71e22dbacb9d1595ae3baf1a5d289effbf09c052",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/en_XA_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/en_XA_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/en_XA_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/es.lproj/locale.pak",
+      "size": 726621,
+      "sha256": "95351084e3fa4842a36db529553204ada658e1fbd6c302b28485688fa559214a",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/es_419.lproj/locale.pak",
+      "size": 731885,
+      "sha256": "b265ce044e7ff27c543f5566d4a13991e008ed4628bce8bc556051bb009e7220",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/es_419_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/es_419_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/es_419_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/es_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/es_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/es_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/et.lproj/locale.pak",
+      "size": 667928,
+      "sha256": "2638498897566cc1668cbd02b8252d3daa8e2bcdd61e31bcc6fcd5c79fd873cf",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/et_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/et_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/et_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/fa.lproj/locale.pak",
+      "size": 1093126,
+      "sha256": "7a5177c6ceda3254725c3b565609686d69470aed77ea639cd3dbd5a79e46e7e0",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/fa_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/fa_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/fa_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/fi.lproj/locale.pak",
+      "size": 679264,
+      "sha256": "5cd078d6cd5e08b83e705025de878787a6b6ad05158cf762fb71deca181ee944",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/fi_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/fi_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/fi_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/fil.lproj/locale.pak",
+      "size": 766984,
+      "sha256": "7c447548a3d2115ea9e791de1f2437720b683dd0fd1886f2d2d9d82558123f66",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/fil_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/fil_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/fil_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/fr.lproj/locale.pak",
+      "size": 795617,
+      "sha256": "3a2568415b76a7e7640124344831d78e1b8088122be669f075f5953f20b3b9d2",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/fr_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/fr_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/fr_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/gpu_shader_cache.bin",
+      "size": 968826,
+      "sha256": "d3fc3a27c1d9a651f5d470e0f6ef2e06094ec5ad58c68b497b22b312442fdb8d",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/gu.lproj/locale.pak",
+      "size": 1527290,
+      "sha256": "bc3e99415212600db8f97f1e41c665a1ffb68805dc80ba070ed9c81397962710",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/gu_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/gu_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/gu_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/he.lproj/locale.pak",
+      "size": 961689,
+      "sha256": "43c4417cae50f22ee3efe4494364150a8a9c736c5fea862e48ed643892e332d7",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/he_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/he_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/he_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/hi.lproj/locale.pak",
+      "size": 1626154,
+      "sha256": "828668fffab91874544a6cdd28685ded20c1a0efb5b020e9c37a052cd8aac0f5",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/hi_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/hi_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/hi_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/hr.lproj/locale.pak",
+      "size": 742631,
+      "sha256": "96f227ba78d050790ea6af0a5263bd6ef0e9e84e8f2c58d50966d4b49ea75bc5",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/hr_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/hr_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/hr_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/hu.lproj/locale.pak",
+      "size": 789179,
+      "sha256": "9fd9270fbf45c36e9c74d80acf1d2829f3bb61bda2407118b033afc5368c5b43",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/hu_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/hu_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/hu_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/icudtl.dat",
+      "size": 10686384,
+      "sha256": "eccdb4c815b98d90dba72c85f156ca3ced5a2625923655f50d8702217951d15c",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/id.lproj/locale.pak",
+      "size": 660297,
+      "sha256": "44f916d6b0baa9322e33cc8be860c3a52de5d28810aaa595ec2b3f0f20d44722",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/id_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/id_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/id_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/install.sh",
+      "size": 6377,
+      "sha256": "1b541faca17a7a1a124d9e288fd27bf66785f3667d788243383ab17700489b69",
+      "executable": true
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/it.lproj/locale.pak",
+      "size": 721957,
+      "sha256": "34889ac43ab34ee2155b496391fdedbb730f157e1428d41a9c75a1cbf2b9c7f8",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/it_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/it_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/it_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/ja.lproj/locale.pak",
+      "size": 874016,
+      "sha256": "7002c37ffbe5aa69fde680efafbd76a74c63ed91977d6fb8bff25038531398ee",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/ja_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/ja_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/ja_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/kn.lproj/locale.pak",
+      "size": 1754653,
+      "sha256": "c8290cbfb297799d5222c1937604919254c7bdd854cf583db8d0cb3c4b2fef68",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/kn_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/kn_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/kn_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/ko.lproj/locale.pak",
+      "size": 745889,
+      "sha256": "1191aa55f849c99ea0c3e1b52839d78e476959c11bc4eb0f30a91bb802e97a55",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/ko_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/ko_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/ko_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/lt.lproj/locale.pak",
+      "size": 810054,
+      "sha256": "6341e95a59a112a533b0f7a82e5e129865b12f9debb78d4932afb8922cce101b",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/lt_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/lt_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/lt_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/lv.lproj/locale.pak",
+      "size": 804887,
+      "sha256": "9a12c00b3bce6be32d0c1b39cc3a78070b162b9b51e61459482055310784baaa",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/lv_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/lv_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/lv_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/ml.lproj/locale.pak",
+      "size": 1797142,
+      "sha256": "8877340e858645e7516f20cc93f007f7eeeea7947178db53b2d4fd8ea4337674",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/ml_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/ml_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/ml_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/mr.lproj/locale.pak",
+      "size": 1493770,
+      "sha256": "74e03e4b94939f13b97de7918c6e2eb73a5160d561ef59c20ab2f80070d9cc02",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/mr_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/mr_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/mr_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/ms.lproj/locale.pak",
+      "size": 694458,
+      "sha256": "7dfbe70b086978eb3d2335e7d36c24b98a3d74b87eb84557e6b6c9f571efa04e",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/ms_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/ms_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/ms_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/nb.lproj/locale.pak",
+      "size": 658853,
+      "sha256": "d9e35f71d29e7b7eb7294548eb3c511648fb3ebab61ea15de4e11ff05a312020",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/nb_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/nb_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/nb_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/nl.lproj/locale.pak",
+      "size": 687008,
+      "sha256": "526f3c153b5a3b7d1011b4115d0fdf72d9f5b1a231e4a07df03f04a7fcb1556d",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/nl_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/nl_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/nl_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/pl.lproj/locale.pak",
+      "size": 773819,
+      "sha256": "cc5eeed75b0528ad8886235dd70ac2324d6f7e39ac95daf4bb53c85f89a67761",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/pl_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/pl_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/pl_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/product_logo_32.png",
+      "size": 822,
+      "sha256": "c29f2c754d619246062db49e4ba1c3b8e96fcce18ec4524f5ef371172af385ad",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/pt_BR.lproj/locale.pak",
+      "size": 722389,
+      "sha256": "c1ea12e48a55963e8cd24a0f156a4fe09de4562c9f74f680d35b234bdb799869",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/pt_BR_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/pt_BR_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/pt_BR_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/pt_PT.lproj/locale.pak",
+      "size": 724009,
+      "sha256": "397ffc97d70c58640213f3cb7c1b965d88ce300ab298d51f0600ad20086100a9",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/pt_PT_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/pt_PT_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/pt_PT_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/resources.pak",
+      "size": 21959002,
+      "sha256": "205fb99c3830d0fc94fe82ab921785fe80e26006985dd643c0f763ee7dd1d2a9",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/ro.lproj/locale.pak",
+      "size": 750689,
+      "sha256": "4ae77b2879847388285b12790706ad53ff523c742d3ba4fa03a556d6a54a3a54",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/ro_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/ro_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/ro_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/ru.lproj/locale.pak",
+      "size": 1238815,
+      "sha256": "f7f84b758b13634b4bdecbceaa2f55a55ae5869677ffce500d8f6a6f4cb0c6d3",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/ru_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/ru_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/ru_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/sk.lproj/locale.pak",
+      "size": 784517,
+      "sha256": "f14088823a9fa5e969687ffb4fad89b2e53beee5fd58cb7cec9c37779786ae9a",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/sk_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/sk_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/sk_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/sl.lproj/locale.pak",
+      "size": 749928,
+      "sha256": "398974ac50c11af9451b42be8b830fd392bd7308982510cf7b4b607e6d59e15c",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/sl_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/sl_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/sl_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/sr.lproj/locale.pak",
+      "size": 1145512,
+      "sha256": "c3f14d3ab00f7c303af65d888bbe14837e0999f855cf983e84391d9d0a6e04ae",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/sr_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/sr_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/sr_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/sv.lproj/locale.pak",
+      "size": 669969,
+      "sha256": "e1e955d45ca22c58dd438660d90e6fa902eb66d4936c5d5181af6cdf6b54dd09",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/sv_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/sv_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/sv_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/sw.lproj/locale.pak",
+      "size": 710930,
+      "sha256": "830bd4f7771415705453fac6af5c3dee786a5b24a435bda2c8283b06c822e253",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/sw_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/sw_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/sw_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/ta.lproj/locale.pak",
+      "size": 1788759,
+      "sha256": "c254e6fd4d089c79b193cd50aa4640fb6ea04a1d3e6e8ba7071ff557fbed0dc3",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/ta_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/ta_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/ta_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/te.lproj/locale.pak",
+      "size": 1658746,
+      "sha256": "1cb9db4240f8a289bc63493ca0d13ff637bc2ebd43749c0c1b41c0069e1e2a69",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/te_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/te_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/te_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/th.lproj/locale.pak",
+      "size": 1389622,
+      "sha256": "d907703aa0458ac68ac7be0d2e92d33db636ac4a99f8da465f7e5998fc15821d",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/th_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/th_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/th_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/tr.lproj/locale.pak",
+      "size": 723261,
+      "sha256": "08e533b6cacc05ac3160ffed428cb88c27929e81c8671ed624f1705a87a012e3",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/tr_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/tr_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/tr_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/uk.lproj/locale.pak",
+      "size": 1248545,
+      "sha256": "6ceba61143ad6a976990ed0f6fccd51b726cba55c0b0070cb8650608b87a4883",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/uk_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/uk_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/uk_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/ur.lproj/locale.pak",
+      "size": 1070193,
+      "sha256": "faaefc266de640cb4b75c5e7211085ab8097ff75160145e45b2c7d77d9db0db1",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/ur_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/ur_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/ur_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/v8_context_snapshot.x86_64.bin",
+      "size": 711712,
+      "sha256": "dcc290472b6e942b70f37585798ad9791db710922f47df5df7e90d473b0329a0",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/vi.lproj/locale.pak",
+      "size": 855045,
+      "sha256": "6c1d2d2ebe5c10bda34308afd2a9d452dc30a67f0803fbb4a65f2fb1dfc26810",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/vi_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/vi_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/vi_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/webui_code_cache.x86_64.pak",
+      "size": 3663924,
+      "sha256": "cf95b00a18fbd12c21ee7a118d27bb60a4881d6201b1f68c6e8fb95b19671800",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/zh_CN.lproj/locale.pak",
+      "size": 616062,
+      "sha256": "c06e16a925fd1ba9a7b046a53a4bc1efd20ab18f709ff518ca5bf80d6598a972",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/zh_CN_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/zh_CN_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/zh_CN_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/zh_TW.lproj/locale.pak",
+      "size": 609727,
+      "sha256": "7efb5bcfa9c7f7aa91bae0f71e5b698f88c85934c8ca74056abf59395507aa63",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/zh_TW_FEMININE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/zh_TW_MASCULINE.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/159.0.8147.0/Resources/zh_TW_NEUTER.lproj/locale.pak",
+      "size": 18,
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/Current",
+      "size": 0,
+      "link": "159.0.8147.0",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Info.plist",
+      "size": 18350,
+      "sha256": "87adae38feb5c5ceaaeca89014a3a4921d82054cae0083e63ccd4fbfff21da84",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/MacOS/Chromium",
+      "size": 12664,
+      "sha256": "f0ac28167314611215e30dfbbd98b8384a0e71503ef7a0db51d1489be36dd8ea",
+      "executable": true
+    },
+    {
+      "path": "Chromium.app/Contents/PkgInfo",
+      "size": 8,
+      "sha256": "c03e793ff8a6b3a8ba2d0bfb36e24c527396ec58b8d246538f1e53651d70c66e",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/Assets.car",
+      "size": 437192,
+      "sha256": "961218f6eef627cad9b6ef7401f1774efd9c1cbcd3eebd299d7843415a1fcbb7",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/af.lproj/InfoPlist.strings",
+      "size": 1078,
+      "sha256": "87ad38e206db8f75206209e4b70117cc625f1c4b61d66a898984f954ee1f5e98",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/am.lproj/InfoPlist.strings",
+      "size": 1726,
+      "sha256": "4c224b411ab16467b7312a980b0cfa54931e6e78ebf7eeaaf6fa447ac2a8bc93",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/app.icns",
+      "size": 85977,
+      "sha256": "a1c2b17191234ee4ab1259d4fb5056ef340cc64345c1a7d2b504c632812ff062",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/ar.lproj/InfoPlist.strings",
+      "size": 1973,
+      "sha256": "f4c7657f04e1d9d32b12fbe19443ea593de3d8fd611e0f6fe35936edc125ea4f",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/ar_XB.lproj/InfoPlist.strings",
+      "size": 1847,
+      "sha256": "faca1a1ca1ace10a4c0d54391e08b25b0d2f2c8d62b291c9955776ea9d60bcb5",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/bg.lproj/InfoPlist.strings",
+      "size": 1790,
+      "sha256": "d9d31c317c7d0bab4f8f17a52e5a78492649e716ff17fcf341589fa293c757cb",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/bn.lproj/InfoPlist.strings",
+      "size": 2323,
+      "sha256": "58dc32404ebe8991cc086b286da7553542e4de0dbf0e6e64ea19de0c70dea544",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/ca.lproj/InfoPlist.strings",
+      "size": 1142,
+      "sha256": "5871d8b4fae87b60b4714be7f83f87cacc686ffc63e25f1e42223c51ab4f2a56",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/cs.lproj/InfoPlist.strings",
+      "size": 1217,
+      "sha256": "f2ed57d2946861004e9ea0fd65ed14e7ce107b2ae7d4c7a80a385d94a02c04ae",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/da.lproj/InfoPlist.strings",
+      "size": 1072,
+      "sha256": "67418c3a7f267513d5aed17208d913860bbfb02feeec20858e6a4d34e6461a81",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/de.lproj/InfoPlist.strings",
+      "size": 1130,
+      "sha256": "111205295985a67d0c372fa4f4026084a6762c98a38379c0d723b61979b3d993",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/el.lproj/InfoPlist.strings",
+      "size": 1989,
+      "sha256": "c0a3875e6a3bc2b307606f4d87e1d6a8d10e8a5c84ac294c423cffdac15548c6",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/en.lproj/InfoPlist.strings",
+      "size": 1121,
+      "sha256": "2df348636f244ce4de914b8bef766997747e18afd07c9493ba9bf131a8e23624",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/en_GB.lproj/InfoPlist.strings",
+      "size": 1121,
+      "sha256": "201db92404f75b901d116e29cce46cb9795a5e8a06ad02b4aa0aaced07832b46",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/en_XA.lproj/InfoPlist.strings",
+      "size": 2242,
+      "sha256": "5071c247c3d69b1cbe61d2871c29cdeb776a9ce29ce7443cd54aa6c1f0c736be",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/es.lproj/InfoPlist.strings",
+      "size": 1231,
+      "sha256": "03177dfed0f6550af4b0e3d3d88d2d6b110c40255f0df71bec16eea384ee4ec8",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/es_419.lproj/InfoPlist.strings",
+      "size": 1209,
+      "sha256": "d2c00c829d0a336139752d12687a31b0f1060bdfb5772387246a2417eefe43bd",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/et.lproj/InfoPlist.strings",
+      "size": 1270,
+      "sha256": "9ba5bcb9aa6f89816b9f4bc61a8b7732fad28363a6e0152c17d5a9f2ffaaa536",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/fa.lproj/InfoPlist.strings",
+      "size": 1809,
+      "sha256": "4a6fae3803a26e09d29824122a71c60a3a68f80648acf025634d0d5c3d160863",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/fi.lproj/InfoPlist.strings",
+      "size": 1189,
+      "sha256": "44a287f3edd5d1ae8123fa8aa671f11dcffc8b563583b14f82c81b746d851215",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/fil.lproj/InfoPlist.strings",
+      "size": 1312,
+      "sha256": "74bc35d8adca50c6b5283c15173e48b19ca1fc75d4a017d4624511fb5faa68e7",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/fr.lproj/InfoPlist.strings",
+      "size": 1508,
+      "sha256": "fe721fa156583aa0ca9d5473f3c8b9ead25e11eb5e5320231f2ac4bf2dc34d39",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/gu.lproj/InfoPlist.strings",
+      "size": 2100,
+      "sha256": "922f0f8d73176ac3bf9d4899b83520a78d4d1daab9ec034b9f2a13ef3ddced57",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/he.lproj/InfoPlist.strings",
+      "size": 1326,
+      "sha256": "daeb88b930d271a4bd09e3d474f6f064669eaa1e6018031bfc814a3048cf5973",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/hi.lproj/InfoPlist.strings",
+      "size": 2140,
+      "sha256": "eb7d3aab374d35c198558489011c8029f86045aaec165aed230716784ee3efaf",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/hr.lproj/InfoPlist.strings",
+      "size": 1158,
+      "sha256": "c397c806fb3ab7832e00851fca2511a0bea54bce22b9b30b2c3d57eccf99ba67",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/hu.lproj/InfoPlist.strings",
+      "size": 1327,
+      "sha256": "f617975115f764edafedfcb39d9033436d5a22c183d8368318a092924d7726c1",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/id.lproj/InfoPlist.strings",
+      "size": 1177,
+      "sha256": "089b19a2bf38b1b9b885cf0b30fae2d47e1cec520e8cb34bf3b1325d9413a44c",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/it.lproj/InfoPlist.strings",
+      "size": 1245,
+      "sha256": "e224ce707ab4333a49ae68a08f6371a10e4dc85ff77b71df16eb0e3ed52d73bf",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/ja.lproj/InfoPlist.strings",
+      "size": 1610,
+      "sha256": "aeb4e4df5cbb35e9ece1919a92b44710058b7db82f794c1c1aa6778023ce74cd",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/kn.lproj/InfoPlist.strings",
+      "size": 2857,
+      "sha256": "ff2fce4a408323d0689e51c4ab94475a052510932d42b82688793c0ab94561f6",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/ko.lproj/InfoPlist.strings",
+      "size": 1480,
+      "sha256": "1311ac33e6f2d763ddfb654a6880b76312d0903575df1c899cd94ac2323d4ee3",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/lt.lproj/InfoPlist.strings",
+      "size": 1487,
+      "sha256": "c6b5315e5ab9276b33b8d445b6400068682cc162788c71240968837dd5630451",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/lv.lproj/InfoPlist.strings",
+      "size": 1275,
+      "sha256": "3ad8c2500f417d631bb28cfe21417c72875c2df537a93ca985055415629e86f2",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/ml.lproj/InfoPlist.strings",
+      "size": 2751,
+      "sha256": "f19dd3d9a126d7bba918ec444a19faba39cea1dd5bd0013e6092bee5061ff287",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/mr.lproj/InfoPlist.strings",
+      "size": 2166,
+      "sha256": "150ab4caec4e45820bcda755c04b5c506e007ab2966f3271a8667262504ce0b3",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/ms.lproj/InfoPlist.strings",
+      "size": 1274,
+      "sha256": "46ada8ae6a20b7768aa984095c230165ba220279339236b02d121a46a0bd70e4",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/nb.lproj/InfoPlist.strings",
+      "size": 1118,
+      "sha256": "e45025e15bb263034683051e9f18d7eb8f2506484449d8c37d65666d8486a513",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/nl.lproj/InfoPlist.strings",
+      "size": 1119,
+      "sha256": "a526d89105dbae5cd850d57a61bcfea03a7378ccd0abb77d49c6f035a7ffe906",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/org.chromium.Chromium.manifest/Contents/Resources/en.lproj/Localizable.strings",
+      "size": 395420,
+      "sha256": "a3ae734de94acfbd9d212f904821783b476dfaa93049d64e1d5365440916b440",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/org.chromium.Chromium.manifest/Contents/Resources/org.chromium.Chromium.manifest",
+      "size": 174163,
+      "sha256": "54ac37f8c33f543a54540ec44808dbfac10637833586bddb546ec5a3916c373d",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/pl.lproj/InfoPlist.strings",
+      "size": 1207,
+      "sha256": "211b4081dc41145739abfaba1ad1c18b43a3e090d2bf26e20662c4a6b6802672",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/pt_BR.lproj/InfoPlist.strings",
+      "size": 1141,
+      "sha256": "1855f15717955f4142ac0a5a917d6030e3e3c73e2123888fafc70f064be70ba7",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/pt_PT.lproj/InfoPlist.strings",
+      "size": 1219,
+      "sha256": "6dfb70659f7af9bfe127f1da818237f95aae6a5e43e3e9b886ca3087dfa6be6e",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/ro.lproj/InfoPlist.strings",
+      "size": 1228,
+      "sha256": "1838902548994baa73d283f5bb969192fdc792a31f4a8f65c85beab3f81ce512",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/ru.lproj/InfoPlist.strings",
+      "size": 1780,
+      "sha256": "a1118552b0a2b7f4760a25fe075f7c6430e569161ee14429d10f1ba79cbd778d",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/scripting.sdef",
+      "size": 16777,
+      "sha256": "cd0453c2e166a0b664f8ea1d1ac04b53a54eed14835569b6104a7823dbb950f2",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/sk.lproj/InfoPlist.strings",
+      "size": 1155,
+      "sha256": "148b488b081b4362ddbc2b9d17def4bdbd5702009aa3d802c6486346cb62ca5b",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/sl.lproj/InfoPlist.strings",
+      "size": 1257,
+      "sha256": "a3299e2c4668ec14cec10c64fed1c9d81829431110caec6c9c5afc3fd83a7a74",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/sr.lproj/InfoPlist.strings",
+      "size": 1611,
+      "sha256": "49f0ab0b1f409ef6e41141f6c653a9461270440025778d885e393823978b467d",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/sv.lproj/InfoPlist.strings",
+      "size": 1161,
+      "sha256": "7a42e2084349c8f41a1bff6b586b1f18dddeb3d4cab00848152c23ac01f0e52e",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/sw.lproj/InfoPlist.strings",
+      "size": 1166,
+      "sha256": "dfbbd05d6efbbe2f84a0015a0cf3c4b97e885b119bbdc4d2d07ced0ec5a8c070",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/ta.lproj/InfoPlist.strings",
+      "size": 2592,
+      "sha256": "ae6256c80aa7fccaf17d60c8b52740643860835679c287b8d7076a94b7297234",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/te.lproj/InfoPlist.strings",
+      "size": 2922,
+      "sha256": "6885e732ad0cae249d41ddac3743d373b5b6f4428eda262a9c5c61b98c499d36",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/th.lproj/InfoPlist.strings",
+      "size": 2326,
+      "sha256": "dd69c979af94ec6ffb71aecc1c9a9136c5c206e6230dcb750c57c5af285085b7",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/tr.lproj/InfoPlist.strings",
+      "size": 1348,
+      "sha256": "9fd412d9a2dc528e5a41a5f1c0e28584e2c029df3375d7c6228216b69aa4ed30",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/uk.lproj/InfoPlist.strings",
+      "size": 1705,
+      "sha256": "2ecc0eeff9c2e5967b7fc4cfd0d1406b0aa5405fca8fb0fe96e58ffe58372e2e",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/ur.lproj/InfoPlist.strings",
+      "size": 1609,
+      "sha256": "83180e0453570a488a0edba6739d05a37fce447fd433f04a1cb4a9cc7e1f2cb9",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/vi.lproj/InfoPlist.strings",
+      "size": 1523,
+      "sha256": "336719a115efd4d0273aa1bf4bd3577cb5dea77024b220d2df1aab15823ff2c0",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/zh_CN.lproj/InfoPlist.strings",
+      "size": 1259,
+      "sha256": "5707fb22509c577969acdc9d1cbdc51747e7bd59fb1068dc36effb50be786fe9",
+      "executable": false
+    },
+    {
+      "path": "Chromium.app/Contents/Resources/zh_TW.lproj/InfoPlist.strings",
+      "size": 1105,
+      "sha256": "05c98346926e97d80c9040e10dbc409c31ea06501cf9bf9d028c326f1907a159",
+      "executable": false
+    }
+  ]
+}

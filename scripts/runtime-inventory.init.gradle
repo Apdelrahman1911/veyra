@@ -1,0 +1,254 @@
+/*
+ * Exact production dependency inventory, not a cache scan or final-package SBOM.
+ * Run only in the coordinated build slot, through scripts/gradle.sh. Examples:
+ *   -I scripts/runtime-inventory.init.gradle :composeApp:exportProductionInventory \
+ *       -Pveyra.inventory.platform=desktop-linux-x64
+ *   -Pveyra.inventory.platform=android-release
+ *   -Pveyra.inventory.platform=ios-arm64
+ * Resolves production configurations and POM metadata only. It never resolves a
+ * test configuration, installs tools, uploads files, or claims native closure.
+ * Local project artifacts must already exist (compile/package the target first).
+ */
+import groovy.json.JsonOutput
+import groovy.xml.XmlSlurper
+import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.nio.file.StandardCopyOption
+import java.security.MessageDigest
+import org.gradle.api.GradleException
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
+import org.gradle.api.artifacts.type.ArtifactTypeDefinition
+import org.gradle.api.artifacts.result.ResolvedArtifactResult
+import org.gradle.api.artifacts.result.UnresolvedComponentResult
+import org.gradle.api.artifacts.result.UnresolvedDependencyResult
+import org.gradle.maven.MavenModule
+import org.gradle.maven.MavenPomArtifact
+
+gradle.projectsEvaluated {
+    def app = gradle.rootProject.findProject(':composeApp')
+    // The init script also reaches included builds. Never add this task there.
+    if (app == null || !new File(gradle.rootProject.rootDir, 'gradle/kmpyt.commit').isFile()) {
+        return
+    }
+    app.tasks.register('exportProductionInventory') {
+        group = 'verification'
+        description = 'Hash the selected production classpath and its Maven POMs (not tests or package closure)'
+        notCompatibleWithConfigurationCache('Explicit dependency resolution and POM provenance audit')
+        doLast {
+            def root = gradle.rootProject.rootDir.canonicalFile.toPath()
+            def definitions = [
+                'desktop-linux-x64': ['desktopRuntimeClasspath', 'jvm-runtime-classpath', 'linux', 'x64'],
+                'desktop-windows-x64': ['desktopRuntimeClasspath', 'jvm-runtime-classpath', 'windows', 'x64'],
+                'desktop-macos-x64': ['desktopRuntimeClasspath', 'jvm-runtime-classpath', 'macos', 'x64'],
+                'desktop-macos-arm64': ['desktopRuntimeClasspath', 'jvm-runtime-classpath', 'macos', 'arm64'],
+                'android-release': ['releaseRuntimeClasspath', 'android-runtime-classpath', null, null],
+                'android-debug': ['debugRuntimeClasspath', 'android-runtime-classpath', null, null],
+                'ios-arm64': ['iosArm64CompileKlibraries', 'native-main-link-inputs', 'macos', null],
+                'ios-simulator-arm64': ['iosSimulatorArm64CompileKlibraries', 'native-main-link-inputs', 'macos', 'arm64'],
+                'ios-simulator-x64': ['iosX64CompileKlibraries', 'native-main-link-inputs', 'macos', 'x64'],
+            ]
+            def platform = app.providers.gradleProperty('veyra.inventory.platform').orNull
+            def definition = definitions[platform]
+            if (definition == null) {
+                throw new GradleException('Set -Pveyra.inventory.platform to one of: ' + definitions.keySet().join(', '))
+            }
+            def hostOs = System.getProperty('os.name').toLowerCase(Locale.ROOT)
+            hostOs = hostOs.contains('mac') ? 'macos' : hostOs.contains('win') ? 'windows' : hostOs.contains('linux') ? 'linux' : hostOs
+            def hostArch = System.getProperty('os.arch').toLowerCase(Locale.ROOT)
+            hostArch = hostArch in ['aarch64', 'arm64'] ? 'arm64' : hostArch in ['amd64', 'x86_64'] ? 'x64' : hostArch
+            if ((definition[2] != null && definition[2] != hostOs) || (definition[3] != null && definition[3] != hostArch)) {
+                throw new GradleException('Inventory platform does not match this host; currentOs dependencies cannot be cross-inventoried')
+            }
+            def configuration = app.configurations.findByName(definition[0])
+            if (configuration == null || !configuration.canBeResolved) {
+                throw new GradleException('Required production configuration unavailable: ' + definition[0] + '; no guessed/test fallback')
+            }
+
+            def ownedPath = { File file ->
+                def resolved = file.canonicalFile.toPath()
+                if (!resolved.startsWith(root)) {
+                    throw new GradleException('Inventory input/output escapes the repository; use scripts/gradle.sh and owned caches')
+                }
+                resolved
+            }
+            def digestFile = { File file ->
+                def digest = MessageDigest.getInstance('SHA-256')
+                file.withInputStream { input ->
+                    byte[] bytes = new byte[1024 * 1024]
+                    int count
+                    while ((count = input.read(bytes)) != -1) {
+                        digest.update(bytes, 0, count)
+                    }
+                }
+                digest.digest().encodeHex().toString()
+            }
+            def recordFile = { File file ->
+                def path = ownedPath(file)
+                if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
+                    throw new GradleException('A selected artifact is missing/not a plain file; build this target before inventory: ' + root.relativize(path))
+                }
+                [path: root.relativize(path).toString().replace('\\', '/'), bytes: Files.size(path), sha256: digestFile(path.toFile())]
+            }
+            def componentId = { id ->
+                if (id instanceof ModuleComponentIdentifier) {
+                    return "${id.group}:${id.module}:${id.version}".toString()
+                }
+                if (id instanceof ProjectComponentIdentifier) {
+                    return "project:${id.buildTreePath}".toString()
+                }
+                throw new GradleException('Opaque/file dependency requires explicit provenance before production inventory: ' + id.class.simpleName)
+            }
+            def components = new TreeMap<String, Object>()
+            def externalIds = []
+            def resolution = configuration.incoming.resolutionResult
+            def unresolved = resolution.allDependencies.findAll { it instanceof UnresolvedDependencyResult }
+            if (!unresolved.isEmpty()) {
+                // Do not echo repository URLs or failure bodies into public logs.
+                throw new GradleException("Production dependency resolution failed (${unresolved.size()} unresolved edges)")
+            }
+            resolution.allComponents.each { component ->
+                def id = componentId(component.id)
+                if (component.id instanceof ModuleComponentIdentifier) {
+                    components[id] = [id: id, kind: 'module', group: component.id.group,
+                        module: component.id.module, version: component.id.version]
+                    externalIds.add(component.id)
+                } else {
+                    components[id] = [id: id, kind: 'project', projectPath: component.id.projectPath]
+                }
+            }
+            // AGP publishes several artifact kinds on each Android variant. Select its
+            // runtime class JAR view explicitly; an untyped view is ambiguous.
+            // This remains a classpath inventory, not packaged-resource/native closure.
+            def artifactCollection = platform.startsWith('android-')
+                ? configuration.incoming.artifactView {
+                    attributes.attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, 'android-classes-jar')
+                }.artifacts
+                : configuration.incoming.artifacts
+            def artifacts = artifactCollection.artifacts.collectMany { artifact ->
+                def attributes = new TreeMap<String, String>()
+                artifact.variant.attributes.keySet().each { key ->
+                    attributes[key.name] = String.valueOf(artifact.variant.attributes.getAttribute(key))
+                }
+                def identity = [component: componentId(artifact.id.componentIdentifier), variant: attributes]
+                def path = ownedPath(artifact.file)
+                if (!Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
+                    return [recordFile(artifact.file) + identity]
+                }
+                // Kotlin/Native project outputs may be unpacked KLIB directories.
+                // Hash their exact regular members, never replace them with a
+                // guessed archive or scan unrelated build/cache directories.
+                if (!platform.startsWith('ios-') || !path.toString().replace('\\', '/').contains('/main/klib/')) {
+                    throw new GradleException('Unexpected directory artifact in production inventory')
+                }
+                def members = []
+                Files.walk(path).withCloseable { stream ->
+                    def iterator = stream.iterator()
+                    int entries = 0
+                    while (iterator.hasNext()) {
+                        def member = iterator.next()
+                        if (++entries > 16384 || Files.isSymbolicLink(member)) {
+                            throw new GradleException('Linked/oversized unpacked KLIB artifact')
+                        }
+                        if (!Files.isDirectory(member, LinkOption.NOFOLLOW_LINKS)) {
+                            members.add(recordFile(member.toFile()) + identity + [container: root.relativize(path).toString().replace('\\', '/')])
+                        }
+                    }
+                }
+                if (members.isEmpty()) throw new GradleException('Empty unpacked KLIB artifact')
+                members
+            }.sort { a, b -> (a.component <=> b.component) ?: (a.path <=> b.path) }
+            if (artifacts.isEmpty() || artifacts.size() > 16384) {
+                throw new GradleException('Empty/oversized production artifact set is not a successful inventory')
+            }
+
+            def poms = new TreeMap<String, Object>()
+            def pomFailures = new TreeSet<String>()
+            def pomParents = new LinkedHashSet<String>()
+            def parseParent = { File file ->
+                def parser = new XmlSlurper(false, false)
+                parser.setFeature('http://apache.org/xml/features/disallow-doctype-decl', true)
+                parser.setFeature('http://xml.org/sax/features/external-general-entities', false)
+                parser.setFeature('http://xml.org/sax/features/external-parameter-entities', false)
+                def xml = parser.parse(file)
+                if (xml.parent.size() == 0) return null
+                def fields = [xml.parent.groupId.text(), xml.parent.artifactId.text(), xml.parent.version.text()]
+                if (fields.any { !it || it.contains('${') || !(it ==~ /[A-Za-z0-9_.+\-]+/) }) {
+                    return 'unresolved-parent-coordinates'
+                }
+                fields.join(':')
+            }
+            def collectPoms = { query ->
+                def result = query.withArtifacts(MavenModule, MavenPomArtifact).execute()
+                result.resolvedComponents.each { component ->
+                    def id = componentId(component.id)
+                    def files = component.getArtifacts(MavenPomArtifact).findAll { it instanceof ResolvedArtifactResult }
+                    if (files.size() != 1) {
+                        pomFailures.add(id)
+                    } else {
+                        def file = files.first().file
+                        def parent = parseParent(file)
+                        poms[id] = recordFile(file) + [component: id, parent: parent]
+                        if (parent != null && parent != 'unresolved-parent-coordinates') pomParents.add(parent)
+                    }
+                }
+                result.components.findAll { it instanceof UnresolvedComponentResult }.each { component ->
+                    pomFailures.add(componentId(component.id))
+                }
+            }
+            if (!externalIds.isEmpty()) {
+                collectPoms(app.dependencies.createArtifactResolutionQuery().forComponents(externalIds))
+            }
+            // Parent POMs are metadata, NOT extra runtime components. Follow only
+            // parents named by actually selected components; never crawl caches.
+            def seenParents = new HashSet<String>()
+            for (int depth = 0; !pomParents.isEmpty(); depth++) {
+                if (depth >= 32 || seenParents.size() > 4096) {
+                    throw new GradleException('POM inheritance exceeds bounded audit depth/count')
+                }
+                def pending = new ArrayList<String>(pomParents)
+                pomParents.clear()
+                pending.sort().each { parent ->
+                    if (seenParents.add(parent) && !poms.containsKey(parent)) {
+                        def parts = parent.split(':', -1)
+                        collectPoms(app.dependencies.createArtifactResolutionQuery().forModule(parts[0], parts[1], parts[2]))
+                    }
+                }
+            }
+            components.keySet().findAll { !it.startsWith('project:') && !poms.containsKey(it) }.each { pomFailures.add(it) }
+
+            def requiredInputNames = ['settings.gradle.kts', 'build.gradle.kts', 'gradle.properties',
+                'gradle/libs.versions.toml', 'gradle/kmpyt.commit', 'gradle/wrapper/gradle-wrapper.properties',
+                'composeApp/build.gradle.kts', 'shared/build.gradle.kts',
+                'third_party/kmpYT/settings.gradle.kts', 'third_party/kmpYT/build.gradle.kts',
+                'third_party/kmpYT/kmpyt/build.gradle.kts', 'third_party/kmpYT/gradle.properties',
+                'scripts/runtime-inventory.init.gradle']
+            if (requiredInputNames.any { !new File(root.toFile(), it).isFile() }) {
+                throw new GradleException('Critical production build/pin fingerprint input is missing')
+            }
+            def inputNames = requiredInputNames + ['third_party/kmpYT/gradle/libs.versions.toml']
+            def buildInputs = inputNames.collect { new File(root.toFile(), it) }.findAll { it.isFile() }.collect(recordFile)
+            def pin = new File(root.toFile(), 'gradle/kmpyt.commit').getText('UTF-8').trim()
+            if (!(pin ==~ /[0-9a-f]{40}/)) throw new GradleException('A full immutable kmpYT commit pin is required')
+            def result = [schemaVersion: 1, type: 'veyra-production-dependencies', platform: platform,
+                project: app.path, configuration: configuration.name, configurationKind: definition[1],
+                resolved: true, testConfigurationIncluded: false,
+                source: [kmpytPin: pin, buildInputs: buildInputs],
+                components: components.values().toList(), artifacts: artifacts, poms: poms.values().toList(),
+                missingPoms: pomFailures.toList(),
+                claims: [finalPackageInventory: false, nativeClosureVerified: false,
+                    correspondingSourceVerified: false, physicalAudioVerified: false]]
+            def destination = ownedPath(new File(root.toFile(), ".work/verification/runtime-inventory/${platform}.json"))
+            Files.createDirectories(destination.parent)
+            def staging = Files.createTempFile(destination.parent, '.inventory-', '.json')
+            try {
+                staging.toFile().setText(JsonOutput.prettyPrint(JsonOutput.toJson(result)) + '\n', 'UTF-8')
+                Files.move(staging, destination, StandardCopyOption.REPLACE_EXISTING)
+            } finally {
+                Files.deleteIfExists(staging)
+            }
+            logger.lifecycle("Production inventory: ${platform}, ${components.size()} components, ${artifacts.size()} artifacts, ${pomFailures.size()} missing POMs")
+            logger.lifecycle('Written ' + root.relativize(destination) + '; native/bundled-tool/package closure remains unverified')
+        }
+    }
+}

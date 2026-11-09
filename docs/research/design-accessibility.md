@@ -1,8 +1,10 @@
 # Veyra / ڤيرا — original design, accessibility, and Arabic RTL research
 
-**Phase:** research and proposed acceptance contract; not an implemented or accessibility-certified UI.  
+**Phase:** research completed; shared design implementation and static audits authored. No compiled/UI/accessibility certification is implied.
 **Research date:** 2026-11-06.  
 **Scope:** Kotlin Multiplatform / Compose app, Android, iOS, Windows, macOS, Linux; English and Arabic; music and podcasts; online and genuinely available offline media.
+
+**Authoritative scope amendments:** `DECISIONS.md` D005/D006/D008/D009 supersede early product assumptions in this research. All playable acquisition uses complete-title → first ordered kmpYT result, including podcasts and externally discovered/local references; RSS/Commons are metadata, not an independent audio route. Room owns durable state, downloads require complete resumable/background/retry/validation phases, and native equal-power **music-only crossfade is required**. One coordinator may own two deliberately overlapping decks; “one player” never means disabling that requirement. See the implementation handoff update below for evidence limits.
 
 ## 1. Recommendation and evidence boundary
 
@@ -72,6 +74,8 @@ Proposed names map cleanly into Material roles while leaving native high-contras
 | `onSecondaryContainer` | `#3B2209` | `#F9DFC3` |
 | `error` | `#AD292F` | `#FFB3B5` |
 | `onError` | `#FFFFFF` | `#680A13` |
+| `errorContainer` | `#FFE2E1` | `#552025` |
+| `onErrorContainer` | `#680A13` | `#FFDADB` |
 | `success` — with check + text | `#196B44` | `#85D3AA` |
 | `warning` — with warning icon + text | `#785104` | `#EFBC66` |
 | `focusRing` — neutral-surface controls | `primary` | `primary` |
@@ -98,6 +102,7 @@ Calculated with the WCAG sRGB relative-luminance formula, `(lighter + .05)/(dark
 | `onSecondaryContainer / secondaryContainer` | 11.54:1 | 7.05:1 |
 | `error / surface` | 6.70:1 | 9.49:1 |
 | `onError / error` | 6.70:1 | 7.53:1 |
+| `onErrorContainer / errorContainer` | 10.49:1 | 10.07:1 |
 | `success / surface` | 6.51:1 | 9.13:1 |
 | `warning / surface` | 7.05:1 | 9.25:1 |
 
@@ -439,22 +444,141 @@ Before polishing large numbers of screens, test a focused prototype with Arabic 
 Final module/package names are architecture-owned. The intended surface is deliberately small:
 
 ```kotlin
-enum class AppLanguage { English, Arabic }
-// A separate preference can represent System; resolve it before rendering.
-class AppStrings(val language: AppLanguage) {
+// Uses the shared domain LanguagePreference; the shell resolves SYSTEM first.
+class AppStrings(language: LanguagePreference, val arabicIndicDigits: Boolean = false) {
     fun text(key: TextKey): String
     fun format(key: TextKey, vararg arguments: String): String
+    fun quantity(key: QuantityKey, count: Long): String
+    fun mediaTime(milliseconds: Long?): String
+    fun spokenDuration(milliseconds: Long?): String
+    fun byteSize(bytes: Long): String
+    fun errorFor(failure: AppFailure): String
 }
 // LocalStrings provides the resolved AppStrings to composables.
 // App code does not persist the instance or its rendered messages.
 @Composable
-fun VeyraTheme(darkTheme: Boolean, language: AppLanguage, content: @Composable () -> Unit)
+fun VeyraTheme(darkTheme: Boolean, language: LanguagePreference, content: @Composable () -> Unit)
 // VeyraIcons exposes one consistent ImageVector family.
 ```
 
 `TextKey` covers navigation, playback controls/states, music library/playlist actions, podcast follow/progress/queue/timer actions, all download phases, empty states, settings/licenses, accessibility names, and recoverable errors. Typed domain errors map into keys at the UI boundary: Offline/Connection, Timeout, RateLimited, SourceRestricted, SourceUnavailable, InvalidFeed, UnsupportedEnclosure/Format, PermissionDenied, StorageFull, FileMissing/Corrupt, DownloadInterrupted, SeekUnavailable, plus a safe unknown fallback. Exact enum names should match the agreed domain model, not create duplicate error taxonomies. Cancellation is normally a user-requested state, not a scary error toast.
 
-Every key has en/ar content. Formatted metadata arguments are bidi-isolated; quantity/duration formatting is a dedicated locale-aware operation, not English string concatenation. UI errors never accept arbitrary backend prose as already-localized safe text. UI agents request new keys rather than embedding independent translations. Parity/placeholder tests and a scan for user-facing literals accompany integration. This is an interface proposal, not compiled code or permission to claim a finished translation.
+Every key has en/ar content. Formatted metadata arguments are bidi-isolated; quantity/duration formatting is a dedicated locale-aware operation, not English string concatenation. UI errors never accept arbitrary backend prose as already-localized safe text. UI agents request new keys rather than embedding independent translations. Parity/placeholder tests and a scan for user-facing literals accompany integration. These interfaces are now authored, but compilation and native-language/rendering review remain separate checks.
+
+### Implementation handoff update — 2026-11-06
+
+- `ui/design` contains the bilingual typed catalogue, actual opaque theme tokens, original code-native icons and shared components. `VeyraIconButton` provides a 48dp minimum, selected/state semantics, localized tooltip/name and visible focus border. `MediaDirection` is only for transport/seek geometry, not queue navigation or an entire Arabic screen.
+- Catalogue copy separates original metadata/title/duration/licence from the exact requested/resolved audio receipt. A matching title is **not** a verified recording match. Current audio, downloaded audio and previous search results have distinct labels; an unrelated newer search receipt must not stand in for the audible/downloaded one. Listing rights do not automatically cover first-result audio.
+- Podcast historical-position notices now distinguish a known changed recording (this recording starts from the beginning) from an unverified selection (resume is conditional on matching the prior recording). Both en/ar keys include the separately preserved historical position and accept visual media time or spoken duration. Two additional Kotlin interpolation/bidi/argument-count tests are authored, **not yet executed**; these resources do not themselves prove the playback/progress-compatibility policy.
+- Crossfade copy covers persisted enable/duration/headroom controls and Preparing/Ready/Overlapping states. Only the native coordinator's actual `OVERLAPPING` state may be labeled active. Podcast behavior must remain unchanged; no source search, UI animation, null-sink probe or automated test substitutes for mandatory physical audible-output verification.
+- Root-delegated `ui/settings` now contains a responsive, wrapping settings screen and typed `SettingsAction` intents. Actions apply one field to the latest Room settings inside its transaction, preserving unrelated fields and show-specific speed preferences; text-size step buttons use relative intents rather than stale slider snapshots. Controls cover native-gated crossfade/2–5-second presets/0.1–30-second custom duration, podcast defaults/skips, language/theme/75–200% text size, offline mode, parallelism/storage and real root navigation callbacks. Choice buttons reserve space for a separate 2dp keyboard-focus ring, distinguishable even on an already-selected choice without layout movement; their inner targets remain at least 48dp. Constant -3.5 dB music headroom is explained, not presented as an adjustable or transition-only control. These controls still require actual root/native application and rendered interaction tests.
+- Playback-tools banner keys distinguish preparing/verifying/downloading/installing software from acquiring audio. Required-state copy explains first online playback/download setup, no offline-startup tool fetch, published release sources and internet-data use. Exact optional byte totals and Node.js/Chromium/FFmpeg names have bilingual resource coverage. Copy does not claim every third-party tool binary is an official upstream build or that setup success establishes playable media.
+- Legal copy explains that bundled licences/notices remain in their original language. Explicit recovery copy warns that restoring the last valid backup returns the library to that earlier state, may omit later changes, retains damaged files and does not reset the library. The prepare-tools action has a separate imperative label from its in-progress status. These labels do not establish that legal bundling or recovery execution passed.
+- Cross-review of the new shared recovery UI found that mobile hosts originally showed it only after initialization had succeeded, making corrupt-store recovery unreachable. Native owners now distinguish constructed-container **availability** from successful initialization, keep the shared failed-state UI mounted, and reject OS playback commands until ready rather than replaying an old Play after recovery. The Android worker observes each current initialization attempt instead of a permanently failed deferred. Source review supports this integration direction; startup/recovery interaction execution remains pending.
+- `Artwork` prefers a supplied persisted path. `LocalRemoteArtworkAllowed` defaults to false: production UI never passes a network URL or potentially cloud-backed `content://` provider to Coil, even online. The owned metadata artwork cache supplies app-local files; isolated tests may explicitly opt into remote models, but offline mode still overrides that opt-in. Network file authorities/UNC paths and encoded equivalents are rejected. The UI helper cannot detect network-mounted filesystem directories: the storage owner must supply only managed local artwork. Missing art remains a neutral real-title initial/original mark, never a fabricated cover.
+- Font manifest and unchanged OFL live in `composeResources/files/licenses`. All three weights are pinned to Google Fonts revision `702964cf46bd1bf33d0745d24bbaac33edf8b8af`; the manifest records original names, exact URLs, byte sizes and SHA-256. No runtime font download is needed.
+- **Executed:** `python3 -B scripts/verify-design-resources.py` passed a read-only, stdlib-only static audit (495 bilingual keys and references across 117 Kotlin source files at the latest check). It checks en/ar key/reference/placeholder consistency; 37 text pairs and 15 essential/focus pairs per theme, including selected queue rows (minimum text light **5.103:1**, dark **5.095:1**; essential light **3.385:1**, dark **3.056:1**); all three font hashes/sizes/pins; 171 required Unicode cmap characters in each weight; Arabic GSUB/GPOS script/feature presence; unchanged OFL. New error-container foreground pairs measure **10.489:1** light and **10.066:1** dark. Table/feature presence is **not a shaping or legibility test**.
+- **Executed:** `python3 -B scripts/tests/test_design_resources.py` passed **49/49 tests**, zero failures/errors/skips. Disposable negative fixtures under `.work/` cover missing/duplicate keys and malformed placeholders, unsafe interpolation/bidi controls, missing references/raw templates, low contrast/alpha, font hash/size/pin/path/symlink/weight/coverage/layout faults, truncated OFL, unmanifested fonts and theme mismatches. A current-catalogue regression preserves both recording-conditional podcast notices and their position placeholders. CLI tests verify failure exit/aggregation and a read-only repeat from another directory. No fonts are installed, no network is requested, and no Kotlin build is run by this suite.
+- Both static commands were rerun after adding the podcast notices and before the pending third GUI batch; exit-zero logs, 134 checked input hashes and their unchanged pre/post comparison are preserved in `.work/design-review-evidence/podcast-recording-notes-fenbnpva/` (49 tests, 0.470s). The earlier 48-test/493-key rerun remains in `.work/design-review-evidence/pre-ui3-static-fvdl57ru/`. Neither run executes the pending Kotlin UI repairs or new Kotlin formatting tests.
+- **Executed and independently inspected:** all **35/35** common Kotlin design/settings tests passed in the authorized first combined desktop batch. Design's 26 tests cover catalogue/interpolation/privacy, Arabic cardinal categories/digits, duration/byte formatting, no-network/default-offline artwork policies, actual color pairs/minimum target and directional icons. Nine settings tests cover single-field/latest-state application, rapid steps/bounds, exact decimal Arabic/Latin input and native speed-range choices. Preserved XML is under `.work/music-ui-evidence/first/`; the full log is `.work/music-ui-tests-first.log`. The enclosing batch reports **196 tests, 127 passed, 69 failed, zero errors/skips**, not a full-suite success.
+- **Historical first-run UI initialization failure:** eleven desktop settings UI tests cover capability gating, persisted-field intents, decimal/error/Done behavior, custom defaults, nondrag text controls, navigation callbacks, focused-button keyboard activation and Arabic 320dp/200% **unclipped** control bounds (clipped semantics bounds alone can hide overflow). These fixtures create no source, database, player or runtime installer. All eleven failed at X11/AWT toolkit initialization in the guarded first run, before layout/interaction checks; this was not evidence of eleven application layout defects. The successful second-run execution is recorded below.
+- **Compiled; UI initialization failed before test bodies:** nine additional `RecoveryAndRuntimeUiTest` cases reuse the actual root/controller/Room fixture with a no-network engine and controlled software-runtime state. They cover passive/offline-disabled preparation, determinate/unknown progress, typed Arabic errors, explicit confirmed recovery versus Cancel, absent-backup/future-schema refusal, actual bundled offline legal documents and one independently unavailable document through the real legal screen's reader seam. Recovery corrupts only a newly seeded task-owned Room database and checks preserved damaged bytes/library contents. The tests use Compose 1.9.3's public `runDesktopComposeUiTest(width = 320, height = 760)`: a 320dp inner Box inside the default 1024px test scene would not actually constrain separate modal layers. Assertions compare unclipped control/modal bounds and text-layout overflow at 200% Arabic. All nine failed during the same guarded X11/AWT initialization; no PNG was generated. These are not native installer, media, screen-reader or physical-output claims. Of **55** authored design/settings/recovery Kotlin cases, **35 passed and 20 report environment-initialization failures** at this checkpoint; rendering, focus/keyboard/large-text journeys and native accessibility remain unverified.
+
+### Second guarded desktop UI checkpoint — actual rendering, not full-suite success
+
+Independently parsed `.work/music-ui-evidence/second/test-results` reports
+**249 tests, 240 passed, nine failures, zero errors/skipped tests**. These are
+real GUI test bodies after the display guard repair, not the first run's AWT
+initialization failures. The design/settings/recovery group is **51/55 passed**:
+all 35 pure design/settings cases and all 11 settings UI cases pass; recovery/
+runtime is 5/9. The five passing root cases cover actual damaged-Room confirmed
+restore/Cancel, missing-backup/future-schema refusal and both offline legal-reader
+paths. Controlled runtime states and fake audio/source services remain explicit.
+
+The four runtime failures are retained, not weakened:
+
+- Prepare's unclipped semantic control is **184×40dp**, below the 48dp target.
+- The Arabic Chromium and FFmpeg detail fields fail the text-layout overflow
+  assertion at **320×760, 200% text**.
+- English byte-progress text fails the same assertion at **960×720, 100% text**,
+  not at the narrow/large-text setting.
+
+Pinned Compose 1.9.3 source review found that the simple String-text semantics
+path reconstructs `MultiParagraph` at the parent's maximum constraints while
+returning the naturally sized text node (`ParagraphLayoutCache.kt:366–401`)
+[S19, S20].
+`hasVisualOverflow` compares these widths; a short text node can therefore
+report width overflow without proof of clipped glyphs. The second run has no
+failing-detail screenshot or detailed width diagnostics, so rendered truncation
+is **not established** merely by those three assertions. The authored repair
+makes the dialog column and each text explicitly full-width within the existing
+bounded, scrollable body, and gives every Prepare/Retry/Close control a 48dp
+minimum on both axes. It does not shrink text, remove bidi isolation, truncate
+details or relax tests. Those `app/MediaRuntimeDetails.kt` and diagnostic/pre-assert
+capture changes subsequently compiled and rendered in the incomplete fourth run
+below; there is still no finalized fourth per-method result.
+
+Preserved images/XML/labels and hashes are under `.work/design-ui-evidence/second/`.
+Visual inspection confirms a rendered 320×760 Arabic compact-runtime scene,
+Arabic large-text recovery confirmation with its scrollable prompt and visible
+buttons, and the actual English bundled OFL page. The compact status deliberately
+ellipsizes and opens full details; this image is not a full-detail fit proof.
+The isolated one-missing-document capture has transparent background/black text:
+its fixture lacked the real app's themed `Surface`, so it does not substantiate
+dark-theme legibility. The next fixture uses that surface and captures the host;
+all reader/error assertions remain. None of these captures establishes runtime
+installation, media acquisition, screen-reader behavior or physical playback.
+
+### Fourth guarded desktop checkpoint — partial execution and reviewed images
+
+The third attempt was interrupted by SIGTERM during compilation, before tests.
+The fourth reached actual test bodies, then ended **exit1 at10:17:44 UTC** when
+the kernel killed Gradle daemon15612 for OOM. Independently inspected retained
+Gradle/kernel evidence distinguishes this environment termination from the eight
+earlier logged assertion failures. **Zero finalized XML does not mean zero test
+execution:** there are eight unique FAILED method names and16 authored PNGs, but
+no complete pass/fail count. The319 expected methods have no finalized results,
+not necessarily319 unexecuted bodies. Independent review matched64/64 evidence
+hashes,34/34 retained artifact hashes/sizes and identical475-entry before/after
+input dictionaries. Evidence: `.work/podcast-ui-evidence/fourth/`; design review:
+`.work/design-ui-evidence/fourth/{independent-review.json,review.md}`.
+
+Actual runtime modal images now show complete Chromium/FFmpeg component labels,
+English and Arabic byte progress, readable typed errors, visible Close controls
+and a reachable full privacy paragraph. Arabic200% details/recovery use actual
+320×760 scenes; English960×720 details yield a560×426 dialog crop. Long bodies
+scroll, so an initial image's partially visible last line is not proof of a
+truncated document. Later Arabic detail/error captures follow several strict
+readability/control assertions, but precede later assertions/teardown: they are
+**not whole-method success**. The repaired missing-legal fixture is opaque and
+themed, but its final PNG depicts the later font-notice page, not the missing
+error itself. The original bundled OFL is visible in the offline English capture.
+No fourth podcast image or complete new Kotlin formatting result was retained.
+
+Six shell failures remain independently identified: two selected-label overflow
+flags, two48dp seek-target checks, the short-landscape Library query's clipping
+check, and sleep-dialog Escape dismissal. The two selected words (`Listen` at
+English200%, `المكتبة` at Arabic175%) visibly render completely; this does not
+prove every200% destination, whose loop stopped early. Exact UI4 paragraph/node
+metrics were not retained. The pinned String-semantics reconstruction above is
+a supported diagnostic explanation, **not permission to remove the check**.
+The surviving player image shows an episode transport in the initial viewport
+with the default44dp thumb. Two failing methods overwrote that same filename;
+there is no separate preserved long-metadata failure frame. The landscape query
+is crowded between a runtime-error banner and a tall mini-player. Escape has no
+retained modal/focus evidence yet; its cause remains undiagnosed.
+
+After the lead lifted the freeze, a narrow source repair made nav labels fill
+their existing bounded slot without shrinking/capping text, wired a short-height
+mini-player preview, and added method/unique-group/sequence-isolated captures.
+Strict48dp/overflow/containment assertions remain, with added ancestor-clipping,
+line/character-advance diagnostics and failure-modal/key-consumption evidence.
+Music separately enlarged the **actual thumb/layout**, not only semantics, and
+authored mouse/touch-edge/keyboard/range and compact-Library regressions. These
+latest repairs are **uncompiled/unrun** at this checkpoint. The two other logged
+failures concern desktop cancellation ownership, not the design surface. No
+screen-reader, real installation/media, physical audible output, native-window
+resize or redistribution-readiness claim follows from these authored scenes.
 
 ## Sources
 
@@ -478,3 +602,5 @@ Fetched 2026-11-06. Apple HIG content was retrieved using its official documenta
 - **[S16]** IBM Plex Sans Arabic OFL: https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexsansarabic/OFL.txt
 - **[S17]** Noto Sans Arabic distribution / OFL: https://github.com/google/fonts/tree/main/ofl/notosansarabic ; https://raw.githubusercontent.com/google/fonts/main/ofl/notosansarabic/OFL.txt
 - **[S18]** Manrope distribution / OFL: https://github.com/google/fonts/tree/main/ofl/manrope ; https://raw.githubusercontent.com/google/fonts/main/ofl/manrope/OFL.txt
+- **[S19]** Pinned Compose Foundation desktop1.9.3 source archive: https://repo.maven.apache.org/maven2/org/jetbrains/compose/foundation/foundation-desktop/1.9.3/foundation-desktop-1.9.3-sources.jar ; inspected `commonMain/androidx/compose/foundation/text/modifiers/ParagraphLayoutCache.kt:366–401`; archive SHA-256 `4f6a4fd0046b6147dc1725777594d5fe0ba1bef718b3ea595dbc92cbe6296f6a`.
+- **[S20]** Pinned Compose UI Text desktop1.9.3 source archive: https://repo.maven.apache.org/maven2/org/jetbrains/compose/ui/ui-text-desktop/1.9.3/ui-text-desktop-1.9.3-sources.jar ; inspected `commonMain/androidx/compose/ui/text/TextLayoutResult.kt:315–325`; archive SHA-256 `5150f7b34bc891255a25506abacb83db3ac1ed1c0005ebfc60349a480a32dee1`. Both archives are preserved under `.work/design-ui-diagnostics/`; source inspection is not a rendered test result.
