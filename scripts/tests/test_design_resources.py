@@ -41,6 +41,26 @@ def catalogue(*entries: str) -> str:
 VALID_CATALOGUE = catalogue(entry("Name", "Veyra", "ڤيرا"), entry("Count", "{0} items", "العناصر: {0}"))
 
 
+class ProductCopyTests(unittest.TestCase):
+    def test_podcast_historical_position_notices_distinguish_changed_and_unverified_recordings(self) -> None:
+        entries = AUDIT.parse_catalog((ROOT / AUDIT.DESIGN / "AppStrings.kt").read_text(encoding="utf-8"))
+        expected = {
+            "PodcastProgressRecordingChanged": (
+                "Saved position: {0}, from a previous recording. This recording will play from the beginning.",
+                "موضع الاستماع المحفوظ: {0}، من تسجيل سابق. سيبدأ تشغيل هذا التسجيل من البداية.",
+            ),
+            "PodcastProgressRecordingUnverified": (
+                "Saved position: {0}. Playback resumes there only if the selected recording matches.",
+                "موضع الاستماع المحفوظ: {0}. يُستأنف التشغيل من هذا الموضع فقط إذا تطابق التسجيل المختار مع التسجيل السابق.",
+            ),
+        }
+        for key, translations in expected.items():
+            with self.subTest(key=key):
+                self.assertEqual(translations, entries[key])
+                for translation in translations:
+                    self.assertEqual(["0"], AUDIT.PLACEHOLDER.findall(translation))
+
+
 class CatalogueParserTests(unittest.TestCase):
     def test_bilingual_placeholders_may_reorder_but_preserve_multiplicity(self) -> None:
         source = catalogue(entry("Track", "{0} by {1}; {0}", "{1} — {0}؛ {0}"))

@@ -3,16 +3,20 @@ package dev.veyra.ui.podcasts
 import dev.veyra.model.AppSnapshot
 import dev.veyra.model.DownloadRecord
 import dev.veyra.model.DownloadStatus
+import dev.veyra.model.FirstResultKind
 import dev.veyra.model.MediaItem
 import dev.veyra.model.MediaKind
 import dev.veyra.model.MediaProgress
 import dev.veyra.model.OfflineAsset
+import dev.veyra.model.PlaybackBinding
 import dev.veyra.model.PodcastShow
 import dev.veyra.model.QueueContext
 import dev.veyra.model.QueueEntry
 import dev.veyra.model.QueueSnapshot
 import dev.veyra.model.SourceProvider
 import dev.veyra.model.SourceRef
+import dev.veyra.source.podcast.PodcastFeed
+import dev.veyra.source.podcast.RssParser
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -58,16 +62,26 @@ class PodcastUiStateTest {
         assertTrue(row.played)
         assertFalse(row.inProgress)
         assertFalse(row.canResume)
-        assertEquals(90_000L, row.positionMs)
-        assertTrue(row.copy(progress = row.progress!!.copy(played = false)).canResume)
+        assertEquals(90_000L, row.historicalPositionMs)
+        assertEquals(0L, row.positionMs, "Unbound historical progress cannot promise the next recording's timeline")
+        val unplayed = row.copy(progress = row.progress!!.copy(played = false))
+        assertTrue(unplayed.inProgress)
+        assertFalse(unplayed.canResume)
         assertFalse(row.downloaded)
     }
 
     @Test
     fun durationEstimatesAndEndPositionDoNotConfirmCompletion() {
         val item = episode("duration-mismatch").copy(durationMs = 30_000L)
-        val progress = MediaProgress(positionMs = 45_000L, durationMs = 60_000L)
-        val row = PodcastEpisodeUiState(item, progress = progress)
+        val binding = PlaybackBinding("receipt", item.id, item.title, FirstResultKind.VIDEO,
+            "abcdefghijk", "Authored recording", selectedVideoId = "abcdefghijk")
+        val progress = MediaProgress(positionMs = 45_000L, durationMs = 60_000L, executionBindingId = binding.id)
+        val record = DownloadRecord("download", item.id, DownloadStatus.COMPLETE,
+            executionBindingId = binding.id, representationId = "representation",
+            asset = OfflineAsset("asset", item.id, "/owned/fixture.mp3", 1_024L,
+                executionBindingId = binding.id, representationId = "representation"))
+        val row = PodcastEpisodeUiState(item, progress = progress, download = record,
+            progressBinding = binding, downloadedBinding = binding)
         assertEquals(60_000L, row.progressDurationMs)
         assertEquals(30_000L, row.listingDurationMs)
         assertTrue(row.inProgress)
@@ -142,6 +156,49 @@ class PodcastUiStateTest {
         assertEquals(listOf(retained), PodcastShowUiState(show.id, snapshot).visibleEpisodes())
         assertTrue(snapshot.podcastEpisodeUiState(retained).noLongerInFeed)
         assertEquals(emptyList(), PodcastsUiState(snapshot.copy(followedShowIds = setOf(show.id))).newEpisodes())
+    }
+
+    @Test
+    fun parsedFeedMembershipControlsNewAndMissingLabelsWithoutRemovingListeningHistory() {
+        fun feed(vararg ids: String) = "<rss><channel><title>Authored feed</title>" + ids.joinToString("") {
+            "<item><guid>$it</guid><title>Complete authored episode $it</title><description>Retained notes $it</description></item>"
+        } + "</channel></rss>"
+        val first = RssParser.parse(feed("started", "archived", "current"), "https://example.org/authored.xml",
+            fetchedAtEpochMs = 1L)
+        val started = first.episodes.first { it.source.episodeGuid == "started" }
+        val archived = first.episodes.first { it.source.episodeGuid == "archived" }
+        val current = first.episodes.first { it.source.episodeGuid == "current" }
+        val history = MediaProgress(positionMs = 45_000L, durationMs = 180_000L)
+        val queue = QueueSnapshot(listOf(QueueEntry("listening-history", started.id)), "listening-history")
+        val savedDownload = DownloadRecord("retained-download", started.id, DownloadStatus.PAUSED)
+        val original = AppSnapshot(media = first.episodes.associateBy { it.id }, shows = mapOf(first.show.id to first.show),
+            followedShowIds = setOf(first.show.id), savedEpisodeIds = setOf(started.id, archived.id),
+            progress = mapOf(started.id to history), queues = mapOf(QueueContext.PODCAST to queue),
+            downloads = mapOf(savedDownload.id to savedDownload))
+        fun projected(parsed: PodcastFeed) = original.copy(media = original.media + parsed.episodes.associateBy { it.id },
+            shows = mapOf(parsed.show.id to parsed.show))
+
+        val shorter = RssParser.parse(feed("current"), first.show.feedUrl, first.show, first.episodes, 2L)
+        val empty = RssParser.parse(feed(), first.show.feedUrl, shorter.show, shorter.episodes, 3L)
+        val reintroduced = RssParser.parse(feed("archived"), first.show.feedUrl, empty.show, empty.episodes, 4L)
+        listOf(shorter, empty, reintroduced).forEach { parsed ->
+            val snapshot = projected(parsed)
+            assertEquals(first.episodes.map { it.id }.toSet(), PodcastShowUiState(first.show.id, snapshot).visibleEpisodes().map { it.id }.toSet())
+            assertEquals(listOf(started), PodcastsUiState(snapshot).continueEpisodes())
+            assertTrue(snapshot.podcastEpisodeUiState(started).noLongerInFeed)
+            assertTrue(snapshot.podcastEpisodeUiState(started).saved)
+            assertTrue(snapshot.podcastEpisodeUiState(started).queued)
+            assertEquals(history, snapshot.progress[started.id])
+            assertEquals(queue, snapshot.queue(QueueContext.PODCAST))
+            assertEquals(savedDownload, snapshot.downloads[savedDownload.id])
+            assertEquals(setOf(first.show.id), snapshot.followedShowIds)
+            assertEquals(archived.description, snapshot.media.getValue(archived.id).description)
+        }
+        assertEquals(listOf(current.id), PodcastsUiState(projected(shorter)).newEpisodes().map { it.id })
+        assertTrue(projected(shorter).podcastEpisodeUiState(archived).noLongerInFeed)
+        assertTrue(PodcastsUiState(projected(empty)).newEpisodes().isEmpty())
+        assertEquals(listOf(archived.id), PodcastsUiState(projected(reintroduced)).newEpisodes().map { it.id })
+        assertFalse(projected(reintroduced).podcastEpisodeUiState(archived).noLongerInFeed)
     }
 
     @Test

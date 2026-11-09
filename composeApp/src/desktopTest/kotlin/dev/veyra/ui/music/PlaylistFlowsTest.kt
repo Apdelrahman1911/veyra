@@ -51,7 +51,7 @@ class PlaylistFlowsTest {
         ui.onNodeWithTag("playlist-save").assertIsNotEnabled()
         ui.onNodeWithTag("playlist-name").performTextReplacement("  ليلة هادئة  ")
         ui.onNodeWithTag("playlist-save").performClick()
-        assertEquals(listOf(MusicUiAction.CreatePlaylist("ليلة هادئة")), actions)
+        assertEquals(listOf<MusicUiAction>(MusicUiAction.CreatePlaylist("ليلة هادئة")), actions)
     }
 
     @Test fun addingAnExistingTrackRequiresAnExplicitDuplicateDecision() {
@@ -64,7 +64,7 @@ class PlaylistFlowsTest {
         ui.onNodeWithText(strings.text(TextKey.DuplicateTrack)).assertIsDisplayed()
         assertTrue(actions.isEmpty())
         ui.onNodeWithTag("confirm-action").performClick()
-        assertEquals(listOf(MusicUiAction.AddToPlaylist(playlist.id, track, allowDuplicate = true)), actions)
+        assertEquals(listOf<MusicUiAction>(MusicUiAction.AddToPlaylist(playlist.id, track, allowDuplicate = true)), actions)
     }
 
     @Test fun removingAPlaylistOccurrenceDoesNotRemoveItsDuplicateOrAudioFile() {
@@ -73,7 +73,7 @@ class PlaylistFlowsTest {
         ui.setContent { VeyraTheme(false, LanguagePreference.ENGLISH) { PlaylistDetailScreen(snapshot, playlist.id, { actions += it }, Modifier.size(900.dp, 680.dp)) } }
         ui.onNodeWithTag("playlist-detail").performScrollToNode(hasTestTag("playlist-entry-copy-b"))
         ui.onNode(hasContentDescription(strings.text(TextKey.RemoveFromPlaylist)) and hasAnyAncestor(hasTestTag("playlist-entry-copy-b"))).performClick()
-        assertEquals(listOf(MusicUiAction.RemovePlaylistEntry(playlist.id, "copy-b")), actions)
+        assertEquals(listOf<MusicUiAction>(MusicUiAction.RemovePlaylistEntry(playlist.id, "copy-b")), actions)
         assertEquals(2, snapshot.playlists.single().entries.size)
     }
 
@@ -97,7 +97,7 @@ class PlaylistFlowsTest {
         ui.onNodeWithText(strings.format(TextKey.ConfirmDeletePlaylist, playlist.name)).assertIsDisplayed()
         assertTrue(actions.isEmpty())
         ui.onNodeWithTag("confirm-action").performClick()
-        assertEquals(listOf(MusicUiAction.DeletePlaylist(playlist.id)), actions)
+        assertEquals(listOf<MusicUiAction>(MusicUiAction.DeletePlaylist(playlist.id)), actions)
     }
 
     @Test fun pointerUsersCanRunAnExplicitSearchWithoutAnImeOrKeyboardShortcut() {

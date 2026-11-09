@@ -2,6 +2,7 @@
 
 package dev.veyra.platform.audio
 
+import android.app.ForegroundServiceStartNotAllowedException
 import android.content.Context
 import android.media.AudioFocusRequest
 import android.media.AudioManager
@@ -11,6 +12,7 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.veyra.app.MainActivity
+import dev.veyra.model.FailureCode
 import dev.veyra.model.MediaItem
 import dev.veyra.model.MediaKind
 import dev.veyra.model.SourceProvider
@@ -22,6 +24,8 @@ import dev.veyra.playback.EnginePhase
 import dev.veyra.playback.InterruptionKind
 import dev.veyra.playback.PlaybackResource
 import dev.veyra.playback.ResolvedPlayable
+import dev.veyra.platform.background.PlaybackForegroundFailureGuard
+import dev.veyra.platform.background.playbackForegroundFailure
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.ByteBuffer
@@ -273,6 +277,110 @@ class AndroidAudioEngineTest {
             }
             delay(100)
             assertFalse(onMain { engine.nativeDecksPlaying.any { it } })
+        }
+    }
+
+    @Test fun injectedForegroundStartRejectionIsTypedAndDoesNotFalselyReleaseTheNativeSource() {
+        lateinit var guard: PlaybackForegroundFailureGuard
+        var foregroundRequests = 0
+        nativeTest(beforePlay = {
+            // A later request would succeed, as a newly created service could. The failed native
+            // generation must not reach that allowance, even after an already-queued Pause.
+            foregroundRequests++
+            if (foregroundRequests == 1) withContext(Dispatchers.Main.immediate) {
+                guard.requireForeground { throw SecurityException("authored-private-notification-detail") }
+            }
+        }) {
+            val resource = BlockingResource()
+            var serviceStops = 0
+            guard = PlaybackForegroundFailureGuard({}, { true }, engine::foregroundServiceLost, {}, { serviceStops++ })
+            try {
+                engine.prepare(source("rejected-start").copy(resource = resource), 0, 95)
+                await { it is EngineEvent.Ready && it.generation == 95L }
+                try { engine.play(95); fail("Foreground rejection was acknowledged as successful Play") }
+                catch (failure: VeyraException) {
+                    assertEquals(FailureCode.BACKGROUND_RESTRICTED, failure.failure.code)
+                    assertEquals(playbackForegroundFailure(), failure.failure)
+                    assertNull(failure.cause)
+                }
+                val failure = await { it is EngineEvent.Error && it.generation == 95L } as EngineEvent.Error
+                assertEquals(playbackForegroundFailure(), failure.failure)
+                assertEquals(1, serviceStops)
+                assertFalse(onMain { engine.nativeDecksPlaying.any { it } })
+                assertEquals("Retirement does not pretend the native source was cleared", 1,
+                    onMain { engine.nativePlayer.mediaItemCount })
+                assertFalse("Retirement must not acknowledge resource release", resource.entered.isCompleted)
+                assertFalse(observed.any { it is EngineEvent.StateChanged && it.generation == 95L && it.phase == EnginePhase.IDLE })
+                engine.play(95) // An already-queued Play cannot retry a retired foreground owner.
+                assertEquals(1, serviceStops)
+                engine.pause(95)
+                engine.play(95)
+                assertEquals("A queued Pause incorrectly cleared the terminal policy failure", 1, foregroundRequests)
+                assertFalse(onMain { engine.nativeDecksPlaying.any { it } })
+                assertFalse(resource.entered.isCompleted)
+                coroutineScope {
+                    val stopping = async { engine.stop(96) }
+                    try {
+                        withTimeout(2_000) { resource.entered.await() }
+                        assertFalse(stopping.isCompleted)
+                        assertEquals(0, resource.closed.get())
+                        assertFalse(onMain { engine.nativeDecksPlaying.any { it } })
+                    } finally { resource.finish.complete(Unit) }
+                    withTimeout(15_000) { stopping.await() }
+                }
+                assertEquals(1, resource.closed.get())
+            } finally { resource.finish.complete(Unit) }
+        }
+    }
+
+    @Test fun injectedNotificationRejectionSurvivesConfirmedHandover() = notificationRejectionDuringHandover(confirm = true)
+
+    @Test fun injectedNotificationRejectionSurvivesCancelledHandover() = notificationRejectionDuringHandover(confirm = false)
+
+    private fun notificationRejectionDuringHandover(confirm: Boolean) {
+        var foregroundRequests = 0
+        nativeTest(beforePlay = { foregroundRequests++ }) {
+            val outgoing = CountingResource()
+            val incoming = CountingResource()
+            engine.prepare(source("policy-outgoing").copy(resource = outgoing), 0, 100)
+            await { it is EngineEvent.Ready && it.generation == 100L }
+            engine.play(100)
+            await { it is EngineEvent.Position && it.generation == 100L && it.positionMs >= 250 }
+            engine.preloadNext(source("policy-incoming").copy(resource = incoming), 0, 101, 100)
+            await { it is EngineEvent.StageReady && it.nextGeneration == 101L }
+            engine.beginCrossfade(500, 101, 100)
+            await { it is EngineEvent.CrossfadeCompleted && it.nextGeneration == 101L }
+            val guard = PlaybackForegroundFailureGuard({}, { true }, engine::foregroundServiceLost, {}, {})
+            onMain {
+                // Concrete policy exception, injected into the same boundary used by real refreshes.
+                // This is native deck/error propagation evidence only after execution, not OS denial.
+                val rejection = if (Build.VERSION.SDK_INT >= 31)
+                    ForegroundServiceStartNotAllowedException("authored-private-notification-detail")
+                else SecurityException("authored-private-notification-detail")
+                assertFalse(guard.attempt { throw rejection })
+                assertFalse(engine.nativeDecksPlaying.any { it })
+            }
+            delay(100)
+            assertEquals(0, outgoing.closed.get())
+            assertEquals(0, incoming.closed.get())
+            assertFalse("The failure cannot guess which side of an unacknowledged handover won",
+                observed.any { it is EngineEvent.Error && it.generation in 100L..101L })
+            if (confirm) engine.confirmCrossfade(101, 100) else engine.cancelNext(101, 100)
+            val selected = if (confirm) 101L else 100L
+            val failure = await { it is EngineEvent.Error && it.generation == selected } as EngineEvent.Error
+            assertEquals(playbackForegroundFailure(), failure.failure)
+            assertEquals("The selected native source remains owned until real Stop drains it", 0,
+                (if (confirm) incoming else outgoing).closed.get())
+            assertEquals(1, onMain { engine.nativePlayer.mediaItemCount })
+            engine.play(selected)
+            engine.pause(selected)
+            engine.play(selected)
+            assertEquals("Selected-generation Pause must retain the terminal service-failure hold", 1, foregroundRequests)
+            assertFalse(onMain { engine.nativeDecksPlaying.any { it } })
+            assertFalse(observed.any { it is EngineEvent.StateChanged && it.generation == selected && it.phase == EnginePhase.IDLE })
+            engine.stop(102)
+            assertEquals(1, outgoing.closed.get())
+            assertEquals(1, incoming.closed.get())
         }
     }
 

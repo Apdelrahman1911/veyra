@@ -221,7 +221,7 @@ class DownloadMaintenanceRoomTest {
         gateway.assertUnused()
     }
 
-    @Test fun backgroundPauseCancelsValidationChildWithoutKillingRecoveryScheduler() = downloadCase {
+    @Test fun cancelOnlyExpirationAllowsExplicitForegroundResumeWithoutKillingRecoveryScheduler() = downloadCase {
         val first = store()
         val seeded = seedFinalization(first)
         val entered = CompletableDeferred<Unit>()
@@ -240,17 +240,18 @@ class DownloadMaintenanceRoomTest {
         val a = coordinator(first, gateway, native, gate)
         a.start(); entered.await()
         coroutineScope {
-            val pausing = async { a.pauseForBackground() }
-            unwinding.entered.await()
-            val checkpoint = first.flush().getOrThrow()
-            assertEquals(DownloadStatus.NEEDS_FOREGROUND, checkpoint.downloads[seeded.record.id]?.status)
-            assertEquals(seeded.intent, checkpoint.downloadFinalizations[seeded.record.id])
-            assertFalse(pausing.isCompleted)
-            assertEquals(0, gate.closes.get())
-            a.resumePending()
             val oldExpiration: suspend () -> Unit = gate.callbacks[0]
-            oldExpiration()
-            unwinding.release(); pausing.await()
+            val expiration = async { oldExpiration() }
+            try {
+                unwinding.entered.await()
+                expiration.await() // Callback completion is NOT the independent native/Room owner drain.
+                val checkpoint = first.flush().getOrThrow()
+                assertEquals(DownloadStatus.NEEDS_FOREGROUND, checkpoint.downloads[seeded.record.id]?.status)
+                assertEquals(seeded.intent, checkpoint.downloadFinalizations[seeded.record.id])
+                assertEquals(0, gate.closes.get())
+                a.resumePending()
+                oldExpiration()
+            } finally { unwinding.release() }
         }
         eventually(first) { it.downloads[seeded.record.id]?.status == DownloadStatus.COMPLETE }
         assertEquals(2, nativeCalls.get())

@@ -6,7 +6,6 @@ import androidx.room.RoomDatabase
 import androidx.room.RoomDatabaseConstructor
 import androidx.room.migration.Migration
 import androidx.sqlite.SQLiteConnection
-import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import androidx.sqlite.execSQL
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -43,6 +42,68 @@ import kotlinx.coroutines.Dispatchers
         NavigationEntity::class,
         StoreMetaEntity::class,
         SettingsEntity::class,
+        AcquisitionRequestEntity::class,
+        RequestMediaMetadataEntity::class,
+        RequestMediaArtistEntity::class,
+        RequestAlbumMetadataEntity::class,
+        RequestAlbumArtistEntity::class,
+        RequestAlbumMemberEntity::class,
+        RequestAlbumMemberArtistEntity::class,
+        RequestShowMetadataEntity::class,
+        RequestShowAliasEntity::class,
+        RequestShowMemberEntity::class,
+        RequestSourceCollectionMetadataEntity::class,
+        ReleaseObservationEntity::class,
+        ReleaseObservationGroupEntity::class,
+        ReleaseGroupSecondaryTypeEntity::class,
+        ReleaseArtistCreditEntity::class,
+        ReleaseEventEntity::class,
+        ReleaseEventCountryEntity::class,
+        ReleaseLabelEntity::class,
+        ReleaseMediumEntity::class,
+        ReleaseTrackEntity::class,
+        ReleaseTrackArtistCreditEntity::class,
+        ReleaseSummaryProblemEntity::class,
+        ReleaseCoreProblemEntity::class,
+        ReleaseMediumProblemEntity::class,
+        ReleaseTrackProblemEntity::class,
+        RequestReleaseMetadataEntity::class,
+        RequestMediaReleaseOccurrenceEntity::class,
+        ReleaseCatalogEntryEntity::class,
+        SavedReleaseEntity::class,
+        FirstResultReceiptEntity::class,
+        SourceRecordingEntity::class,
+        ExecutableSubjectEntity::class,
+        ExecutionBindingEntity::class,
+        AcquisitionOutcomeEntity::class,
+        AcquisitionJobEntity::class,
+        CollectionRunEntity::class,
+        CollectionObservationEntity::class,
+        CollectionIdentityEvidenceEntity::class,
+        CollectionPageCommitEntity::class,
+        CollectionPageFailureEntity::class,
+        CollectionMemberEntity::class,
+        CollectionSnapshotEntity::class,
+        CollectionSnapshotMemberEntity::class,
+        RequestCollectionMemberMetadataEntity::class,
+        AdmissionScopeEntity::class,
+        AdmissionScopeMemberEntity::class,
+        ExecutionOccurrenceEntity::class,
+        ExecutionQueueRevisionEntity::class,
+        ExecutionQueueMemberEntity::class,
+        ExecutionQueueHeadEntity::class,
+        OccurrenceCheckpointEntity::class,
+        SourceRecordingResumeEntity::class,
+        CatalogProgressEntity::class,
+        ListeningHistoryEntity::class,
+        FavoriteSubjectEntity::class,
+        PlaylistMemberEntity::class,
+        DownloadBatchEntity::class,
+        DownloadBatchMemberEntity::class,
+        DownloadClaimEntity::class,
+        PhysicalDownloadAdoptionEntity::class,
+        MaterializationReceiptEntity::class,
+        AssetUseEntity::class,
     ],
     version = VeyraDatabase.VERSION,
     exportSchema = true,
@@ -50,8 +111,9 @@ import kotlinx.coroutines.Dispatchers
 @ConstructedBy(VeyraDatabaseConstructor::class)
 abstract class VeyraDatabase : RoomDatabase() {
     abstract fun libraryDao(): LibraryDao
+    abstract fun acquisitionDao(): AcquisitionDao
 
-    companion object { const val VERSION = 2 }
+    companion object { const val VERSION = 3 }
 }
 
 @Suppress("KotlinNoActualForExpect")
@@ -73,9 +135,9 @@ fun buildVeyraDatabase(
     builder: RoomDatabase.Builder<VeyraDatabase>,
     dispatcher: CoroutineDispatcher = Dispatchers.IO,
 ): VeyraDatabase = builder
-    .setDriver(BundledSQLiteDriver())
+    .setDriver(VeyraSQLiteDriver())
     .setQueryCoroutineContext(dispatcher)
     .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
-    .addMigrations(MIGRATION_1_2)
+    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
     // No destructive fallback: corruption, incompatible schema, and missing migrations are surfaced.
     .build()

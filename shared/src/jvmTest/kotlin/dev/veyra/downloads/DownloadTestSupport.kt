@@ -17,6 +17,7 @@ import dev.veyra.source.execution.KmpMediaGateway
 import dev.veyra.source.youtube.YouTubeTransferProgress
 import dev.veyra.source.youtube.YouTubeTransferResult
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.StateFlow
 import okio.FileSystem
 import java.nio.file.Files
 import java.nio.file.Path
@@ -157,10 +158,12 @@ internal class DownloadFixture(fileSystem: FileSystem = FileSystem.SYSTEM) {
     fun coordinator(store: LibraryStore, gateway: DownloadTestGateway = DownloadTestGateway(),
         validator: AssetValidator = this.validator, gate: DownloadExecutionGate = ProcessLifetimeDownloadGate,
         files: DownloadFiles = this.files, beforeDelete: suspend (OfflineAsset) -> Unit = {},
-        capabilities: EngineCapabilities = EngineCapabilities(), heartbeatMs: Long = 80): DownloadCoordinator =
-        DownloadCoordinator(store, files, AppSourceResolver(store, files, validator, gateway, clock), gateway,
-            validator, capabilities, parent, gate, clock, pollingMs = 40, leaseDurationMs = 1_000,
-            heartbeatMs = heartbeatMs, beforePhysicalDelete = beforeDelete).also { coordinators += it }
+        capabilities: EngineCapabilities = EngineCapabilities(), heartbeatMs: Long = 80,
+        network: StateFlow<DownloadNetworkState> = alwaysConnectedDownloadNetwork,
+        schedulerClock: Clock = clock): DownloadCoordinator =
+        DownloadCoordinator(store, files, AppSourceResolver(store, files, validator, gateway, schedulerClock), gateway,
+            validator, capabilities, parent, gate, schedulerClock, pollingMs = 40, leaseDurationMs = 1_000,
+            heartbeatMs = heartbeatMs, beforePhysicalDelete = beforeDelete, networkState = network).also { coordinators += it }
 
     fun item(id: String = "item-1") = MediaItem(id, "Complete requested title $id — العنوان الكامل", MediaKind.MUSIC,
         SourceRef(SourceProvider.COMMONS, "original-$id", canonicalUrl = "https://commons.wikimedia.org/wiki/File:$id"),

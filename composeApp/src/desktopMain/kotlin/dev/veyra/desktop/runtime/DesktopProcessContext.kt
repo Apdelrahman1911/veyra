@@ -5,10 +5,12 @@ import java.nio.channels.FileLock
 import java.nio.channels.OverlappingFileLockException
 import java.nio.file.Files
 import java.nio.file.LinkOption.NOFOLLOW_LINKS
+import java.nio.file.NoSuchFileException
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption.CREATE
 import java.nio.file.StandardOpenOption.WRITE
 import java.nio.file.attribute.PosixFilePermissions
+import java.nio.file.attribute.BasicFileAttributes
 import java.util.Locale
 
 /** Own this before opening Room, starting transfers, or creating any audio/session object. */
@@ -96,7 +98,14 @@ class DesktopProcessContext private constructor(
         internal fun rejectSymbolicAncestors(path: Path) {
             var current: Path? = path.toAbsolutePath().normalize()
             while (current != null) {
-                require(!Files.isSymbolicLink(current)) { "Veyra private paths must not contain symbolic links" }
+                val attributes = try { Files.readAttributes(current, BasicFileAttributes::class.java, NOFOLLOW_LINKS) }
+                catch (_: NoSuchFileException) { null }
+                // Windows junctions are reparse points, not Java symbolic links. OpenJDK's
+                // NOFOLLOW attributes identify them as isOther even when isDirectory is true.
+                // Unlike Files.isSymbolicLink(), attribute reads do not turn access/provider
+                // errors into a false 'safe' answer. Only a genuinely absent path is allowed.
+                require(attributes == null || (!attributes.isSymbolicLink && !attributes.isOther &&
+                    (attributes.isDirectory || attributes.isRegularFile))) { "Veyra private paths must not contain links or special entries" }
                 current = current.parent
             }
         }

@@ -1,5 +1,7 @@
 package dev.veyra.downloads
 
+import dev.veyra.acquisition.AcquisitionDownloadExecutor
+import dev.veyra.data.LibraryAcquisitionView
 import dev.veyra.data.LibraryStore
 import dev.veyra.data.getOrThrow
 import dev.veyra.model.*
@@ -7,6 +9,7 @@ import dev.veyra.playback.AssetValidation
 import dev.veyra.playback.AssetValidator
 import dev.veyra.playback.Clock
 import dev.veyra.playback.EngineCapabilities
+import dev.veyra.playback.LocalMediaValidationReaderUnacknowledged
 import dev.veyra.playback.PlaybackResource
 import dev.veyra.playback.SystemClock
 import dev.veyra.source.ResolvePurpose
@@ -17,6 +20,9 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+
+private typealias MaintenanceKind = DownloadMaintenanceKind
+private typealias CleanupOwner = DownloadCleanupOwner
 
 /**
  * Room owns durable intent; kmpYT alone acquires media. Expiring a database lease does NOT prove
@@ -38,11 +44,15 @@ class DownloadCoordinator(
     private val heartbeatMs: Long = minOf(pollingMs, 20_000),
     /** Root must await actual native file release, not just an accepted/queued Stop command. */
     private val beforePhysicalDelete: suspend (OfflineAsset) -> Unit = {},
-) {
+    private val networkState: StateFlow<DownloadNetworkState> = alwaysConnectedDownloadNetwork,
+    /** Production schema3 MUST inject the same-owner ports; null is legacy schema2/test compatibility only. */
+    acquisitionDependencies: DownloadAcquisitionDependencies? = null,
+) : DownloadScheduling {
     private val scope = CoroutineScope(parentScope.coroutineContext + SupervisorJob(parentScope.coroutineContext[Job]) + Dispatchers.IO)
     // Public item actions enter this mutex BEFORE their first possible suspension. The app's
     // undispatched intent admission relies on that order; slow join/native/file work stays outside.
     private val commands = Mutex()
+    private val closeLock = Mutex()
     private val activeLock = Mutex()
     private val maintenanceLock = Mutex()
     private val active = mutableMapOf<String, Job>()
@@ -50,33 +60,123 @@ class DownloadCoordinator(
     private val wake = Channel<Unit>(Channel.CONFLATED)
     private val maintenanceWake = Channel<Unit>(Channel.CONFLATED)
     private val lifecycle = MutableStateFlow(Lifecycle())
+    // A coroutine finishing is NOT a receipt that a throwing native close consumed its owner.
+    // These records remain strongly owned after their jobs terminate, including during close().
+    private val cleanupRegistry = DownloadCleanupRegistry { noteActivity() }
+    private val cleanupOwners = cleanupRegistry.owners
+    private val cleanupFailure = MutableStateFlow<AppFailure?>(null)
+    private val dependencyReleaseSafe = MutableStateFlow(false)
+    // Only closeLock accesses this first sanitized close outcome.
+    private var closeFailure: AppFailure? = null
     private val owner = newEntityId("download-owner")
+    private val activityEpoch = MutableStateFlow(0L)
+    private val mutableSchedulingChanges = MutableStateFlow(0L)
+    override val schedulingChanges: StateFlow<Long> = mutableSchedulingChanges.asStateFlow()
+    private val claimDeferrals = MutableStateFlow<Map<DownloadClaimKey, DownloadClaimDeferral>>(emptyMap())
+    // These three values are accessed only with commands + activeLock held, in that order.
+    private var schedulingRevision = 0L
+    private var previousSchedulingInputs: SchedulingInputs? = null
+    private var issuedIdle: IssuedIdle? = null
     private data class CheckedAsset(val asset: OfflineAsset, val binding: PlaybackBinding)
     private val checkedAssets = MutableStateFlow<Map<String, CheckedAsset>>(emptyMap())
     private var scheduler: Job? = null
     private var reconciler: Job? = null
     private var startup: CompletableDeferred<Unit>? = null
     private var policyObserver: Job? = null
+    private var networkObserver: Job? = null
     private var lastSweepMs: Long? = null
     private data class Lifecycle(val started: Boolean = false, val suspended: Boolean = false, val closed: Boolean = false,
-        val generation: Long = 0)
+        val generation: Long = 0, val checksActivated: Boolean = false, val drainsInFlight: Int = 0,
+        val drainFailure: AppFailure? = null)
+    private data class RequestedItem(val title: String, val kind: MediaKind, val source: SourceRef)
+    private data class SchedulingInputs(
+        val records: Map<String, DownloadRecord>,
+        val finalizations: Map<String, DownloadFinalization>,
+        val requests: Map<String, RequestedItem?>,
+        val bindings: Map<String, PlaybackBinding?>,
+        val attemptPaths: Map<String, Set<String>>,
+        val offlineOnly: Boolean,
+        val parallelism: Int,
+        val life: Lifecycle,
+        val network: DownloadNetworkState,
+        val checkedIds: Set<String>,
+        val deferrals: Map<DownloadClaimKey, DownloadClaimDeferral>,
+        val physical: DownloadPhysicalSchedulingInputs? = null,
+        val physicalHost: DownloadPhysicalHostState? = null,
+        val batchWork: DownloadBatchWorkSchedulingInputs? = null,
+    )
+    private data class BuiltPlan(val plan: DownloadWakePlan, val inputs: SchedulingInputs)
+    private data class IssuedIdle(val ticket: DownloadIdleTicket, val generation: Long, val activityEpoch: Long,
+        val inputs: SchedulingInputs)
     private data class ExecutionClaim(val record: DownloadRecord, val item: MediaItem, val attempt: DownloadAttempt,
         val generationLease: DownloadFileLease, val slot: DownloadTransferSlot, val lifecycleGeneration: Long,
-        val allowanceCallbacksOpen: MutableStateFlow<Boolean> = MutableStateFlow(true))
-    private enum class MaintenanceKind { CLEANUP, FINALIZATION, CHECK_ASSET }
+        val allowanceCallbacksOpen: MutableStateFlow<Boolean> = MutableStateFlow(true),
+        val validationReaders: DownloadValidationReaderRetention = DownloadValidationReaderRetention())
     private data class MaintenanceClaim(val record: DownloadRecord, val intent: DownloadFinalization?,
         val leaseOwner: String, val kind: MaintenanceKind, val stagingPaths: Set<String>, val finalPaths: Set<String>,
-        val fileLease: DownloadFileLease, val lifecycleGeneration: Long)
+        val fileLease: DownloadFileLease, val lifecycleGeneration: Long,
+        val validationReaders: DownloadValidationReaderRetention = DownloadValidationReaderRetention())
     private data class MaintenanceRun(val token: String, val lifecycleGeneration: Long,
         val claim: MaintenanceClaim? = null, val orphanLease: DownloadFileLease? = null,
         val allowanceCallbacksOpen: MutableStateFlow<Boolean> = MutableStateFlow(true),
         val actionFinished: MutableStateFlow<Boolean> = MutableStateFlow(false))
     private data class TrackedMaintenance(val run: MaintenanceRun, val job: Job)
+    private class ExecutionCleanup(val claim: ExecutionClaim, val resource: PlaybackResource?,
+        val allowance: DownloadExecutionLease?, val publicationLease: DownloadFileLease?,
+        val failure: AppFailure?, val cancelled: Boolean, val finalization: DownloadFinalization?,
+        val partialLeases: List<DownloadLeaseCleanup>) :
+        CleanupOwner("execution:${claim.attempt.id}")
+    private class MaintenanceCleanup(val run: MaintenanceRun, val allowance: DownloadExecutionLease?,
+        val admissionFailed: Boolean) : CleanupOwner("maintenance:${run.token}")
+    private class RollbackCleanup(val leases: DownloadLeaseCleanup,
+        val executionClaim: ExecutionClaim? = null, val maintenanceClaim: MaintenanceClaim? = null,
+        val failure: AppFailure? = null, val cancelled: Boolean = false) :
+        CleanupOwner(newEntityId("download-claim-rollback"))
+
+    // This is the schema3 body of THIS coordinator: same mutexes, jobs, slots, scope and registry.
+    // In particular it is not another lifetime, scheduler, native player or source-selection queue.
+    private val physicalRuntime: DownloadPhysicalRuntime? = acquisitionDependencies?.let { dependencies ->
+        DownloadPhysicalRuntime(store, dependencies, files, gateway, capabilities, executionGate, clock,
+            leaseDurationMs, heartbeatMs, DownloadPhysicalHost(
+                commands = commands, activeLock = activeLock, active = active, cleanupRegistry = cleanupRegistry,
+                state = { physicalHostState() }, acquisitionView = store::acquisitionView,
+                changed = ::noteActivity, signalWork = ::signalWork, publishFailure = { publishFailure(it) },
+                publishCleanupFailure = ::publishCleanupFailure, failCheckpointAdmission = ::failPhysicalCheckpointAdmission,
+                allowanceExpired = ::physicalAllowanceExpired,
+            ))
+    }
+    private val batchWorkRuntime: DownloadBatchWorkRuntime? = acquisitionDependencies?.let { dependencies ->
+        DownloadBatchWorkRuntime(dependencies, requireNotNull(physicalRuntime), files, executionGate, clock, ::batchAllowanceExpired)
+    }
+    private val checkedMaterializations: StateFlow<DownloadMaterializationChecks> =
+        physicalRuntime?.checkedMaterializations ?: MutableStateFlow(DownloadMaterializationChecks.Empty).asStateFlow()
+
+    /** The exact issuer consumed by AcquisitionDownloadAdapter, not a wrapping replacement owner. */
+    val acquisitionExecutor: AcquisitionDownloadExecutor get() = requirePhysicalRuntime()
+
+    /** Includes in-progress and failed cleanup; a zero native lease count cannot clear it. */
+    val hasPendingCleanupOwners: Boolean get() = cleanupOwners.value.isNotEmpty()
+
+    /**
+     * Monotonic post-close receipt: every scheduler/registered job joined, every native/file
+     * owner consumed, Room cleanup calls returned, and this coordinator's scope joined. Empty
+     * cleanup records ALONE are not proof. Existing reported/caught Room finalizer exceptions
+     * are not upgraded to durable-CAS success by this dependency-lifetime receipt.
+     * A prior sanitized close failure may still be thrown when this becomes true. Hosts retain
+     * their dependency graph while false; they must not infer safety from close throwing/returning.
+     */
+    val dependencyReleaseSafeAfterClose: Boolean get() = dependencyReleaseSafe.value
 
     init { require(pollingMs > 0 && leaseDurationMs in 1_000..600_000 && heartbeatMs in 1 until leaseDurationMs) }
 
     /** One coherent snapshot: never merge a newer Room revision with an older download map. */
-    val presentation: StateFlow<AppSnapshot> = combine(store.state, checkedAssets, lifecycle) { snapshot, checked, life ->
+    val presentation: StateFlow<AppSnapshot> = if (physicalRuntime != null) {
+        combine(store.acquisitionViews, checkedMaterializations, lifecycle) { view, checked, life ->
+            projectLegacyPhysicalDownloads(view, checked, physicalHostState(view.snapshot, life))
+        }.stateIn(scope, SharingStarted.Eagerly, store.acquisitionViews.value.let { view ->
+            projectLegacyPhysicalDownloads(view, DownloadMaterializationChecks.Empty, physicalHostState(view.snapshot))
+        })
+    } else combine(store.state, checkedAssets, lifecycle) { snapshot, checked, life ->
         snapshot.copy(downloads = projectStates(snapshot, checked, life))
     }.stateIn(scope, SharingStarted.Eagerly, store.state.value.let {
         it.copy(downloads = projectStates(it, emptyMap(), lifecycle.value))
@@ -84,7 +184,32 @@ class DownloadCoordinator(
     /** Session-only projection: Room's completion receipt is not a new process's integrity check. */
     val states: StateFlow<Map<String, DownloadRecord>> = presentation.map { it.downloads }
         .stateIn(scope, SharingStarted.Eagerly, presentation.value.downloads)
-    val hasPendingWork: StateFlow<Boolean> = combine(store.state, lifecycle, checkedAssets) { snapshot, life, checked ->
+    /** Paired canonical Room view/checking state: UI must not combine independently delayed maps. */
+    val acquisitionPresentation: StateFlow<DownloadAcquisitionPresentation> = if (physicalRuntime != null) {
+        combine(store.acquisitionViews, checkedMaterializations, lifecycle) { view, checked, life ->
+            projectAcquisitionDownloadPresentation(view, checked, physicalHostState(view.snapshot, life))
+        }.stateIn(scope, SharingStarted.Eagerly, store.acquisitionViews.value.let { view ->
+            projectAcquisitionDownloadPresentation(view, DownloadMaterializationChecks.Empty, physicalHostState(view.snapshot))
+        })
+    } else store.acquisitionViews.map { DownloadAcquisitionPresentation(it, emptyMap()) }
+        .stateIn(scope, SharingStarted.Eagerly, DownloadAcquisitionPresentation(store.acquisitionViews.value, emptyMap()))
+
+    /** Canonical neutral/catalogue jobs; never manufacture a legacy MediaItem or OfflineAsset. */
+    val physicalStates: StateFlow<Map<String, PhysicalDownloadJob>> = acquisitionPresentation.map { it.states }
+        .stateIn(scope, SharingStarted.Eagerly, acquisitionPresentation.value.states)
+
+    val hasPendingWork: StateFlow<Boolean> = if (physicalRuntime != null) {
+        combine(store.acquisitionViews, lifecycle, checkedMaterializations) { view, life, checked ->
+            val inputs = DownloadPhysicalSchedulingInputs(view.acquisition.physicalSchedulingRecords(),
+                checkedPhysicalDownloadIds(view.acquisition, checked), emptyMap())
+            val host = physicalHostState(view.snapshot, life)
+            val now = clock.epochMs()
+            val plan = withPendingDownloadBatchWork(projectPhysicalDownloadWakePlan(inputs, host,
+                now, DownloadSchedulingKey(owner, 0)), requireNotNull(batchWorkRuntime).schedulingInputs(view.acquisition), host, now)
+            life.started && !life.closed && !life.suspended &&
+                (plan.nextLocalEpochMs != null || plan.nextNetworkEpochMs != null)
+        }.stateIn(scope, SharingStarted.Eagerly, false)
+    } else combine(store.state, lifecycle, checkedAssets) { snapshot, life, checked ->
         life.started && !life.closed && !life.suspended && snapshot.downloads.values.any {
             it.cleanupPending || !it.userPaused && it.id in snapshot.downloadFinalizations ||
                 it.status == DownloadStatus.COMPLETE && !assetChecked(snapshot, it, checked) ||
@@ -94,24 +219,159 @@ class DownloadCoordinator(
     private val mutableFailure = MutableStateFlow<AppFailure?>(null)
     val lastFailure: StateFlow<AppFailure?> = mutableFailure.asStateFlow()
 
+    /** Headless scheduling bootstrap: Room only, no files, hashes, source calls or native allowance. */
+    suspend fun initializeScheduling() = commands.withLock {
+        requireOpen()
+        store.initialize().getOrThrow()
+        Unit
+    }
+
+    /** Durable batch changes invalidate idle and wake the existing workers; NEVER activate work. */
+    fun onAcquisitionBatchChanged() {
+        noteActivity()
+        signalWork()
+    }
+
+    override suspend fun schedulingPlan(): DownloadWakePlan = commands.withLock {
+        requireOpen()
+        activeLock.withLock { buildSchedulingPlan().plan }
+    }
+
+    override suspend fun idleDecision(): DownloadIdleDecision = commands.withLock {
+        requireOpen()
+        requireNoFailedBackgroundDrain()
+        activeLock.withLock admission@ {
+            issuedIdle = null
+            val built = buildSchedulingPlan()
+            if (lifecycle.value.drainsInFlight != 0 || active.isNotEmpty() || maintenance.isNotEmpty() ||
+                hasPendingCleanupOwners || physicalRuntime?.epochs?.allLocalOwnersConsumed() == false || built.plan.hasDueWork) {
+                // The scheduler has a due admission to try. Physical refusal is recorded as
+                // bounded LOCAL deferral; a future retry never enters this branch by itself.
+                if (built.plan.hasDueWork) signalWork()
+                return@admission DownloadIdleDecision.OwnedWork
+            }
+            val ticket = DownloadIdleTicket(built.plan.key)
+            issuedIdle = IssuedIdle(ticket, lifecycle.value.generation, activityEpoch.value, built.inputs)
+            DownloadIdleDecision.Deferred(ticket, built.plan)
+        }
+    }
+
+    override suspend fun confirmIdle(ticket: DownloadIdleTicket, retire: () -> Boolean): Boolean = commands.withLock {
+        requireOpen()
+        requireNoFailedBackgroundDrain()
+        activeLock.withLock admission@ {
+            val issued = issuedIdle
+            if (issued == null || issued.ticket !== ticket) return@admission false
+            issuedIdle = null // Every confirmation attempt consumes the exact instance, even on failure.
+            val built = buildSchedulingPlan()
+            if (lifecycle.value.drainsInFlight != 0 || active.isNotEmpty() || maintenance.isNotEmpty() ||
+                hasPendingCleanupOwners || physicalRuntime?.epochs?.allLocalOwnersConsumed() == false || built.plan.hasDueWork ||
+                issued.generation != lifecycle.value.generation || issued.activityEpoch != activityEpoch.value ||
+                ticket.key != built.plan.key || issued.inputs != built.inputs) return@admission false
+            // A completed concurrent store publication and a due-time crossing during the read
+            // cannot be hidden by the earlier barrier. No suspension is allowed after this point.
+            val currentInputs = if (physicalRuntime == null) schedulingInputs(store.state.value)
+                else schedulingInputs(store.acquisitionViews.value)
+            if (currentInputs != built.inputs) return@admission false
+            val now = clock.epochMs()
+            if (built.plan.nextLocalEpochMs?.let { it <= now } == true ||
+                networkState.value == DownloadNetworkState.CONNECTED &&
+                built.plan.nextNetworkEpochMs?.let { it <= now } == true) return@admission false
+            retire() // Native exact-owner/epoch/zero-lease CAS only. Never WorkManager or expiration.
+        }
+    }
+
+    private fun schedulingInputs(snapshot: AppSnapshot): SchedulingInputs {
+        val records = snapshot.downloads.mapValues { (_, record) -> record.schedulingRecord() }
+        val ids = records.values.mapTo(hashSetOf()) { it.mediaId }
+        val bindingIds = records.values.flatMap { record ->
+            listOfNotNull(record.executionBindingId, record.asset?.executionBindingId,
+                snapshot.downloadFinalizations[record.id]?.executionBindingId)
+        }.toSet()
+        val checked = records.values.filter { assetChecked(snapshot, it, checkedAssets.value) }.mapTo(hashSetOf()) { it.id }
+        return SchedulingInputs(records, snapshot.downloadFinalizations,
+            ids.associateWith { id -> snapshot.media[id]?.let { RequestedItem(it.title, it.kind, it.source) } },
+            bindingIds.associateWith { snapshot.playbackBindings[it] },
+            snapshot.downloadAttempts.values.filter { it.downloadId in records && it.stagingPath != null }
+                .groupBy { it.downloadId }.mapValues { (_, attempts) -> attempts.mapNotNull { it.stagingPath }.toSet() },
+            snapshot.settings.offlineOnly, snapshot.settings.downloadParallelism.coerceIn(1, 4),
+            lifecycle.value, networkState.value, checked,
+            claimDeferrals.value.filter { (key, value) -> records[key.id] == value.record })
+    }
+
+    private fun schedulingInputs(view: LibraryAcquisitionView): SchedulingInputs {
+        val snapshot = view.snapshot
+        val life = lifecycle.value
+        val network = networkState.value
+        return SchedulingInputs(emptyMap(), emptyMap(), emptyMap(), emptyMap(), emptyMap(),
+            snapshot.settings.offlineOnly, snapshot.settings.downloadParallelism.coerceIn(1, 4),
+            life, network, emptySet(), emptyMap(), requirePhysicalRuntime().schedulingInputs(view.acquisition),
+            physicalHostState(snapshot, life, network), requireNotNull(batchWorkRuntime).schedulingInputs(view.acquisition))
+    }
+
+    private fun nextSchedulingKey(inputs: SchedulingInputs): DownloadSchedulingKey {
+        if (inputs != previousSchedulingInputs) {
+            check(schedulingRevision < Long.MAX_VALUE) { "Download scheduling epoch exhausted" }
+            schedulingRevision++
+            previousSchedulingInputs = inputs
+        }
+        return DownloadSchedulingKey(owner, schedulingRevision)
+    }
+
+    private suspend fun buildSchedulingPlan(): BuiltPlan {
+        if (physicalRuntime != null) {
+            val view = store.acquisitionView() // ONE same-owner transaction/read barrier.
+            val inputs = schedulingInputs(view)
+            val now = clock.epochMs()
+            val host = checkNotNull(inputs.physicalHost)
+            val projected = withPendingDownloadBatchWork(projectPhysicalDownloadWakePlan(checkNotNull(inputs.physical),
+                host, now, nextSchedulingKey(inputs)), checkNotNull(inputs.batchWork), host, now)
+            return BuiltPlan(projected, inputs)
+        }
+        val snapshot = store.flush().getOrThrow()
+        val inputs = schedulingInputs(snapshot)
+        val context = DownloadSchedulingContext(clock.epochMs(), inputs.life.suspended,
+            inputs.life.checksActivated, inputs.network, inputs.checkedIds, inputs.deferrals)
+        val projected = projectDownloadWakePlan(snapshot, context, nextSchedulingKey(inputs))
+        return BuiltPlan(inputs.life.drainFailure?.let { projected.copy(blockedReason = it) } ?: projected, inputs)
+    }
+
+    private fun physicalHostState(snapshot: AppSnapshot = store.acquisitionViews.value.snapshot,
+        life: Lifecycle = lifecycle.value, network: DownloadNetworkState = networkState.value) =
+        DownloadPhysicalHostState(life.started, life.closed, life.suspended, life.checksActivated,
+            life.generation, life.drainsInFlight, life.drainFailure ?: cleanupFailure.value,
+            snapshot.settings.offlineOnly, snapshot.settings.downloadParallelism.coerceIn(1, 4), network)
+
+    private fun requirePhysicalRuntime(): DownloadPhysicalRuntime = physicalRuntime
+        ?: throw VeyraException(AppFailure(FailureCode.RECOVERY_REQUIRED, "download_acquisition_owner_required"))
+
     @OptIn(ExperimentalCoroutinesApi::class, DelicateCoroutinesApi::class)
-    suspend fun start() {
+    suspend fun start(activation: DownloadActivation = DownloadActivation.USER_SESSION) {
         val ready = commands.withLock {
-            if (lifecycle.value.started) return@withLock startup!!
             requireOpen()
+            requireNoFailedBackgroundDrain()
+            if (lifecycle.value.started) {
+                if (activation == DownloadActivation.USER_SESSION && !lifecycle.value.checksActivated) {
+                    lifecycle.value = lifecycle.value.copy(checksActivated = true)
+                    noteActivity()
+                    signalWork()
+                }
+                return@withLock startup!!
+            }
             store.initialize().getOrThrow()
             withContext(Dispatchers.IO) { files.initialize() }
-            lifecycle.value = lifecycle.value.copy(started = true)
+            lifecycle.value = lifecycle.value.copy(started = true, checksActivated = activation == DownloadActivation.USER_SESSION)
+            noteActivity()
             val initialized = CompletableDeferred<Unit>().also { startup = it }
             scheduler = scope.launch(start = CoroutineStart.ATOMIC) {
                 try {
                     while (isActive) {
                         try {
                             // Cached StateFlows are hints, never the authority for arbitration.
-                            store.flush().getOrThrow()
+                            if (physicalRuntime == null) store.flush().getOrThrow()
                             schedule()
                         } catch (cancelled: CancellationException) { throw cancelled }
-                        catch (error: Exception) { mutableFailure.value = classify(error) }
+                        catch (error: Exception) { publishFailure(classify(error)) }
                         withTimeoutOrNull(pollingMs) { wake.receive() }
                     }
                 } finally { if (!initialized.isCompleted) initialized.cancel() }
@@ -122,16 +382,23 @@ class DownloadCoordinator(
                 while (isActive) {
                     try { reconcile() }
                     catch (cancelled: CancellationException) { throw cancelled }
-                    catch (error: Exception) { mutableFailure.value = classify(error) }
+                    catch (error: Exception) { publishFailure(classify(error)) }
                     withTimeoutOrNull(pollingMs) { maintenanceWake.receive() }
                 }
             }
             policyObserver = scope.launch {
-                store.state.map { it.settings.offlineOnly }.distinctUntilChanged().collect { offline ->
+                val policy = if (physicalRuntime == null) store.state.map { it.settings.offlineOnly }
+                    else store.acquisitionViews.map { it.snapshot.settings.offlineOnly }
+                policy.distinctUntilChanged().collect { offline ->
                     try { if (offline) pauseForPolicy() else signalWork() }
                     catch (cancelled: CancellationException) { throw cancelled }
-                    catch (error: Exception) { mutableFailure.value = classify(error) }
+                    catch (error: Exception) { publishFailure(classify(error)) }
                 }
+            }
+            networkObserver = scope.launch {
+                // A connection is eligibility for new claims only. Existing native work keeps
+                // its exact lease and reports typed failures; local cleanup never needs network.
+                networkState.collect { signalWork() }
             }
             initialized.complete(Unit)
             initialized
@@ -140,9 +407,26 @@ class DownloadCoordinator(
         ready.await()
     }
 
+    /** Root already selected this exact immutable Single, outside ALL download locks. */
+    suspend fun enqueueAccepted(requestId: AcquisitionRequestId, requiredBindingId: ExecutionBindingId,
+        requireIntentCurrent: () -> Unit): String =
+        requirePhysicalRuntime().userCommands.enqueueAccepted(requestId, requiredBindingId, requireIntentCurrent)
+
+    /** Explicit unknown-schema2 replacement; reader/native drain is mandatory even without an asset row. */
+    suspend fun adoptSchema2(id: String, requestId: AcquisitionRequestId, requiredBindingId: ExecutionBindingId,
+        requireIntentCurrent: () -> Unit): String =
+        requirePhysicalRuntime().userCommands.adoptSchema2(id, requestId, requiredBindingId, requireIntentCurrent)
+
+    /** Physical completion is not an R2 use receipt. This performs owned local validation/CAS only. */
+    suspend fun validateStandaloneAssetUse(id: String, requiredBindingId: ExecutionBindingId): AssetUse =
+        requirePhysicalRuntime().validateStandaloneAssetUse(id, requiredBindingId)
+
     /** An explicit playback receipt pins Play -> Download; an existing different selection is not silently replaced. */
-    suspend fun enqueue(item: MediaItem, reuseBindingId: String? = null): String = commands.withLock {
+    suspend fun enqueue(item: MediaItem, reuseBindingId: String? = null): String =
+        physicalRuntime?.userCommands?.enqueueKnownCatalog(item, reuseBindingId) ?: commands.withLock {
         requireOpen()
+        requireNoFailedBackgroundDrain()
+        noteActivity()
         var actualId = files.key(item.id)
         store.update { snapshot ->
             val existingItem = snapshot.media[item.id]
@@ -187,8 +471,12 @@ class DownloadCoordinator(
     suspend fun remove(id: String) = stopItem(id, discard = true, remove = true)
 
     suspend fun resume(id: String) {
+        physicalRuntime?.let { it.userCommands.resume(id); return }
         commands.withLock {
             requireOpen()
+            requireNoFailedBackgroundDrain()
+            noteActivity()
+            clearClaimDeferrals(id)
             store.update { snapshot ->
                 val current = snapshot.downloads[id] ?: return@update snapshot
                 if (current.cleanupPending || current.status in BUSY + setOf(DownloadStatus.QUEUED, DownloadStatus.COMPLETE)) return@update snapshot
@@ -206,8 +494,11 @@ class DownloadCoordinator(
     }
 
     private suspend fun stopItem(id: String, discard: Boolean, remove: Boolean) {
+        physicalRuntime?.let { it.userCommands.stop(id, discard, remove); return }
         val jobs = commands.withLock {
             requireOpen()
+            noteActivity()
+            clearClaimDeferrals(id)
             var stopped = false
             store.update { snapshot ->
                 val current = snapshot.downloads[id] ?: return@update snapshot
@@ -232,9 +523,109 @@ class DownloadCoordinator(
         signalWork()
     }
 
+    /** Existing host pause semantics: report a checkpoint failure only after accepted owner drain. */
     suspend fun pauseForBackground() {
-        val jobs = restrictOwnedWork(DownloadStatus.NEEDS_FOREGROUND, suspendHost = true)
+        drainForBackground().checkpointFailure?.let { throw VeyraException(it) }
+    }
+
+    /**
+     * Independent host/worker drain, NOT an allowance callback. Callback return or a zero native
+     * lease count does not prove resource/file/Room unwind: registered owners remain until then.
+     * Once accepted, caller cancellation or a failed checkpoint must not skip joining those owners.
+     * Only the returned receipt acknowledges drain; an unknown thrown error must remain fail-closed.
+     * Foreground resume is rejected, never queued, until every concurrent drain has joined its owners.
+     * Unknown checkpoint failure leaves a visible, sticky restriction; only a recreated host can
+     * recover it. There is no implicit retry that declares an earlier unacknowledged drain safe.
+     */
+    suspend fun drainForBackground(): DownloadBackgroundDrainAck = withContext(NonCancellable) {
+        var checkpointError: Throwable? = null
+        var physicalEpochs = emptyList<DownloadOwnershipEpochs.Epoch>()
+        val jobs = commands.withLock {
+            val life = lifecycle.value
+            check(life.drainsInFlight < Int.MAX_VALUE) { "Too many independent download drains" }
+            // Block both new claims and foreground reentry before observing owners, including
+            // concurrent drains and an already-closing coordinator. Never reopen a closed host.
+            lifecycle.value = life.copy(suspended = true, drainsInFlight = life.drainsInFlight + 1)
+            noteActivity()
+            val (running, maintaining) = activeLock.withLock {
+                physicalEpochs = physicalRuntime?.ownedEpochs().orEmpty()
+                active.values.toList() to maintenance.values.toList()
+            }
+            // close() may have latched closed but still be awaiting native owners. Join that
+            // same registry without reopening/checkpointing an already-closed library.
+            // A cleanup failure can precede OTHER jobs' successful unwind. Even an already
+            // failed drain must independently join those live jobs before returning no ACK.
+            // It never retries the failed cleanup records or replays a Room checkpoint.
+            if (!life.closed && life.drainFailure == null) {
+                try { suspendOwnedRecords(DownloadStatus.NEEDS_FOREGROUND, maintaining = maintaining) }
+                catch (error: Throwable) { checkpointError = error }
+            }
+            running + maintaining.map { it.job }
+        }
+        // No admission lock is held while callbacks or owner finalizers need it to complete.
         cancelAndJoinJobs(jobs)
+        var physicallyDrained = true
+        val physical = physicalRuntime
+        for (epoch in physicalEpochs) {
+            try { if (physical == null || !physical.epochs.drain(epoch)) physicallyDrained = false }
+            catch (error: Throwable) { physicallyDrained = false; if (checkpointError == null) checkpointError = error }
+        }
+        val physicalCheckpoint = if (physical != null && physicallyDrained) physical.drainCheckpointFailure() else null
+        val checkpointFailure = (checkpointError as? VeyraException)?.failure ?: physicalCheckpoint
+        val unknown = checkpointError?.takeUnless { it is VeyraException } ?: physical?.takeUnknownCheckpointFailure()
+        val blocked = commands.withLock {
+            val life = lifecycle.value
+            check(life.drainsInFlight > 0)
+            val sticky = life.drainFailure ?: cleanupFailure.value ?: if (unknown != null || !physicallyDrained || hasPendingCleanupOwners ||
+                physical?.epochs?.allLocalOwnersConsumed() == false) restartRequiredFailure() else null
+            // Joined is not still-running. Retire this in-flight count, but retain a separate
+            // failed-drain admission fence and the FIRST typed failure rather than an invisible wait.
+            lifecycle.value = life.copy(drainsInFlight = life.drainsInFlight - 1, drainFailure = sticky)
+            if (sticky != null || checkpointFailure != null) publishFailure(sticky ?: checkpointFailure)
+            noteActivity()
+            sticky
+        }
+        // No suspension after releasing the fence: the native Main-confined caller consumes
+        // this receipt and clears its exact expiration barrier in the same dispatch segment.
+        unknown?.let { throw it } // Unknown/cancellation is never converted into a post-drain ACK.
+        blocked?.let { throw VeyraException(it) }
+        DownloadBackgroundDrainAck(checkpointFailure)
+    }
+
+    /** Exact schema3 generation/map guard; inline acquire/close callbacks MUST be cancel-only. */
+    private suspend fun physicalAllowanceExpired(run: DownloadPhysicalRun): Unit = withContext(NonCancellable) {
+        val jobs = commands.withLock {
+            val physical = physicalRuntime ?: return@withLock emptyList<Job>()
+            activeLock.withLock current@ {
+                val life = lifecycle.value
+                if (life.closed || life.generation != run.hostGeneration || !run.allowanceCallbacksOpen.value ||
+                    run.actionFinished.value || !physical.isCurrentRun(run)) return@current emptyList<Job>()
+                // Never revoke an epoch before the exact active-map check. A retired allowance
+                // cannot suspend/cancel a newer generation or manufacture a drain receipt.
+                lifecycle.value = life.copy(suspended = true)
+                physical.requestHostSuspension(DownloadStatus.NEEDS_FOREGROUND)
+                noteActivity()
+                active.values.toList() + maintenance.values.map { it.job }
+            }
+        }
+        jobs.forEach { it.cancel(CancellationException("Physical download execution allowance ended")) }
+    }
+
+    /** The pending member has an ACTUAL registered Job; late/inline callbacks never join it. */
+    private suspend fun batchAllowanceExpired(run: DownloadBatchWorkRun): Unit = withContext(NonCancellable) {
+        val jobs = commands.withLock {
+            val pending = batchWorkRuntime ?: return@withLock emptyList<Job>()
+            activeLock.withLock current@ {
+                val life = lifecycle.value
+                if (life.closed || life.generation != run.hostGeneration || !run.allowanceCallbacksOpen.value ||
+                    run.actionFinished.value || !pending.isCurrentRun(run)) return@current emptyList<Job>()
+                lifecycle.value = life.copy(suspended = true)
+                physicalRuntime?.requestHostSuspension(DownloadStatus.NEEDS_FOREGROUND)
+                noteActivity()
+                active.values.toList() + maintenance.values.map { it.job }
+            }
+        }
+        jobs.forEach { it.cancel(CancellationException("Batch selection execution allowance ended")) }
     }
 
     /** Safe even when acquire/close invokes its expiration callback inline in the transfer itself. */
@@ -250,14 +641,16 @@ class DownloadCoordinator(
                 // Latch locally BEFORE SQLite: an unavailable database must not permit work
                 // outside its OS allowance. Foreground resume advances the epoch under this lock.
                 lifecycle.value = life.copy(suspended = true)
+                noteActivity()
                 try {
                     if (!suspendOwnedRecords(DownloadStatus.NEEDS_FOREGROUND, onlyIfClaim = claim, maintaining = maintaining)) {
                         // The callback was queued for a now-completed/superseded claim. Do not
                         // suspend a healthy current host because a retired allowance reported late.
                         lifecycle.value = life
+                        noteActivity()
                         return@withLock listOf(expiredJob)
                     }
-                } catch (error: Exception) { mutableFailure.value = classify(error) }
+                } catch (error: Exception) { publishFailure(classify(error)) }
                 running.values.toList() + maintaining.map { it.job }
             }
             jobs.forEach { it.cancel(CancellationException("Background execution allowance ended")) }
@@ -265,20 +658,29 @@ class DownloadCoordinator(
         }
     }
 
-    private suspend fun pauseForPolicy() = cancelAndJoinJobs(restrictOwnedWork(DownloadStatus.WAITING_NETWORK, suspendHost = false))
+    private suspend fun pauseForPolicy() = cancelAndJoinJobs(restrictOwnedAcquisitionsForPolicy())
 
-    private suspend fun restrictOwnedWork(target: DownloadStatus, suspendHost: Boolean): List<Job> = commands.withLock {
+    private suspend fun restrictOwnedAcquisitionsForPolicy(): List<Job> = commands.withLock {
         if (lifecycle.value.closed) return@withLock emptyList()
-        if (suspendHost) lifecycle.value = lifecycle.value.copy(suspended = true)
-        val maintaining = activeLock.withLock { if (suspendHost) maintenance.values.toList() else emptyList() }
-        val jobs = activeLock.withLock { active.values.toList() } + maintaining.map { it.job }
-        try { suspendOwnedRecords(target, maintaining = maintaining) }
+        val jobs = activeLock.withLock {
+            physicalRuntime?.let { it.activeTransferJobs() + batchWorkRuntime?.activeNetworkJobs().orEmpty() }
+                ?: active.values.toList()
+        }
+        try { suspendOwnedRecords(DownloadStatus.WAITING_NETWORK) }
         catch (error: Exception) { jobs.forEach { it.cancel() }; throw error }
         jobs
     }
 
     private suspend fun suspendOwnedRecords(target: DownloadStatus, onlyIfClaim: ExecutionClaim? = null,
         onlyIfMaintenance: MaintenanceRun? = null, maintaining: List<TrackedMaintenance> = emptyList()): Boolean {
+        physicalRuntime?.let { physical ->
+            // Schema3 publishes no legacy physical writes and releases no ownership early.
+            // The registered run settles this status through its canonical finalizer AFTER
+            // actual native/file drain. The legacy maintenance path here owns orphan sweeps only.
+            if (onlyIfClaim != null || onlyIfMaintenance?.claim != null) return false
+            physical.requestHostSuspension(target)
+            return true
+        }
         var matched = false
         store.update { snapshot ->
             if (onlyIfClaim != null) {
@@ -310,13 +712,15 @@ class DownloadCoordinator(
             val maintaining = activeLock.withLock { maintenance.values.toList() }
             val expired = maintaining.firstOrNull { it.run === run } ?: return@withLock emptyList()
             lifecycle.value = life.copy(suspended = true)
+            noteActivity()
             try {
                 if (!suspendOwnedRecords(DownloadStatus.NEEDS_FOREGROUND, onlyIfMaintenance = run, maintaining = maintaining)) {
                     lifecycle.value = life
+                    noteActivity()
                     return@withLock listOf(expired.job)
                 }
-                mutableFailure.value = AppFailure(FailureCode.BACKGROUND_RESTRICTED)
-            } catch (error: Exception) { mutableFailure.value = classify(error) }
+                publishFailure(AppFailure(FailureCode.BACKGROUND_RESTRICTED))
+            } catch (error: Exception) { publishFailure(classify(error)) }
             activeLock.withLock { active.values.toList() } + maintaining.map { it.job }
         }
         jobs.forEach { it.cancel(CancellationException("Maintenance execution allowance ended")) }
@@ -330,12 +734,19 @@ class DownloadCoordinator(
     }
 
     suspend fun resumePending() {
+        // Do not retain a foreground announcement behind a suspended checkpoint and replay it
+        // after that drain's ACK. The locked recheck also covers admission racing the first read.
+        requireOpen()
+        requireForegroundResumeAdmission()
         commands.withLock {
             requireOpen()
+            requireForegroundResumeAdmission()
             val life = lifecycle.value
             if (life.suspended) require(life.generation < Long.MAX_VALUE)
             lifecycle.value = life.copy(suspended = false, generation = life.generation + if (life.suspended) 1 else 0)
-            store.update { snapshot -> snapshot.copy(downloads = snapshot.downloads.mapValues { (_, record) ->
+            noteActivity()
+            if (physicalRuntime != null) physicalRuntime.resumeHostPending()
+            else store.update { snapshot -> snapshot.copy(downloads = snapshot.downloads.mapValues { (_, record) ->
                 if (record.failure?.code == FailureCode.BACKGROUND_RESTRICTED && !record.liveLease(clock.epochMs()) &&
                     (record.cleanupPending || record.status == DownloadStatus.COMPLETE)) return@mapValues record.copy(failure = null)
                 if (!record.userPaused && !record.cleanupPending && !record.liveLease(clock.epochMs()) &&
@@ -347,23 +758,219 @@ class DownloadCoordinator(
         signalWork()
     }
 
-    suspend fun close() {
-        var checkpointError: Exception? = null
-        var wasStarted = false
-        val jobs = commands.withLock {
-            if (lifecycle.value.closed) return
-            wasStarted = lifecycle.value.started
-            lifecycle.value = lifecycle.value.copy(closed = true, suspended = true)
-            val running = activeLock.withLock { active.values.toList() + maintenance.values.map { it.job } }
-            try { if (wasStarted) suspendOwnedRecords(DownloadStatus.QUEUED) }
-            catch (error: Exception) { checkpointError = error; mutableFailure.value = classify(error) }
-            running
+    private fun requireForegroundResumeAdmission() {
+        requireNoFailedBackgroundDrain()
+        if (lifecycle.value.drainsInFlight != 0)
+            throw VeyraException(AppFailure(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_in_progress"))
+    }
+
+    private fun requireNoFailedBackgroundDrain() {
+        (lifecycle.value.drainFailure ?: cleanupFailure.value)?.let { throw VeyraException(it) }
+    }
+
+    /**
+     * Serialized, explicit cleanup retry. Each previously failed owner gets at most one attempt
+     * at each remaining stage per call; already successful stages never run again. This bounds
+     * retries, NOT the wall time of an accepted native close. Real blocked consumption is awaited.
+     * A failure never turns into success merely because a later retry consumes all owners.
+     */
+    suspend fun close(): Unit = withContext(NonCancellable) {
+        closeLock.withLock {
+            if (dependencyReleaseSafeAfterClose) {
+                closeFailure?.let { throw VeyraException(it) }
+                return@withLock
+            }
+            try {
+                var wasStarted = false
+                var retrying = emptyList<CleanupOwner>()
+                var physicalEpochs = emptyList<DownloadOwnershipEpochs.Epoch>()
+                val jobs = commands.withLock {
+                    val life = lifecycle.value
+                    wasStarted = life.started
+                    // Only an already FAILED owner is an explicit retry. A normal finalizer
+                    // that first fails while this close joins it is not silently retried here.
+                    retrying = cleanupOwners.value.values.filter { it.failed.value }
+                    lifecycle.value = life.copy(closed = true, suspended = true)
+                    noteActivity()
+                    val running = activeLock.withLock {
+                        physicalEpochs = physicalRuntime?.ownedEpochs().orEmpty()
+                        active.values.toList() + maintenance.values.map { it.job }
+                    }
+                    if (!life.closed && wasStarted) {
+                        try { suspendOwnedRecords(DownloadStatus.QUEUED) }
+                        catch (error: Throwable) { rememberCloseFailure(error) }
+                    }
+                    running
+                }
+                cancelAndJoinJobs(listOfNotNull(scheduler, reconciler, policyObserver, networkObserver) + jobs)
+                for (retained in retrying) {
+                    if (cleanupOwners.value[retained.token] === retained) attemptCleanup(retained, retryFailed = true)
+                }
+                val physical = physicalRuntime
+                for (epoch in physicalEpochs) {
+                    if (physical == null || !physical.epochs.drain(epoch)) {
+                        if (closeFailure == null) closeFailure = restartRequiredFailure()
+                    }
+                }
+                physical?.drainCheckpointFailure()?.let { rememberCloseFailure(VeyraException(it)) }
+                cleanupFailure.value?.let { if (closeFailure == null) closeFailure = it }
+                if (!hasPendingCleanupOwners && physical?.epochs?.allLocalOwnersConsumed() != false) {
+                    if (wasStarted) {
+                        try { store.flush().getOrThrow() }
+                        catch (error: Throwable) { rememberCloseFailure(error) }
+                    }
+                    scope.coroutineContext.job.cancelAndJoin()
+                    activeLock.withLock {
+                        check(active.isEmpty() && maintenance.isEmpty() && !hasPendingCleanupOwners &&
+                            physical?.epochs?.allLocalOwnersConsumed() != false)
+                        // This is the only writer. No admission is possible after closed=true.
+                        dependencyReleaseSafe.value = true
+                    }
+                } else if (closeFailure == null) {
+                    closeFailure = restartRequiredFailure()
+                }
+            } catch (error: Throwable) {
+                // An exception before the explicit drain receipt retains the host dependencies.
+                rememberCloseFailure(error)
+            }
+            closeFailure?.let { throw VeyraException(it) }
         }
-        try {
-            cancelAndJoinJobs(listOfNotNull(scheduler, reconciler, policyObserver) + jobs)
-            if (wasStarted) store.flush().getOrThrow()
-        } finally { scope.cancel() }
-        checkpointError?.let { throw it }
+    }
+
+    private fun rememberCloseFailure(error: Throwable) {
+        if (closeFailure == null) closeFailure = cleanupFailure.value ?: when (error) {
+            is VeyraException -> error.failure
+            is Exception -> classify(error)
+            else -> AppFailure(FailureCode.UNEXPECTED)
+        }
+        publishFailure(closeFailure)
+    }
+
+    private fun registerCleanup(owner: CleanupOwner) {
+        cleanupRegistry.register(owner)
+    }
+
+    /**
+     * Resource/allowance closes and failure publication run OUTSIDE admission locks. The initial
+     * file-only rollback may keep its existing claim lock, but cannot invoke native callbacks or
+     * acquire commands/activeLock again; report=false defers that failure latch until lock exit.
+     */
+    private suspend fun attemptCleanup(owner: CleanupOwner, retryFailed: Boolean = false, report: Boolean = true) {
+        if (owner is DownloadPhysicalCleanup) {
+            // Runtime owns this SAME cleanup mutex. Dispatch before locking; never self-deadlock.
+            owner.runtime.attemptCleanup(owner, retryFailed, report)
+            return
+        }
+        if (owner is DownloadBatchWorkCleanup) {
+            owner.runtime.attemptCleanup(owner, retryFailed, report)
+            return
+        }
+        owner.lock.withLock {
+            try {
+                // Temporary compensation may already have thrown before the enclosing claim failed.
+                // Register/adopt it, but never turn this initial unwind into an automatic retry.
+                if (owner.failed.value && !retryFailed) throw VeyraException(restartRequiredFailure())
+                if (owner is DownloadLeaseCleanup) {
+                    owner.close()
+                    cleanupRegistry.remove(owner)
+                    return@withLock
+                }
+                val steps = when (owner) {
+                    is ExecutionCleanup -> 7
+                    is MaintenanceCleanup -> 3
+                    is RollbackCleanup -> 2
+                    is DownloadLeaseCleanup -> error("File-only cleanup already handled")
+                    is DownloadPhysicalCleanup -> error("Physical cleanup already dispatched")
+                    is DownloadBatchWorkCleanup -> error("Batch cleanup already dispatched")
+                }
+                while (owner.nextStep < steps) {
+                    when (owner) {
+                        is ExecutionCleanup -> when (owner.nextStep) {
+                            0 -> {
+                                owner.claim.validationReaders.requireReleased()
+                                owner.resource?.close()
+                            }
+                            1 -> {
+                                owner.allowance?.close()
+                                owner.claim.allowanceCallbacksOpen.value = false
+                            }
+                            2 -> {
+                                if (!retryFailed && owner.partialLeases.any { it.failed.value })
+                                    throw VeyraException(restartRequiredFailure())
+                                owner.partialLeases.forEach { it.close() }
+                            }
+                            3 -> owner.publicationLease?.close()
+                            4 -> owner.claim.generationLease.close()
+                            5 -> owner.claim.slot.close()
+                            6 -> finishExecution(owner.claim, owner.failure, owner.cancelled, owner.finalization)
+                            else -> error("Invalid execution cleanup stage")
+                        }
+                        is MaintenanceCleanup -> when (owner.nextStep) {
+                            0 -> {
+                                owner.run.claim?.validationReaders?.requireReleased()
+                                owner.allowance?.close()
+                                owner.run.allowanceCallbacksOpen.value = false
+                            }
+                            1 -> (owner.run.claim?.fileLease ?: owner.run.orphanLease)?.close()
+                            2 -> {
+                                finishMaintenance(owner.run)
+                                // Defer after the lease-release transaction so this receipt belongs
+                                // to the current unowned record, not the pre-release Room revision.
+                                if (owner.admissionFailed) owner.run.claim?.let { claim ->
+                                    store.state.value.downloads[claim.record.id]?.let { deferClaim(it, claim.kind.claimKind()) }
+                                }
+                            }
+                            else -> error("Invalid maintenance cleanup stage")
+                        }
+                        is RollbackCleanup -> when (owner.nextStep) {
+                            0 -> owner.leases.close()
+                            1 -> {
+                                owner.executionClaim?.let { finishExecution(it, owner.failure, owner.cancelled) }
+                                owner.maintenanceClaim?.let { finishMaintenanceRollback(it) }
+                            }
+                            else -> error("Invalid rollback cleanup stage")
+                        }
+                        is DownloadLeaseCleanup -> error("File-only cleanup already handled")
+                        is DownloadPhysicalCleanup -> error("Physical cleanup already dispatched")
+                        is DownloadBatchWorkCleanup -> error("Batch cleanup already dispatched")
+                    }
+                    owner.nextStep++
+                }
+                cleanupRegistry.remove(owner)
+            } catch (_: Throwable) {
+                // Even CancellationException (or a typed error) is not proof of consumption. Keep
+                // this exact stage and every dependent owner; never log the native exception text.
+                owner.failed.value = true
+                cleanupFailure.update { it ?: restartRequiredFailure() }
+            }
+        }
+        if (report) publishCleanupFailure()
+    }
+
+    /**
+     * An accepted canonical finish threw without a typed outcome. This synchronous callback
+     * may run while commands is held: latch the existing atomic admission fence, not lifecycle
+     * under an unlocked read/copy. Normal publication below later suspends/cancels owned jobs.
+     */
+    private fun failPhysicalCheckpointAdmission() {
+        cleanupFailure.update { it ?: restartRequiredFailure() }
+        publishFailure(restartRequiredFailure())
+        noteActivity()
+    }
+
+    /** Called after claim locks exit, including when a synchronous Files compensation failed. */
+    private suspend fun publishCleanupFailure() {
+        if (cleanupFailure.value == null && cleanupOwners.value.values.none { it.failed.value }) return
+        val jobs = commands.withLock {
+            val sticky = lifecycle.value.drainFailure ?: cleanupFailure.value ?: restartRequiredFailure()
+            cleanupFailure.update { it ?: sticky }
+            lifecycle.value = lifecycle.value.copy(suspended = true, drainFailure = sticky)
+            publishFailure(sticky)
+            noteActivity()
+            activeLock.withLock { active.values.toList() + maintenance.values.map { it.job } }
+        }
+        // Cancel-only: this may be the currently registered owner's own finalizer.
+        jobs.forEach { it.cancel(CancellationException("Download cleanup ownership was not consumed")) }
     }
 
     private suspend fun cancelAndJoinJobs(jobs: List<Job>) {
@@ -374,39 +981,87 @@ class DownloadCoordinator(
 
     @OptIn(ExperimentalCoroutinesApi::class, DelicateCoroutinesApi::class)
     private suspend fun schedule() {
+        val physical = physicalRuntime
+        if (physical != null) {
+            val admissionOwner = currentCoroutineContext().job // Capture BEFORE NonCancellable.
+            var staleBatchJobs = emptyList<Job>()
+            try {
+                commands.withLock {
+                    activeLock.withLock admission@ {
+                        val view = store.acquisitionView()
+                        staleBatchJobs = batchWorkRuntime?.staleIntentJobs(view.acquisition).orEmpty()
+                        val state = physicalHostState(view.snapshot)
+                        if (!state.started || state.closed || state.suspended || state.drainsInFlight != 0 || state.failure != null)
+                            return@admission
+                        if (!state.offlineOnly && state.network == DownloadNetworkState.CONNECTED) {
+                            for (id in physical.candidates()) {
+                                admissionOwner.ensureActive()
+                                if (cleanupFailure.value != null || physical.transferCount() + (batchWorkRuntime?.networkCount() ?: 0) >=
+                                    store.acquisitionViews.value.snapshot.settings.downloadParallelism.coerceIn(1, 4)) break
+                                if (id in active) continue
+                                // Exact durable claim AND ATOMIC actual-Job installation form one
+                                // owned segment. No cancellation gap strands physical resources.
+                                withContext(NonCancellable) {
+                                    admissionOwner.ensureActive()
+                                    val run = physical.claimExecution(id, admissionOwner) ?: return@withContext
+                                    physical.installExecution(run, scope)
+                                }
+                            }
+                        }
+                        // Local committed attachment/admission remains eligible offline. READY
+                        // selection also needs connectivity, native allowance and an actual slot.
+                        withContext(NonCancellable) {
+                            batchWorkRuntime?.installCandidate(store.acquisitionViews.value.acquisition, scope, admissionOwner)
+                        }
+                    }
+                }
+            } finally {
+                // Batch intent changes revoke only their captured member operation. Never join
+                // under admission locks or reinterpret a current self-CLAIMED request as stale.
+                staleBatchJobs.forEach { it.cancel(CancellationException("Download batch intent changed")) }
+                withContext(NonCancellable) { publishCleanupFailure() }
+            }
+            return
+        }
         val life = lifecycle.value
-        if (!life.started || life.closed || life.suspended || store.state.value.settings.offlineOnly) return
-        activeLock.withLock {
+        if (!life.started || life.closed || life.suspended || store.state.value.settings.offlineOnly ||
+            networkState.value != DownloadNetworkState.CONNECTED) return
+        try { activeLock.withLock {
             val candidates = store.state.value.downloads.values.filter { it.id !in active }
                 .sortedWith(compareByDescending<DownloadRecord> { it.priority }.thenBy { it.createdEpochMs }.thenBy { it.id })
             for (candidate in candidates) {
-                if (active.size >= store.state.value.settings.downloadParallelism.coerceIn(1, 4)) break
+                if (cleanupFailure.value != null || active.size >= store.state.value.settings.downloadParallelism.coerceIn(1, 4)) break
                 val claim = claimExecution(candidate.id) ?: continue
                 // ATOMIC enters the try/finally even if the parent is cancelled just after the durable claim.
                 val task = scope.launch(start = CoroutineStart.ATOMIC) {
                     try { execute(claim) }
-                    finally { withContext(NonCancellable) { activeLock.withLock { active.remove(claim.record.id) }; signalWork() } }
+                    finally { withContext(NonCancellable) {
+                        activeLock.withLock { active.remove(claim.record.id); noteActivity() }
+                        signalWork()
+                    } }
                 }
                 active[claim.record.id] = task
+                noteActivity()
             }
-        }
+        } } finally { withContext(NonCancellable) { publishCleanupFailure() } }
     }
 
     private suspend fun claimExecution(id: String): ExecutionClaim? {
         var claim: ExecutionClaim? = null
         var slot: DownloadTransferSlot? = null
         var generationLease: DownloadFileLease? = null
+        val partial = DownloadLeaseCleanupScope(cleanupRegistry)
         try {
             store.update { snapshot ->
                 val record = snapshot.downloads[id] ?: return@update snapshot
                 val now = clock.epochMs()
-                if (lifecycle.value.closed || lifecycle.value.suspended || snapshot.settings.offlineOnly || record.cleanupPending || record.userPaused ||
-                    record.status !in QUEUED || record.liveLease(now) || (record.nextRetryEpochMs ?: 0) > now ||
-                    id in snapshot.downloadFinalizations || record.asset != null) return@update snapshot
+                if (!lifecycle.value.started || lifecycle.value.closed || !DownloadClaimRules.acquisitionReady(snapshot, record,
+                        now, networkState.value, lifecycle.value.suspended,
+                        claimDeferredUntil(record, DownloadClaimKind.ACQUISITION, claimDeferrals.value))) return@update snapshot
                 val limit = snapshot.settings.downloadParallelism.coerceIn(1, 4)
-                if (snapshot.downloads.values.count { it.liveLease(now) && it.status in BUSY && !it.cleanupPending } >= limit) return@update snapshot
                 val item = snapshot.media[record.mediaId] ?: return@update snapshot
-                slot = files.tryTransferSlot(limit) ?: return@update snapshot
+                slot = files.tryTransferSlot(limit, partial)
+                if (slot == null) { deferClaim(record, DownloadClaimKind.ACQUISITION); return@update snapshot }
                 val attemptId = newEntityId("download-attempt")
                 val bound = record.executionBindingId?.let(snapshot.playbackBindings::get)?.let {
                     it.mediaId == record.mediaId && it.selectionOrdinal == 0 && it.firstResultKind == FirstResultKind.VIDEO &&
@@ -415,12 +1070,12 @@ class DownloadCoordinator(
                 // Bytes may only be resumed with their immutable selection AND representation.
                 // An unbound pre-attempt directory must not be paired with a fresh title search.
                 var path = record.stagingPath.takeIf { bound && !record.representationId.isNullOrBlank() }
-                if (path != null) generationLease = files.tryLeasePaths(listOf(path))
+                if (path != null) generationLease = files.tryLeasePaths(listOf(path), partial)
                 val retained = generationLease != null
                 if (!retained) {
                     path = files.part(record.mediaId, attemptId).toString()
-                    generationLease = files.tryLeasePaths(listOf(path))
-                    if (generationLease == null) return@update snapshot
+                    generationLease = files.tryLeasePaths(listOf(path), partial)
+                    if (generationLease == null) { deferClaim(record, DownloadClaimKind.ACQUISITION); return@update snapshot }
                 }
                 require(record.validatorGeneration < Long.MAX_VALUE && record.attemptCount < Int.MAX_VALUE)
                 val generation = maxOf(now.coerceAtLeast(0), record.validatorGeneration + 1)
@@ -435,15 +1090,38 @@ class DownloadCoordinator(
                 claim = ExecutionClaim(next, item, attempt, generationLease!!, slot!!, lifecycle.value.generation)
                 snapshot.copy(downloads = snapshot.downloads + (id to next), downloadAttempts = snapshot.downloadAttempts + (attemptId to attempt))
             }.getOrThrow()
-            if (claim == null) { generationLease?.close(); slot?.close() }
+            if (claim == null) rollbackClaim(partial, listOfNotNull(generationLease, slot))
+            else clearClaimDeferrals(id, DownloadClaimKind.ACQUISITION)
             return claim
-        } catch (error: Exception) {
-            runCatching { generationLease?.close() }; runCatching { slot?.close() }
+        } catch (error: Throwable) {
             // A cancellation on the dispatcher return may happen AFTER the SQLite claim committed.
             // Release only that exact attempt; a rolled-back claim makes this an inert CAS.
-            claim?.let { withContext(NonCancellable) { finishExecution(it,
-                if (error is CancellationException) null else classify(error), error is CancellationException) } }
+            rollbackClaim(partial, listOfNotNull(generationLease, slot), executionClaim = claim, error = error)
+            // The transform can have allocated locks before SQLite rolls it back. A non-null
+            // tentative claim is not evidence that a retry/terminal state became durable.
+            if (error !is CancellationException)
+                store.state.value.downloads[id]?.let { deferClaim(it, DownloadClaimKind.ACQUISITION) }
             throw error
+        }
+    }
+
+    /** Initial FILE-ONLY compensation under the existing claim lock; no allowance callbacks. */
+    private suspend fun rollbackClaim(partial: DownloadLeaseCleanupScope, leases: List<DownloadFileLease>,
+        executionClaim: ExecutionClaim? = null, maintenanceClaim: MaintenanceClaim? = null, error: Throwable? = null) {
+        val pending = partial.pending()
+        if (pending.isEmpty() && leases.isEmpty() && executionClaim == null && maintenanceClaim == null) return
+        withContext(NonCancellable) {
+            val cleanup = RollbackCleanup(DownloadLeaseCleanup(pending + leases), executionClaim, maintenanceClaim,
+                failure = when (error) {
+                    null, is CancellationException -> null
+                    is Exception -> classify(error)
+                    else -> AppFailure(FailureCode.UNEXPECTED)
+                }, cancelled = error is CancellationException)
+            cleanup.failed.value = pending.any { it.failed.value }
+            registerCleanup(cleanup)
+            partial.adopted()
+            // Publication/cancellation is deferred until schedule/runMaintenance exits its locks.
+            attemptCleanup(cleanup, report = false)
         }
     }
 
@@ -456,6 +1134,7 @@ class DownloadCoordinator(
         var failure: AppFailure? = null
         var cancelled = false
         var intendedFinalization: DownloadFinalization? = null
+        val partial = DownloadLeaseCleanupScope(cleanupRegistry)
         try {
             coroutineScope {
                 val executionJob = currentCoroutineContext().job
@@ -464,7 +1143,7 @@ class DownloadCoordinator(
                         delay(heartbeatMs)
                         try { updateOwned(claim) { it } }
                         catch (error: Exception) {
-                            if (error !is CancellationException) { failure = classify(error); mutableFailure.value = failure }
+                            if (error !is CancellationException) { failure = classify(error); publishFailure(failure) }
                             executionJob.cancel(CancellationException("Download lease revoked", error))
                         }
                     }
@@ -472,7 +1151,7 @@ class DownloadCoordinator(
                 try {
                     currentCoroutineContext().ensureActive()
                     updateOwned(claim) { it }
-                    allowance = executionGate.acquire { allowanceExpired(claim) }
+                    withContext(NonCancellable) { allowance = executionGate.acquire { allowanceExpired(claim) } }
                     currentCoroutineContext().ensureActive()
                     val binding = resolver.acquireBinding(claim.item, claim.record.executionBindingId)
                     updateOwned(claim) { it.copy(executionBindingId = binding.id) }
@@ -514,7 +1193,7 @@ class DownloadCoordinator(
                     val staged = OfflineAsset("$id-$attemptId", claim.item.id, part.toString(), result.bytesWritten,
                         mimeType = result.mimeType, codecs = result.codecs, sha256 = hash, representationId = result.representationId,
                         validatorGeneration = claim.record.validatorGeneration, executionBindingId = binding.id)
-                    val duration = validate(staged)
+                    val duration = validate(staged, claim.validationReaders)
                     files.verifiedFile(staged)
                     val intent = DownloadFinalization(id, claim.item.id, part.toString(),
                         files.finalPath(claim.item.id, claim.record.validatorGeneration, result.mimeType, attemptId).toString(),
@@ -523,7 +1202,7 @@ class DownloadCoordinator(
                     intendedFinalization = intent
                     // The independently-running integrity worker must not inspect a just-committed
                     // file before this validated writer has published its session check receipt.
-                    publicationLease = files.tryLeasePaths(listOf(intent.finalPath))
+                    publicationLease = files.tryLeasePaths(listOf(intent.finalPath), partial)
                         ?: throw CancellationException("Final publication path is still owned")
                     store.update { snapshot ->
                         val record = requireOwned(snapshot, claim)
@@ -543,16 +1222,11 @@ class DownloadCoordinator(
             if (failure?.code == FailureCode.BACKGROUND_RESTRICTED) allowanceExpired(claim)
         } finally {
             withContext(NonCancellable) {
-                try { planResource?.close() }
-                catch (error: Exception) { mutableFailure.value = classify(error) }
-                try { allowance?.close() }
-                catch (error: Exception) { mutableFailure.value = classify(error) }
-                finally { claim.allowanceCallbacksOpen.value = false }
-                // Only after all gateway/native/allowance callbacks returned can another host reuse or remove these bytes.
-                runCatching { publicationLease?.close() }.onFailure { mutableFailure.value = AppFailure(FailureCode.STORAGE_IO, "publication_lock_release") }
-                runCatching { claim.generationLease.close() }.onFailure { mutableFailure.value = AppFailure(FailureCode.STORAGE_IO, "generation_lock_release") }
-                runCatching { claim.slot.close() }.onFailure { mutableFailure.value = AppFailure(FailureCode.STORAGE_IO, "transfer_slot_release") }
-                finishExecution(claim, failure, cancelled, intendedFinalization)
+                val cleanup = ExecutionCleanup(claim, planResource, allowance, publicationLease,
+                    failure, cancelled, intendedFinalization, partial.pending())
+                registerCleanup(cleanup) // BEFORE the first fallible close, while the job is registered.
+                partial.adopted()
+                attemptCleanup(cleanup)
             }
         }
     }
@@ -621,13 +1295,16 @@ class DownloadCoordinator(
                 snapshot.copy(downloads = if (owns) snapshot.downloads + (record.id to updated) else snapshot.downloads,
                     downloadAttempts = if (attempt == null) snapshot.downloadAttempts else snapshot.downloadAttempts + (attempt.id to attempt))
             }.getOrThrow()
-        } catch (error: Exception) { mutableFailure.value = classify(error) }
+        } catch (error: Exception) { publishFailure(classify(error)) }
     }
 
-    private suspend fun validate(asset: OfflineAsset): Long? = when (val result = validator.validate(asset)) {
-        is AssetValidation.Valid -> result.durationMs
-        is AssetValidation.Invalid -> throw VeyraException(result.failure)
-    }
+    private suspend fun validate(asset: OfflineAsset, readers: DownloadValidationReaderRetention): Long? =
+        readers.validate {
+            when (val result = validator.validate(asset)) {
+                is AssetValidation.Valid -> result.durationMs
+                is AssetValidation.Invalid -> throw VeyraException(result.failure)
+            }
+        }
 
     private suspend fun commitFinalization(intent: DownloadFinalization, claimant: String, lifecycleGeneration: Long,
         expectedBinding: PlaybackBinding, alreadyPublished: Boolean): Boolean {
@@ -667,6 +1344,13 @@ class DownloadCoordinator(
 
     /** Startup AND periodic reconciliation; unexpired foreign owners are never relabelled or cleared. */
     private suspend fun reconcile() = maintenanceLock.withLock {
+        val physical = physicalRuntime
+        if (physical != null) {
+            store.acquisitionView() // Refresh the ONE canonical owner, never combine its public flows.
+            physical.reconcilePass()
+            maybeSweepRetiredStaging()
+            return@withLock
+        }
         val ids = store.flush().getOrThrow().downloads.keys.toList()
         var checked = 0
         for (id in ids) {
@@ -676,51 +1360,67 @@ class DownloadCoordinator(
                 when {
                     record.cleanupPending -> cleanup(id)
                     id in store.state.value.downloadFinalizations -> recoverFinalization(id)
-                    record.status == DownloadStatus.COMPLETE && !assetChecked(store.state.value, record, checkedAssets.value) &&
+                    lifecycle.value.checksActivated && record.status == DownloadStatus.COMPLETE &&
+                        !assetChecked(store.state.value, record, checkedAssets.value) &&
                         checked < MAX_ASSET_CHECKS_PER_PASS -> { checked++; checkCompletedAsset(id) }
-                    record.leaseOwner != null && !record.liveLease(clock.epochMs()) || record.status in BUSY && record.leaseOwner == null -> releaseExpired(id)
+                    DownloadClaimRules.expiredRecoveryReady(store.state.value, record, clock.epochMs(),
+                        claimDeferredUntil(record, DownloadClaimKind.EXPIRED_RECOVERY, claimDeferrals.value)) -> releaseExpired(id)
                 }
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (error: Exception) { mutableFailure.value = classify(error) }
+            catch (error: Exception) { publishFailure(classify(error)) }
         }
+        maybeSweepRetiredStaging()
+    }
+
+    private suspend fun maybeSweepRetiredStaging() {
         val stamp = clock.monotonicMs()
-        if (!lifecycle.value.closed && !lifecycle.value.suspended && (lastSweepMs == null || stamp - lastSweepMs!! >= 5_000)) {
+        if (lifecycle.value.checksActivated && !lifecycle.value.closed && !lifecycle.value.suspended &&
+            (lastSweepMs == null || stamp - lastSweepMs!! >= 5_000)) {
             sweepRetiredStaging()
             lastSweepMs = stamp
         }
     }
 
     private suspend fun releaseExpired(id: String) {
-        store.update { snapshot ->
-            val record = snapshot.downloads[id] ?: return@update snapshot
-            if (record.liveLease(clock.epochMs()) || record.cleanupPending || id in snapshot.downloadFinalizations) return@update snapshot
-            val target = if (record.status !in BUSY) record.status else if (record.userPaused) DownloadStatus.PAUSED else queuedStatus(snapshot)
-            snapshot.copy(downloads = snapshot.downloads + (id to record.copy(status = target,
-                leaseOwner = null, leaseExpiresEpochMs = null, activeAttemptId = null, updatedEpochMs = clock.epochMs())))
-            // Do not fabricate an old writer's acknowledgement. Its file lock may still be alive.
-        }.getOrThrow()
+        try {
+            store.update { snapshot ->
+                val record = snapshot.downloads[id] ?: return@update snapshot
+                if (!lifecycle.value.started || lifecycle.value.closed || lifecycle.value.suspended ||
+                    !DownloadClaimRules.expiredRecoveryReady(snapshot, record, clock.epochMs(),
+                        claimDeferredUntil(record, DownloadClaimKind.EXPIRED_RECOVERY, claimDeferrals.value))) return@update snapshot
+                val target = if (record.status !in BUSY) record.status else if (record.userPaused) DownloadStatus.PAUSED else queuedStatus(snapshot)
+                snapshot.copy(downloads = snapshot.downloads + (id to record.copy(status = target,
+                    leaseOwner = null, leaseExpiresEpochMs = null, activeAttemptId = null, updatedEpochMs = clock.epochMs())))
+                // Do not fabricate an old writer's acknowledgement. Its file lock may still be alive.
+            }.getOrThrow()
+        } catch (error: Exception) {
+            if (error !is CancellationException)
+                store.state.value.downloads[id]?.let { deferClaim(it, DownloadClaimKind.EXPIRED_RECOVERY) }
+            throw error
+        }
     }
 
     private suspend fun claimMaintenance(id: String, kind: MaintenanceKind): MaintenanceClaim? {
         var claimed: MaintenanceClaim? = null
         var fileLease: DownloadFileLease? = null
+        val partial = DownloadLeaseCleanupScope(cleanupRegistry)
         val token = newEntityId("download-maintenance")
         try {
             store.update { snapshot ->
                 val record = snapshot.downloads[id] ?: return@update snapshot
                 val now = clock.epochMs()
                 val life = lifecycle.value
-                if (life.closed || record.liveLease(now)) return@update snapshot
+                if (!life.started || life.closed || record.liveLease(now) ||
+                    kind == MaintenanceKind.CHECK_ASSET && !life.checksActivated) return@update snapshot
                 val intent = snapshot.downloadFinalizations[id]
-                when (kind) {
-                    MaintenanceKind.CLEANUP -> if (!record.cleanupPending) return@update snapshot
-                    MaintenanceKind.FINALIZATION -> if (record.cleanupPending || record.userPaused || intent == null ||
-                        (record.nextRetryEpochMs ?: 0) > now || record.activeAttemptId != null && record.activeAttemptId != intent.attemptId) return@update snapshot
-                    MaintenanceKind.CHECK_ASSET -> if (record.cleanupPending || record.status != DownloadStatus.COMPLETE || record.asset == null ||
-                        assetChecked(snapshot, record, checkedAssets.value)) return@update snapshot
-                }
+                val checked = assetChecked(snapshot, record, checkedAssets.value)
+                if (!DownloadClaimRules.maintenanceIntent(snapshot, record, kind, checked) ||
+                    (record.nextRetryEpochMs ?: 0) > now ||
+                    (claimDeferredUntil(record, kind.claimKind(), claimDeferrals.value) ?: 0) > now) return@update snapshot
                 if (life.suspended) return@update snapshot.copy(downloads = snapshot.downloads +
                     (id to restrictMaintenanceRecord(record, kind)))
+                if (!DownloadClaimRules.maintenanceReady(snapshot, record, kind, checked, now, life.suspended,
+                        claimDeferredUntil(record, kind.claimKind(), claimDeferrals.value))) return@update snapshot
                 val staging = when (kind) {
                     MaintenanceKind.CLEANUP -> stagingPaths(snapshot, record)
                     MaintenanceKind.FINALIZATION -> setOf(intent!!.stagingPath)
@@ -731,7 +1431,8 @@ class DownloadCoordinator(
                     MaintenanceKind.FINALIZATION -> setOfNotNull(intent!!.finalPath, record.asset?.uri)
                     MaintenanceKind.CHECK_ASSET -> setOf(record.asset!!.uri)
                 }
-                fileLease = files.tryLeasePaths(staging + finals) ?: return@update snapshot
+                fileLease = files.tryLeasePaths(staging + finals, partial)
+                if (fileLease == null) { deferClaim(record, kind.claimKind()); return@update snapshot }
                 val next = record.copy(leaseOwner = token, leaseExpiresEpochMs = now + leaseDurationMs,
                     status = if (kind == MaintenanceKind.FINALIZATION) DownloadStatus.VERIFYING else record.status,
                     activeAttemptId = if (kind == MaintenanceKind.FINALIZATION) intent!!.attemptId else record.activeAttemptId,
@@ -739,22 +1440,27 @@ class DownloadCoordinator(
                 claimed = MaintenanceClaim(next, intent, token, kind, staging, finals, fileLease!!, life.generation)
                 snapshot.copy(downloads = snapshot.downloads + (id to next))
             }.getOrThrow()
+            if (claimed != null) clearClaimDeferrals(id, kind.claimKind())
+            else rollbackClaim(partial, listOfNotNull(fileLease))
             return claimed
-        } catch (error: Exception) {
-            runCatching { fileLease?.close() }
+        } catch (error: Throwable) {
             // As with execution claims, cancellation/adapter failure can surface after the real
             // SQLite commit. Do not strand a maintenance lease before withMaintenance begins.
-            claimed?.let { claim -> withContext(NonCancellable) {
-                try {
-                    store.update { snapshot ->
-                        val record = snapshot.downloads[id] ?: return@update snapshot
-                        if (record.leaseOwner != claim.leaseOwner) snapshot else snapshot.copy(downloads = snapshot.downloads +
-                            (id to record.copy(leaseOwner = null, leaseExpiresEpochMs = null)))
-                    }.getOrThrow()
-                } catch (releaseError: Exception) { mutableFailure.value = classify(releaseError) }
-            } }
+            rollbackClaim(partial, listOfNotNull(fileLease), maintenanceClaim = claimed, error = error)
+            if (error !is CancellationException)
+                store.state.value.downloads[id]?.let { deferClaim(it, kind.claimKind()) }
             throw error
         }
+    }
+
+    private suspend fun finishMaintenanceRollback(claim: MaintenanceClaim) {
+        try {
+            store.update { snapshot ->
+                val record = snapshot.downloads[claim.record.id] ?: return@update snapshot
+                if (record.leaseOwner != claim.leaseOwner) snapshot else snapshot.copy(downloads = snapshot.downloads +
+                    (record.id to record.copy(leaseOwner = null, leaseExpiresEpochMs = null)))
+            }.getOrThrow()
+        } catch (error: Exception) { publishFailure(classify(error)) }
     }
 
     private fun matchesMaintenance(snapshot: AppSnapshot, claim: MaintenanceClaim): Boolean =
@@ -796,6 +1502,7 @@ class DownloadCoordinator(
                 var run: MaintenanceRun? = null
                 var allowance: DownloadExecutionLease? = null
                 var heartbeat: Job? = null
+                var admissionFailed = false
                 try {
                     val current = commands.withLock {
                         // Claim and registration share intent admission. A local Remove/Background
@@ -805,7 +1512,10 @@ class DownloadCoordinator(
                         val life = lifecycle.value
                         if (life.closed || life.suspended || life.generation != prepared.lifecycleGeneration)
                             throw CancellationException("Maintenance host epoch ended")
-                        activeLock.withLock { maintenance[prepared.token] = TrackedMaintenance(prepared, operation) }
+                        activeLock.withLock {
+                            maintenance[prepared.token] = TrackedMaintenance(prepared, operation)
+                            noteActivity()
+                        }
                         prepared
                     } ?: return@coroutineScope
                     current.claim?.let { claim ->
@@ -814,7 +1524,7 @@ class DownloadCoordinator(
                                 delay(heartbeatMs)
                                 try { renewMaintenance(claim) }
                                 catch (error: Exception) {
-                                    if (error !is CancellationException) mutableFailure.value = classify(error)
+                                    if (error !is CancellationException) publishFailure(classify(error))
                                     operation.cancel(CancellationException("Maintenance lease revoked", error))
                                 }
                             }
@@ -822,7 +1532,7 @@ class DownloadCoordinator(
                     }
                     currentCoroutineContext().ensureActive()
                     // Registered BEFORE acquire: a mobile gate may expire inline before it returns.
-                    allowance = executionGate.acquire { maintenanceAllowanceExpired(current) }
+                    withContext(NonCancellable) { allowance = executionGate.acquire { maintenanceAllowanceExpired(current) } }
                     currentCoroutineContext().ensureActive()
                     current.claim?.let { renewMaintenance(it) }
                     action(current)
@@ -832,23 +1542,21 @@ class DownloadCoordinator(
                     val current = run
                     if (classify(error).code == FailureCode.BACKGROUND_RESTRICTED && current != null)
                         maintenanceAllowanceExpired(current)
-                    else throw error
+                    else { admissionFailed = true; throw error }
                 } finally {
                     withContext(NonCancellable) {
                         heartbeat?.cancelAndJoin()
                         val current = run
                         if (current != null) {
-                            // Keep the native OS lease until ALL file/native/Room unwind is over.
-                            // The native validator/release callback has returned through its finally.
-                            try { finishMaintenance(current) }
+                            // Validator/release callback has returned. The independently retained
+                            // cleanup owner now fences allowance -> file -> Room consumption;
+                            // native lease0 and coroutine completion are never drain receipts.
+                            val cleanup = MaintenanceCleanup(current, allowance, admissionFailed)
+                            registerCleanup(cleanup)
+                            try { attemptCleanup(cleanup) }
                             finally {
-                                try { allowance?.close() }
-                                catch (error: Exception) { mutableFailure.value = classify(error) }
-                                finally {
-                                    current.allowanceCallbacksOpen.value = false
-                                    activeLock.withLock { maintenance.remove(current.token) }
-                                    wake.trySend(Unit)
-                                }
+                                activeLock.withLock { maintenance.remove(current.token); noteActivity() }
+                                wake.trySend(Unit)
                             }
                         }
                     }
@@ -857,34 +1565,29 @@ class DownloadCoordinator(
         } catch (cancelled: CancellationException) {
             // A locally revoked maintenance child must not kill the scheduler; external shutdown must.
             currentCoroutineContext().ensureActive()
-        }
+        } finally { withContext(NonCancellable) { publishCleanupFailure() } }
     }
 
     private suspend fun finishMaintenance(run: MaintenanceRun) {
-        val claim = run.claim
-        try { (claim?.fileLease ?: run.orphanLease)?.close() }
-        finally {
-            if (claim != null) {
-                try {
-                    store.update { snapshot ->
-                        val record = snapshot.downloads[claim.record.id] ?: return@update snapshot
-                        if (record.leaseOwner != claim.leaseOwner) return@update snapshot
-                        val life = lifecycle.value
-                        val unchanged = record.asset == claim.record.asset && snapshot.downloadFinalizations[record.id] == claim.intent
-                        val restricted = life.suspended && !life.closed && unchanged &&
-                            (claim.kind == MaintenanceKind.CLEANUP || record.status in setOf(DownloadStatus.COMPLETE, DownloadStatus.VERIFYING))
-                        var updated = if (restricted) restrictMaintenanceRecord(record, claim.kind) else record
-                        if (!life.suspended && !life.closed && unchanged && updated.failure?.code == FailureCode.BACKGROUND_RESTRICTED) {
-                            updated = updated.copy(status = if (updated.status == DownloadStatus.NEEDS_FOREGROUND &&
-                                claim.kind == MaintenanceKind.FINALIZATION && !updated.userPaused && !updated.cleanupPending)
-                                DownloadStatus.VERIFYING else updated.status, failure = null)
-                        }
-                        snapshot.copy(downloads = snapshot.downloads +
-                            (record.id to updated.copy(leaseOwner = null, leaseExpiresEpochMs = null)))
-                    }.getOrThrow()
-                } catch (error: Exception) { mutableFailure.value = classify(error) }
-            }
-        }
+        val claim = run.claim ?: return
+        try {
+            store.update { snapshot ->
+                val record = snapshot.downloads[claim.record.id] ?: return@update snapshot
+                if (record.leaseOwner != claim.leaseOwner) return@update snapshot
+                val life = lifecycle.value
+                val unchanged = record.asset == claim.record.asset && snapshot.downloadFinalizations[record.id] == claim.intent
+                val restricted = life.suspended && !life.closed && unchanged &&
+                    (claim.kind == MaintenanceKind.CLEANUP || record.status in setOf(DownloadStatus.COMPLETE, DownloadStatus.VERIFYING))
+                var updated = if (restricted) restrictMaintenanceRecord(record, claim.kind) else record
+                if (!life.suspended && !life.closed && unchanged && updated.failure?.code == FailureCode.BACKGROUND_RESTRICTED) {
+                    updated = updated.copy(status = if (updated.status == DownloadStatus.NEEDS_FOREGROUND &&
+                        claim.kind == MaintenanceKind.FINALIZATION && !updated.userPaused && !updated.cleanupPending)
+                        DownloadStatus.VERIFYING else updated.status, failure = null)
+                }
+                snapshot.copy(downloads = snapshot.downloads +
+                    (record.id to updated.copy(leaseOwner = null, leaseExpiresEpochMs = null)))
+            }.getOrThrow()
+        } catch (error: Exception) { publishFailure(classify(error)) }
     }
 
     private suspend fun recoverFinalization(id: String) {
@@ -906,11 +1609,12 @@ class DownloadCoordinator(
                     mimeType = intent.mimeType, codecs = intent.codecs, sha256 = intent.sha256,
                     executionBindingId = intent.executionBindingId, measuredDurationMs = intent.mediaDurationMs)
                 files.verifiedFile(asset)
-                validate(asset)
+                validate(asset, claim.validationReaders)
                 files.verifiedFile(asset)
                 currentCoroutineContext().ensureActive()
                 commitFinalization(intent, claim.leaseOwner, claim.lifecycleGeneration, verifiedBinding!!, alreadyPublished = published)
             } catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: LocalMediaValidationReaderUnacknowledged) { throw error }
             catch (error: Exception) {
                 store.update { snapshot ->
                     if (!matchesMaintenance(snapshot, claim)) return@update snapshot
@@ -936,7 +1640,7 @@ class DownloadCoordinator(
                     snapshot
                 }.getOrThrow()
                 files.verifiedFile(asset)
-                validate(asset)
+                validate(asset, claim.validationReaders)
                 files.verifiedFile(asset)
                 var stillCurrent = false
                 store.update { snapshot ->
@@ -951,6 +1655,7 @@ class DownloadCoordinator(
                 }.getOrThrow()
                 if (stillCurrent) checkedAssets.update { it + (id to CheckedAsset(asset, verifiedBinding!!)) }
             } catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: LocalMediaValidationReaderUnacknowledged) { throw error }
             catch (error: Exception) {
                 store.update { snapshot ->
                     if (!matchesMaintenance(snapshot, claim)) return@update snapshot
@@ -993,14 +1698,16 @@ class DownloadCoordinator(
                         }, downloadFinalizations = snapshot.downloadFinalizations - id)
                 }.getOrThrow()
                 checkedAssets.update { it - id }
+                clearClaimDeferrals(id)
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) {
                 val failure = classify(error)
-                mutableFailure.value = failure
+                publishFailure(failure)
                 store.update { snapshot ->
                     if (!matchesMaintenance(snapshot, claim)) return@update snapshot
                     val record = snapshot.downloads.getValue(id)
-                    snapshot.copy(downloads = snapshot.downloads + (id to record.copy(failure = failure, updatedEpochMs = clock.epochMs())))
+                    snapshot.copy(downloads = snapshot.downloads + (id to record.copy(failure = failure,
+                        nextRetryEpochMs = schedulingDeadline(clock.epochMs(), LOCAL_RECHECK_MS), updatedEpochMs = clock.epochMs())))
                 }.getOrThrow()
             }
         }
@@ -1013,14 +1720,23 @@ class DownloadCoordinator(
             if (life.closed || life.suspended) return
             // Metadata-only preflight and a nonblocking native claim avoid starting an OS worker
             // for empty/live generations. All recursive deletion runs under the execution gate.
-            val snapshot = store.state.value
-            if (stagingReferenced(snapshot, path)) continue
+            val physical = physicalRuntime
+            if (if (physical == null) stagingReferenced(store.state.value, path)
+                else physical.stagingReferenced(store.acquisitionViews.value.acquisition, path)) continue
             runMaintenance(prepare = prepare@ {
                 if (lifecycle.value.closed || lifecycle.value.suspended) return@prepare null
-                val lease = files.tryLeasePaths(listOf(path)) ?: return@prepare null
+                val lease = files.tryLeasePaths(listOf(path), DownloadLeaseCleanupScope(cleanupRegistry)) ?: return@prepare null
                 MaintenanceRun(newEntityId("download-sweep"), lifecycle.value.generation, orphanLease = lease)
             }) { run ->
-                store.update { snapshot ->
+                if (physical != null) {
+                    // The exact OS generation lock is already held. Re-read under that lock;
+                    // new physical path claims also require it, so a stale hint cannot authorize
+                    // deletion. Retained schema3 attempt/receipt HISTORY is never rewritten.
+                    val view = store.acquisitionView()
+                    currentCoroutineContext().ensureActive()
+                    if (!lifecycle.value.closed && !lifecycle.value.suspended && lifecycle.value.generation == run.lifecycleGeneration &&
+                        !physical.stagingReferenced(view.acquisition, path)) files.resetStaging(path)
+                } else store.update { snapshot ->
                     if (lifecycle.value.closed || lifecycle.value.suspended || lifecycle.value.generation != run.lifecycleGeneration ||
                         stagingReferenced(snapshot, path)) return@update snapshot
                     val attempts = snapshot.downloadAttempts.values.filter { it.stagingPath == path }
@@ -1070,7 +1786,39 @@ class DownloadCoordinator(
             throw VeyraException(AppFailure(FailureCode.CORRUPT_MEDIA, "offline_execution_binding_mismatch"))
     }
 
-    private fun signalWork() { wake.trySend(Unit); maintenanceWake.trySend(Unit) }
+    private fun signalWork() {
+        wake.trySend(Unit)
+        maintenanceWake.trySend(Unit)
+        notifySchedulingChange()
+    }
+
+    private fun notifySchedulingChange() {
+        // Hints may wrap; authoritative activity/ticket epochs below never do.
+        mutableSchedulingChanges.update { if (it == Long.MAX_VALUE) 0 else it + 1 }
+    }
+
+    private fun noteActivity() {
+        activityEpoch.update { check(it < Long.MAX_VALUE) { "Download activity epoch exhausted" }; it + 1 }
+        notifySchedulingChange()
+    }
+
+    private fun deferClaim(record: DownloadRecord, kind: DownloadClaimKind) {
+        val key = DownloadClaimKey(record.id, kind)
+        val relevant = record.schedulingRecord()
+        claimDeferrals.update { previous ->
+            val refusals = previous[key]?.takeIf { it.record == relevant }?.refusals?.coerceAtMost(4)?.plus(1) ?: 1
+            val delay = (LOCAL_RECHECK_MS shl (refusals - 1)).coerceAtMost(60_000)
+            previous + (key to DownloadClaimDeferral(relevant, schedulingDeadline(clock.epochMs(), delay), refusals))
+        }
+        noteActivity()
+    }
+
+    private fun clearClaimDeferrals(id: String, kind: DownloadClaimKind? = null) {
+        claimDeferrals.update { previous -> previous.filterKeys { it.id != id || kind != null && it.kind != kind } }
+    }
+
+    private fun schedulingDeadline(now: Long, delayMs: Long): Long =
+        now.coerceIn(0, Long.MAX_VALUE - delayMs) + delayMs
 
     private fun queuedStatus(snapshot: AppSnapshot): DownloadStatus = when {
         snapshot.settings.offlineOnly -> DownloadStatus.WAITING_NETWORK
@@ -1079,9 +1827,15 @@ class DownloadCoordinator(
     }
     private fun queueFailure(snapshot: AppSnapshot): AppFailure? =
         if (!snapshot.settings.offlineOnly && lifecycle.value.suspended) AppFailure(FailureCode.BACKGROUND_RESTRICTED) else null
-    private fun DownloadRecord.liveLease(now: Long): Boolean = leaseOwner != null && (leaseExpiresEpochMs ?: 0) > now
+    private fun DownloadRecord.liveLease(now: Long): Boolean = liveDownloadLease(now)
     private fun requireOpen() { check(!lifecycle.value.closed) { "Download coordinator closed" } }
+    private fun restartRequiredFailure() =
+        AppFailure(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_failed_restart_required")
+    private fun publishFailure(failure: AppFailure?) {
+        mutableFailure.update { lifecycle.value.drainFailure ?: cleanupFailure.value ?: failure }
+    }
     private fun classify(error: Exception): AppFailure = when (error) {
+        is LocalMediaValidationReaderUnacknowledged -> AppFailure(FailureCode.BACKGROUND_RESTRICTED, "local_validation_reader_unacknowledged")
         is VeyraException -> error.failure
         is IllegalArgumentException, is IllegalStateException -> AppFailure(FailureCode.INVALID_STATE)
         else -> AppFailure(FailureCode.UNEXPECTED)
@@ -1089,10 +1843,11 @@ class DownloadCoordinator(
 
     companion object {
         private const val MAX_ASSET_CHECKS_PER_PASS = 2
+        private const val LOCAL_RECHECK_MS = 5_000L
         private val VIDEO_ID = Regex("[A-Za-z0-9_-]{11}")
         private const val MAX_RETRIES = 5
-        private val BUSY = setOf(DownloadStatus.RESOLVING, DownloadStatus.RUNNING, DownloadStatus.VERIFYING)
-        private val QUEUED = setOf(DownloadStatus.QUEUED, DownloadStatus.WAITING_NETWORK)
+        private val BUSY = DownloadClaimRules.busy
+        private val QUEUED = DownloadClaimRules.queued
         private val RUNNABLE_OR_BUSY = BUSY + QUEUED
         private val RETRYABLE = setOf(FailureCode.NETWORK_UNAVAILABLE, FailureCode.RATE_LIMITED)
         fun retryDelayMs(attempt: Int, retryAfterMs: Long? = null): Long =

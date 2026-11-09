@@ -68,11 +68,26 @@ class TrackDetailPresentationTest {
         assertTrue(ready.isReady())
         listOf(
             ready.copy(status = DownloadStatus.VERIFYING),
+            ready.copy(status = DownloadStatus.NEEDS_FOREGROUND),
             ready.copy(asset = null),
             ready.copy(asset = ready.asset!!.copy(mediaId = "another")),
             ready.copy(asset = ready.asset!!.copy(sizeBytes = 0)),
             ready.copy(asset = ready.asset!!.copy(uri = "  ")),
         ).forEach { assertFalse(it.isReady()) }
+    }
+
+    @Test fun recheckingMaterializedAssetsNeverUsesActiveTransferControlsOrClaimsReadiness() {
+        val record = DownloadRecord("download", track.id, DownloadStatus.VERIFYING, asset = asset(null))
+        listOf(DownloadStatus.VERIFYING, DownloadStatus.NEEDS_FOREGROUND).forEach { status ->
+            val projected = record.copy(status = status)
+            assertTrue(projected.isRecheckingAsset())
+            assertFalse(projected.isReady())
+            assertFalse(projected.copy(asset = null).isRecheckingAsset(), "Asset-null finalization remains a transfer")
+            assertFalse(projected.copy(cleanupPending = true).isRecheckingAsset())
+        }
+        assertFalse(record.copy(status = DownloadStatus.FAILED).isRecheckingAsset(), "Corrupt files still support retry")
+        assertFalse(record.copy(status = DownloadStatus.COMPLETE).isRecheckingAsset())
+        assertFalse((null as DownloadRecord?).isRecheckingAsset())
     }
 
     @Test fun receiptsForOtherMediaCannotBeBorrowedEvenThroughADanglingAssetReference() {

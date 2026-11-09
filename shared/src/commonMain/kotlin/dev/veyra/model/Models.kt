@@ -3,7 +3,8 @@ package dev.veyra.model
 import kotlinx.serialization.Serializable
 import kotlin.random.Random
 
-@Serializable enum class SourceProvider { YOUTUBE, RSS, LOCAL, COMMONS }
+/** Requested metadata provenance; all media execution still uses the central acquisition port. */
+@Serializable enum class SourceProvider { YOUTUBE, RSS, LOCAL, COMMONS, MUSICBRAINZ }
 @Serializable enum class MediaKind { MUSIC, EPISODE }
 @Serializable enum class QueueContext { MUSIC, PODCAST }
 @Serializable enum class RepeatMode { OFF, ALL, ONE }

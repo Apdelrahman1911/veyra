@@ -141,6 +141,12 @@ class ArtworkCache(
             ?: item.showId?.let(::cachedShowArtworkPath)
     }
 
+    /** Exact captured identity only: no latest-media/show fallback or new network/file work. */
+    fun cachedCapturedArtworkPath(path: String?): String? {
+        if (!lifetime.isActive || path == null) return null
+        return path.takeIf { captured -> verifiedPaths.value.values.any { it == captured } }
+    }
+
     fun cachedShowArtworkPath(showId: String): String? {
         if (!lifetime.isActive) return null
         return store.state.value.shows[showId]?.localArtworkPath?.takeIf { verifiedPaths.value[showKey(showId)] == it }

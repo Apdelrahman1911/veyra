@@ -10,13 +10,17 @@ import dev.veyra.model.RepeatMode
 import dev.veyra.playback.PlaybackCommand
 import dev.veyra.playback.PlaybackPhase
 import dev.veyra.playback.PlaybackState
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -28,6 +32,8 @@ import java.nio.file.Files
 import java.nio.file.LinkOption.NOFOLLOW_LINKS
 import java.nio.file.StandardCopyOption.ATOMIC_MOVE
 import java.security.MessageDigest
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 
 sealed interface DesktopSessionStatus {
     data class Available(val implementation: String) : DesktopSessionStatus
@@ -35,7 +41,7 @@ sealed interface DesktopSessionStatus {
 }
 
 /** Application-lifetime system controls. Unavailable D-Bus/native sessions never crash playback. */
-class DesktopMediaSession private constructor(
+class DesktopMediaSession internal constructor(
     private val backend: Backend?,
     parentScope: CoroutineScope,
     playback: StateFlow<PlaybackState>,
@@ -44,6 +50,8 @@ class DesktopMediaSession private constructor(
     private val scope = CoroutineScope(SupervisorJob(parentScope.coroutineContext[Job]) + Dispatchers.IO)
     private val mutableStatus = MutableStateFlow(initialStatus)
     val status: StateFlow<DesktopSessionStatus> = mutableStatus.asStateFlow()
+    private val closing = AtomicBoolean()
+    private val closed = CompletableDeferred<Unit>()
     private val updates = scope.launch {
         if (backend != null) playback.collect { state ->
             try { backend.update(state) }
@@ -51,14 +59,31 @@ class DesktopMediaSession private constructor(
         }
     }
 
-    suspend fun close() = withContext(NonCancellable + Dispatchers.IO) {
-        updates.cancel()
-        updates.join()
-        runCatching { backend?.close() }
-        scope.cancel()
+    suspend fun close(): Unit = withContext(NonCancellable) {
+        // Return from IO into an active non-cancellable context first. A combined NC+IO
+        // switch can lose its terminal result while returning to an already-cancelled caller.
+        withContext(Dispatchers.IO) drain@{
+            if (!closing.compareAndSet(false, true)) { closed.await(); return@drain }
+            var failure: Throwable? = null
+            suspend fun release(action: suspend () -> Unit) {
+                try { action() } catch (error: Throwable) { if (failure == null) failure = error }
+            }
+            try {
+                // Never release a native backend while its last metadata update is still running.
+                release { updates.cancelAndJoin() }
+                release { backend?.close() }
+            } finally {
+                release { scope.coroutineContext[Job]?.cancelAndJoin() }
+                // Closing is once-only, but its outcome is sticky for every concurrent/later owner.
+                // A swallowed backend failure would let the host publish a false verified success.
+                val error = failure
+                if (error == null) closed.complete(Unit) else closed.completeExceptionally(error)
+            }
+            closed.await()
+        }
     }
 
-    private interface Backend : AutoCloseable { fun update(state: PlaybackState) }
+    internal interface Backend : AutoCloseable { fun update(state: PlaybackState) }
 
     companion object {
         suspend fun create(
@@ -71,47 +96,148 @@ class DesktopMediaSession private constructor(
             quit: () -> Unit,
             setVolume: (Float) -> Unit,
             outputChanged: () -> Unit,
+            onOwned: (DesktopMediaSession) -> Unit,
         ): DesktopMediaSession {
             val platform = DesktopNativeRuntime.platform()
-            var status: DesktopSessionStatus = DesktopSessionStatus.Unavailable("media_session_not_initialized")
-            var acquired: Backend? = null
-            val backend = try {
-                if (platform.startsWith("linux")) {
-                    withContext(Dispatchers.IO) {
+            // Reading an existing window pointer allocates no session backend. If this fails,
+            // createOwned still publishes one resource-free, visibly unavailable owner.
+            val windowId = if (platform.startsWith("windows")) {
+                try {
+                    withContext(Dispatchers.Main) {
+                        check(window.isDisplayable) { "Native window is not ready" }
+                        Pointer.nativeValue(Native.getComponentPointer(window))
+                    }
+                } catch (_: CancellationException) {
+                    throw FactoryCancellation("media_session_initialization_cancelled")
+                } catch (_: LinkageError) { null }
+                catch (_: Exception) { null }
+            } else 0L
+            return createOwned(
+                parentScope = parentScope,
+                playback = playback,
+                implementation = when {
+                    platform.startsWith("linux") -> "MPRIS2"
+                    platform.startsWith("windows") -> "Windows SMTC"
+                    else -> "macOS MediaPlayer"
+                },
+                unavailableReason = if (platform.startsWith("linux")) "session_bus_unavailable" else "native_session_unavailable",
+                onOwned = onOwned,
+                acquireBackend = {
+                    if (platform.startsWith("linux")) {
                         val mpris = LinuxMprisSession.create(command, raise, quit, setVolume)
-                        status = DesktopSessionStatus.Available("MPRIS2")
                         object : Backend {
                             override fun update(state: PlaybackState) = mpris.update(state)
                             override fun close() = mpris.close()
-                        }.also { acquired = it }
-                    }
-                } else {
-                    val windowId = if (platform.startsWith("windows")) withContext(Dispatchers.Main) {
-                        check(window.isDisplayable) { "Native window is not ready" }
-                        Pointer.nativeValue(Native.getComponentPointer(window))
-                    } else 0L
-                    withContext(Dispatchers.IO) {
-                        NativeBackend.create(context, platform, windowId, command, outputChanged).also {
-                            acquired = it
-                            status = DesktopSessionStatus.Available(if (platform.startsWith("windows")) "Windows SMTC" else "macOS MediaPlayer")
                         }
+                    } else {
+                        NativeBackend.create(context, platform, checkNotNull(windowId) { "Native window is unavailable" }, command, outputChanged)
+                    }
+                },
+            )
+        }
+
+        /** Publish BEFORE allocation, not after a cancellation-sensitive dispatcher return.
+         * A host must retain this exact owner even if create throws or its caller is cancelled.
+         * The synchronous acquisition seam returns ownership of every backend it allocates;
+         * any partial native allocation before it returns remains that backend factory's duty. */
+        internal suspend fun createOwned(
+            parentScope: CoroutineScope,
+            playback: StateFlow<PlaybackState>,
+            implementation: String,
+            unavailableReason: String,
+            onOwned: (DesktopMediaSession) -> Unit,
+            dispatcher: CoroutineDispatcher = Dispatchers.IO,
+            acquireBackend: () -> Backend,
+        ): DesktopMediaSession {
+            val holder = AcquiringBackend(playback)
+            val session = DesktopMediaSession(holder, parentScope, playback,
+                DesktopSessionStatus.Unavailable("media_session_not_initialized"))
+            try {
+                // This cannot strand native state when a registration callback throws: no
+                // backend has been requested yet. Also drain the resource-free owned scope.
+                onOwned(session)
+            } catch (failure: Throwable) {
+                session.close()
+                if (failure is CancellationException)
+                    throw FactoryCancellation("media_session_initialization_cancelled")
+                throw FactoryFailure("media_session_owner_registration_failed")
+            }
+            try {
+                withContext(dispatcher) {
+                    currentCoroutineContext().ensureActive()
+                    holder.acquire(acquireBackend) {
+                        session.mutableStatus.value = DesktopSessionStatus.Available(implementation)
                     }
                 }
-            } catch (cancelled: CancellationException) {
-                withContext(NonCancellable + Dispatchers.IO) { runCatching { acquired?.close() } }
-                throw cancelled
+                currentCoroutineContext().ensureActive()
+                return session
+            } catch (failure: Throwable) {
+                session.mutableStatus.value = DesktopSessionStatus.Unavailable(unavailableReason)
+                // close() is NonCancellable and joins the metadata collector before the holder.
+                // A failed release remains retained/sanitized in that owner; NEVER turn it into
+                // a graceful unavailable return or hide it behind a cancellation-only job join.
+                session.close()
+                when (failure) {
+                    is CancellationException -> throw FactoryCancellation("media_session_initialization_cancelled")
+                    is FactoryFailure -> throw failure
+                    is LinkageError, is Exception -> return session
+                    else -> throw FactoryFailure("media_session_initialization_failed")
+                }
             }
-            catch (_: LinkageError) {
-                // A missing native dependency is a visible session capability failure, not an
-                // exception which may tear down an otherwise usable audio/library window.
-                status = DesktopSessionStatus.Unavailable("native_session_unavailable")
-                null
+        }
+
+        private class FactoryFailure(val reason: String) : IllegalStateException(reason)
+
+        /** Preserve cancellation with only a static classification, including across await.
+         * The reason field prevents coroutine stack-recovery cloning; sealing the null cause
+         * also prevents a constructor-based copy from attaching the original exception. */
+        private class FactoryCancellation(val reason: String) : CancellationException(reason) {
+            init { initCause(null) }
+        }
+
+        /** One pre-registered owner, not a detached resource registry. Admission, attachment,
+         * projection and release share this monitor because Backend acquisition is synchronous.
+         * A host close either prevents acquisition or waits until its returned backend is owned. */
+        private class AcquiringBackend(private val playback: StateFlow<PlaybackState>) : Backend {
+            private var backend: Backend? = null
+            private var closed = false
+            private var cleanupFailure: FactoryFailure? = null
+
+            @Synchronized fun acquire(factory: () -> Backend, attached: () -> Unit) {
+                if (closed) throw FactoryFailure("media_session_closed_during_initialization")
+                check(backend == null) { "Session backend was already acquired" }
+                backend = factory()
+                // The collector may have consumed its initial projection while the holder was
+                // empty. Populate controls now; no later playback change is needed for setup.
+                backend!!.update(playback.value)
+                // Publish before releasing the projection lock, so a subsequent collector
+                // failure cannot be overwritten by a late optimistic Available assignment.
+                attached()
             }
-            catch (_: Exception) {
-                status = DesktopSessionStatus.Unavailable(if (platform.startsWith("linux")) "session_bus_unavailable" else "native_session_unavailable")
-                null
+
+            @Synchronized override fun update(state: PlaybackState) {
+                if (closed) return
+                try { backend?.update(state) }
+                catch (_: Throwable) { throw FactoryFailure("media_session_projection_failed") }
             }
-            return DesktopMediaSession(backend, parentScope, playback, status)
+
+            @Synchronized override fun close() {
+                if (closed) {
+                    cleanupFailure?.let { throw it }
+                    return
+                }
+                closed = true
+                try {
+                    backend?.close()
+                    backend = null
+                } catch (_: Throwable) {
+                    // Retain the backend after failure, but never its arbitrary exception text.
+                    // The enclosing session's once-only close keeps this outcome sticky.
+                    val failure = FactoryFailure("media_session_cleanup_failed")
+                    cleanupFailure = failure
+                    throw failure
+                }
+            }
         }
     }
 
@@ -139,7 +265,11 @@ class DesktopMediaSession private constructor(
         }
 
         @Synchronized override fun close() {
-            handle?.let(library::veyra_session_close)
+            val pointer = handle ?: return
+            // ABI2 consumes the native handle only after successful retirement.
+            // A failure leaves the inert handle and callback strongly owned;
+            // the enclosing session retains the failure and never retries it.
+            check(library.veyra_session_close(pointer) == 1) { "Native media-session cleanup is incomplete" }
             handle = null
         }
 
@@ -159,7 +289,13 @@ class DesktopMediaSession private constructor(
                     finally { Files.deleteIfExists(stage) }
                 }
                 require(Files.isRegularFile(file, NOFOLLOW_LINKS) && DesktopNativeRuntime.sha256(file) == digest) { "Bundled media session integrity check failed" }
-                val library = Native.load(file.toString(), NativeSessionLibrary::class.java, mapOf(Library.OPTION_STRING_ENCODING to "UTF-8"))
+                // Disarmed native callback/delegate tails may remain enqueued by
+                // the OS after unregister. Keep their code loaded until process
+                // exit, independently of a closed backend's garbage collection.
+                val library = sessionLibraries.computeIfAbsent(file.toString()) {
+                    Native.load(it, NativeSessionLibrary::class.java, mapOf(Library.OPTION_STRING_ENCODING to "UTF-8"))
+                }
+                check(library.veyra_session_abi_version() == 2) { "Bundled native media-session ABI does not match" }
                 val callback = object : NativeSessionCallback {
                     override fun invoke(identifier: Int, value: Double) {
                         if (!value.isFinite()) return
@@ -178,17 +314,22 @@ class DesktopMediaSession private constructor(
                         }
                     }
                 }
-                val pointer = library.veyra_session_create(window, callback) ?: error("Native session is unavailable")
-                return NativeBackend(library, pointer, callback)
+                // Allocate the Kotlin owner before C may return an owned partial
+                // initialization. No wrapper allocation follows that handoff.
+                val owner = NativeBackend(library, null, callback)
+                owner.handle = library.veyra_session_create(window, callback) ?: error("Native session is unavailable")
+                return owner
             }
         }
     }
 }
 
 internal interface NativeSessionCallback : Callback { fun invoke(identifier: Int, value: Double) }
+private val sessionLibraries = ConcurrentHashMap<String, NativeSessionLibrary>()
 internal interface NativeSessionLibrary : Library {
+    fun veyra_session_abi_version(): Int
     fun veyra_session_create(window: Long, callback: NativeSessionCallback): Pointer?
     fun veyra_session_update(session: Pointer, title: String, artist: String, album: String, artwork: String, entry: String,
         durationMs: Long, positionMs: Long, rate: Double, status: Int, capabilities: Int): Int
-    fun veyra_session_close(session: Pointer)
+    fun veyra_session_close(session: Pointer): Int
 }

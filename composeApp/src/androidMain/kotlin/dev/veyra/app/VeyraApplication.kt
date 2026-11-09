@@ -7,6 +7,7 @@ import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
 import dev.veyra.data.createAndroidLibraryStore
+import dev.veyra.downloads.DownloadNetworkState
 import dev.veyra.model.AppFailure
 import dev.veyra.model.FailureCode
 import dev.veyra.model.LanguagePreference
@@ -15,6 +16,8 @@ import dev.veyra.platform.audio.AndroidAssetValidator
 import dev.veyra.platform.audio.AndroidAudioEngine
 import dev.veyra.platform.audio.AndroidMediaSessionBridge
 import dev.veyra.platform.background.AndroidDownloadExecutionGate
+import dev.veyra.platform.background.AndroidDownloadConnectivity
+import dev.veyra.platform.background.AndroidDownloadScheduler
 import dev.veyra.platform.background.PlaybackForegroundGate
 import dev.veyra.playback.PlaybackCommand
 import dev.veyra.playback.PlaybackResult
@@ -26,6 +29,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -47,11 +51,15 @@ class VeyraApplication : Application() {
     val nativeLanguage: StateFlow<LanguagePreference> = mutableNativeLanguage.asStateFlow()
     private var container: AppContainer? = null
     private var visibleActivities = 0
+    private var visibleActivation: Job? = null
     private lateinit var engine: AndroidAudioEngine
+    private lateinit var connectivity: AndroidDownloadConnectivity
 
     lateinit var playbackForeground: PlaybackForegroundGate
         private set
     lateinit var downloadExecution: AndroidDownloadExecutionGate
+        private set
+    lateinit var downloadScheduling: AndroidDownloadScheduler
         private set
     lateinit var mediaSession: AndroidMediaSessionBridge
         private set
@@ -60,7 +68,15 @@ class VeyraApplication : Application() {
         super.onCreate()
         refreshNativeLanguage()
         playbackForeground = PlaybackForegroundGate(this)
-        downloadExecution = AndroidDownloadExecutionGate(this)
+        connectivity = AndroidDownloadConnectivity(this)
+        downloadExecution = AndroidDownloadExecutionGate(
+            this,
+            ensureCoverage = { downloadScheduling.ensureInstalled() },
+            // Independent worker/enqueue-owned drain, not a transfer expiration callback. Merely
+            // awaiting construction never opens a user session or reactivates a cancelled owner.
+            drainOwners = { constructed.await().downloads.drainForBackground() },
+        )
+        downloadScheduling = AndroidDownloadScheduler(this, downloadExecution)
         engine = AndroidAudioEngine(this) { playbackForeground.awaitForeground() }
         var directory: File? = null
         mediaSession = AndroidMediaSessionBridge(
@@ -88,7 +104,7 @@ class VeyraApplication : Application() {
             val created = try {
                 val root = withContext(Dispatchers.IO) { androidApplicationDirectory(filesDir) }
                 directory = root
-                val services = AndroidPlatformServices(this@VeyraApplication, root, engine, downloadExecution)
+                val services = AndroidPlatformServices(this@VeyraApplication, root, engine, downloadExecution, connectivity.state)
                 AppContainer(services, appScope)
             } catch (cancelled: CancellationException) {
                 constructed.cancel(cancelled)
@@ -112,9 +128,12 @@ class VeyraApplication : Application() {
                     if (state is AppInitialization.Ready) resumeDownloadsWhenVisible()
                 }
             }
-            try { created.initialize() }
+            // A periodic repair can cold-start Application. Do not start transfers, restored
+            // collection requests or historical COMPLETE validation merely to read scheduling.
+            try { created.initializeScheduling() }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { /* AppInitialization.Failed remains visible and recoverable. */ }
+            resumeDownloadsWhenVisible()
         }
     }
 
@@ -131,12 +150,15 @@ class VeyraApplication : Application() {
     internal fun nativeLabelsContext() = nativeLanguageContext(this, nativeLanguage.value)
 
     /** Main-only service lifecycle callback; interruption is tagged by the originating native deck. */
-    internal fun onPlaybackServiceLost() { engine.foregroundServiceLost() }
+    internal fun onPlaybackServiceLost(failure: AppFailure? = null) { engine.foregroundServiceLost(failure) }
 
-    /** Workers may await an attempt, but a failed attempt never poisons later explicit recovery. */
+    /** UI/native playback waits for a full user session, never used by a scheduling-only worker. */
     suspend fun awaitContainer(): AppContainer = constructed.await().also {
         awaitApplicationInitialization(it.initialization)
     }
+
+    /** Room + scheduling only. A failed attempt never poisons a later legal recovery/retry. */
+    suspend fun awaitSchedulingContainer(): AppContainer = constructed.await().also { it.initializeScheduling() }
 
     suspend fun dispatch(command: PlaybackCommand): PlaybackResult {
         val state = bootstrap.value
@@ -160,14 +182,18 @@ class VeyraApplication : Application() {
     fun onHidden() { visibleActivities = (visibleActivities - 1).coerceAtLeast(0) }
 
     private fun resumeDownloadsWhenVisible() {
-        if (visibleActivities == 0) return
-        appScope.launch {
+        if (visibleActivities == 0 || visibleActivation?.isActive == true) return
+        visibleActivation = appScope.launch {
             try {
-                val initialized = container ?: return@launch
-                if (initialized.initialization.value !is AppInitialization.Ready) return@launch
-                downloadExecution.awaitForegroundReady()
+                val initialized = constructed.await()
+                if (visibleActivities == 0) return@launch
+                // Library/playback may become Ready even if the previous download owner cannot
+                // drain. Shared bounded activation below records that typed restriction visibly.
+                initialized.initialize()
                 if (visibleActivities > 0 && initialized.initialization.value is AppInitialization.Ready) {
-                    initialized.downloads.resumePending()
+                    // Coverage retry admits future actions only; rejected enqueue/resume commands
+                    // are never remembered/replayed after a later cancellation or visibility change.
+                    initialized.activateUserDownloads()
                 }
             }
             catch (cancelled: CancellationException) { throw cancelled }
@@ -198,6 +224,7 @@ private class AndroidPlatformServices(
     directory: File,
     override val engine: AndroidAudioEngine,
     override val downloadExecution: AndroidDownloadExecutionGate,
+    override val downloadNetworkState: StateFlow<DownloadNetworkState>,
 ) : PlatformServices {
     override val dataDirectory = directory.absolutePath
     override val store = createAndroidLibraryStore(application, dataDirectory)
@@ -208,6 +235,13 @@ private class AndroidPlatformServices(
         application.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
     // A picker is not a second acquisition layer. Remains disabled until central registration is proven.
     override val supportsFileImport = false
+    override suspend fun ensureDownloadScheduling() {
+        // USER_SESSION activation only: drain an old native owner before resumePending, then
+        // establish durable repair coverage. This awaits existing expirations, NOT a new FGS.
+        // Cold Room-only/wake/repair bootstrap uses the installer directly and never acquires here.
+        downloadExecution.awaitForegroundReady()
+        application.downloadScheduling.ensureInstalled()
+    }
 
     override suspend fun openExternalUrl(url: String) = withContext(Dispatchers.Main.immediate) {
         val checked = PublicUrlPolicy.normalize(url)

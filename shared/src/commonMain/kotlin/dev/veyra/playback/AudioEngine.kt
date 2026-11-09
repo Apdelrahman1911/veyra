@@ -5,6 +5,7 @@ import dev.veyra.model.MediaItem
 import dev.veyra.model.OfflineAsset
 import dev.veyra.model.PlaybackBinding
 import dev.veyra.model.StreamTransport
+import dev.veyra.source.execution.AcquisitionPlaybackSource
 import kotlinx.coroutines.flow.Flow
 
 data class EngineCapabilities(
@@ -174,6 +175,18 @@ sealed interface EngineEvent {
     ) : EngineEvent
 }
 
+/**
+ * A scoped file-release fence, not a playback/transport event. An unacknowledged retired reader
+ * must veto deletion without pausing, replacing, or reporting an error for an unrelated active
+ * or staged source. The failure contains a stable, sanitized code only, never native diagnostics.
+ */
+sealed interface NativeReaderDrainResult {
+    /** Both native-owner epoch checks matched this exact controller epoch. */
+    data class Drained(val expectedGeneration: Long) : NativeReaderDrainResult
+    data object Superseded : NativeReaderDrainResult
+    data class Unacknowledged(val failure: AppFailure) : NativeReaderDrainResult
+}
+
 /** One audio owner, no authoritative native playlist. All operations are main-safe. */
 interface AudioEngine {
     val capabilities: EngineCapabilities
@@ -181,12 +194,36 @@ interface AudioEngine {
     val events: Flow<EngineEvent>
     /** Takes source.resource ownership on invocation, also on failure or a rejected generation. */
     suspend fun prepare(source: ResolvedPlayable, startPositionMs: Long, generation: Long)
+    /**
+     * Typed handoff. Register ownership BEFORE validating the selection or rejecting this source.
+     * Use NativePlaybackSource.Acquired.validateSelection inside the same retained-owner path as
+     * legacy admission. There is no default unsupported-close implementation: failed release must
+     * remain strongly owned and veto awaitRetiredReaders, even on an intentionally unsupported fake.
+     * Neutral input never becomes a synthetic MediaItem/mediaId/ResolvedPlayable.
+     */
+    suspend fun prepare(source: AcquisitionPlaybackSource, selection: PlaybackSelection, startPositionMs: Long, generation: Long)
     suspend fun play(generation: Long)
     suspend fun pause(generation: Long)
     suspend fun seek(positionMs: Long, seekSequence: Long, generation: Long)
     suspend fun setRate(speed: Float, generation: Long)
     /** Monotonic barrier: accept generation >= active; other commands require the exact active generation. */
     suspend fun stop(generation: Long)
+    /**
+     * Serialized with native ownership, after already-enqueued stop/cancel/promotion commands.
+     * Await every retired native reader and resource/loader closure without changing any live
+     * deck. Check the exact expected epoch before AND after those waits. Only a positively
+     * pristine, never-source-owning engine may establish its initial controller epoch zero;
+     * an empty engine after a failed/replaced load is not pristine. There is no default ACK.
+     *
+     * Failed retirement handles remain strongly owned; reader/resource-close-only failure is
+     * a sticky release veto and must not enter a global Error/silence path. A distinct failure
+     * to establish native transport silence may require transport-wide containment during
+     * retirement; this fence itself never initiates unrelated transport changes.
+     * Cancellation cannot be converted to Drained.
+     * The controller still rechecks its generation and the target's current/staged exclusion
+     * after this fence and its own resource fence; this result alone authorizes no deletion.
+     */
+    suspend fun awaitRetiredReaders(expectedGeneration: Long): NativeReaderDrainResult
     suspend fun close()
 }
 
@@ -204,6 +241,8 @@ interface AudioEngine {
  */
 interface CrossfadeAudioEngine : AudioEngine {
     suspend fun preloadNext(source: ResolvedPlayable, startPositionMs: Long, nextGeneration: Long, generation: Long)
+    /** Same transferred ownership and exact typed-selection check as prepare; explicit MUSIC only. */
+    suspend fun preloadNext(source: AcquisitionPlaybackSource, selection: PlaybackSelection, startPositionMs: Long, nextGeneration: Long, generation: Long)
     suspend fun beginCrossfade(durationMs: Long, nextGeneration: Long, generation: Long)
     /** Acknowledge a CrossfadeCompleted event after the coordinator commits the new queue cursor. */
     suspend fun confirmCrossfade(nextGeneration: Long, generation: Long)

@@ -84,6 +84,9 @@ fun LibraryScreen(
                 item { LibraryHeader(selectedSection, onAction) }
                 item {
                     OutlinedTextField(query, { query = it }, label = { Text(strings.text(TextKey.SearchLocal)) }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp).testTag("library-query"))
+                }
+                // The query is its own scroll target even when options wrap into several rows.
+                item {
                     FlowRow(Modifier.padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (selectedSection == LibrarySection.PLAYLISTS) {
                             Button(onClick = { create = true }, modifier = Modifier.heightIn(min = 48.dp).testTag("new-playlist")) { Text(strings.text(TextKey.NewPlaylist)) }
@@ -291,8 +294,8 @@ private fun DownloadRow(record: DownloadRecord, snapshot: AppSnapshot, onAction:
         }
         record.failure?.let { Text(strings.errorFor(it), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (record.isReady()) {
-                if (item != null) Button({ onAction(MusicUiAction.Play(item)) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.Play)) }
+            if (record.isReady() || record.isRecheckingAsset()) {
+                if (item != null && record.isReady()) Button({ onAction(MusicUiAction.Play(item)) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.Play)) }
                 OutlinedButton({ remove = true }, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.RemoveDownload)) }
             } else {
                 when (record.status) {

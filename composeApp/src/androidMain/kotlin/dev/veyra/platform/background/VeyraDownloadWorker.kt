@@ -11,14 +11,12 @@ import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import dev.veyra.app.R
 import dev.veyra.app.VeyraApplication
+import dev.veyra.downloads.DownloadActivation
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -32,15 +30,19 @@ class VeyraDownloadWorker(context: Context, parameters: WorkerParameters) : Coro
         var foreground = false
         var labelsJob: Job? = null
         try {
+            // Cold worker startup opens Room/scheduling ONLY. Full user initialization may restore
+            // collections or validate historical files, so it is forbidden on this headless path.
+            val coordinator = app.awaitSchedulingContainer().downloads
+            app.downloadScheduling.ensureInstalled()
             try {
                 setForeground(foregroundInfo())
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) {
                 gate.failedStart(token)
-                return@coroutineScope Result.failure()
+                return@coroutineScope downloadSchedulingFailed("foreground_start")
             }
             foreground = gate.foregroundStarted(token)
-            if (!foreground) return@coroutineScope Result.failure()
+            if (!foreground) return@coroutineScope downloadSchedulingFailed("foreground_owner")
             labelsJob = launch {
                 app.nativeLanguage.collect {
                     // Updating an existing notification does not acquire or replace an OS lease.
@@ -52,19 +54,15 @@ class VeyraDownloadWorker(context: Context, parameters: WorkerParameters) : Coro
                     catch (_: Exception) { /* Nonessential refresh; keep the existing notice. */ }
                 }
             }
-            val coordinator = app.awaitContainer().downloads
-            // This does not resume explicit user-paused records. There is only one coordinator.
-            coordinator.resumePending()
-            while (true) {
-                combine(coordinator.hasPendingWork, gate.leaseCount) { pending, leases -> !pending && leases == 0 }
-                    .first { it }
-                // Let the eagerly-derived shared StateFlow settle after bootstrap/finalization.
-                delay(1_000)
-                if (!coordinator.hasPendingWork.value && gate.retireIfIdle(token)) break
-            }
+            // The actual setForeground ACK precedes execution activation. A timed wake never
+            // clears user pause/NeedsForeground through resumePending, nor checks every old asset.
+            coordinator.start(DownloadActivation.DURABLE_WORK)
+            AndroidDownloadWorkerLifetime(gate, app.downloadScheduling).retireWhenIdle(token, coordinator)
             Result.success()
         } catch (cancelled: CancellationException) { throw cancelled }
-        catch (_: Exception) { return@coroutineScope Result.failure() }
+        // NEVER Result.retry in this immediate foreground chain. It would create a delayed leaf
+        // that blocks future APPEND_OR_REPLACE acquisitions. Wake/repair lanes own bounded retry.
+        catch (_: Exception) { return@coroutineScope downloadSchedulingFailed("foreground_scheduling") }
         finally {
             withContext(NonCancellable) {
                 labelsJob?.cancelAndJoin()

@@ -3,7 +3,7 @@
 # so the caller's HOME and existing gh authentication remain unchanged.
 
 _veyra_prepare_environment() {
-    local root python native_root native_home native_tmp native_prefs native_daemon
+    local root python native_root native_home native_tmp native_prefs native_daemon display_authority
     root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)" || return 1
     if command -v python3 >/dev/null 2>&1; then
         python=python3
@@ -16,9 +16,11 @@ _veyra_prepare_environment() {
 
     # Validate every destination before mkdir: a pre-existing escaping symlink
     # must not turn a project-local-looking path into an out-of-scope write.
-    "$python" -B - "$root" <<'PY'
+    display_authority="$("$python" -B - "$root" <<'PY'
 import os
 import pathlib
+import re
+import stat
 import sys
 
 root = pathlib.Path(sys.argv[1]).resolve(strict=True)
@@ -33,6 +35,36 @@ for path in paths:
     resolved = path.resolve(strict=False)
     if os.path.commonpath((str(root), str(resolved))) != str(root):
         raise SystemExit('Refusing an out-of-repository tool directory: ' + str(path))
+
+# A nested dev/Gradle wrapper must keep the exact private Xvfb cookie selected
+# by with-display.sh, not restore the empty default Xauthority. Arbitrary
+# inherited desktop authentication is never accepted as this context.
+authority = os.environ.get('VEYRA_DISPLAY_AUTHORITY', '')
+if authority:
+    failure = 'Refusing an invalid owned display authentication context'
+    if (not sys.platform.startswith('linux')
+            or authority != os.environ.get('XAUTHORITY')
+            or os.environ.get('VEYRA_DISPLAY_MOUNT_NAMESPACE') != os.readlink('/proc/self/ns/mnt')):
+        raise SystemExit(failure)
+    path = pathlib.Path(authority)
+    display = re.fullmatch(r'127\.0\.0\.1:([0-9]{1,5})', os.environ.get('DISPLAY', ''))
+    if (path.parent != root / '.work/runtime'
+            or not re.fullmatch(r'xauth-[A-Za-z0-9_-]{6,64}', path.name)
+            or str(path) != authority or not display or not 1 <= int(display[1]) <= 59535):
+        raise SystemExit(failure)
+    for ancestor in (path, *path.parents):
+        if ancestor == root:
+            break
+        if ancestor.is_symlink():
+            raise SystemExit(failure)
+    try:
+        info = path.lstat()
+    except OSError:
+        raise SystemExit(failure)
+    if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_uid != os.getuid()
+            or info.st_mode & 0o077 or not info.st_mode & stat.S_IRUSR
+            or not 1 <= info.st_size <= 4096):
+        raise SystemExit(failure)
 old_mask = os.umask(0o077)
 try:
     for path in paths:
@@ -41,8 +73,9 @@ try:
         (root / '.work' / 'runtime').chmod(0o700)
 finally:
     os.umask(old_mask)
+print(authority)
 PY
-    if [ "$?" -ne 0 ]; then return 1; fi
+    )" || return 1
 
     native_root="$root"
     if command -v cygpath >/dev/null 2>&1; then
@@ -83,7 +116,7 @@ PY
     export npm_config_userconfig="$native_root/.work/config/npmrc"
     export npm_config_prefix="$native_root/.work/data/npm"
     export PIP_CACHE_DIR="$native_root/.work/cache/pip"
-    export XAUTHORITY="$native_root/.work/runtime/Xauthority"
+    export XAUTHORITY="${display_authority:-$native_root/.work/runtime/Xauthority}"
     export GIT_CONFIG_NOSYSTEM=1
     export GIT_CONFIG_GLOBAL="$native_root/.work/config/gitconfig"
     export GIT_TERMINAL_PROMPT=0

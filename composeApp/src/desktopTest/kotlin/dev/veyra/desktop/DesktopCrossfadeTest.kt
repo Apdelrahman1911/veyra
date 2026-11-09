@@ -164,7 +164,7 @@ class DesktopCrossfadeTest {
         } finally { events.job.cancel(); withContext(NonCancellable) { engine.close(); engine.close() } }
     }
 
-    @Test fun failedRetirementCannotBeForgottenBySuccessfulUnrelatedStopOrShutdown() = runBlocking {
+    @Test fun failedRetirementCannotBeForgottenBySuccessfulUnrelatedStopOrShutdown(): Unit = runBlocking {
         val config = config()
         var failedCloseAttempts = 0
         val bad = object : PlaybackResource {
@@ -224,7 +224,7 @@ class DesktopCrossfadeTest {
         }
     }
 
-    @Test fun shutdownCleanupFailureIsNotReportedAsSuccessfulClose() = runBlocking {
+    @Test fun shutdownCleanupFailureIsNotReportedAsSuccessfulClose(): Unit = runBlocking {
         val config = config()
         val bad = object : PlaybackResource { override suspend fun close(): Unit = error("Authored shutdown failure") }
         val engine = DesktopAudioEngine.create(config); val events = Events(this, engine)
