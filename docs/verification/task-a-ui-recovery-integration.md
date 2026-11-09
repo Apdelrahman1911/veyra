@@ -157,3 +157,22 @@ Their sealed runner and command records invoke the wrapper without an override, 
 claim was unsupported. Input, test, lock and drain evidence remain genuine; no historical argv or
 seal was changed. Future runs use a separate corrected runner that records and supplies the
 required literal JVM argument. The bounded 384 MiB Test fork was configured in the historical runs.
+
+## Lead integration adjudication — 2026-11-09
+
+The lead independently checked all 563 regular Git blobs for the `ee1aa17` attempts, 188
+sealed attempt/XML entries, log/XML method equality, start/end lock identities, admission prefixes,
+and zero before/after/done process samples. The retained timeout remains unexplained; a later
+full pass is not a diagnosis. The older crossfade rendering hang remains outside Room/UI acceptance.
+
+Followup source `3bf58fa9209f5b137fd67db680bf33ee7518bd26` suppresses Validate targets for inactive batch/claim intent.
+`lead-paused-validation-001` executed **21 tests / 3 suites / 0 failures/errors/skips**, exit 0,
+equal before/after inputs, 24 valid sealed entries and zero owned process samples. Its corrected
+runner records and passes the required daemon JVM override. The connected test asserts a paused
+batch exposes no validation target and a captured action rejects before native validation; exact
+reactivation restores the target and successful local validation. No shared production change
+was made and no unchanged shared full suite was repeated.
+
+**Task A Room/download recovery and connected UI integration is accepted in this scope.**
+This permits Task B preparation/execution; full-app regression, native/live audio, platform/device,
+package/legal/signing/retention and distribution acceptance remain separate gates.
