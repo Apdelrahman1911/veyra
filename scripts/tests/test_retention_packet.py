@@ -2,6 +2,7 @@
 """Authored nonproduction retention-packet regressions. No network or release action."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -107,9 +108,11 @@ class RetentionPacketTest(unittest.TestCase):
         text = text.replace('"kind": "veyra-retention-canary",',
                             '"kind": "veyra-retention-canary", "kind": "veyra-retention-canary",')
         (self.packet / "manifest.json").write_text(text + "\n")
-        sums = subprocess.check_output(["sha256sum", "payload.bin", "identity.json", "manifest.json"],
-                                       cwd=self.packet, text=True)
-        (self.packet / "SHA256SUMS").write_text("".join(sorted(sums.splitlines(keepends=True))))
+        lines = []
+        for name in ("payload.bin", "identity.json", "manifest.json"):
+            data = (self.packet / name).read_bytes()
+            lines.append(hashlib.sha256(data).hexdigest() + "  " + name + "\n")
+        (self.packet / "SHA256SUMS").write_text("".join(sorted(lines)))
         self.verify(ok=False)
 
     def test_wrong_canary_tag_is_rejected_before_writing(self):

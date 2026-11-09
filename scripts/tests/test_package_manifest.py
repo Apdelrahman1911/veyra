@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import platform
 import shutil
 import subprocess
 import sys
@@ -15,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/package-manifest.py"
 SHA = "a" * 40
 PIN = "b" * 40
+EXT = {"Linux": ".deb", "Darwin": ".dmg", "Windows": ".msi"}[platform.system()]
 
 
 class PackageManifestTest(unittest.TestCase):
@@ -46,7 +48,7 @@ class PackageManifestTest(unittest.TestCase):
                                                   text=True).strip()
         self.addCleanup(shutil.rmtree, self.directory, True)
 
-    def package(self, name: str = "Veyra_1.0.0_amd64.deb", data: bytes = b"authored package bytes\n",
+    def package(self, name: str = "Veyra_1.0.0_amd64" + EXT, data: bytes = b"authored package bytes\n",
                 nanoseconds_after_marker: int = 1_000_000_000) -> Path:
         path = self.packages / name
         path.write_bytes(data)
@@ -86,8 +88,8 @@ class PackageManifestTest(unittest.TestCase):
         self.assertIn("newly generated", result.stderr)
 
     def test_stale_package_is_excluded_when_a_new_one_exists(self):
-        self.package("old.deb", nanoseconds_after_marker=-1_000_000_000)
-        current = self.package("current.deb")
+        self.package("old" + EXT, nanoseconds_after_marker=-1_000_000_000)
+        current = self.package("current" + EXT)
         result = self.run_manifest()
         self.assertEqual(0, result.returncode, result.stderr)
         value = json.loads((self.root / ".work/verification/packages.json").read_text())
@@ -100,7 +102,7 @@ class PackageManifestTest(unittest.TestCase):
 
     def test_symlinked_package_is_rejected(self):
         target = self.package()
-        link = self.packages / "link.deb"
+        link = self.packages / ("link" + EXT)
         try:
             link.symlink_to(target)
         except OSError:
