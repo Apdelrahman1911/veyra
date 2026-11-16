@@ -14,7 +14,7 @@ import kotlinx.coroutines.withContext
 import okio.Buffer
 import okio.ByteString.Companion.encodeUtf8
 import okio.FileSystem
-import okio.HashingSource
+import okio.buffer
 import okio.Path
 import okio.Path.Companion.toPath
 import okio.use
@@ -36,6 +36,14 @@ internal interface DownloadFileLease { fun close() }
 
 /** Nonblocking OS advisory locks; contention is null, an actual I/O error is not contention. */
 internal expect fun tryAcquireDownloadFileLease(path: String): DownloadFileLease?
+
+/** Streaming SHA-256 backed by the platform's native implementation. */
+internal expect class FileSha256() {
+    fun update(bytes: ByteArray, offset: Int, count: Int)
+    /** Lowercase hex digest; finishes and releases the hash. */
+    fun hex(): String
+    fun close()
+}
 
 /** Internal seam for decorating real leases in fault tests; production always uses the OS port. */
 internal fun interface DownloadFileLeaseFactory { fun acquire(path: String): DownloadFileLease? }
@@ -287,14 +295,21 @@ class DownloadFiles internal constructor(directory: String, val fileSystem: File
     suspend fun sha256(path: Path): String = withContext(Dispatchers.IO) {
         val safe = ownedPath(path.toString())
         val digest = storageOperation {
-            HashingSource.sha256(fileSystem.source(safe)).use { hashing ->
-                val buffer = Buffer()
-                while (hashing.read(buffer, 64L * 1024) != -1L) {
-                    currentCoroutineContext().ensureActive()
-                    buffer.clear()
+            // Platform-native SHA-256: the portable implementation made every offline play wait
+            // on two full-file hashes on iOS. Same bytes, same digest, same integrity guarantee.
+            val hasher = FileSha256()
+            try {
+                fileSystem.source(safe).buffer().use { source ->
+                    val chunk = ByteArray(256 * 1024)
+                    while (true) {
+                        val count = source.read(chunk, 0, chunk.size)
+                        if (count < 0) break
+                        hasher.update(chunk, 0, count)
+                        currentCoroutineContext().ensureActive()
+                    }
                 }
-                hashing.hash.hex()
-            }
+                hasher.hex()
+            } finally { hasher.close() }
         }
         // EOF and Source.close can themselves block. A same-IO withContext return does not
         // replace this check: never hand a cancelled hash to the native validation stage.
