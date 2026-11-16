@@ -879,6 +879,18 @@ class AppContainer(
                         playlists = old.playlists + Playlist(id, action.name.trim(),
                             item?.let { listOf(PlaylistEntry(newEntityId(), it.id)) }.orEmpty(), clock.epochMs(), clock.epochMs()))
                 }
+                if (action.openAfter) navigate { it.open(AppDetail(DetailKind.PLAYLIST, id)) }
+            }
+            is MusicUiAction.AddAllToPlaylist -> editLibrary { old ->
+                require(old.playlists.any { it.id == action.playlistId })
+                val items = action.items.filter { it.kind == MediaKind.MUSIC }.distinctBy { it.id }
+                old.copy(media = mergeMedia(old.media, items), playlists = old.playlists.map { playlist ->
+                    if (playlist.id != action.playlistId) playlist else {
+                        val present = playlist.entries.mapTo(mutableSetOf()) { it.mediaId }
+                        val added = items.filter { it.id !in present }.map { PlaylistEntry(newEntityId(), it.id) }
+                        if (added.isEmpty()) playlist else playlist.copy(entries = playlist.entries + added, updatedEpochMs = clock.epochMs())
+                    }
+                })
             }
             is MusicUiAction.RenamePlaylist -> editLibrary { old ->
                 require(action.name.isNotBlank() && action.name.length <= 500)

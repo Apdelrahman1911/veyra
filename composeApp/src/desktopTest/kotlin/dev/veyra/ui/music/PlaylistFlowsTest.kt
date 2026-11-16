@@ -34,6 +34,7 @@ import dev.veyra.ui.design.TextKey
 import dev.veyra.ui.design.VeyraTheme
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import androidx.compose.ui.test.assertTextContains
 import org.junit.Rule
 import org.junit.Test
 
@@ -48,10 +49,13 @@ class PlaylistFlowsTest {
         val actions = mutableListOf<MusicUiAction>()
         ui.setContent { VeyraTheme(false, LanguagePreference.ENGLISH) { LibraryScreen(AppSnapshot(), LibrarySection.PLAYLISTS, { actions += it }, Modifier.size(900.dp, 680.dp)) } }
         ui.onNodeWithTag("new-playlist").performClick()
+        // A ready name is suggested, so one tap creates and opens the playlist.
+        ui.onNodeWithTag("playlist-name").assertTextContains("Playlist 1")
+        ui.onNodeWithTag("playlist-name").performTextReplacement("   ")
         ui.onNodeWithTag("playlist-save").assertIsNotEnabled()
         ui.onNodeWithTag("playlist-name").performTextReplacement("  ليلة هادئة  ")
         ui.onNodeWithTag("playlist-save").performClick()
-        assertEquals(listOf<MusicUiAction>(MusicUiAction.CreatePlaylist("ليلة هادئة")), actions)
+        assertEquals(listOf<MusicUiAction>(MusicUiAction.CreatePlaylist("ليلة هادئة", openAfter = true)), actions)
     }
 
     @Test fun addingAnExistingTrackRequiresAnExplicitDuplicateDecision() {
@@ -71,10 +75,27 @@ class PlaylistFlowsTest {
         val snapshot = AppSnapshot(media = mapOf(track.id to track), playlists = listOf(playlist))
         val actions = mutableListOf<MusicUiAction>()
         ui.setContent { VeyraTheme(false, LanguagePreference.ENGLISH) { PlaylistDetailScreen(snapshot, playlist.id, { actions += it }, Modifier.size(900.dp, 680.dp)) } }
+        ui.onNodeWithTag("playlist-edit").performClick()
         ui.onNodeWithTag("playlist-detail").performScrollToNode(hasTestTag("playlist-entry-copy-b"))
         ui.onNode(hasContentDescription(strings.text(TextKey.RemoveFromPlaylist)) and hasAnyAncestor(hasTestTag("playlist-entry-copy-b"))).performClick()
         assertEquals(listOf<MusicUiAction>(MusicUiAction.RemovePlaylistEntry(playlist.id, "copy-b")), actions)
         assertEquals(2, snapshot.playlists.single().entries.size)
+    }
+
+    @Test fun addSongsSelectsSeveralTracksAndAddsThemInOneAction() {
+        val second = MediaItem("test-track-2", "Second authored track", MediaKind.MUSIC, SourceRef(SourceProvider.YOUTUBE, "test-track-2"))
+        val third = MediaItem("test-track-3", "Third authored track", MediaKind.MUSIC, SourceRef(SourceProvider.YOUTUBE, "test-track-3"))
+        val snapshot = AppSnapshot(media = mapOf(track.id to track, second.id to second, third.id to third), playlists = listOf(playlist))
+        val actions = mutableListOf<MusicUiAction>()
+        ui.setContent { VeyraTheme(false, LanguagePreference.ENGLISH) { PlaylistDetailScreen(snapshot, playlist.id, { actions += it }, Modifier.size(900.dp, 680.dp)) } }
+        ui.onNodeWithTag("playlist-add-songs").performClick()
+        ui.onNodeWithTag("add-songs-confirm").assertIsNotEnabled()
+        ui.onNodeWithTag("add-song-${second.id}").performClick()
+        ui.onNodeWithTag("add-song-${third.id}").performClick()
+        ui.onNodeWithTag("add-songs-confirm").performClick()
+        val added = actions.single() as MusicUiAction.AddAllToPlaylist
+        assertEquals(playlist.id, added.playlistId)
+        assertEquals(setOf(second.id, third.id), added.items.map { it.id }.toSet())
     }
 
     @Test fun playlistReplacementRequiresConfirmationAndUndoTargetsMusicRatherThanTheViewedQueue() {
@@ -93,7 +114,7 @@ class PlaylistFlowsTest {
     @Test fun deletingAPlaylistIsAnExplicitReferenceOnlyAction() {
         val actions = mutableListOf<MusicUiAction>()
         ui.setContent { VeyraTheme(false, LanguagePreference.ENGLISH) { LibraryScreen(AppSnapshot(playlists = listOf(playlist)), LibrarySection.PLAYLISTS, { actions += it }, Modifier.size(900.dp, 680.dp)) } }
-        ui.onNodeWithContentDescription(strings.text(TextKey.MoreOptions)).performClick()
+        ui.onNodeWithContentDescription(strings.text(TextKey.PlaylistOptions)).performClick()
         ui.onNodeWithText(strings.text(TextKey.DeletePlaylist)).performClick()
         ui.onNodeWithText(strings.format(TextKey.ConfirmDeletePlaylist, playlist.name)).assertIsDisplayed()
         assertTrue(actions.isEmpty())

@@ -97,10 +97,13 @@ sealed interface MusicUiAction {
     data class SetFavorites(val items: List<MediaItem>, val favorite: Boolean) : MusicUiAction
     data class ToggleFavorite(val item: MediaItem) : MusicUiAction
     data class Enqueue(val item: MediaItem, val playNext: Boolean) : MusicUiAction
-    data class CreatePlaylist(val name: String, val initialItem: MediaItem? = null) : MusicUiAction
+    /** [openAfter] opens the new playlist so the user can add songs straight away. */
+    data class CreatePlaylist(val name: String, val initialItem: MediaItem? = null, val openAfter: Boolean = false) : MusicUiAction
     data class RenamePlaylist(val playlistId: String, val name: String) : MusicUiAction
     data class DeletePlaylist(val playlistId: String) : MusicUiAction
     data class AddToPlaylist(val playlistId: String, val item: MediaItem, val allowDuplicate: Boolean = false) : MusicUiAction
+    /** Adds several tracks in one library edit; tracks already in the playlist are skipped. */
+    data class AddAllToPlaylist(val playlistId: String, val items: List<MediaItem>) : MusicUiAction
     data class RemovePlaylistEntry(val playlistId: String, val entryId: String) : MusicUiAction
     data class MovePlaylistEntry(val playlistId: String, val entryId: String, val toIndex: Int) : MusicUiAction
     data object UndoLibrary : MusicUiAction

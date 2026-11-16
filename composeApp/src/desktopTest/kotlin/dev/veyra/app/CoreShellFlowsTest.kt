@@ -224,6 +224,7 @@ class CoreShellFlowsTest {
         await { app.container.navigation.value.librarySection == LibrarySection.PLAYLISTS }
         ui.onNodeWithText(playlist.name).performScrollTo().performClick()
         await { app.container.navigation.value.detail?.id == playlist.id }
+        ui.onNodeWithTag("playlist-edit").performClick()
         ui.onNodeWithTag("playlist-detail").performScrollToNode(hasTestTag("playlist-entry-playlist-copy"))
         ui.onNode(hasContentDescription(english.text(TextKey.RemoveFromPlaylist)) and
             hasAnyAncestor(hasTestTag("playlist-entry-playlist-copy"))).performScrollTo().performClick()

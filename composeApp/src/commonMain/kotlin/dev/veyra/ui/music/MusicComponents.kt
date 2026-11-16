@@ -283,32 +283,13 @@ internal fun ConfirmActionDialog(title: String, description: String, confirm: St
 }
 
 @Composable
-internal fun PlaylistNameDialog(initialName: String = "", onDismiss: () -> Unit, onSave: (String) -> Unit) {
-    val strings = LocalStrings.current
-    var name by remember(initialName) { mutableStateOf(initialName) }
-    val valid = validatedPlaylistName(name)
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(strings.text(if (initialName.isBlank()) TextKey.CreatePlaylist else TextKey.RenamePlaylist)) },
-        text = {
-            OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text(strings.text(TextKey.PlaylistName)) }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("playlist-name"))
-        },
-        confirmButton = {
-            TextButton(onClick = { valid?.let(onSave) }, enabled = valid != null, modifier = Modifier.heightIn(min = 48.dp).testTag("playlist-save")) {
-                Text(strings.text(if (initialName.isBlank()) TextKey.CreatePlaylist else TextKey.Rename))
-            }
-        },
-        dismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.Cancel)) } },
-    )
-}
-
-@Composable
 internal fun PlaylistPicker(item: MediaItem, playlists: List<Playlist>, onAction: (MusicUiAction) -> Unit, onDismiss: () -> Unit) {
     val strings = LocalStrings.current
     var creating by remember { mutableStateOf(false) }
     var duplicate by remember { mutableStateOf<Playlist?>(null) }
     if (creating) {
-        PlaylistNameDialog(onDismiss = { creating = false }, onSave = {
+        PlaylistNameDialog(onDismiss = { creating = false },
+            suggestedName = defaultPlaylistName(playlists) { strings.text(TextKey.DefaultPlaylistName).replace("{0}", it) }, onSave = {
             onAction(MusicUiAction.CreatePlaylist(it, item)); onDismiss()
         })
     } else if (duplicate != null) {

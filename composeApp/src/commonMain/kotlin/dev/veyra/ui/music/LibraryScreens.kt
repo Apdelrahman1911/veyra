@@ -86,16 +86,39 @@ fun LibraryScreen(
     }
     Column(modifier.fillMaxSize().testTag("library-screen")) {
         if (selectedSection == LibrarySection.OVERVIEW) {
+            val playlists = remember(snapshot.playlists) { snapshot.playlists.sortedByDescending { it.updatedEpochMs } }
             LazyColumn(Modifier.fillMaxSize().testTag("library-list"), contentPadding = PaddingValues(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 item { ScreenIntro(strings.text(TextKey.Library), strings.text(TextKey.LibrarySubtitle)) }
-                item { CollectionLink(strings.text(TextKey.Favorites), strings.format(TextKey.TrackCount, snapshot.favoriteIds.size.toString()), VeyraIcons.Favorite,
-                    { onAction(MusicUiAction.OpenLibrary(LibrarySection.FAVORITES)) }, Modifier.padding(horizontal = 20.dp).testTag("library-FAVORITES")) }
-                item { CollectionLink(strings.text(TextKey.Playlists), null, VeyraIcons.Library,
-                    { onAction(MusicUiAction.OpenLibrary(LibrarySection.PLAYLISTS)) }, Modifier.padding(horizontal = 20.dp).testTag("library-PLAYLISTS")) }
-                item { CollectionLink(strings.text(TextKey.Downloads), strings.text(TextKey.ReadyOffline), VeyraIcons.Download,
-                    { onAction(MusicUiAction.OpenLibrary(LibrarySection.DOWNLOADS)) }, Modifier.padding(horizontal = 20.dp).testTag("library-DOWNLOADS")) }
-                if (options.supportsImport || snapshot.media.values.any { it.source.provider == SourceProvider.LOCAL }) item { CollectionLink(strings.text(TextKey.OnThisDevice), if (options.supportsImport) strings.text(TextKey.ImportDescription) else null, VeyraIcons.Music,
-                    { onAction(MusicUiAction.OpenLibrary(LibrarySection.LOCAL_FILES)) }, Modifier.padding(horizontal = 20.dp).testTag("library-LOCAL_FILES")) }
+                item {
+                    Button(onClick = { create = true }, modifier = Modifier.padding(horizontal = 20.dp).fillMaxWidth().heightIn(min = 52.dp).testTag("new-playlist")) {
+                        Icon(VeyraIcons.Add, null, Modifier.padding(end = 8.dp)); Text(strings.text(TextKey.NewPlaylist))
+                    }
+                }
+                item {
+                    FlowRow(Modifier.padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp), maxItemsInEachRow = 2) {
+                        LibraryShortcut(strings.text(TextKey.Favorites), strings.format(TextKey.TrackCount, strings.number(snapshot.favoriteIds.size.toLong())),
+                            VeyraIcons.Favorite, { onAction(MusicUiAction.OpenLibrary(LibrarySection.FAVORITES)) }, Modifier.weight(1f).testTag("library-FAVORITES"))
+                        LibraryShortcut(strings.text(TextKey.Downloads), strings.text(TextKey.ReadyOffline), VeyraIcons.Download,
+                            { onAction(MusicUiAction.OpenLibrary(LibrarySection.DOWNLOADS)) }, Modifier.weight(1f).testTag("library-DOWNLOADS"))
+                        if (options.supportsImport || snapshot.media.values.any { it.source.provider == SourceProvider.LOCAL }) {
+                            LibraryShortcut(strings.text(TextKey.OnThisDevice), if (options.supportsImport) strings.text(TextKey.ImportAudio) else null, VeyraIcons.Music,
+                                { onAction(MusicUiAction.OpenLibrary(LibrarySection.LOCAL_FILES)) }, Modifier.weight(1f).testTag("library-LOCAL_FILES"))
+                        }
+                    }
+                }
+                item {
+                    Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(strings.text(TextKey.YourPlaylists), Modifier.weight(1f).semantics { heading() }, style = MaterialTheme.typography.titleLarge)
+                        TextButton({ onAction(MusicUiAction.OpenLibrary(LibrarySection.PLAYLISTS)) }, Modifier.heightIn(min = 48.dp).testTag("library-PLAYLISTS")) {
+                            Text(strings.text(TextKey.SeeAll))
+                        }
+                    }
+                }
+                if (playlists.isEmpty()) item {
+                    EmptyState(strings.text(TextKey.CreateFirstPlaylist), strings.text(TextKey.NoPlaylistsDescription),
+                        strings.text(TextKey.NewPlaylist), { create = true }, Modifier.padding(horizontal = 20.dp))
+                } else items(playlists, key = { it.id }) { PlaylistLibraryRow(it, snapshot, onAction) }
             }
         } else if (selectedSection == LibrarySection.DOWNLOADS) {
             DownloadsContent(snapshot, onAction, Modifier.weight(1f), options) {
@@ -125,7 +148,7 @@ fun LibraryScreen(
                     if (matching.isEmpty()) item {
                         EmptyState(strings.text(if (query.isBlank()) TextKey.NoPlaylists else TextKey.NoResults), strings.text(if (query.isBlank()) TextKey.NoPlaylistsDescription else TextKey.NoResultsDescription), modifier = Modifier.padding(20.dp))
                     }
-                    items(matching, key = { it.id }) { PlaylistLibraryRow(it, onAction) }
+                    items(matching, key = { it.id }) { PlaylistLibraryRow(it, snapshot, onAction) }
                 } else {
                     if (media.isEmpty()) item {
                         EmptyState(
@@ -139,7 +162,9 @@ fun LibraryScreen(
             }
         }
     }
-    if (create) PlaylistNameDialog(onDismiss = { create = false }, onSave = { onAction(MusicUiAction.CreatePlaylist(it)); create = false })
+    if (create) PlaylistNameDialog(onDismiss = { create = false },
+        suggestedName = defaultPlaylistName(snapshot.playlists) { strings.text(TextKey.DefaultPlaylistName).replace("{0}", it) },
+        onSave = { onAction(MusicUiAction.CreatePlaylist(it, openAfter = true)); create = false })
 }
 
 /** The header scrolls with the list: large labels must not consume a short window's whole viewport. */
@@ -163,24 +188,41 @@ private fun LibrarySection.label(): TextKey = when (this) {
 }
 
 @Composable
-private fun PlaylistLibraryRow(playlist: Playlist, onAction: (MusicUiAction) -> Unit) {
+private fun LibraryShortcut(title: String, subtitle: String?, icon: androidx.compose.ui.graphics.vector.ImageVector,
+    onClick: () -> Unit, modifier: Modifier = Modifier) {
+    androidx.compose.material3.Surface(onClick = onClick, modifier = modifier.heightIn(min = 96.dp), shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surface) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Icon(icon, null, tint = MaterialTheme.colorScheme.primary)
+            Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+        }
+    }
+}
+
+@Composable
+private fun PlaylistLibraryRow(playlist: Playlist, snapshot: AppSnapshot, onAction: (MusicUiAction) -> Unit) {
     val strings = LocalStrings.current
     var rename by remember(playlist.id) { mutableStateOf(false) }
     var delete by remember(playlist.id) { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
-    Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 5.dp).background(MaterialTheme.colorScheme.surface, RoundedCornerShape(22.dp)).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-        TextButton(onClick = { onAction(MusicUiAction.OpenPlaylist(playlist.id)) }, modifier = Modifier.weight(1f).heightIn(min = 72.dp)) {
-            Icon(VeyraIcons.Library, null, Modifier.padding(end = 12.dp))
+    androidx.compose.material3.Surface(onClick = { onAction(MusicUiAction.OpenPlaylist(playlist.id)) },
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).testTag("playlist-row-${playlist.id}"),
+        shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface) {
+        Row(Modifier.padding(start = 12.dp, top = 10.dp, bottom = 10.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            PlaylistCover(playlist, snapshot, Modifier.size(56.dp))
             Column(Modifier.weight(1f)) {
                 MetadataText(playlist.name, Modifier.fillMaxWidth(), style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(strings.format(TextKey.TrackCount, playlist.entries.size.toString()), Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Start)
+                Text(strings.format(TextKey.TrackCount, strings.number(playlist.entries.size.toLong())), Modifier.fillMaxWidth(),
+                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Start)
             }
-        }
-        Box {
-            ActionIcon(VeyraIcons.MoreOptions, strings.text(TextKey.MoreOptions), { menu = true })
-            DropdownMenu(menu, { menu = false }) {
-                DropdownMenuItem(text = { Text(strings.text(TextKey.RenamePlaylist)) }, onClick = { menu = false; rename = true })
-                DropdownMenuItem(text = { Text(strings.text(TextKey.DeletePlaylist)) }, onClick = { menu = false; delete = true })
+            Box {
+                ActionIcon(VeyraIcons.MoreOptions, strings.text(TextKey.PlaylistOptions), { menu = true })
+                DropdownMenu(menu, { menu = false }) {
+                    DropdownMenuItem(text = { Text(strings.text(TextKey.RenamePlaylist)) }, onClick = { menu = false; rename = true })
+                    DropdownMenuItem(text = { Text(strings.text(TextKey.DeletePlaylist)) }, onClick = { menu = false; delete = true })
+                }
             }
         }
     }
@@ -210,6 +252,9 @@ fun PlaylistDetailScreen(
     var rename by remember(playlistId) { mutableStateOf(false) }
     var delete by remember(playlistId) { mutableStateOf(false) }
     var replaceShuffle by remember(playlistId) { mutableStateOf<Boolean?>(null) }
+    var adding by remember(playlistId) { mutableStateOf(false) }
+    var editing by rememberSaveable(playlistId) { mutableStateOf(false) }
+    var menu by remember(playlistId) { mutableStateOf(false) }
     val availableItems = playlist.entries.mapNotNull { snapshot.media[it.mediaId] }.filter { it.kind == MediaKind.MUSIC }
     val shown = playlist.entries.withIndex().filter { (_, entry) -> snapshot.media[entry.mediaId]?.let { matchesMediaQuery(it, query) } ?: query.isBlank() }
     fun play(shuffle: Boolean) {
@@ -223,29 +268,45 @@ fun PlaylistDetailScreen(
     }
     LazyColumn(modifier.fillMaxSize().testTag("playlist-detail"), contentPadding = PaddingValues(bottom = 24.dp)) {
         item {
-            availableItems.firstOrNull()?.let { cover ->
-                dev.veyra.ui.design.Artwork(cover.artworkUrl, playlist.name,
-                    Modifier.padding(horizontal = 24.dp, vertical = 16.dp).size(160.dp), snapshot.settings.offlineOnly, cover.localArtworkPath)
-            }
-
-            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f).padding(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    MetadataText(playlist.name, Modifier.fillMaxWidth().semantics { heading() }, style = MaterialTheme.typography.titleLarge, maxLines = 3, overflow = TextOverflow.Ellipsis)
-                    Text(strings.format(TextKey.TrackCount, playlist.entries.size.toString()), style = MaterialTheme.typography.bodyMedium)
+            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                PlaylistCover(playlist, snapshot, Modifier.size(112.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    MetadataText(playlist.name, Modifier.fillMaxWidth().semantics { heading() }, style = MaterialTheme.typography.headlineSmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                    Text(strings.format(TextKey.TrackCount, strings.number(playlist.entries.size.toLong())), style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Box {
+                    ActionIcon(VeyraIcons.MoreOptions, strings.text(TextKey.PlaylistOptions), { menu = true }, Modifier.testTag("playlist-menu"))
+                    DropdownMenu(menu, { menu = false }) {
+                        DropdownMenuItem(text = { Text(strings.text(TextKey.RenamePlaylist)) }, onClick = { menu = false; rename = true })
+                        DropdownMenuItem(text = { Text(strings.text(TextKey.DeletePlaylist)) }, onClick = { menu = false; delete = true })
+                    }
                 }
             }
-            FlowRow(Modifier.padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button({ play(false) }, enabled = availableItems.isNotEmpty(), modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.Play)) }
-                OutlinedButton({ play(true) }, enabled = availableItems.isNotEmpty(), modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.Shuffle)) }
-                TextButton({ rename = true }, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.Rename)) }
-                TextButton({ delete = true }, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.DeletePlaylist)) }
+            FlowRow(Modifier.padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button({ play(false) }, enabled = availableItems.isNotEmpty(), modifier = Modifier.heightIn(min = 48.dp)) {
+                    Icon(VeyraIcons.Play, null, Modifier.padding(end = 6.dp)); Text(strings.text(TextKey.Play))
+                }
+                OutlinedButton({ play(true) }, enabled = availableItems.isNotEmpty(), modifier = Modifier.heightIn(min = 48.dp)) {
+                    Icon(VeyraIcons.Shuffle, null, Modifier.padding(end = 6.dp)); Text(strings.text(TextKey.Shuffle))
+                }
+                OutlinedButton({ adding = true }, modifier = Modifier.heightIn(min = 48.dp).testTag("playlist-add-songs")) {
+                    Icon(VeyraIcons.Add, null, Modifier.padding(end = 6.dp)); Text(strings.text(TextKey.AddSongs))
+                }
+                if (playlist.entries.isNotEmpty()) TextButton({ editing = !editing }, modifier = Modifier.heightIn(min = 48.dp).testTag("playlist-edit")) {
+                    Text(strings.text(if (editing) TextKey.DoneEditing else TextKey.EditPlaylist))
+                }
                 if (options.canUndoLibrary) TextButton({ onAction(MusicUiAction.UndoLibrary) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.UndoLibraryEdit)) }
                 if (QueueContext.MUSIC in options.undoableQueueContexts) TextButton({ onAction(MusicUiAction.UndoQueue(QueueContext.MUSIC)) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.UndoQueueEdit)) }
             }
-            OutlinedTextField(query, { query = it }, label = { Text(strings.text(TextKey.Search)) }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp))
+            if (playlist.entries.size > 8) OutlinedTextField(query, { query = it }, label = { Text(strings.text(TextKey.Search)) }, singleLine = true,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp))
         }
         if (shown.isEmpty()) item {
-            EmptyState(strings.text(if (query.isBlank()) TextKey.EmptyPlaylist else TextKey.NoResults), strings.text(if (query.isBlank()) TextKey.EmptyPlaylistDescription else TextKey.NoResultsDescription), strings.text(TextKey.AddMusic), { onAction(MusicUiAction.OpenSearch()) }, Modifier.padding(20.dp))
+            if (query.isBlank()) EmptyState(strings.text(TextKey.EmptyPlaylist), strings.text(TextKey.EmptyPlaylistDescription),
+                strings.text(TextKey.AddSongs), { adding = true }, Modifier.padding(20.dp))
+            else EmptyState(strings.text(TextKey.NoResults), strings.text(TextKey.NoResultsDescription), modifier = Modifier.padding(20.dp))
         }
         itemsIndexed(shown, key = { _, indexed -> indexed.value.id }) { visibleIndex, indexed ->
             val entry = indexed.value
@@ -253,7 +314,8 @@ fun PlaylistDetailScreen(
             Column(Modifier.fillMaxWidth().testTag("playlist-entry-${entry.id}")) {
                 if (item != null) MusicMediaRow(item, snapshot, onAction, options = options)
                 else Text(strings.text(TextKey.FileUnavailable), Modifier.padding(20.dp), color = MaterialTheme.colorScheme.error)
-                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.End) {
+                // Reorder/remove only while editing: the everyday list stays clean.
+                if (editing) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.End) {
                     val title = item?.title.orEmpty()
                     ActionIcon(VeyraIcons.ArrowUp, strings.format(TextKey.MoveEntryUp, title), { onAction(MusicUiAction.MovePlaylistEntry(playlist.id, entry.id, shown[visibleIndex - 1].index)) }, enabled = visibleIndex > 0)
                     ActionIcon(VeyraIcons.ArrowDown, strings.format(TextKey.MoveEntryDown, title), { onAction(MusicUiAction.MovePlaylistEntry(playlist.id, entry.id, shown[visibleIndex + 1].index)) }, enabled = visibleIndex < shown.lastIndex)
@@ -265,6 +327,7 @@ fun PlaylistDetailScreen(
     }
     if (rename) PlaylistNameDialog(playlist.name, { rename = false }) { onAction(MusicUiAction.RenamePlaylist(playlist.id, it)); rename = false }
     if (delete) ConfirmActionDialog(strings.text(TextKey.DeletePlaylist), strings.format(TextKey.ConfirmDeletePlaylist, playlist.name), strings.text(TextKey.Delete), { delete = false }) { onAction(MusicUiAction.DeletePlaylist(playlist.id)); delete = false }
+    if (adding) AddSongsDialog(snapshot, playlist, onAction, onFindMusic = { onAction(MusicUiAction.OpenSearch()) }, onDismiss = { adding = false })
     replaceShuffle?.let { shuffle -> ConfirmActionDialog(strings.text(TextKey.ReplaceQueueAndPlay), strings.text(TextKey.ConfirmReplaceQueue), strings.text(TextKey.ReplaceQueueAndPlay), { replaceShuffle = null }) { onAction(MusicUiAction.PlayCollection(availableItems, shuffle)); replaceShuffle = null } }
 }
 
