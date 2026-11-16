@@ -10,16 +10,14 @@ import com.mohamedrejeb.calf.ui.utils.applyLayoutDirection
 import com.mohamedrejeb.calf.ui.utils.applyTheme
 import com.mohamedrejeb.calf.ui.utils.isDark
 import androidx.compose.ui.viewinterop.UIKitView
-import androidx.compose.ui.viewinterop.UIKitInteropProperties
 import dev.veyra.nativecomponents.LocalNativeControlAccessibility
 import kotlinx.cinterop.BetaInteropApi
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.ObjCAction
 import platform.Foundation.NSSelectorFromString
 import platform.UIKit.*
-import dev.veyra.nativecomponents.nativeControlBackground
 import dev.veyra.nativecomponents.nativeControlContainer
-import dev.veyra.nativecomponents.toUIColor
+import dev.veyra.nativecomponents.nativeControlProperties
 import platform.darwin.NSObject
 import kotlin.math.roundToInt
 
@@ -43,7 +41,6 @@ actual fun AdaptiveSlider(value: Float, onValueChange: (Float) -> Unit, modifier
             callback.value(current.start + fraction * (current.endInclusive - current.start))
         }.also { it.onFinish = { finished.value?.invoke() } }
     }
-    val background = nativeControlBackground()
     UIKitView(
         factory = { nativeControlContainer(UISlider().apply {
             minimumValue = 0f; maximumValue = 1f
@@ -52,7 +49,6 @@ actual fun AdaptiveSlider(value: Float, onValueChange: (Float) -> Unit, modifier
         }, fill = true) },
         modifier = modifier,
         update = { container ->
-            container.backgroundColor = background.toUIColor()
             val it = container.subviews.first() as UISlider
             if (!it.tracking) it.value = ((value - valueRange.start) / (valueRange.endInclusive - valueRange.start)).coerceIn(0f, 1f)
             it.enabled = enabled
@@ -62,7 +58,7 @@ actual fun AdaptiveSlider(value: Float, onValueChange: (Float) -> Unit, modifier
             it.accessibilityValue = accessibility?.value
             it.accessibilityLanguage = accessibility?.languageTag
         },
-        properties = UIKitInteropProperties(isNativeAccessibilityEnabled = true),
+        properties = nativeControlProperties(accessible = true),
     )
 }
 

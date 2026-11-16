@@ -218,14 +218,10 @@ private fun SettingsSection(titleKey: TextKey, content: @Composable ColumnScope.
     // Always open: every setting is one tap away, with the group title as a heading.
     Surface(modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surface,
         shape = RoundedCornerShape(24.dp)) {
-        // Native iOS switches/sliders paint their whole host area with the card colour.
-        androidx.compose.runtime.CompositionLocalProvider(
-            dev.veyra.nativecomponents.LocalNativeControlBackground provides MaterialTheme.colorScheme.surface) {
-            Column(Modifier.padding(horizontal = 20.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text(title, Modifier.fillMaxWidth().testTag("settings-section-${titleKey.name}").semantics { heading() },
-                    style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurface)
-                content()
-            }
+        Column(Modifier.padding(horizontal = 20.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Text(title, Modifier.fillMaxWidth().testTag("settings-section-${titleKey.name}").semantics { heading() },
+                style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurface)
+            content()
         }
     }
 }

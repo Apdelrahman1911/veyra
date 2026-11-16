@@ -33,9 +33,10 @@ Arabic. Drafts are local to the control, commit once on release, and are discard
 when the playback entry or generation changes. A current-owner guard also rejects
 late callbacks from a disposed native control.
 
-Compose Multiplatform 1.9 draws a UIKit interop view in an area cut through the Compose
-layer, so any pixel the native control does not paint shows black (UISwitch is a fixed
-51×31 inside a 48 dp target; UISlider's track is thinner than its host). Each iOS control
-is therefore hosted in a container that fills the whole area with the colour behind it:
-`LocalNativeControlBackground`, defaulting to the theme background. Settings cards provide
-their surface colour.
+By default Compose Multiplatform places a UIKit interop view below its Metal canvas and
+cuts a transparent hole through the canvas, so every pixel a native control leaves unpainted
+shows black instead of the surface around it. The iOS controls are therefore hosted with
+`placedAsOverlay = true` (Compose Multiplatform 1.10+): the view sits above the canvas with a
+transparent background and blends with any surface, still clipped to its ancestors. UISwitch
+is never sized by a guess: its host takes the switch's measured intrinsic size (wider since
+iOS 26), at least 48 dp, so the control is never squeezed or clipped.
