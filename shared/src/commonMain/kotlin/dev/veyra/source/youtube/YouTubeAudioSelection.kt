@@ -141,16 +141,12 @@ internal fun selectYouTubeAudio(
     if (supported.isEmpty()) youtubeFailure(FailureCode.UNSUPPORTED_CODEC, "YOUTUBE_NATIVE_AUDIO_UNSUPPORTED")
     val available = supported.filter { it.selectable || it.expiredSourceOnly() }
     if (available.isEmpty()) youtubeFailure(FailureCode.UNSUPPORTED_SOURCE, "YOUTUBE_AUDIO_SOURCE_UNAVAILABLE")
-    // iOS prefers SABR for seeking, but a SABR session for a response that declares a pre-roll
-    // wait was refused even after the wait was honored (2026-11-16, `_VMJ4YSPx3A`), while the
-    // progressive file with the same honored wait plays. Use progressive whenever a wait exists.
-    val declaresWait = available.any { it.availableAtEpochMs != null }
-    val transportPreference = if (purpose == ResolvePurpose.PLAYBACK && !declaresWait &&
-        platformName.equals("iOS", ignoreCase = true) && supportsSabrPlayback) {
-        listOf(TransportKind.SABR, TransportKind.PROGRESSIVE, TransportKind.DASH, TransportKind.HLS, TransportKind.UNRESOLVED)
-    } else {
+    // Progressive first on every platform. iOS used to prefer SABR because AVPlayer cannot open
+    // these progressive objects directly, but its owned loopback now serves them as exact ranges
+    // (2026-11-16: every range 206), while SABR sessions for responses that declare a pre-roll ad
+    // were refused even after the wait. SABR remains the fallback when no progressive track exists.
+    val transportPreference =
         listOf(TransportKind.PROGRESSIVE, TransportKind.SABR, TransportKind.DASH, TransportKind.HLS, TransportKind.UNRESOLVED)
-    }
     return available.sortedWith(
         compareByDescending<Representation> { it.audioMime() == "audio/mp4" && it.audioCodec() == "mp4a.40.2" }
             .thenBy { transportPreference.indexOf(it.transport) }

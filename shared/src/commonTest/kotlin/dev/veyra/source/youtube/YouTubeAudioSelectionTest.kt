@@ -33,12 +33,14 @@ class YouTubeAudioSelectionTest {
         videoId, ProviderId.YOUTUBE, "Authored fixture", "https://www.youtube.com/watch?v=$videoId", formats.toList(),
     )
 
-    @Test fun iosPlaybackPrefersTheDeclaredNativeSabrBridgeForTheOriginalTrack() {
+    @Test fun iosPlaybackPrefersTheLoopbackProgressiveFileAndFallsBackToSabr() {
         val progressive = aac.copy(audioTrackId = "ar.4", audioDisplayName = "Arabic original", audioIsDefault = false)
         val sabr = progressive.copy(transport = TransportKind.SABR,
             sabr = YouTubeSabrResource(videoId, requireNotNull(aac.url), "AQID", SabrFormatId(140, 1uL), SabrClientInfo(1, "authored")))
         val dub = aac.copy(audioIsDefault = true, audioIsAutoDubbed = true)
-        assertEquals(sabr, selectYouTubeAudio(media(dub, progressive, sabr), broadEngine,
+        assertEquals(progressive, selectYouTubeAudio(media(dub, progressive, sabr), broadEngine,
+            platformName = "iOS", supportsSabrPlayback = true))
+        assertEquals(sabr, selectYouTubeAudio(media(dub, sabr), broadEngine,
             platformName = "iOS", supportsSabrPlayback = true))
         assertEquals(progressive, selectYouTubeAudio(media(dub, progressive, sabr), broadEngine,
             platformName = "iOS", supportsSabrPlayback = false))
