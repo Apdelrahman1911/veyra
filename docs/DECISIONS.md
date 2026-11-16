@@ -34,6 +34,21 @@ order stays TV-first. VisionOS-first measured ~170 ms faster but mainly changes 
 pre-roll wait is declared, so it is an owner decision. See
 `verification/media-pipeline-performance-20261116.md`.
 
+## D015 — First result skips suggestion shelves (owner decision 2026-11-16; clarifies D005)
+
+YouTube sometimes places a suggestion shelf (Shorts, a related-videos grid such as
+`gridShelfViewModel`) above the ordinary results for a complete-title search. It varies per
+request: the same title was playable on one tap and "not a playable video" on the next.
+
+- A shelf like that is not the answer to the query. The first ordered result is the first
+  standalone entry after it, and the shelf's tiles never become the first result.
+- A navigable collection shelf (playlist, album, channel) is still itself the first result.
+- Ads, unknown cards and malformed entries remain strict, as before.
+
+Requests also carry a neutral `Accept-Language`, and the iOS YouTube session keeps no cookies,
+so every platform sees the source's original titles. iOS had been receiving creator-supplied
+English titles and searching with them.
+
 ## D001 — Scope, access, and repository visibility (accepted)
 The last user instruction overrides the earlier private default: create Veyra **public** when implementation begins. Use only free standard public-repository Actions runners and existing resources. All project files, temporary writes, cleanup and GitHub changes are confined to Veyra and kmpYT. No system configuration or unrelated repositories may change.
 
