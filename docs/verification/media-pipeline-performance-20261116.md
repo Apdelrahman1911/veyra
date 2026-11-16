@@ -227,3 +227,25 @@ needs recovery":
 **Known gap:** a response that declares a start ad without a duration computes no wait
 (`waitMs=0`). Such an item keeps the SABR preference and may still be refused on the first
 attempt.
+
+## iPhone titles and first-result reliability (same day, owner-confirmed)
+
+The owner reported English titles on iOS and intermittent "first result isn't playable" errors.
+
+- **Cause 1: translated titles.** iOS requests carried the device language. YouTube then
+  returned creator-supplied English titles, and Veyra searched with them.
+  - kmpYT now sends `Accept-Language: *` on every service (`cc283d2`; an earlier wiring left
+    the parameter shadowed).
+  - The iOS session keeps no cookies (`cf9cf11`).
+  - Debug log afterwards: every search `hl=ar`.
+- **Cause 2: a leading suggestion shelf.** Some searches start with a `gridShelfViewModel`
+  shelf. D015 (owner decision) skips such shelves; collection shelves, ads and unknown cards
+  stay strict.
+- **Cause 3: SABR refusals.** SABR was refused for responses that declare a pre-roll without a
+  duration. iOS now prefers the progressive loopback, with SABR as fallback.
+- **Owner confirmation:** "works now". The log shows no playback failures and 82 loopback
+  requests (54 × 206, 28 × 302 followed with re-validation).
+
+**Remaining limits:**
+- Library items saved earlier keep their translated titles.
+- About 10 s from tap to native preparation on iOS, of which 5 s is the declared wait.
