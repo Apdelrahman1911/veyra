@@ -32,3 +32,10 @@ are provided through the accessibility local. Transport direction stays LTR in
 Arabic. Drafts are local to the control, commit once on release, and are discarded
 when the playback entry or generation changes. A current-owner guard also rejects
 late callbacks from a disposed native control.
+
+Compose Multiplatform 1.9 draws a UIKit interop view in an area cut through the Compose
+layer, so any pixel the native control does not paint shows black (UISwitch is a fixed
+51×31 inside a 48 dp target; UISlider's track is thinner than its host). Each iOS control
+is therefore hosted in a container that fills the whole area with the colour behind it:
+`LocalNativeControlBackground`, defaulting to the theme background. Settings cards provide
+their surface colour.

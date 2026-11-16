@@ -17,6 +17,9 @@ import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.ObjCAction
 import platform.Foundation.NSSelectorFromString
 import platform.UIKit.*
+import dev.veyra.nativecomponents.nativeControlBackground
+import dev.veyra.nativecomponents.nativeControlContainer
+import dev.veyra.nativecomponents.toUIColor
 import platform.darwin.NSObject
 import kotlin.math.roundToInt
 
@@ -40,14 +43,17 @@ actual fun AdaptiveSlider(value: Float, onValueChange: (Float) -> Unit, modifier
             callback.value(current.start + fraction * (current.endInclusive - current.start))
         }.also { it.onFinish = { finished.value?.invoke() } }
     }
+    val background = nativeControlBackground()
     UIKitView(
-        factory = { UISlider().apply {
+        factory = { nativeControlContainer(UISlider().apply {
             minimumValue = 0f; maximumValue = 1f
             addTarget(target, NSSelectorFromString("changed:"), UIControlEventValueChanged)
             addTarget(target, NSSelectorFromString("finished:"), UIControlEventTouchUpInside or UIControlEventTouchUpOutside or UIControlEventTouchCancel)
-        } },
+        }, fill = true) },
         modifier = modifier,
-        update = {
+        update = { container ->
+            container.backgroundColor = background.toUIColor()
+            val it = container.subviews.first() as UISlider
             if (!it.tracking) it.value = ((value - valueRange.start) / (valueRange.endInclusive - valueRange.start)).coerceIn(0f, 1f)
             it.enabled = enabled
             it.applyLayoutDirection(layoutDirection)

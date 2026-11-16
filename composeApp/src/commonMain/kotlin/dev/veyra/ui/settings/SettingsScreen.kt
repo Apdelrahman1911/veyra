@@ -218,6 +218,9 @@ private fun SettingsSection(titleKey: TextKey, content: @Composable ColumnScope.
     var expanded by rememberSaveable(titleKey) { mutableStateOf(false) }
     Surface(modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surface,
         shape = RoundedCornerShape(24.dp)) {
+        // Native iOS switches/sliders paint their whole host area with the card colour.
+        androidx.compose.runtime.CompositionLocalProvider(
+            dev.veyra.nativecomponents.LocalNativeControlBackground provides MaterialTheme.colorScheme.surface) {
         Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             TextButton(onClick = { expanded = !expanded }, modifier = Modifier.fillMaxWidth().sizeIn(minHeight = 56.dp)
                 .testTag("settings-section-${titleKey.name}")
@@ -226,6 +229,7 @@ private fun SettingsSection(titleKey: TextKey, content: @Composable ColumnScope.
                 Icon(if (expanded) VeyraIcons.ArrowUp else VeyraIcons.ChevronForward, null)
             }
             if (expanded) Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(16.dp), content = content)
+        }
         }
     }
 }
