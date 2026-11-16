@@ -17,7 +17,7 @@ data class AppDetail(val kind: DetailKind, val id: String, val collection: Media
 /** Navigation is independent of the active audio context. Opening a screen never starts audio. */
 data class AppNavigation(
     val destination: AppDestination = AppDestination.LISTEN,
-    val librarySection: LibrarySection = LibrarySection.FAVORITES,
+    val librarySection: LibrarySection = LibrarySection.OVERVIEW,
     val details: List<AppDetail> = emptyList(),
     val playerOpen: Boolean = false,
     val queueOpen: Boolean = false,
@@ -30,6 +30,7 @@ data class AppNavigation(
         queueOpen -> copy(queueOpen = false)
         playerOpen -> copy(playerOpen = false)
         details.isNotEmpty() -> copy(details = details.dropLast(1))
+        destination == AppDestination.LIBRARY && librarySection != LibrarySection.OVERVIEW -> copy(librarySection = LibrarySection.OVERVIEW)
         destination != AppDestination.LISTEN -> copy(destination = AppDestination.LISTEN)
         else -> this
     }
@@ -97,7 +98,7 @@ data class AppNavigation(
             }
             return AppNavigation(
                 enum("screen", AppDestination.entries, AppDestination.LISTEN),
-                enum("librarySection", LibrarySection.entries, LibrarySection.FAVORITES),
+                enum("librarySection", LibrarySection.entries, LibrarySection.OVERVIEW),
                 details = details,
                 viewedQueue = enum("viewedQueue", QueueContext.entries, snapshot.activeContext),
             )

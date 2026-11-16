@@ -93,7 +93,7 @@ fun PodcastEpisodeRow(
                 Artwork(
                     url = state.episode.artworkUrl ?: state.show?.artworkUrl,
                     title = state.episode.title,
-                    modifier = Modifier.size(56.dp).clip(RoundedCornerShape(12.dp)),
+                    modifier = Modifier.size(64.dp).clip(RoundedCornerShape(18.dp)),
                     offlineOnly = state.offlineOnly,
                     localPath = state.episode.localArtworkPath?.takeIf(String::isNotBlank) ?: state.show?.localArtworkPath,
                 )
@@ -101,7 +101,7 @@ fun PodcastEpisodeRow(
                     MetadataText(
                         state.episode.title,
                         style = MaterialTheme.typography.titleMedium,
-                        maxLines = 3,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
                     if (showPublisher) {
@@ -118,7 +118,10 @@ fun PodcastEpisodeRow(
             // Full-width metadata and actions remain readable beside long titles at 200% text.
             PodcastEpisodeMetadata(state)
             PodcastEpisodeStatus(state)
-            if (state.binding != null) PodcastEpisodeProvenance(state, onAction, compact = true)
+            if (state.binding != null && state.binding.firstResultTitle != state.episode.title) {
+                Text(strings.format(TextKey.ResolvedTitleValue, state.binding.firstResultTitle), style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
             if (state.canResume) {
                 podcastProgressFraction(state.positionMs, state.progressDurationMs)?.let { fraction ->
                     val remaining = strings.format(TextKey.MediaRemaining,

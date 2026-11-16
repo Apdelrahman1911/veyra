@@ -10,6 +10,35 @@ import kotlin.test.*
  * are test inputs, not real files, hashes, native validation, drain evidence or Room commits.
  */
 class PhysicalDownloadCommandTest {
+    @Test fun onlyTheCurrentSelectedTransferCanResetProgressAndInvalidCountsStillFail() {
+        val setup = typed()
+        val fixture = setup.fixture
+        val claimed = claim(fixture, setup.admission.physical.job, now = 124_000)
+        fixture.project { it.applySelectRepresentation(SelectPhysicalDownloadRepresentation(
+            claimed.fence, "authored-key", 4, null, null, 124_010)) }
+        fixture.project { it.applyPhysicalHeartbeat(HeartbeatPhysicalDownload(claimed.fence, 124_020, 1_000, 8, 16)) }
+        assertFailsWith<IllegalArgumentException> {
+            fixture.project { it.applyPhysicalHeartbeat(HeartbeatPhysicalDownload(claimed.fence, 124_030, 1_000, 0, 16)) }; Unit
+        }
+        val restarted = fixture.project { it.applyPhysicalHeartbeat(HeartbeatPhysicalDownload(
+            claimed.fence, 124_030, 1_000, 0, 16, allowProgressReset = true)) }.projectedValue()
+        assertEquals(0L, restarted.job.bytesDownloaded)
+        assertEquals(0L, restarted.activeAttempt!!.bytesDownloaded)
+        assertEquals("authored-key", restarted.job.representationId)
+        assertEquals(claimed.physical.job.producer, restarted.job.producer)
+        assertEquals(claimed.fence.ownershipGeneration, restarted.job.ownershipGeneration)
+        assertEquals(claimed.fence.attemptId, restarted.activeAttempt!!.id)
+        assertEquals(PhysicalDownloadCommit.Stale, fixture.project { it.applyPhysicalHeartbeat(HeartbeatPhysicalDownload(
+            claimed.fence.copy(ownershipGeneration = claimed.fence.ownershipGeneration + 1),
+            124_040, 1_000, 0, 16, allowProgressReset = true)) })
+        for ((bytes, total) in listOf(-1L to 16L, 17L to 16L)) {
+            assertFailsWith<IllegalArgumentException> {
+                fixture.project { it.applyPhysicalHeartbeat(HeartbeatPhysicalDownload(
+                    claimed.fence, 124_040, 1_000, bytes, total, allowProgressReset = true)) }; Unit
+            }
+        }
+    }
+
     @Test fun newPhysicalPathNeverInheritsPartialCountersOrValidatorsFromAnEarlierAttempt() {
         val setup = typed()
         val fixture = setup.fixture
@@ -223,6 +252,8 @@ class PhysicalDownloadCommandTest {
             join.job.ownershipGeneration, PhysicalDownloadMaintenanceKind.VALIDATE, "validator", 124_100, 1_000)) }.projectedValue()
         assertFailsWith<IllegalArgumentException> { fixture.project { it.applyPhysicalHeartbeat(HeartbeatPhysicalDownload(validation.fence,
             124_110, 1_000, join.job.bytesDownloaded + 1, join.job.totalBytes!! + 1)) }; Unit }
+        assertFailsWith<IllegalArgumentException> { fixture.project { it.applyPhysicalHeartbeat(HeartbeatPhysicalDownload(validation.fence,
+            124_110, 1_000, 0, join.job.totalBytes, allowProgressReset = true)) }; Unit }
         val refreshed = fixture.project { it.applyPhysicalHeartbeat(HeartbeatPhysicalDownload(validation.fence,
             124_110, 1_000, join.job.bytesDownloaded, join.job.totalBytes)) }.projectedValue()
         assertEquals(join.asset, refreshed.asset)

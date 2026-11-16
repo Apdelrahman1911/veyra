@@ -150,7 +150,9 @@ internal class QueueSessionPlayer(
         val builder = State.Builder().setAvailableCommands(commands.build())
             .setPlaybackState(playbackState)
             .setPlayWhenReady(state.isPlaying || (state.desiredPlaying && state.isBuffering), Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
-            .setIsLoading(state.isBuffering)
+            // Resolution may precede a current item. Media3 forbids loading in IDLE,
+            // even while the shared owner is resolving the requested recording.
+            .setIsLoading(playbackState == Player.STATE_BUFFERING)
             .setPlaybackParameters(PlaybackParameters(state.speed.coerceIn(0.5f, 2f)))
             .setContentPositionMs(position).setContentBufferedPositionMs(buffered).setTotalBufferedDurationMs(totalBuffered)
             .setRepeatMode(when (queue.repeat) {

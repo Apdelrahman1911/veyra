@@ -64,10 +64,12 @@ class AppNavigationTest {
         assertEquals(noPlayer.copy(details = listOf(AppDetail(DetailKind.PLAYLIST, playlist.id))), playlistOnly)
         val library = playlistOnly.back()
         assertEquals(playlistOnly.copy(details = emptyList()), library)
-        val listen = library.back()
-        assertEquals(library.copy(destination = AppDestination.LISTEN), listen)
+        val overview = library.back()
+        assertEquals(library.copy(librarySection = LibrarySection.OVERVIEW), overview)
+        val listen = overview.back()
+        assertEquals(overview.copy(destination = AppDestination.LISTEN), listen)
         assertFalse(listen.canGoBack)
-        assertEquals(LibrarySection.DOWNLOADS, listen.librarySection)
+        assertEquals(LibrarySection.OVERVIEW, listen.librarySection)
         assertEquals(QueueContext.PODCAST, listen.viewedQueue)
     }
 

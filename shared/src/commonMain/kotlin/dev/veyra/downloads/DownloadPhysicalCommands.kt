@@ -32,7 +32,7 @@ internal class DownloadPhysicalCommands(
      * merely cancelling the source coroutine cannot retract an already committed Room command.
      */
     suspend fun enqueueAccepted(requestId: AcquisitionRequestId, requiredBindingId: ExecutionBindingId,
-        requireIntentCurrent: () -> Unit): String = host.commands.withLock {
+        requireIntentCurrent: () -> Unit): String = runtime.diagnosedCommand(DownloadDiagnosticStage.ENQUEUE) {
         requireAdmission()
         requireIntentCurrent()
         admitAcceptedLocked(requestId, requiredBindingId)
@@ -42,7 +42,10 @@ internal class DownloadPhysicalCommands(
      * Compatibility route for ALREADY selected genuine catalogue media only. New selections
      * must use root acquisition routing then enqueueAccepted; no fallback query is made here.
      */
-    suspend fun enqueueKnownCatalog(item: MediaItem, reuseBindingId: String?): String = host.commands.withLock {
+    suspend fun enqueueKnownCatalog(
+        item: MediaItem,
+        reuseBindingId: String?,
+    ): String = runtime.diagnosedCommand(DownloadDiagnosticStage.ENQUEUE) {
         requireAdmission()
         val view = host.acquisitionView()
         val currentItem = view.snapshot.media[item.id]

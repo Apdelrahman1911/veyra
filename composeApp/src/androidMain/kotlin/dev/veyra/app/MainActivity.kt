@@ -13,6 +13,9 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.core.view.WindowCompat
+import dev.veyra.model.ThemeMode
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
@@ -34,6 +37,19 @@ class MainActivity : ComponentActivity() {
             val state = bootstrap
             if (state is AndroidBootstrap.Available) {
                 val navigation by state.container.navigation.collectAsState()
+                val snapshot by state.container.library.collectAsState()
+                val systemDark = isSystemInDarkTheme()
+                val dark = when (snapshot.settings.theme) {
+                    ThemeMode.SYSTEM -> systemDark
+                    ThemeMode.DARK -> true
+                    ThemeMode.LIGHT -> false
+                }
+                LaunchedEffect(dark) {
+                    WindowCompat.getInsetsController(window, window.decorView).apply {
+                        isAppearanceLightStatusBars = !dark
+                        isAppearanceLightNavigationBars = !dark
+                    }
+                }
                 BackHandler(enabled = navigation.canGoBack) { state.container.navigateBack() }
                 VeyraApp(state.container)
             }

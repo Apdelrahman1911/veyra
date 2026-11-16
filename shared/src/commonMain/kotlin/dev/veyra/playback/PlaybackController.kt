@@ -1142,6 +1142,16 @@ class PlaybackController(
                     typed?.observedNativePosition()
                     progressDirty = true
                     checkpoint(force = true)
+                    val completedSequence = event.seekSequence
+                    sendEngine { token ->
+                        val current = mutableState.value
+                        if (preparedGeneration == token && terminalGeneration != token &&
+                            pendingSeekSequence == null && confirmedSeekSequence == completedSequence &&
+                            current.desiredPlaying &&
+                            (current.durationMs == null || current.positionMs < current.durationMs - 1)) {
+                            engine.play(token)
+                        }
+                    }
                 } else mutableState.value = mutableState.value.copy(pendingSeekMs = null, failure = AppFailure(FailureCode.UNEXPECTED, "Seek was not completed"))
             }
             is EngineEvent.Ended -> {
@@ -2444,7 +2454,40 @@ class PlaybackController(
                 queue.displayedOrder.first() else null)?.takeUnless { it == queue.currentOccurrenceId }
         }
 
+        private var warmedGeneration = -1L
+        private var warmJob: Job? = null
+
+        /**
+         * Once per playing music track, near its end, ready the next queue item's source so its
+         * declared availability wait and inspection overlap the current track (P4). Bounded to a
+         * single in-flight request; offline mode, podcasts and saved local files never inspect.
+         */
+        private fun checkWarmNext() {
+            if (warmedGeneration == generation || warmJob?.isActive == true) return
+            val current = mutableState.value
+            if (current.controlsMode != PlaybackControlsMode.MUSIC || !current.isPlaying || !current.desiredPlaying ||
+                preparedGeneration != generation || resolvedLocal ||
+                current.currentSelection?.selectionState != OccurrenceSelectionState.BOUND) return
+            val settings = store.state.value.settings
+            if (settings.offlineOnly || next != null) return
+            // Crossfade staging already selects and prepares the neighbour; never compete with it
+            // for the single prefetch slot.
+            if (engine is CrossfadeAudioEngine && engine.capabilities.supportsCrossfade && settings.crossfadeEnabled) return
+            val duration = current.durationMs?.takeIf { it > 0 } ?: return
+            if (duration - current.positionMs > WARM_NEXT_LEAD_MS) return
+            val queue = currentQueue()
+            val currentId = queue.currentOccurrenceId ?: return
+            if (neighbour(queue) == null) return
+            warmedGeneration = generation
+            warmJob = ownerScope.launch {
+                try { services.queues.warmMusicNext(queue.context, queue.editRevision, currentId) }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { } // The real transition reports any failure.
+            }
+        }
+
         suspend fun checkCrossfade() {
+            checkWarmNext()
             val transport = engine as? CrossfadeAudioEngine ?: return
             val current = mutableState.value; val settings = store.state.value.settings
             val queue = store.acquisitionViews.value.acquisition.queues[current.activeContext] ?: return
@@ -2637,3 +2680,6 @@ class PlaybackController(
         data object Tick : Message
     }
 }
+
+/** How long before a music track ends its successor is readied (P4). */
+internal const val WARM_NEXT_LEAD_MS = 40_000L

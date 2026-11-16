@@ -15,6 +15,34 @@ import dev.veyra.model.ThemeMode
  * Arabic copy is intentionally kept central for subsequent native-language review.
  */
 enum class TextKey(internal val english: String, internal val arabic: String) {
+    Home("Home", "الرئيسية"),
+    HomeGreeting("Good to see you.", "سعداء بعودتك."),
+    HomeHeadline("Listen to what\nmoves you", "استمع لما\nيلامسك"),
+    HomeSubtitle("Your music. Your flow.", "موسيقاك، على مزاجك."),
+    JumpBackIn("Jump back in", "استكمل الاستماع"),
+    MadeForYourLibrary("Your next favorite is waiting.", "أغنيتك المفضلة القادمة بانتظارك."),
+    NoRecommendations("No recommendations yet. Search for something you love.", "لا توجد اقتراحات حاليًا. ابحث عمّا تحب."),
+    ExploreSounds("Find your next sound", "اكتشف صوتك القادم"),
+    LibrarySubtitle("Everything you love, in one place.", "كل ما تحبه، في مكان واحد."),
+    YourCollection("Your collection", "مجموعتك"),
+    AllLibrary("Overview", "نظرة عامة"),
+    SearchSubtitle("Find something that feels like you.", "اعثر على ما يشبهك."),
+    SearchOptions("Search options", "خيارات البحث"),
+    ExploreMusic("Explore music", "اكتشف الموسيقى"),
+    PodcastsSubtitle("Stories worth listening to.", "قصص تستحق الاستماع."),
+    AudioDetails("About this audio", "حول هذا الصوت"),
+    SettingsSubtitle("Make Veyra yours.", "اجعل ڤيرا على ذوقك."),
+    PlaybackSettings("Sound & playback", "الصوت والتشغيل"),
+    AppearanceSettings("Look & feel", "المظهر واللغة"),
+    DownloadSettings("Downloads & storage", "التنزيلات والتخزين"),
+    PodcastSettings("Podcast preferences", "تفضيلات البودكاست"),
+    OfflineSettings("Offline listening", "الاستماع دون اتصال"),
+    AboutSettings("About & privacy", "حول التطبيق والخصوصية"),
+    BrowseLibrary("Browse your library", "تصفح مكتبتك"),
+    SaveForLaterHint("Keep favorites and downloads close.", "احتفظ بمفضلاتك وتنزيلاتك بالقرب منك."),
+    EmptyLibraryTitle("Your collection starts here", "مجموعتك تبدأ هنا"),
+    EmptyLibraryBody("Find a song you love, then tap the heart or save it for offline listening.", "اعثر على أغنية تحبها، ثم اضغط القلب أو نزّلها للاستماع دون اتصال."),
+
     AppName("Veyra", "ڤيرا"),
     Tagline("Your listening room", "مساحتك للاستماع"),
     Listen("Listen", "استمع"),
@@ -163,6 +191,7 @@ enum class TextKey(internal val english: String, internal val arabic: String) {
     SkipForwardSeconds("Forward {0} seconds", "تقديم {0} ثانية"),
     NextEpisode("Next episode", "الحلقة التالية"),
     PreparingAudio("Preparing audio…", "جارٍ تجهيز الصوت…"),
+    StartingIn("Starting in {0} s…", "يبدأ التشغيل خلال {0} ث…"),
     Buffering("Buffering…", "جارٍ التخزين المؤقت…"),
     Playing("Playing", "قيد التشغيل"),
     Paused("Paused", "متوقف مؤقتًا"),
@@ -419,6 +448,7 @@ enum class TextKey(internal val english: String, internal val arabic: String) {
     OpenSourcePage("Open source page", "فتح صفحة المصدر"),
     SourceRestricted("This source requires access that is not available here. Metadata may still be shown; playback is unavailable.", "يتطلب هذا المصدر صلاحية وصول غير متاحة هنا. قد تظهر المعلومات، لكن التشغيل غير متاح."),
     SourceUnavailable("This source is currently unavailable. Other sources and local files are unaffected.", "هذا المصدر غير متاح حاليًا. لا تتأثر المصادر الأخرى والملفات المحلية."),
+    SourceLinkExpired("This media link expired or was rejected. Retry to request a fresh link.", "انتهت صلاحية رابط الوسائط أو رُفض. أعد المحاولة لطلب رابط جديد."),
     SourceMetadataOnly("Metadata only — audio unavailable", "معلومات فقط — الصوت غير متاح"),
     SourceRightsRequired("Downloading is not available for this source or recording.", "التنزيل غير متاح لهذا المصدر أو التسجيل."),
     Offline("Offline", "دون اتصال"),
@@ -535,7 +565,9 @@ fun arabicPluralCategory(count: Long): ArabicPluralCategory {
     }
 }
 
-private val placeholderPattern = Regex("\\{([0-9]+)}")
+// Android's ICU regex rejects a bare closing brace even when the opening brace is
+// escaped. The desktop JVM accepts it, so only physical Android startup exposed this.
+private val placeholderPattern = Regex("\\{([0-9]+)\\}")
 private const val FSI = '\u2068'
 private const val LRI = '\u2066'
 private const val PDI = '\u2069'
@@ -717,7 +749,11 @@ class AppStrings(
         FailureCode.STORAGE_IO -> TextKey.StorageError
         FailureCode.CORRUPT_MEDIA -> TextKey.CorruptMedia
         FailureCode.PARSE_FAILURE -> TextKey.ParseFailure
-        FailureCode.RECOVERY_REQUIRED -> TextKey.RecoveryRequired
+        FailureCode.RECOVERY_REQUIRED -> if (failure.detail == "YOUTUBE_SOURCE_EXPIRED") {
+            TextKey.SourceLinkExpired
+        } else {
+            TextKey.RecoveryRequired
+        }
         FailureCode.FUTURE_SCHEMA -> TextKey.FutureSchema
         FailureCode.INVALID_STATE -> TextKey.InvalidState
         FailureCode.CANCELLED -> TextKey.Cancelled

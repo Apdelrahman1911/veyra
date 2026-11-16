@@ -1,5 +1,474 @@
 # Veyra — resumable state
 
+## Media pipeline performance (sections, reuse, warm-next, hedging, countdown) — Android device-measured — 2026-11-16
+
+Owner-approved Snaptube-parity work, without bypasses or integrity tokens (D014).
+
+**Downloads (P1).** kmpYT downloads large progressive objects as exact ≤8 MiB ranges over 4
+connections, keeping hashed-prefix checkpoints and a fallback to one verified request. The
+39.8 MB item went from **32 KB/s to 3.06–3.15 MB/s** on the owner's Huawei (Wi-Fi
+saturates near 3.1 MB/s). Materialization now links/renames instead of copying three times.
+iOS uses sequential validated sections (tests only).
+
+**Playback (P2–P4, P7, P8).**
+- Android playback reads googlevideo objects in ≤8 MiB sections. Native ready went from
+  ~720 ms to 430–560 ms, and cold tap→ready from 2.93 s to 2.61–2.83 s.
+- Single-use, in-memory inspection reuse makes a replay or download-after-play skip inspection
+  (replay: **~0.2 s** instead of ~2.4 s plus a new declared wait).
+- The next music queue item is inspected 40 s before the end.
+- Stalled watch/player/oEmbed reads are hedged once.
+- A "Starting in N s" countdown shows during declared waits (compiled; not visually verified).
+
+**Not done.**
+- P5 (no watch page) was not implemented: it needs an undocumented client context.
+- P6 measured VisionOS-first ~170 ms faster, but its main effect is fewer declared pre-roll
+  waits. The default stays TV-first; changing it is an owner decision.
+
+See `docs/verification/media-pipeline-performance-20261116.md` and
+`docs/research/snaptube-comparison-20261115.md` §5.
+
+## Faster online preparation (player-program store + prewarm) — Android installed — 2026-11-15
+
+Cold online play/download preparation was dominated by re-downloading (~3 MB),
+re-analyzing and re-initializing the versioned YouTube player program on every
+app start. kmpYT now persists exact player programs in a private store
+(`YouTubePlayerProgramStore`; file implementations for JVM/Android and iOS) and
+`YouTubeClient.prewarm()` readies the stored program with **no network request**;
+Veyra calls it 1.5 s after startup. On the owner's Huawei AQM-LX1 (Android 10) the
+measured cold tap→ready dropped from 5.6–7.4 s to **2.9 s** (two runs each); stored
+programs are recompiled and verified, mismatches fall back to the network, D005 is
+unchanged. The final debug APK (`847ef508…`) is installed in place; its launch
+prewarm read the store. Shared JVM 1,261/1,261 pass; kmpYT JVM 496/504 with the 8
+failures confined to desktop Chromium-runtime tests (Chromium absent on this Mac);
+iOS simulator store tests 4/4. This Huawei build freezes app processes without a
+visible component, which invalidated early probe runs (preserved, labelled).
+
+Parallel owner-requested agents: small UI fixes (preparing spinner and text
+overflow limits in `PlayerSurfaces.kt`; collapse an empty expanded player; detail
+headers show the destination instead of the app name) — compiled for desktop and
+Android, not device-verified. Review findings on PlaybackController stuck-PREPARING
+and shutdown were traced as unreachable/already handled; mini-player padding and
+download progress reset were confirmed correct by design.
+
+See `docs/verification/online-preparation-program-store-20261115.md` and ignored
+`.work/evidence/prep-latency-20261115/`. Nothing committed; kmpYT pin not updated;
+desktop has no persistent program store yet.
+
+## iPhone seek/silent-tail repair — installed v14 — 2026-11-11
+
+The current local Debug app is **v14**, development-signed and installed in place
+on the owner's iPhone with existing data preserved. This supersedes the v10
+installation record below, not its original-audio/preparation verification limits.
+Work continued directly without additional workers, checkout, commit or push.
+
+The selected retained fragmented AAC exposed a false AVFoundation duration:
+375.372 seconds versus 187.662 seconds measured by AudioToolbox. Seeking into the
+extra timeline advanced the native clock while decoded samples were zero. The
+iOS engine now bounds duration, seek and playback end by the actual source or
+validated-materialization duration; original retained bytes are not rewritten.
+A guarded seek-completion command reasserts current play intent without trusting
+the potentially stale native `isPlaying` observation, while respecting pause,
+generation, sequence and end-of-track guards.
+
+Late SABR failures are now forwarded through resource ownership into typed app
+errors, stopping the iOS deck instead of leaving a silent advancing clock.
+The exact `1WdCxUiIC7I` online diagnostic encountered
+`SABR_PROTECTION_RETRY_LIMIT`; **that upstream access refusal is not repaired or
+bypassed**. Declared-original selection and all prior download fixes remain.
+
+Final checks: 104 focused shared tests, 18 library JVM tests, 13 native iOS
+Simulator engine tests, Android Kotlin compilation and full iPhone build pass.
+The installed-app physical seek test passes forward/back, paused-seek and
+end/back/explicit-resume checks. Separate-host physical PCM experiments on a
+private copy of the selected file confirm nonzero decoded audio after bounded
+seeks, including initial seek and end/back. These are not microphone evidence of
+speaker audibility, nor a successful fresh-online seek in Veyra for the refused
+source. All 798 recorded build inputs match and all 152 library Kotlin files match
+the upstream working mirror. Earlier failed device runs remain preserved.
+
+See `docs/verification/ios-seek-audio-20261111.md` and ignored
+`.work/evidence/ios-seek-audio-20261111/final-v14/` for exact evidence and limits.
+The separate test host/private audio copies are removed, only the task-owned
+simulator is shut down, and Veyra is reopened with playback paused.
+The full redesign, variable online preparation and five-platform/release gates
+remain open. The following installation entries are historical.
+
+## Original language clarification and online preparation follow-up — installed v10 — 2026-11-11
+
+The owner wants each video's **source-declared original language**, never a
+hardcoded Arabic/app-language preference. This is now explicit in D013; nine app
+selection tests pass, including six different original languages and missing
+optional language-code metadata. Explicit selections/renewal identity remain
+preserved. Work continued directly, without starting further workers.
+
+The current v10 local Debug app is development-signed and installed **in place**
+on the owner's iPhone, preserving the library and downloads. It reuses the bounded
+player-response graph within an inspection and removes unnecessary per-write
+`fsync` only from the disposable iOS playback cache. Retained SABR download
+durability/integrity remains intact. All 798 recorded source inputs match; 152
+library Kotlin files match the upstream working mirror.
+
+Four separate-host online runs of the exact `1WdCxUiIC7I` source selected a declared
+original and advanced native playback muted. Final source inspection took
+6.156/3.228 seconds; native readiness still varied (3.953/7.990 seconds).
+**No repeatable total-startup speedup is established**, and online preparation is
+not claimed instantaneous or fully eliminated. The online host did not touch the
+owner's retained file; these are not fresh-online measurements in Veyra's UI.
+
+108 focused library JVM, 47 native Simulator and 80 focused shared tests pass;
+Android compilation and the full iPhone build pass. The broad shared run had
+1,253/1,254 passes with one 15-second Room recovery timeout; its whole class passed
+on focused rerun. Two final physical retained/offline tests pass, the original
+online setting is restored and playback paused. The separate test host is removed,
+the task-owned simulator shut down, and normal Veyra reopened.
+
+See `docs/verification/online-preparation-original-audio-20261111.md` and ignored
+`.work/evidence/online-preparation-20261111/final-device-verification.json`.
+The following v9 record is historical. Its root-download repairs remain present;
+the separate first-result issue, human audible confirmation, full redesign and
+five-platform/release acceptance gates remain open.
+
+## Three reported iPhone issues — root repairs installed; physical results and limits — 2026-11-11
+
+The owner explicitly authorized exactly three parallel Sol/max T3 repair workers
+on the existing dirty checkout, with separate audio-selection, source-preparation
+and download-state scopes. This is new authorization, not reuse of the failed
+native provider session. No new checkout, commit, push or data reset is authorized.
+
+The three workers finished; subsequent diagnosis, root repairs, review and device
+verification were performed directly. No additional worker was started. The final
+v9 local Debug app is development-signed and **installed in place on the owner's
+iPhone as `dev.veyra.app`**, with the existing library/data preserved. The earlier
+09:44 UTC unavailable-device checkpoint is historical, not the current state.
+
+Automatic audio selection now prefers a declared compatible original in kmpYT
+and Veyra. Physical inspection of the owner's exact `1WdCxUiIC7I` example confirms
+the selected original track is `ar.4`, not the default English auto-dub `en-US.10`.
+Native decoding and advancing playback were verified muted; a human audible-Arabic
+confirmation is still separate. Existing explicit selections and renewal keys are
+not silently rewritten, nor are retained dub files replaced.
+
+Two download root repairs are implemented: historical iOS container references
+resolve only inside the current trusted Veyra media root, preserving size/hash,
+symlink and actual-path lease checks; final asset timestamps are now created inside
+the existing publication mutation lock so a heartbeat during final hashing cannot
+invalidate completion. The seven new path/real-Room race regressions failed four
+cases before the repairs and now pass. No schema change or ownership/CAS/integrity
+guard waiver was introduced. The earlier bounded, redacted diagnostics remain.
+
+The retained previously failing download recovered to Downloaded. The exact owner
+example also completed in the app, about 22.5 MiB, and played from its validated
+local file. On **final v9**, the exact file remained Downloaded after a cold app
+restart with Veyra offline mode enabled; native playback advanced, tap-to-Playing
+was 2.765 s, and online mode was restored with playback paused. A separate final-v9
+check confirms the formerly failed retained row remains complete. This is app
+offline-policy/local playback, not OS-level denial of native-player networking.
+
+The compiler allocation optimization is retained. Physical progressive-source
+controls also exposed HTTP 403 and a native preparation stall for the example.
+Automatic iOS playback now prefers the source-declared SABR representation through
+the already configured native bridge, preserving the original/AAC checks and exact
+explicit keys. Download ordering and Android/JVM ordering are unchanged. Controlled
+streaming of the same `ar.4` original reached native readiness and advancing playback.
+Cold inspection took 12.058 s and inspection-to-progress 21.780 s; a second run took
+6.504 s / 11.677 s, but fetched a different player-program version. It is **not** a
+same-version warm-cache measurement or a proven speedup percentage. Cold online
+preparation remains substantial; the three issues are not universally closed.
+
+One additional fresh app playback check failed before source/native preparation:
+the immutable first receipt was UNSUPPORTED / `FIRST_RESULT_UNAVAILABLE`. The UI's
+saved-data-recovery wording is misleading. This separate source-selection/message
+gap remains open; D005 was not bypassed by choosing a later result. Controlled
+exact-example streaming and exact-example local app playback are distinct evidence.
+
+Final executed checks: **691 shared tests in 69 suites**, zero failures/errors/skips;
+the focused 26-test path/race/original/transport run also passes. Android app main,
+iOS Simulator main/test sources and the complete iPhone Kotlin/Swift host compile.
+Earlier focused library checks pass 121 tests, but its full 489-test JVM run remains
+NOT green: one Chromium navigation timeout and three skips. No test was concealed
+or weakened. No current Android runtime or complete Simulator-host run is claimed.
+
+All **796 source/build inputs** match the final prebuild manifest and signed native
+file hashes match the artifact receipt; all 150 library Kotlin sources byte-match
+`.work/kmpYT`. The temporary live probe is removed from source and its launch marker
+is absent from the final binary. Safe Debug-only diagnostics remain. No persistent
+task-owned console remains active. This is not a distribution/release candidate;
+the full redesign/nativeCmpkit, Arabic/RTL and five-platform scope remains open.
+
+Evidence: `.work/evidence/three-ios-repairs-20261111/repair-final-device-verification.json`,
+`repair-final-iphone-install.json`, preserved test XML, native controls and the final
+v9 `iphone-probe-repair-final-*-v9-20261111-test.log` files under the redesign evidence
+directory. See `verification/three-iphone-repairs-20261111.md` for exact limits and
+remaining acceptance work. Earlier failed runs and versioned receipts are preserved.
+
+## Latest player/transfer build installed on iPhone — 2026-11-11
+
+The user explicitly requested installation on the connected iPhone. The current
+native player UI and iOS bounded-range download repair were rebuilt, development
+signed, verified and installed in place as `dev.veyra.app`, without uninstall or
+data reset. All 767 recorded source inputs still match. Launch succeeded and its
+process was subsequently observed running. No physical playback/download or UI
+interaction test was performed during this installation.
+
+See `verification/iphone-player-transfer-install-20261111.md` and
+`.work/evidence/redesign/iphone-player-transfer-20261111-summary.json`.
+This supersedes the older installed-artifact references below. The full redesign
+and physical media acceptance remain open.
+
+## Measured media transfer/preparation repair — 2026-11-11
+
+The current Android app includes the nativeCmpkit seek control plus bounded
+Googlevideo media requests for native downloads and Android Media3 initial/seek
+reads, using exact inspected object lengths. No signed URL changes or database
+schema changes. Matching download changes are present in `.work/kmpYT` and the
+consumed `third_party/kmpYT`; pins and historical dirty changes are preserved.
+
+Live A/B/A controls on the same URL isolated the speed cap: 256 KiB took
+9.102/8.176 s unbounded, versus 0.648 s with a bounded range. A second full-object
+range control reproduced 8.898/9.000 s versus 0.827 s. The real complete
+1,247,702-byte download improved from 40.529 s including preparation to 2.519 s
+in the download-only fix run and 3.892 s in the final build. The final warm
+native-ready stage was 57 ms versus 1,609 ms baseline; cold was 1,354 ms versus
+3,594 ms. These are single-recording emulator observations, not a network SLA.
+
+Cold source preparation remains a separate delay (5.621 s final run): watch-page
+HTTP, a roughly 3 MB versioned player program, analysis/setup, native JS VM and
+player API. Actual `n` transforms took milliseconds. No cold-program optimization
+or physical iOS speedup is claimed.
+
+Verified: 40 upstream JVM transfer/protocol tests, 48 selected shared JVM tests,
+11 Android emulator regression tests, the live complete-download/native-playback
+probe, iOS arm64 main/app compilation and Simulator test-source compilation,
+and Android app/test APK builds. iOS native tests were not executed. Earlier
+player/Settings Desktop tests passed 30/30. Latest in-place installed APK SHA256:
+`ad0cccf780c010dfae078d147346e2037a3ae560094b16580e0e07c20e327689`.
+Existing emulator data is retained; physical iPhone untouched.
+Normal UI search/play and a fresh approved-channel download also succeeded;
+Ready offline/Downloaded persisted after a process restart and startup
+revalidation. One transient older-entry unavailable label during startup settled
+back to Downloaded without retry; retained as a UX observation. This is not a
+network-denied offline acceptance claim.
+The newly downloaded recording also reached Playing after restart and was then
+paused. The task-owned emulator/private ADB server have been stopped, with
+emulator data preserved; process cleanup is recorded in `runtime-cleanup.json`.
+
+See `verification/media-performance-20261111.md` and evidence under
+`.work/evidence/redesign/media-performance-20261111/`. Work continues directly
+without agents. The full redesign and broader physical/platform gates remain
+open. Historical worker blockers below are superseded.
+
+## Direct native player integration and emulator check — 2026-11-11
+
+The user now explicitly prohibits subagents unless requested. Continue directly;
+this supersedes the historical worker requirement and blocker below. The full
+player uses nativeCmpkit AdaptiveSlider with localized elapsed/duration speech and
+language. A consumer Material actual preserves the real 48 dp input node without
+changing pinned upstream source. Entry/generation keys and a current-owner guard
+reject stale drags; native samples do not steal drafts; release commits once.
+
+All 30 focused Desktop player/Settings tests passed. iOS arm64 compilation,
+Android app and instrumentation APK builds passed. The updated app was installed
+in place on the preserved API 34 emulator. Existing downloaded playback and an
+actual seek advanced to 17:09/24:19, then playback was paused. Physical iPhone
+remains on its earlier artifact; this UI change has not been installed there.
+See `verification/native-player-seek-implementation-20261111.md`.
+
+The requested emulator investigation is now measured and repaired as described
+in the newer checkpoint above. The full redesign remains open.
+
+## Goal blocked on worker access or workflow authorization — 2026-11-11
+
+The OpenCode native-player task remains terminal with `Invalid credential` and no
+active run. This same implementation blocker has persisted through the native
+control audit, secondary-screen evidence preservation, and the current recheck.
+The ten source hashes for the accepted six-test evidence remain unchanged, and
+PlayerSeek still imports Material3 Slider. The full redesign is incomplete.
+
+The prepared implementation remains
+`.work/workers/native-player-seek-20261111/task.md`. Resume when OpenCode access is
+restored or the owner explicitly authorizes Codex to implement the remaining work
+directly. Automatic goal continuations do not answer that pending workflow
+question. No retry, provider switch or substantial implementation was performed.
+The next work is native seek integration, then focused validation and remaining
+physical iPhone playback/download acceptance; slow startup remains unresolved.
+
+## Secondary redesigned screens verified — 2026-11-11
+
+Six focused authored Desktop UI checks passed: **6 tests, 0 failures/errors,
+0 skipped**. Library overview fits 320 × 760 in English/light at 100% text and
+Arabic/dark at 200% text after scrolling; all four section cards have unclipped
+48 dp-or-larger targets and emit only their expected library route. Existing
+podcast narrow/wide viewport, Settings large-Arabic-text, and track-detail
+large-Arabic-text checks also passed. Current captures were visually reviewed.
+All ten saved source hashes still match. JUnit XML, screenshot hashes/dimensions,
+geometry and the passing 40-second build log are preserved under
+`.work/evidence/redesign/library-overview-verification-20261111/`.
+
+See `verification/redesign-secondary-screens-20261111.md` for cases and limits.
+No production source or installed app changed in this verification. No heavy test
+remains active. Physical iPhone playback/download and native seek integration
+remain pending; the OpenCode worker authentication failure below is unresolved.
+The full redesign goal remains open.
+
+## Native player migration audit and OpenCode blocker — 2026-11-11
+
+The current player still uses Material3 Slider. A focused Desktop rendering proves
+that a direct pinned nativeCmpkit AdaptiveSlider substitution yields a **44 dp**
+progress/input node versus the existing player's **48 dp**, despite the same outer
+minimum height. The expected red probe and measured XML are preserved; no production
+source changed. The unchanged production player's existing English/Arabic target,
+semantics, keyboard, mouse/touch-edge and one-bound-seek regression then **passed**.
+
+NativeCmpkit remains clean at its original pin. Prepared scoped work: retain the
+real 48 dp target in a consumer Material actual, migrate PlayerSeek to AdaptiveSlider
+with localized native time accessibility, and verify draft/release/stale-generation
+behavior. The OpenCode DeepSeek/max task failed immediately with **Invalid credential**;
+authoritative terminal state and source hashes show no worker implementation edits.
+No other provider, CLI fallback, credential change or lead takeover was attempted.
+The owner must restore OpenCode access or authorize direct Codex implementation.
+
+A full-scope reference/native/UX acceptance matrix and exact evidence are in
+`verification/native-player-seek-audit-20261111.md`. The task is
+`.work/workers/native-player-seek-20261111/task.md`; evidence is under
+`.work/evidence/redesign/native-slider-audit-20261111/`. The iPhone installation
+status below remains current. No phone/emulator/simulator action or new UI release
+artifact was produced in this continuation. No heavy task remains active.
+The full redesign goal stays open.
+
+## Current source fix installed on iPhone — 2026-11-11
+
+The signed **`iphone-search-control-20261111`** artifact is now installed in place
+on the physical iPhone. Its executable/plist hashes and development signature were
+verified, and all 24 saved source hashes remain current. It reached `library_ready`
+with the existing library/selected recording preserved. No uninstall or data reset.
+
+Two inspection-only XCTest runs passed. Playback attempts remain **unverified**:
+one hit an accessibility timeout, and a focused exact-recording probe encountered
+foreground switches to other apps and invalid hit points. No fresh iPhone download
+acceptance is claimed. A targeted crash-file listing found no new Veyra report;
+this is not proof of playback success. One transient snapshot also displayed the
+incomplete/damaged-file snackbar without identifying its producing action/asset.
+
+Device actions stopped to avoid conflicting with foreground use. No heavy build
+or test runner remains active. The local console monitor was detached without
+forwarding a catchable signal to the phone app. For the remaining physical test,
+keep the phone unlocked with Veyra open. See
+`verification/iphone-source-install-20261111.md` and
+`.work/evidence/redesign/iphone-source-acceptance-20261111-summary.json`.
+This supersedes the earlier **uninstalled** status below. The full redesign and
+physical playback/download acceptance remain incomplete.
+
+## Source-selection fix and current Android acceptance — 2026-11-11
+
+A live Android retry exposed an additional kmpYT parsing defect: YouTube's
+`didYouMeanRenderer` spelling control was counted as unsupported first content.
+Both local kmpYT copies now ignore that recognized control while retaining the
+unchanged query and actual first-content identity. The regression fails before
+and passes after; **32 browsing/first-result tests pass**. The exact reported
+recording then reached native Android PLAYING; its accepted source video ID
+matches the tapped result. Observed play+1.715 s advancement took 21.741 s; no
+before/after speed or human-listening claim.
+
+A fresh in-app download completed at **23,626,255 bytes / 22.5 MiB**. App-only offline
+mode persisted across a COLD launch, and the retained download played with actual
+position **1 → 11 s**. Actual outside/button/IME keyboard dismissal, mini-player and
+Home-card taps, and repeated sheet gestures passed on the preserved Android
+emulator. Current screenshots show continuous bottom surfaces. **All 6 clean
+Android instrumentation tests pass** after updating obsolete owner-drain fixtures
+to current same-owner schema-3 Room admission without removing their assertions.
+
+Installed app SHA256: `ee6513f87ae6f85c85d1946caa2243256e4c2a9a71d5f542972b150648f97e89`.
+Current signed iPhone artifact is **`iphone-search-control-20261111`**, superseding
+`iphone-framework-refresh` at the same build output path. Full native host build,
+actual relink, UTF-16 parser marker and development signature are verified. Signed
+debug-library SHA256: `8f40e67d4436e2b098cde5af3ef3677be53f029740dca7a4afbc22a979abfadb`.
+It remains **uninstalled**: the targeted iPhone still reports
+`tunnelState=unavailable`. The original phone-native access failure still needs
+exact-recording physical playback/download acceptance with this build.
+
+See `verification/source-selection-runtime-20261111.md` and evidence under
+`.work/evidence/redesign/android-runtime/`. Older reports retain their actual
+scope. No commit/push, uninstall, app-data reset or pin/bootstrap weakening. The
+full redesign goal stays open for remaining physical and platform acceptance.
+The original online setting is restored, playback is paused, and the preserved
+Android emulator/private ADB server are stopped. No live task-owned build or
+emulator process needs resuming; use the current receipts/artifacts above.
+
+## iPhone runtime and full redesign continuation — 2026-11-10
+
+Latest source: redesigned Home empty state, native UIKit control RTL/theme and
+localized slider accessibility, stable settings expansion across language changes,
+readable dark player titles, direct pointer Search, and standalone detail Back
+with one shell header in the application. Menus/audio disclosures retain the
+original action and exact-recording assertions. All **235 UI/localization tests
+pass**, with XML and `all-ui-final-summary.json` retained under
+`.work/evidence/redesign/`.
+
+A fresh Simulator capture detected an old Kotlin archive in the native host
+despite successful build output. Xcode now declares generated framework outputs
+and links the exact archive in Debug/Release. Both native hosts actually relinked;
+both app binaries contain current UI markers. Before/after evidence is in
+`xcode-framework-relink-before/after.json`. The intermediate device binary already
+contained the new Home marker; do not infer every earlier iPhone build was stale.
+
+Latest artifacts: Android production compilation passes; full Simulator/iPhone
+builds pass in `ios-framework-refresh-simulator-build.log` and
+`iphone-framework-refresh-build.log`. Final development signature and source
+snapshots are `iphone-framework-refresh-signature.json` and
+`iphone-framework-refresh-source-hashes.json`. **The final build is signed but
+uninstalled:** the paired iPhone still reports `tunnelState=unavailable` in
+`iphone-framework-refresh-device-state.json`.
+
+Current real Simulator captures are `redesign-refreshed-simulator-*`, including
+English light/dark and Arabic dark cold launches that reach `library_ready`.
+English/Arabic dark Home views were inspected and show the calm empty state and
+continuous bottom navigation background. The older `redesign-final-simulator-*`
+captures were made from the stale Simulator host and are superseded. Captures
+have no selected mini-player; they do not establish keyboard, native controls,
+full-player geometry or playback acceptance. The task-owned Simulator is shut down.
+
+Previous iPhone crash fixes and the shared/native unsupported-source correction
+remain in the source. The selected video reported NSURLErrorDomain -1102 with
+underlying NSOSStatusErrorDomain -12660; this is native access/read failure, not
+independent proof of HTTP 403. Classification now permits bounded same-recording
+renewal; optional unavailable source responses no longer poison valid audio.
+The exact video still needs physical retesting. Earlier physical playback/download
+and sheet gesture successes are limited to their actual older builds/recordings.
+
+See `verification/redesign-native-ux-20261110.md` and the earlier
+`verification/ios-runtime-player-redesign-20261110.md` for evidence and remaining
+gates. No commit/push, uninstall, data reset, or store upload. The full redesign
+goal remains incomplete pending essential physical acceptance.
+
+## Local Android and kmpYT repair — 2026-11-10
+
+In `/Users/abdelrahman/Projects/veyra`, the original failed MATGREESH download now
+completes in the actual app: Downloaded / 3.6 MiB, exactly 3,725,310 bytes. App-only
+offline playback advanced from 4 to 19 seconds, then from 1 second to 1:02 on
+the final APK after a cold launch; the original online setting was restored. On the final installed APK, a fresh undownloaded CTRL result was
+observed Playing within 18.81 seconds of its tap and reached 1:31 without a
+crash. This is an absolute observed startup time; there is no comparable old-build
+benchmark or human listening confirmation.
+
+The local kmpYT patch honors source-declared availability, anchored to actual
+player-response receipt, across playback/download/manifest paths. Audio-only
+inspection and per-inspection signature/throttling reuse reduce unnecessary
+video processing. Earlier Android ICU placeholder, Media3 loading-state,
+fenced download-progress reset and bilingual expired-link repairs remain intact.
+Full library JVM suite: 457 discovered, 454 passed / 3 skipped. Focused shared
+suite: 120 passed. Final physical Android regressions: 3 passed. Clean APKs built
+and were installed with data preserved; installed app hash matches the build.
+Diagnostic source and task-owned device probe cache files were removed.
+
+Changes are uncommitted in Veyra and both kmpYT copies; upstream checkout
+`.work/kmpYT` is on `fix/android-media-transfer-startup`. Source patches and
+evidence are retained locally. No push/PR/upstream merge/release occurred; the
+original pin remains unchanged. Normal bootstrap still requires the upstream
+patch to be reviewed/merged and pinned before distribution; local validation used
+the existing scoped development wrapper. iOS/native desktop behavior is not
+verified. See `verification/kmpyt-media-startup-repairs-20261110.md` and
+`verification/android-runtime-repairs-20261110.md`.
+
 ## Current consolidation — 2026-11-09
 
 The owner superseded the worktree-per-task workflow with one checkout on `main`. The active source is PR27 `cf78955d4363599f42f40ce539e3608a31c4040d`; its five-platform APK/EXE/DMG/DEB packaging run `42688713102` passed. All prior branch tips and five local-change snapshots are preserved in main history. Focused checks (85 tests), offline Gradle configuration and Git object verification passed before reclamation. Consolidation is complete: one checkout on `main`, zero additional worktrees, about 2.84 GiB including hidden files, `.git` and the retained local evidence; final archive/restore checks and Git integrity checks passed. See `docs/verification/main-consolidation-20261109.md` for selection decisions, exact snapshot commits, evidence restoration and final cleanup status. Older entries below are historical and do not override this owner instruction. Installation, physical/live/offline audio, iOS, signing/notarization and legal/native/JDK release gates remain open.

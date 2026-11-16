@@ -20,6 +20,7 @@ import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performMouseInput
@@ -87,8 +88,8 @@ class TrackDetailFlowsTest {
         scrollTo("track-play")
         ui.onNodeWithTag("track-play").performClick()
         ui.onNodeWithTag("track-favorite").performClick()
-        ui.onNodeWithTag("track-play-next").performClick()
-        ui.onNodeWithTag("track-enqueue").performClick()
+        chooseTrackAction(TextKey.PlayNext)
+        chooseTrackAction(TextKey.AddToEnd)
         assertEquals(listOf<MusicUiAction>(MusicUiAction.TogglePlayPause, MusicUiAction.ToggleFavorite(track),
             MusicUiAction.Enqueue(track, true), MusicUiAction.Enqueue(track, false)), actions)
     }
@@ -127,7 +128,7 @@ class TrackDetailFlowsTest {
         scrollTo("track-play")
         ui.onNodeWithTag("track-play").assertIsNotEnabled()
         ui.onNodeWithTag("track-favorite").performClick()
-        ui.onNodeWithTag("track-enqueue").performClick()
+        chooseTrackAction(TextKey.AddToEnd)
         scrollTo("track-download-start")
         ui.onNodeWithTag("track-download-start").assertIsNotEnabled()
         scrollTo("track-source-link")
@@ -201,8 +202,7 @@ class TrackDetailFlowsTest {
             TrackDetailScreen(snapshot().copy(playlists = listOf(playlist)), track.id, PlaybackState(),
                 { actions += it }, Modifier.size(900.dp, 720.dp), options)
         } }
-        scrollTo("track-playlist")
-        ui.onNodeWithTag("track-playlist").performClick()
+        chooseTrackAction(TextKey.AddToPlaylist)
         ui.onNodeWithText(playlist.name).performClick()
         scrollTo("track-source-link")
         ui.onNodeWithTag("track-source-link").performClick()
@@ -236,14 +236,30 @@ class TrackDetailFlowsTest {
         } }
         ui.onNodeWithTag("track-back").assertIsDisplayed()
         capture("track-ar-dark-large-top.png")
-        scrollTo("track-enqueue")
-        ui.onNodeWithTag("track-enqueue").assertIsDisplayed().performClick()
+        chooseTrackAction(TextKey.AddToEnd, LanguagePreference.ARABIC)
         capture("track-ar-dark-large-actions.png")
         ui.onNodeWithTag("track-back").assertIsDisplayed().performClick()
         assertEquals(listOf<MusicUiAction>(MusicUiAction.Enqueue(track, false), MusicUiAction.NavigateBack), actions)
     }
 
-    private fun scrollTo(tag: String) { ui.onNodeWithTag("track-detail-content").performScrollToNode(hasTestTag(tag)) }
+    private var audioDetailsExpanded = false
+
+    private fun chooseTrackAction(key: TextKey, language: LanguagePreference = LanguagePreference.ENGLISH) {
+        val localized = AppStrings(language)
+        scrollTo("track-actions")
+        ui.onNodeWithContentDescription(localized.format(TextKey.MoreActionsFor, track.title)).performClick()
+        ui.onNodeWithText(localized.text(key)).performClick()
+    }
+
+    private fun scrollTo(tag: String) {
+        val list = ui.onNodeWithTag("track-detail-content")
+        if (tag in setOf("track-current-audio", "track-downloaded-audio", "track-previous-audio") && !audioDetailsExpanded) {
+            list.performScrollToNode(hasTestTag("track-audio-details"))
+            ui.onNodeWithTag("track-audio-details").performClick()
+            audioDetailsExpanded = true
+        }
+        list.performScrollToNode(hasTestTag(tag))
+    }
 
     private fun capture(name: String) {
         ui.onNodeWithTag("track-detail").performMouseInput { moveTo(Offset(1f, 1f)); exit() }

@@ -196,7 +196,14 @@ internal fun AcquisitionGraph.applyPhysicalHeartbeat(command: HeartbeatPhysicalD
     val join = physicalJoin(command.fence.downloadId) ?: return physicalStale()
     if (!join.matches(command.fence, command.nowEpochMs) || join.job.maintenanceKind == null && join.demand() != DownloadClaimDemand.CONTINUE) return physicalStale()
     require(command.leaseDurationMs in 1_000..600_000 && command.nowEpochMs <= Long.MAX_VALUE - command.leaseDurationMs)
-    require(command.bytesDownloaded >= join.job.bytesDownloaded && (command.totalBytes == null || command.totalBytes >= command.bytesDownloaded))
+    require(command.bytesDownloaded >= 0 && (command.totalBytes == null || command.totalBytes >= command.bytesDownloaded))
+    if (command.allowProgressReset) {
+        // kmpYT can discard a prefix when its resume receipt is rejected. Processed
+        // output can also be smaller than its input. Neither changes this exact
+        // owner/attempt/representation, nor proves that the final file is valid.
+        require(join.job.maintenanceKind == null && join.job.status == DownloadStatus.RUNNING &&
+            !join.job.representationId.isNullOrBlank() && command.bytesDownloaded < join.job.bytesDownloaded)
+    } else require(command.bytesDownloaded >= join.job.bytesDownloaded)
     if (join.job.maintenanceKind != null) require(command.bytesDownloaded == join.job.bytesDownloaded &&
         command.totalBytes == join.job.totalBytes) { "Maintenance heartbeat cannot change transfer counters" }
     val job = join.job.copy(bytesDownloaded = command.bytesDownloaded, totalBytes = command.totalBytes,

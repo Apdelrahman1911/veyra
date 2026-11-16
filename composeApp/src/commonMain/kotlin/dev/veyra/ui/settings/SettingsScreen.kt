@@ -28,11 +28,19 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Slider
+import com.mohamedrejeb.calf.ui.slider.AdaptiveSlider
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
+import com.mohamedrejeb.calf.ui.toggle.AdaptiveSwitch
+import androidx.compose.material3.Icon
+import androidx.compose.material3.TextButton
+import dev.veyra.ui.design.VeyraIcons
+import dev.veyra.ui.design.ScreenIntro
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import dev.veyra.nativecomponents.LocalNativeControlAccessibility
+import dev.veyra.nativecomponents.NativeControlAccessibility
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -83,11 +91,10 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(VeyraSpacing.Section),
         ) {
             item("title") {
-                Text(strings.text(TextKey.Settings), style = MaterialTheme.typography.headlineLarge,
-                    modifier = Modifier.semantics { heading() })
+                ScreenIntro(strings.text(TextKey.Settings), strings.text(TextKey.SettingsSubtitle))
             }
             item("playback") {
-                SettingsSection(strings.text(TextKey.Playback)) {
+                SettingsSection(TextKey.Playback) {
                     ToggleSetting(
                         title = strings.text(TextKey.Crossfade), description = strings.text(TextKey.CrossfadeDescription),
                         checked = settings.crossfadeEnabled,
@@ -116,7 +123,7 @@ fun SettingsScreen(
                 }
             }
             item("podcasts") {
-                SettingsSection(strings.text(TextKey.PodcastDefaults)) {
+                SettingsSection(TextKey.PodcastDefaults) {
                     Text(strings.text(TextKey.DefaultPodcastSpeedDescription), style = MaterialTheme.typography.bodyMedium)
                     val speeds = supportedPodcastSpeeds(capabilities, settings.speed)
                     if (settings.speed !in speeds) {
@@ -139,7 +146,7 @@ fun SettingsScreen(
                 }
             }
             item("appearance") {
-                SettingsSection(strings.text(TextKey.Appearance)) {
+                SettingsSection(TextKey.Appearance) {
                     ChoiceGroup(strings.text(TextKey.Language)) {
                         LanguagePreference.entries.forEach { language ->
                             SettingsButton(strings.languageName(language), selected = settings.language == language,
@@ -158,7 +165,7 @@ fun SettingsScreen(
                 }
             }
             item("offline") {
-                SettingsSection(strings.text(TextKey.Offline)) {
+                SettingsSection(TextKey.Offline) {
                     ToggleSetting(strings.text(TextKey.OfflineMode), strings.text(TextKey.OfflineModeDescription),
                         checked = settings.offlineOnly,
                         modifier = Modifier.testTag("settings-offline"),
@@ -166,7 +173,7 @@ fun SettingsScreen(
                 }
             }
             item("downloads") {
-                SettingsSection(strings.text(TextKey.Downloads)) {
+                SettingsSection(TextKey.Downloads) {
                     Text(strings.text(TextKey.ParallelDownloadsDescription), style = MaterialTheme.typography.bodyMedium)
                     ChoiceGroup(strings.text(TextKey.ParallelDownloads)) {
                         (1..4).forEach { count ->
@@ -184,7 +191,7 @@ fun SettingsScreen(
                 }
             }
             item("about") {
-                SettingsSection(strings.text(TextKey.About)) {
+                SettingsSection(TextKey.About) {
                     Text(strings.text(TextKey.LocalDataNotice), style = MaterialTheme.typography.bodyMedium)
                     Text(strings.text(TextKey.Privacy), style = MaterialTheme.typography.titleSmall,
                         modifier = Modifier.semantics { heading() })
@@ -205,12 +212,20 @@ fun SettingsScreen(
 }
 
 @Composable
-private fun SettingsSection(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Surface(modifier = Modifier.fillMaxWidth(), color = LocalVeyraColors.current.surface,
-        shape = RoundedCornerShape(VeyraRadii.Card)) {
-        Column(Modifier.padding(VeyraSpacing.Large), verticalArrangement = Arrangement.spacedBy(VeyraSpacing.Large)) {
-            Text(title, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.semantics { heading() })
-            content()
+private fun SettingsSection(titleKey: TextKey, content: @Composable ColumnScope.() -> Unit) {
+    val strings = LocalStrings.current
+    val title = strings.text(titleKey)
+    var expanded by rememberSaveable(titleKey) { mutableStateOf(false) }
+    Surface(modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(24.dp)) {
+        Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = { expanded = !expanded }, modifier = Modifier.fillMaxWidth().sizeIn(minHeight = 56.dp)
+                .testTag("settings-section-${titleKey.name}")
+                .semantics { heading(); stateDescription = if (expanded) strings.text(TextKey.ShowLess) else strings.text(TextKey.ShowMore) }) {
+                Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurface)
+                Icon(if (expanded) VeyraIcons.ArrowUp else VeyraIcons.ChevronForward, null)
+            }
+            if (expanded) Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(16.dp), content = content)
         }
     }
 }
@@ -272,7 +287,7 @@ private fun ToggleSetting(title: String, description: String, checked: Boolean, 
             Text(title, style = MaterialTheme.typography.titleSmall)
             Text(description, style = MaterialTheme.typography.bodyMedium)
         }
-        Switch(checked = checked, onCheckedChange = null, enabled = enabled,
+        AdaptiveSwitch(checked = checked, onCheckedChange = null, enabled = enabled,
             modifier = Modifier.sizeIn(minWidth = VeyraSpacing.TouchTarget, minHeight = VeyraSpacing.TouchTarget).clearAndSetSemantics { })
     }
 }
@@ -325,12 +340,18 @@ private fun TextSizeSetting(value: Float, onAction: (SettingsAction) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(VeyraSpacing.Small)) {
         Text(label, style = MaterialTheme.typography.titleSmall)
         Text(strings.text(TextKey.TextSizeDescription), style = MaterialTheme.typography.bodyMedium)
-        Slider(value = draft, onValueChange = { draft = it }, valueRange = .75f..2f, steps = 24,
-            interactionSource = interactions,
-            onValueChangeFinished = { onAction(SettingsAction.SetTextScale((draft * 20).roundToInt() / 20f)) },
-            modifier = Modifier.fillMaxWidth().sizeIn(minHeight = VeyraSpacing.TouchTarget).testTag("settings-text-scale")
-                .then(if (focused) Modifier.border(2.dp, LocalVeyraColors.current.primary, RoundedCornerShape(VeyraRadii.Small)) else Modifier)
-                .semantics { contentDescription = title; stateDescription = label })
+        CompositionLocalProvider(LocalNativeControlAccessibility provides NativeControlAccessibility(
+            label = title,
+            value = strings.format(TextKey.PercentValue, strings.number((draft * 100).roundToInt().toLong())),
+            languageTag = if (strings.isRtl) "ar" else "en",
+        )) {
+            AdaptiveSlider(value = draft, onValueChange = { draft = it }, valueRange = .75f..2f, steps = 24,
+                interactionSource = interactions,
+                onValueChangeFinished = { onAction(SettingsAction.SetTextScale((draft * 20).roundToInt() / 20f)) },
+                modifier = Modifier.fillMaxWidth().sizeIn(minHeight = VeyraSpacing.TouchTarget).testTag("settings-text-scale")
+                    .then(if (focused) Modifier.border(2.dp, LocalVeyraColors.current.primary, RoundedCornerShape(VeyraRadii.Small)) else Modifier)
+                    .semantics { contentDescription = title; stateDescription = label })
+        }
         ChoiceGroup(title) {
             // Non-drag alternatives apply relative to the CURRENT Room value, including rapid clicks.
             SettingsButton(strings.text(TextKey.SmallerText), enabled = value > .75f,

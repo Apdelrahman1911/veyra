@@ -116,7 +116,7 @@ class AcquisitionPlaybackResolver(
                 }
             }
             currentCoroutineContext().ensureActive()
-            return AcquisitionPlaybackPreparation(AcquisitionPlaybackSource(context, asset.uri, StreamTransport.PROGRESSIVE,
+            return AcquisitionPlaybackPreparation(AcquisitionPlaybackSource(context, files.ownedPath(asset.uri).toString(), StreamTransport.PROGRESSIVE,
                 asset.mimeType, asset.codecs, requireNotNull(asset.representationId), durationMs = duration,
                 seekableHint = true, isLocal = true, materializationAssetId = asset.id), asset)
         }

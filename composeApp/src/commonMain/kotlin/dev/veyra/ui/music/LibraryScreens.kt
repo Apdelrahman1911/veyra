@@ -1,11 +1,14 @@
 package dev.veyra.ui.music
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -48,6 +51,8 @@ import dev.veyra.model.Playlist
 import dev.veyra.model.QueueContext
 import dev.veyra.model.SourceProvider
 import dev.veyra.playback.PlaybackState
+import dev.veyra.ui.design.CollectionLink
+import dev.veyra.ui.design.ScreenIntro
 import dev.veyra.ui.design.EmptyState
 import dev.veyra.ui.design.LocalStrings
 import dev.veyra.ui.design.MetadataText
@@ -80,7 +85,19 @@ fun LibraryScreen(
         else matching.sortedBy { mediaSearchKey(it.title) }
     }
     Column(modifier.fillMaxSize().testTag("library-screen")) {
-        if (selectedSection == LibrarySection.DOWNLOADS) {
+        if (selectedSection == LibrarySection.OVERVIEW) {
+            LazyColumn(Modifier.fillMaxSize().testTag("library-list"), contentPadding = PaddingValues(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                item { ScreenIntro(strings.text(TextKey.Library), strings.text(TextKey.LibrarySubtitle)) }
+                item { CollectionLink(strings.text(TextKey.Favorites), strings.format(TextKey.TrackCount, snapshot.favoriteIds.size.toString()), VeyraIcons.Favorite,
+                    { onAction(MusicUiAction.OpenLibrary(LibrarySection.FAVORITES)) }, Modifier.padding(horizontal = 20.dp).testTag("library-FAVORITES")) }
+                item { CollectionLink(strings.text(TextKey.Playlists), null, VeyraIcons.Library,
+                    { onAction(MusicUiAction.OpenLibrary(LibrarySection.PLAYLISTS)) }, Modifier.padding(horizontal = 20.dp).testTag("library-PLAYLISTS")) }
+                item { CollectionLink(strings.text(TextKey.Downloads), strings.text(TextKey.ReadyOffline), VeyraIcons.Download,
+                    { onAction(MusicUiAction.OpenLibrary(LibrarySection.DOWNLOADS)) }, Modifier.padding(horizontal = 20.dp).testTag("library-DOWNLOADS")) }
+                if (options.supportsImport || snapshot.media.values.any { it.source.provider == SourceProvider.LOCAL }) item { CollectionLink(strings.text(TextKey.OnThisDevice), if (options.supportsImport) strings.text(TextKey.ImportDescription) else null, VeyraIcons.Music,
+                    { onAction(MusicUiAction.OpenLibrary(LibrarySection.LOCAL_FILES)) }, Modifier.padding(horizontal = 20.dp).testTag("library-LOCAL_FILES")) }
+            }
+        } else if (selectedSection == LibrarySection.DOWNLOADS) {
             DownloadsContent(snapshot, onAction, Modifier.weight(1f), options) {
                 LibraryHeader(selectedSection, onAction)
             }
@@ -130,20 +147,15 @@ fun LibraryScreen(
 @Composable
 private fun LibraryHeader(selectedSection: LibrarySection, onAction: (MusicUiAction) -> Unit) {
     val strings = LocalStrings.current
-    SectionTitle(strings.text(TextKey.Library))
-    FlowRow(Modifier.padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        LibrarySection.entries.forEach { section ->
-            FilterChip(
-                selected = selectedSection == section,
-                onClick = { onAction(MusicUiAction.OpenLibrary(section)) },
-                label = { Text(strings.text(section.label())) },
-                modifier = Modifier.heightIn(min = 48.dp).testTag("library-${section.name}"),
-            )
-        }
+    ScreenIntro(strings.text(selectedSection.label()))
+    TextButton({ onAction(MusicUiAction.OpenLibrary(LibrarySection.OVERVIEW)) }, Modifier.padding(horizontal = 20.dp).heightIn(min = 48.dp)) {
+        Icon(VeyraIcons.Library, null)
+        Text(strings.text(TextKey.BrowseLibrary), Modifier.padding(start = 8.dp))
     }
 }
 
 private fun LibrarySection.label(): TextKey = when (this) {
+    LibrarySection.OVERVIEW -> TextKey.AllLibrary
     LibrarySection.FAVORITES -> TextKey.Favorites
     LibrarySection.PLAYLISTS -> TextKey.Playlists
     LibrarySection.DOWNLOADS -> TextKey.Downloads
@@ -155,7 +167,8 @@ private fun PlaylistLibraryRow(playlist: Playlist, onAction: (MusicUiAction) -> 
     val strings = LocalStrings.current
     var rename by remember(playlist.id) { mutableStateOf(false) }
     var delete by remember(playlist.id) { mutableStateOf(false) }
-    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+    var menu by remember { mutableStateOf(false) }
+    Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 5.dp).background(MaterialTheme.colorScheme.surface, RoundedCornerShape(22.dp)).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
         TextButton(onClick = { onAction(MusicUiAction.OpenPlaylist(playlist.id)) }, modifier = Modifier.weight(1f).heightIn(min = 72.dp)) {
             Icon(VeyraIcons.Library, null, Modifier.padding(end = 12.dp))
             Column(Modifier.weight(1f)) {
@@ -163,8 +176,13 @@ private fun PlaylistLibraryRow(playlist: Playlist, onAction: (MusicUiAction) -> 
                 Text(strings.format(TextKey.TrackCount, playlist.entries.size.toString()), Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Start)
             }
         }
-        ActionIcon(VeyraIcons.Edit, strings.text(TextKey.RenamePlaylist), { rename = true })
-        ActionIcon(VeyraIcons.Delete, strings.text(TextKey.DeletePlaylist), { delete = true })
+        Box {
+            ActionIcon(VeyraIcons.MoreOptions, strings.text(TextKey.MoreOptions), { menu = true })
+            DropdownMenu(menu, { menu = false }) {
+                DropdownMenuItem(text = { Text(strings.text(TextKey.RenamePlaylist)) }, onClick = { menu = false; rename = true })
+                DropdownMenuItem(text = { Text(strings.text(TextKey.DeletePlaylist)) }, onClick = { menu = false; delete = true })
+            }
+        }
     }
     if (rename) PlaylistNameDialog(playlist.name, { rename = false }) { onAction(MusicUiAction.RenamePlaylist(playlist.id, it)); rename = false }
     if (delete) ConfirmActionDialog(strings.text(TextKey.DeletePlaylist), strings.format(TextKey.ConfirmDeletePlaylist, playlist.name), strings.text(TextKey.Delete), { delete = false }) {
@@ -205,8 +223,12 @@ fun PlaylistDetailScreen(
     }
     LazyColumn(modifier.fillMaxSize().testTag("playlist-detail"), contentPadding = PaddingValues(bottom = 24.dp)) {
         item {
+            availableItems.firstOrNull()?.let { cover ->
+                dev.veyra.ui.design.Artwork(cover.artworkUrl, playlist.name,
+                    Modifier.padding(horizontal = 24.dp, vertical = 16.dp).size(160.dp), snapshot.settings.offlineOnly, cover.localArtworkPath)
+            }
+
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                ActionIcon(VeyraIcons.Back, strings.text(TextKey.Back), { onAction(MusicUiAction.OpenLibrary(LibrarySection.PLAYLISTS)) })
                 Column(Modifier.weight(1f).padding(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     MetadataText(playlist.name, Modifier.fillMaxWidth().semantics { heading() }, style = MaterialTheme.typography.titleLarge, maxLines = 3, overflow = TextOverflow.Ellipsis)
                     Text(strings.format(TextKey.TrackCount, playlist.entries.size.toString()), style = MaterialTheme.typography.bodyMedium)
@@ -265,7 +287,7 @@ private fun DownloadsContent(snapshot: AppSnapshot, onAction: (MusicUiAction) ->
     LazyColumn(modifier.fillMaxSize().testTag("downloads-list"), contentPadding = PaddingValues(bottom = 24.dp)) {
         item { header() }
         item {
-            SectionTitle(strings.text(TextKey.Downloads), description = strings.format(TextKey.StorageUsed, strings.byteSize(bytes)))
+            Text(strings.format(TextKey.StorageUsed, strings.byteSize(bytes)), Modifier.padding(horizontal = 24.dp, vertical = 8.dp), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             FlowRow(Modifier.padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(TextKey.All, TextKey.InProgress, TextKey.Completed, TextKey.NeedsAttention).forEachIndexed { index, label ->
                     FilterChip(filter == index, { filter = index }, { Text(strings.text(label)) }, modifier = Modifier.heightIn(min = 48.dp))
@@ -289,7 +311,7 @@ private fun DownloadRow(entry: DownloadSurfaceEntry, snapshot: AppSnapshot, onAc
         entry.ready && entry.origin == DownloadSurfaceOrigin.TYPED_CATALOGUE && it.isNotBlank()
     }
     var remove by remember(entry.id) { mutableStateOf(false) }
-    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp).testTag("download-${entry.id}"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp).background(androidx.compose.material3.MaterialTheme.colorScheme.surface, RoundedCornerShape(24.dp)).padding(16.dp).testTag("download-${entry.id}"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (item != null) MetadataText(item.title, Modifier.fillMaxWidth(), style = MaterialTheme.typography.titleMedium, maxLines = 3, overflow = TextOverflow.Ellipsis)
         else if (entry.origin == DownloadSurfaceOrigin.TYPED_SOURCE) {
             MetadataText(entry.displayTitle ?: strings.text(TextKey.InformationUnavailable), Modifier.fillMaxWidth(),

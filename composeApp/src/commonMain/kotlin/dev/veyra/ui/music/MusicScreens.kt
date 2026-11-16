@@ -1,58 +1,35 @@
 package dev.veyra.ui.music
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListScope
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.Button
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import dev.veyra.model.AppFailure
-import dev.veyra.model.AppSnapshot
-import dev.veyra.model.FailureCode
-import dev.veyra.model.MediaItem
-import dev.veyra.model.PodcastShow
-import dev.veyra.model.SourceProvider
+import dev.veyra.model.*
 import dev.veyra.playback.PlaybackState
 import dev.veyra.source.MediaCollection
 import dev.veyra.source.SourcePage
-import dev.veyra.ui.design.Artwork
-import dev.veyra.ui.design.EmptyState
-import dev.veyra.ui.design.ErrorState
-import dev.veyra.ui.design.LocalStrings
-import dev.veyra.ui.design.MetadataText
-import dev.veyra.ui.design.TextKey
-import dev.veyra.ui.design.VeyraIcons
+import dev.veyra.ui.design.*
+import kotlinx.coroutines.delay
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ListenScreen(
     snapshot: AppSnapshot,
@@ -63,73 +40,129 @@ fun ListenScreen(
     options: MusicUiOptions = MusicUiOptions(),
 ) {
     val strings = LocalStrings.current
-    val current = playback.currentItem ?: snapshot.queue(snapshot.activeContext).currentEntry?.let { snapshot.media[it.mediaId] }
-    val recent = remember(snapshot.history, snapshot.media) {
-        snapshot.history.asReversed().mapNotNull { snapshot.media[it.mediaId] }.distinctBy { it.id }.take(6)
+    LaunchedEffect(discovery.loaded, snapshot.settings.offlineOnly) {
+        if (!snapshot.settings.offlineOnly && !discovery.loaded && !discovery.loading) onAction(MusicUiAction.Discover(discovery.provider))
     }
-    LazyColumn(modifier.fillMaxSize().testTag("listen-screen"), contentPadding = PaddingValues(bottom = 24.dp)) {
-        item { SectionTitle(strings.text(TextKey.Listen), description = strings.text(TextKey.Tagline)) }
+    val current = playback.surfaceIdentity(snapshot)
+    val recent = remember(snapshot.history, snapshot.media) {
+        snapshot.history.asReversed().mapNotNull { snapshot.media[it.mediaId] }.distinctBy { it.id }.take(8)
+    }
+    val favorites = remember(snapshot.favoriteIds, snapshot.media) { snapshot.favoriteIds.mapNotNull { snapshot.media[it] }.take(8) }
+    LazyColumn(modifier.fillMaxSize().testTag("listen-screen"), contentPadding = PaddingValues(bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        item {
+            Column(Modifier.padding(horizontal = 24.dp, vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text(strings.text(TextKey.HomeSubtitle), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(strings.text(TextKey.HomeHeadline), style = MaterialTheme.typography.displayLarge)
+                SearchShortcut({ onAction(MusicUiAction.OpenSearch()) }, Modifier.testTag("home-search"))
+            }
+        }
         if (current != null) item {
-            Surface(shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp).fillMaxWidth()) {
-                Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(strings.text(TextKey.ContinueListening), style = MaterialTheme.typography.labelLarge)
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                        Artwork(current.artworkUrl, current.title, Modifier.size(72.dp), offlineOnly = snapshot.settings.offlineOnly, localPath = current.localArtworkPath)
-                        Column(Modifier.weight(1f)) {
-                            MetadataText(current.title, Modifier.fillMaxWidth(), style = MaterialTheme.typography.titleLarge, maxLines = 3, overflow = TextOverflow.Ellipsis)
-                            MetadataText(current.creator, Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        }
+            Surface(Modifier.padding(horizontal = 24.dp).fillMaxWidth().testTag("home-open-player")
+                .clickable(onClickLabel = strings.text(TextKey.OpenPlayer)) { onAction(MusicUiAction.OpenPlayer) },
+                shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, LocalVeyraColors.current.outlineSubtle)) {
+                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Artwork(current.artworkUrl, current.title.orEmpty(), Modifier.size(64.dp), snapshot.settings.offlineOnly, current.localArtworkPath)
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(strings.text(TextKey.ContinueListening), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                        MetadataText(current.title ?: strings.text(TextKey.InformationUnavailable), Modifier.fillMaxWidth(), style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        if (!current.creator.isNullOrBlank()) MetadataText(current.creator!!, Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
-                    Button(onClick = {
-                        when {
-                            playback.currentItem?.id == current.id && showsPause(playback) -> onAction(MusicUiAction.OpenPlayer)
-                            playback.currentItem?.id == current.id -> onAction(MusicUiAction.TogglePlayPause)
-                            snapshot.queue(snapshot.activeContext).currentEntry != null -> onAction(MusicUiAction.PlayQueueEntry(snapshot.activeContext, snapshot.queue(snapshot.activeContext).currentEntry!!.id))
-                            else -> onAction(MusicUiAction.Play(current))
-                        }
-                    }, modifier = Modifier.heightIn(min = 48.dp)) {
-                        Icon(VeyraIcons.Play, null, Modifier.padding(end = 8.dp))
-                        Text(strings.text(if (playback.currentItem?.id == current.id && showsPause(playback)) TextKey.OpenPlayer else TextKey.Resume))
-                    }
+                    ActionIcon(if (showsPause(playback)) VeyraIcons.Pause else VeyraIcons.Play,
+                        strings.text(if (showsPause(playback)) TextKey.Pause else TextKey.Play),
+                        { onAction(MusicUiAction.TogglePlayPause) },
+                        Modifier.background(MaterialTheme.colorScheme.surfaceContainerHighest, CircleShape).testTag("continue-listening"))
                 }
             }
         }
         item {
-            FlowRow(modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                OutlinedButton(onClick = { onAction(MusicUiAction.OpenLibrary(LibrarySection.FAVORITES)) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.Favorites)) }
-                OutlinedButton(onClick = { onAction(MusicUiAction.OpenLibrary(LibrarySection.PLAYLISTS)) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.Playlists)) }
-                OutlinedButton(onClick = { onAction(MusicUiAction.OpenLibrary(LibrarySection.DOWNLOADS)) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.Downloads)) }
-                if (options.supportsImport) OutlinedButton(onClick = { onAction(MusicUiAction.ImportAudio) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.ImportAudio)) }
+            Row(Modifier.padding(horizontal = 24.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedButton({ onAction(MusicUiAction.OpenLibrary(LibrarySection.FAVORITES)) }, Modifier.weight(1f).heightIn(min = 48.dp)) {
+                    Icon(VeyraIcons.FavoriteBorder, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text(strings.text(TextKey.Favorites))
+                }
+                OutlinedButton({ onAction(MusicUiAction.OpenLibrary(LibrarySection.DOWNLOADS)) }, Modifier.weight(1f).heightIn(min = 48.dp)) {
+                    Icon(VeyraIcons.Download, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text(strings.text(TextKey.Downloads))
+                }
             }
         }
         if (recent.isNotEmpty()) {
-            item { SectionTitle(strings.text(TextKey.RecentlyPlayed)) }
-            items(recent, key = { "recent-${it.id}" }) { MusicMediaRow(it, snapshot, onAction, options = options) }
+            item { SectionTitle(strings.text(TextKey.JumpBackIn)) }
+            item { ArtworkShelf(recent, snapshot, options, onAction) }
         }
-        item {
-            SectionTitle(strings.text(TextKey.DiscoverMusic))
-            Text(strings.text(TextKey.SourceResolutionDescription), Modifier.padding(horizontal = 20.dp, vertical = 8.dp), style = MaterialTheme.typography.bodySmall)
-            SourceChoices(discovery.provider, { onAction(MusicUiAction.Discover(it)) }, Modifier.padding(horizontal = 20.dp))
-            if (discovery.provider == SourceProvider.COMMONS) Text(strings.text(TextKey.OpenMusicDescription), Modifier.padding(horizontal = 20.dp, vertical = 8.dp), style = MaterialTheme.typography.bodyMedium)
+        if (favorites.isNotEmpty()) {
+            item { SectionTitle(strings.text(TextKey.Favorites)) }
+            item { ArtworkShelf(favorites, snapshot, options, onAction) }
         }
-        if (snapshot.settings.offlineOnly) item {
-            ErrorState(strings.errorFor(AppFailure(FailureCode.OFFLINE_POLICY)), modifier = Modifier.padding(20.dp))
+        item { SectionTitle(strings.text(TextKey.DiscoverMusic), description = strings.text(TextKey.MadeForYourLibrary)) }
+        if (snapshot.settings.offlineOnly) {
+            item { CollectionLink(strings.text(TextKey.Downloads), strings.text(TextKey.OfflineModeDescription), VeyraIcons.Download,
+                { onAction(MusicUiAction.OpenLibrary(LibrarySection.DOWNLOADS)) }, Modifier.padding(horizontal = 24.dp)) }
         } else {
-            if (discovery.loading) item { LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 20.dp).testTag("discovery-loading")) }
-            discovery.failure?.let { failure -> item { ErrorState(strings.errorFor(failure), onRetry = { onAction(MusicUiAction.Discover(discovery.provider)) }, modifier = Modifier.padding(20.dp)) } }
-            discovery.page.notice?.let { notice -> item { ErrorState(strings.errorFor(notice), modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) } }
-            catalogPage(discovery.page, snapshot, options, onAction, "discovery")
-            if (!discovery.loading && discovery.failure == null && discovery.page.isEmpty()) item {
-                EmptyState(
-                    title = strings.text(if (discovery.loaded) TextKey.NoResults else TextKey.DiscoverMusic),
-                    description = strings.text(TextKey.SearchDescription),
-                    actionLabel = strings.text(TextKey.SearchMusic),
-                    onAction = { onAction(MusicUiAction.OpenSearch()) },
-                    modifier = Modifier.padding(20.dp),
-                )
+            if (discovery.loading) item { LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 24.dp).testTag("discovery-loading")) }
+            discovery.failure?.let { failure -> item {
+                if (failure.code == FailureCode.NOT_FOUND && discovery.page.isEmpty()) {
+                    Text(strings.text(TextKey.NoRecommendations), style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 24.dp))
+                } else {
+                    ErrorState(strings.errorFor(failure), { onAction(MusicUiAction.Discover(discovery.provider)) }, Modifier.padding(24.dp))
+                }
+            } }
+            discovery.page.notice?.let { notice -> item {
+                if (notice.code == FailureCode.NOT_FOUND && discovery.page.isEmpty()) {
+                    Text(strings.text(TextKey.NoRecommendations), style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 24.dp))
+                } else {
+                    ErrorState(strings.errorFor(notice), modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
+                }
+            } }
+            if (discovery.page.items.isNotEmpty()) {
+                item { ArtworkShelf(discovery.page.items.distinctBy { it.id }.take(8), snapshot, options, onAction) }
+                items(discovery.page.items.distinctBy { it.id }.drop(8), key = { "discovery-${it.id}" }) { MusicMediaRow(it, snapshot, onAction, options = options) }
+            }
+            items(discovery.page.collections.distinctBy { it.id }, key = { "discovery-collection-${it.id}" }) { collection ->
+                CollectionSearchRow(collection, false) { onAction(MusicUiAction.OpenCollection(collection)) }
+            }
+            if (!discovery.loading && discovery.page.isEmpty()) item {
+                CollectionLink(strings.text(TextKey.ExploreMusic), strings.text(TextKey.SearchDescription), VeyraIcons.Search,
+                    { onAction(MusicUiAction.OpenSearch()) }, Modifier.padding(horizontal = 24.dp))
+            }
+            items(discovery.page.shows.distinctBy { it.id }, key = { "discovery-show-${it.id}" }) { show ->
+                ShowSearchRow(show, snapshot.settings.offlineOnly) { onAction(MusicUiAction.OpenShow(show)) }
+            }
+            discovery.page.attribution?.takeIf { it.isNotBlank() }?.let { attribution ->
+                item { MetadataText(attribution, Modifier.padding(horizontal = 24.dp, vertical = 8.dp), style = MaterialTheme.typography.bodySmall, paragraph = true) }
             }
             if (discovery.page.nextPageToken != null) item {
-                TextButton(onClick = { onAction(MusicUiAction.LoadMoreDiscovery) }, enabled = !discovery.loading, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text(strings.text(TextKey.LoadMore)) }
+                TextButton({ onAction(MusicUiAction.LoadMoreDiscovery) }, Modifier.fillMaxWidth().heightIn(min = 48.dp), enabled = !discovery.loading) {
+                    Text(strings.text(TextKey.LoadMore))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ArtworkShelf(items: List<MediaItem>, snapshot: AppSnapshot, options: MusicUiOptions, onAction: (MusicUiAction) -> Unit) {
+    LazyRow(contentPadding = PaddingValues(horizontal = 24.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        items(items, key = { it.id }) { item ->
+            Surface(onClick = {
+                val binding = options.downloadSurface(snapshot).savedCatalogueBinding(item.id)
+                onAction(if (binding == null) MusicUiAction.Play(item) else MusicUiAction.PlaySaved(item, binding))
+            }, modifier = Modifier.width(152.dp).testTag("shelf-${item.id}"), shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.surface) {
+                Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    Box {
+                        Artwork(item.artworkUrl, item.title, Modifier.fillMaxWidth().aspectRatio(1f), snapshot.settings.offlineOnly, item.localArtworkPath)
+                        Box(Modifier.align(Alignment.BottomEnd).padding(8.dp).size(30.dp).background(Color.Black.copy(alpha = .7f), CircleShape), contentAlignment = Alignment.Center) {
+                            Icon(VeyraIcons.Play, null, Modifier.size(16.dp), tint = Color.White)
+                        }
+                    }
+                    MetadataText(item.title, Modifier.fillMaxWidth().padding(horizontal = 3.dp), style = MaterialTheme.typography.titleSmall,
+                        maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    if (item.creator.isNotBlank()) MetadataText(item.creator, Modifier.fillMaxWidth().padding(start = 3.dp, end = 3.dp, bottom = 5.dp),
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
         }
     }
@@ -145,6 +178,25 @@ fun SearchScreen(
     options: MusicUiOptions = MusicUiOptions(),
 ) {
     val strings = LocalStrings.current
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    val canSearch = state.query.trim().length >= 2 && !state.loading &&
+        state.scope == SearchScope.EVERYWHERE && !snapshot.settings.offlineOnly
+    fun submitSearch() {
+        focusManager.clearFocus()
+        keyboard?.hide()
+        onAction(MusicUiAction.RunSearch)
+    }
+    var filtersOpen by remember { mutableStateOf(false) }
+    val searchFocus = remember { FocusRequester() }
+    val latestState by rememberUpdatedState(state)
+    val latestAction by rememberUpdatedState(onAction)
+    LaunchedEffect(state.query, state.scope, state.kind, state.provider, snapshot.settings.offlineOnly) {
+        if (state.query.trim().length >= 2 && state.scope == SearchScope.EVERYWHERE && !snapshot.settings.offlineOnly) {
+            delay(650)
+            if (!latestState.loading && !latestState.searched) latestAction(MusicUiAction.RunSearch)
+        }
+    }
     val local = remember(snapshot, state.query, state.kind, options.downloads) {
         libraryMedia(snapshot, options.downloads).filter { matchesSearchKind(it, state.kind) && matchesMediaQuery(it, state.query) }
     }
@@ -154,79 +206,79 @@ fun SearchScreen(
     fun change(query: String = state.query, scope: SearchScope = state.scope, kind: SearchKind = state.kind, provider: SourceProvider = state.provider) {
         onAction(MusicUiAction.SearchChanged(query, scope, kind, provider))
     }
-    LazyColumn(modifier.fillMaxSize().testTag("search-screen"), contentPadding = PaddingValues(bottom = 24.dp)) {
+    LazyColumn(modifier.fillMaxSize().testTag("search-screen"), contentPadding = PaddingValues(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         item {
-            SectionTitle(strings.text(TextKey.Search))
-            Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            ScreenIntro(strings.text(TextKey.Search), strings.text(TextKey.SearchSubtitle))
+            Row(Modifier.padding(horizontal = 24.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
-                    value = state.query,
-                    onValueChange = { change(query = it) },
-                    label = { Text(strings.text(TextKey.Search)) },
-                    placeholder = { Text(strings.text(TextKey.SearchHint)) },
-                    singleLine = true,
-                    leadingIcon = { Icon(VeyraIcons.Search, null) },
+                    state.query, { change(query = it) }, placeholder = { Text(strings.text(TextKey.SearchHint), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    singleLine = true, shape = CircleShape,
+                    leadingIcon = { Icon(VeyraIcons.Search, null, Modifier.size(21.dp)) },
                     trailingIcon = { if (state.query.isNotEmpty()) ActionIcon(VeyraIcons.Close, strings.text(TextKey.ClearSearch), { change(query = "") }) },
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(onSearch = { onAction(MusicUiAction.RunSearch) }),
-                    modifier = Modifier.fillMaxWidth().testTag("search-query"),
+                    keyboardActions = KeyboardActions(onSearch = { submitSearch() }),
+                    colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = LocalVeyraColors.current.outlineSubtle,
+                        focusedContainerColor = MaterialTheme.colorScheme.surface, unfocusedContainerColor = MaterialTheme.colorScheme.surface),
+                    modifier = Modifier.weight(1f).focusRequester(searchFocus).testTag("search-query"),
                 )
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SearchScope.entries.forEach { scope -> FilterChip(selected = state.scope == scope, onClick = { change(scope = scope) }, label = { Text(strings.text(if (scope == SearchScope.EVERYWHERE) TextKey.Everywhere else TextKey.YourLibrary)) }, modifier = Modifier.heightIn(min = 48.dp)) }
-                }
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SearchKind.entries.forEach { kind ->
-                        FilterChip(selected = state.kind == kind, onClick = {
-                            change(kind = kind, provider = if (kind == SearchKind.PODCASTS) SourceProvider.RSS else if (state.provider == SourceProvider.RSS) SourceProvider.YOUTUBE else state.provider)
-                        }, label = { Text(strings.text(when (kind) { SearchKind.ALL -> TextKey.All; SearchKind.MUSIC -> TextKey.Music; SearchKind.PODCASTS -> TextKey.Podcasts })) }, modifier = Modifier.heightIn(min = 48.dp))
-                    }
-                }
-                if (state.scope == SearchScope.EVERYWHERE && state.kind != SearchKind.PODCASTS) {
+                ActionIcon(VeyraIcons.Search, strings.text(TextKey.Search), { submitSearch() },
+                    Modifier.testTag("run-search"), enabled = canSearch)
+                ActionIcon(VeyraIcons.FilterList, strings.text(TextKey.SearchOptions), { filtersOpen = !filtersOpen },
+                    Modifier.testTag("search-options"), isSelected = filtersOpen)
+            }
+            FlowRow(Modifier.padding(horizontal = 24.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(state.scope == SearchScope.EVERYWHERE && state.kind != SearchKind.PODCASTS,
+                    { change(scope = SearchScope.EVERYWHERE, kind = SearchKind.MUSIC, provider = if (state.provider == SourceProvider.RSS) SourceProvider.YOUTUBE else state.provider) },
+                    { Text(strings.text(TextKey.Music)) }, modifier = Modifier.heightIn(min = 48.dp))
+                FilterChip(state.scope == SearchScope.EVERYWHERE && state.kind == SearchKind.PODCASTS,
+                    { change(scope = SearchScope.EVERYWHERE, kind = SearchKind.PODCASTS, provider = SourceProvider.RSS) },
+                    { Text(strings.text(TextKey.Podcasts)) }, modifier = Modifier.heightIn(min = 48.dp))
+                FilterChip(state.scope == SearchScope.LIBRARY, { change(scope = SearchScope.LIBRARY) },
+                    { Text(strings.text(TextKey.YourLibrary)) }, modifier = Modifier.heightIn(min = 48.dp))
+            }
+            if (filtersOpen) Surface(Modifier.padding(horizontal = 24.dp).fillMaxWidth(), shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.surface) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(strings.text(TextKey.SearchSource), style = MaterialTheme.typography.labelLarge)
-                    SourceChoices(state.provider, { change(provider = it) })
+                    SourceChoices(state.provider, { change(kind = SearchKind.MUSIC, provider = it, scope = SearchScope.EVERYWHERE) })
+                    TextButton({ change(kind = SearchKind.ALL) }, Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.All)) }
+                    TextButton({ submitSearch(); filtersOpen = false }, Modifier.heightIn(min = 48.dp).testTag("search-submit"), enabled = canSearch) { Text(strings.text(TextKey.Search)) }
                 }
-                if (state.scope == SearchScope.EVERYWHERE) Button(
-                    onClick = { onAction(MusicUiAction.RunSearch) },
-                    enabled = state.query.isNotBlank() && !state.loading && !snapshot.settings.offlineOnly,
-                    modifier = Modifier.heightIn(min = 48.dp).testTag("run-search"),
-                ) { Text(strings.text(TextKey.Search)) }
             }
         }
-        if (state.query.isBlank() && state.scope == SearchScope.EVERYWHERE) {
-            item { EmptyState(strings.text(when (state.kind) { SearchKind.PODCASTS -> TextKey.FindPodcasts; SearchKind.MUSIC -> TextKey.SearchMusic; SearchKind.ALL -> TextKey.Search }), strings.text(TextKey.SearchDescription), modifier = Modifier.padding(20.dp)) }
-        } else {
-            if (local.isNotEmpty() || localPlaylists.isNotEmpty()) {
-                item { SectionTitle(strings.text(TextKey.LocalLibrary)) }
-                items(local, key = { "local-${it.id}" }) { MusicMediaRow(it, snapshot, onAction, options = options) }
-                items(localPlaylists, key = { "local-playlist-${it.id}" }) { playlist ->
-                    TextButton(onClick = { onAction(MusicUiAction.OpenPlaylist(playlist.id)) }, modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 12.dp)) {
-                        Icon(VeyraIcons.Library, null, Modifier.padding(end = 12.dp))
-                        Column(Modifier.weight(1f)) {
-                            MetadataText(playlist.name, Modifier.fillMaxWidth(), maxLines = 2, overflow = TextOverflow.Ellipsis)
-                            Text(strings.format(TextKey.TrackCount, playlist.entries.size.toString()), Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Start)
-                        }
-                    }
-                }
-            } else if (state.scope == SearchScope.LIBRARY) item {
-                EmptyState(strings.text(TextKey.NoResults), strings.text(TextKey.NoResultsDescription), strings.text(TextKey.ClearFilters), { change(query = "", kind = SearchKind.ALL) }, Modifier.padding(20.dp))
+        if (state.scope == SearchScope.LIBRARY || state.query.isNotBlank() && local.isNotEmpty()) {
+            item { SectionTitle(strings.text(TextKey.YourLibrary)) }
+            items(local, key = { "local-${it.id}" }) { MusicMediaRow(it, snapshot, onAction, options = options) }
+            items(localPlaylists, key = { "local-playlist-${it.id}" }) { playlist ->
+                CollectionLink(playlist.name, strings.format(TextKey.TrackCount, strings.number(playlist.entries.size.toLong())), VeyraIcons.Library,
+                    { onAction(MusicUiAction.OpenPlaylist(playlist.id)) }, Modifier.padding(horizontal = 24.dp))
             }
-            if (state.scope == SearchScope.EVERYWHERE) {
-                item {
-                    SectionTitle(strings.text(TextKey.SearchResults), description = strings.format(TextKey.OriginalMetadataSource, providerName(state.provider)))
-                    Text(strings.text(TextKey.SourceResolutionDescription), Modifier.padding(horizontal = 20.dp, vertical = 8.dp), style = MaterialTheme.typography.bodySmall)
+            if (state.scope == SearchScope.LIBRARY && local.isEmpty() && localPlaylists.isEmpty()) item {
+                EmptyState(strings.text(TextKey.NoResults), strings.text(TextKey.NoResultsDescription), modifier = Modifier.padding(24.dp))
+            }
+        }
+        if (state.scope == SearchScope.EVERYWHERE) {
+            if (snapshot.settings.offlineOnly) item {
+                EmptyState(strings.text(TextKey.Offline), strings.text(TextKey.OfflineModeDescription), strings.text(TextKey.Downloads),
+                    { onAction(MusicUiAction.OpenLibrary(LibrarySection.DOWNLOADS)) }, Modifier.padding(24.dp))
+            } else {
+                if (state.loading) item { LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 24.dp).testTag("search-loading")) }
+                state.failure?.let { failure -> item { ErrorState(strings.errorFor(failure), { onAction(MusicUiAction.RunSearch) }, Modifier.padding(24.dp)) } }
+                state.page.notice?.let { notice -> item { ErrorState(strings.errorFor(notice), modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)) } }
+                if (state.searched || state.page.items.isNotEmpty()) item { SectionTitle(strings.text(TextKey.SearchResults)) }
+                catalogPage(state.page, snapshot, options, onAction, "search")
+                if (!state.loading && state.searched && state.failure == null && state.page.isEmpty()) item {
+                    EmptyState(strings.text(TextKey.NoResults), strings.text(TextKey.NoResultsDescription), modifier = Modifier.padding(24.dp))
                 }
-                if (snapshot.settings.offlineOnly) item {
-                    ErrorState(strings.errorFor(AppFailure(FailureCode.OFFLINE_POLICY)), modifier = Modifier.padding(20.dp))
-                } else {
-                    if (state.loading) item { LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 20.dp).testTag("search-loading")) }
-                    state.failure?.let { failure -> item { ErrorState(strings.errorFor(failure), onRetry = { onAction(MusicUiAction.RunSearch) }, modifier = Modifier.padding(20.dp)) } }
-                    state.page.notice?.let { notice -> item { ErrorState(strings.errorFor(notice), modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) } }
-                    catalogPage(state.page, snapshot, options, onAction, "search")
-                    if (!state.loading && state.searched && state.failure == null && state.page.isEmpty()) item {
-                        EmptyState(strings.text(TextKey.NoResults), strings.text(TextKey.NoResultsDescription), modifier = Modifier.padding(20.dp))
+                if (!state.loading && !state.searched && state.query.isBlank()) item {
+                    Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        CollectionLink(strings.text(TextKey.ExploreMusic), strings.text(TextKey.MadeForYourLibrary), VeyraIcons.Music,
+                            { change(query = "", kind = SearchKind.MUSIC); filtersOpen = false; searchFocus.requestFocus() })
+                        CollectionLink(strings.text(TextKey.Podcasts), strings.text(TextKey.PodcastsSubtitle), VeyraIcons.Podcasts,
+                            { change(kind = SearchKind.PODCASTS, provider = SourceProvider.RSS); searchFocus.requestFocus() })
                     }
-                    if (state.page.nextPageToken != null) item {
-                        TextButton(onClick = { onAction(MusicUiAction.LoadMoreSearch) }, enabled = !state.loading, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text(strings.text(TextKey.LoadMore)) }
-                    }
+                }
+                if (state.page.nextPageToken != null) item {
+                    TextButton({ onAction(MusicUiAction.LoadMoreSearch) }, Modifier.fillMaxWidth().heightIn(min = 48.dp), enabled = !state.loading) { Text(strings.text(TextKey.LoadMore)) }
                 }
             }
         }

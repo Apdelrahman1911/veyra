@@ -53,6 +53,7 @@ class EphemeralPlaybackEndpoint(val uri: String) {
  */
 interface PlaybackResource {
     val localEndpoint: EphemeralPlaybackEndpoint? get() = null
+    val failure: AppFailure? get() = null
     suspend fun close()
 }
 
@@ -73,6 +74,8 @@ data class ResolvedPlayable(
     val item: MediaItem? = null,
     val executionBinding: PlaybackBinding? = null,
     val resource: PlaybackResource? = null,
+    /** Exact declared length of a direct progressive object; absent for remuxed/unknown sources. */
+    val contentLength: Long? = null,
 ) {
     /** A remote acquisition stays remote/offline-blocked even if its owned bridge is on loopback. */
     fun ownedLoopbackUriOrNull(): String? = resource?.localEndpoint?.uri?.takeIf { !isLocal && it == uri }

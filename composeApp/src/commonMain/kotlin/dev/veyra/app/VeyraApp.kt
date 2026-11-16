@@ -1,5 +1,12 @@
 package dev.veyra.app
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -24,6 +31,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import dev.veyra.generated.resources.Res
@@ -47,6 +55,7 @@ fun VeyraApp(container: AppContainer, modifier: Modifier = Modifier) {
     val initialization by container.initialization.collectAsState()
     val navigation by container.navigation.collectAsState()
     val player by container.playback.state.collectAsState()
+    val playbackWait by container.playbackWait.collectAsState()
     val options by container.musicOptions.collectAsState()
     val search by container.search.collectAsState()
     val discovery by container.discovery.collectAsState()
@@ -69,7 +78,8 @@ fun VeyraApp(container: AppContainer, modifier: Modifier = Modifier) {
     val density = remember(deviceDensity.density, deviceDensity.fontScale, settings.textScale) {
         Density(deviceDensity.density, deviceDensity.fontScale * settings.textScale)
     }
-    CompositionLocalProvider(LocalDensity provides density, LocalRemoteArtworkAllowed provides false) {
+    CompositionLocalProvider(LocalDensity provides density, LocalRemoteArtworkAllowed provides false,
+        dev.veyra.ui.music.LocalPlaybackWait provides playbackWait) {
         VeyraTheme(dark, language) {
             val strings = LocalStrings.current
             val snackbar = remember { SnackbarHostState() }
@@ -87,8 +97,9 @@ fun VeyraApp(container: AppContainer, modifier: Modifier = Modifier) {
             var backgroundIsFocused by remember { mutableStateOf(false) }
             var shellHasFocus by remember { mutableStateOf(false) }
             val windowIsFocused = LocalWindowInfo.current.isWindowFocused
-            Surface(modifier.fillMaxSize().testTag("veyra-app"), color = MaterialTheme.colorScheme.background) {
-                BoxWithConstraints(Modifier.fillMaxSize().safeDrawingPadding()
+            Surface(modifier.fillMaxSize().dismissKeyboardOnOutsideTap().testTag("veyra-app"), color = MaterialTheme.colorScheme.background) {
+                BoxWithConstraints(Modifier.fillMaxSize().veyraAmbient()
+                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)).imePadding()
                     .focusRequester(backgroundFocus).onFocusChanged { focus ->
                         backgroundIsFocused = focus.isFocused
                         shellHasFocus = focus.hasFocus
@@ -143,57 +154,27 @@ fun VeyraApp(container: AppContainer, modifier: Modifier = Modifier) {
                     } else {
                         Row(Modifier.fillMaxSize()) {
                             if (useRail) AppNavigationRail(navigation.destination, expanded, shortWindow, container::selectDestination)
-                            Column(Modifier.weight(1f).fillMaxHeight()) {
-                                if (!navigation.playerOpen || navigation.queueOpen && !sideQueue) AppHeader(navigation, settings.offlineOnly, container)
-                                if (mediaRuntime.phase != MediaRuntimePhase.READY &&
-                                    (mediaRuntime.phase != MediaRuntimePhase.REQUIRED || navigation.destination == AppDestination.SETTINGS)) {
-                                    MediaRuntimeIndicator(mediaRuntime, settings.offlineOnly, container::prepareMediaTools)
-                                }
-                                Row(Modifier.weight(1f).fillMaxWidth()) {
-                                    Box(Modifier.weight(1f).fillMaxHeight()) {
-                                        when {
-                                            navigation.queueOpen && !sideQueue -> QueuePanel(snapshot, displayPlayer, navigation.viewedQueue,
-                                                container::onMusicAction, options = screenOptions)
-                                            navigation.playerOpen -> FullPlayer(snapshot, displayPlayer, container::onMusicAction, options = screenOptions)
-                                            else -> {
-                                                val detail = navigation.detail
-                                                when (detail?.kind) {
-                                                    DetailKind.TRACK -> TrackDetailScreen(snapshot, detail.id, displayPlayer,
-                                                        container::onMusicAction, options = screenOptions)
-                                                    DetailKind.EPISODE -> EpisodeDetailScreen(EpisodeDetailUiState(detail.id, snapshot,
-                                                        currentBinding = displayPlayer.executionBinding?.takeIf { it.mediaId == detail.id },
-                                                        downloads = screenDownloads, progressView = podcastProgress), container::onPodcastAction)
-                                                    DetailKind.SHOW -> PodcastShowScreen(PodcastShowUiState(detail.id, snapshot,
-                                                        options = podcastDetails.options[detail.id] ?: PodcastListOptions(),
-                                                        isLoading = detail.id in podcastDetails.refreshing && snapshot.shows[detail.id]?.lastRefreshEpochMs == null,
-                                                        isRefreshing = detail.id in podcastDetails.refreshing,
-                                                        failure = podcastDetails.failures[detail.id],
-                                                        downloads = screenDownloads,
-                                                        progressView = podcastProgress), container::onPodcastAction)
-                                                    DetailKind.PLAYLIST -> PlaylistDetailScreen(snapshot, detail.id, container::onMusicAction, options = screenOptions, playback = displayPlayer)
-                                                    DetailKind.COLLECTION -> detail.collection?.let { collection ->
-                                                        val state = collections[detail.id] ?: CollectionUiState(collection)
-                                                        CollectionDetailScreen(snapshot, state.copy(page = state.page.withArtwork(snapshot)),
-                                                            container::onMusicAction, options = screenOptions)
-                                                    }
-                                                    DetailKind.LICENSES -> LicensesScreen()
-                                                    null -> when (navigation.destination) {
-                                                        AppDestination.LISTEN -> ListenScreen(snapshot, displayPlayer,
-                                                            discovery.copy(page = discovery.page.withArtwork(snapshot)), container::onMusicAction, options = screenOptions)
-                                                        AppDestination.SEARCH -> SearchScreen(snapshot,
-                                                            search.copy(page = search.page.withArtwork(snapshot)), container::onMusicAction, options = screenOptions)
-                                                        AppDestination.PODCASTS -> PodcastsScreen(podcasts.copy(snapshot = snapshot, downloads = screenDownloads), container::onPodcastAction)
-                                                        AppDestination.LIBRARY -> LibraryScreen(snapshot, navigation.librarySection, container::onMusicAction, options = screenOptions)
-                                                        AppDestination.SETTINGS -> SettingsScreen(settings, container.platform.engine.capabilities, storageBytes,
-                                                            onSettingsChange = { action -> container.changeSettings { action.applyTo(it) } },
-                                                            onManageStorage = { container.onMusicAction(MusicUiAction.OpenLibrary(LibrarySection.DOWNLOADS)) },
-                                                            onOpenLicenses = container::openLicenses)
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                    if (sideQueue) {
+                            ExpandablePlayerScaffold(
+                                expanded = navigation.playerOpen,
+                                hasPlayer = displayPlayer.hasCurrent,
+                                dragEnabled = !navigation.queueOpen,
+                                onExpandedChange = { open ->
+                                    container.onMusicAction(if (open) MusicUiAction.OpenPlayer else MusicUiAction.ClosePlayer)
+                                },
+                                modifier = Modifier.weight(1f).fillMaxHeight(),
+                                compactPlayer = {
+                                    MiniPlayer(snapshot, displayPlayer, container::onMusicAction, options = screenOptions,
+                                        compactHeight = shortWindow, docked = true)
+                                },
+                                bottomBar = {
+                                    if (!useRail && !navigation.queueOpen) AppBottomNavigation(navigation.destination,
+                                        density.fontScale >= 1.5f || windowWidth < 360.dp, container::selectDestination)
+                                    else if (displayPlayer.hasCurrent) Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.safeDrawing))
+                                },
+                                expandedPlayer = {
+                                    if (navigation.queueOpen && sideQueue) Row(Modifier.fillMaxSize()) {
+                                        FullPlayer(snapshot, displayPlayer, container::onMusicAction,
+                                            Modifier.weight(1f), screenOptions)
                                         VerticalDivider()
                                         Column(Modifier.width(368.dp).fillMaxHeight()) {
                                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
@@ -202,15 +183,75 @@ fun VeyraApp(container: AppContainer, modifier: Modifier = Modifier) {
                                             QueuePanel(snapshot, displayPlayer, navigation.viewedQueue, container::onMusicAction,
                                                 Modifier.weight(1f), screenOptions)
                                         }
+                                    } else if (navigation.queueOpen) Column(Modifier.fillMaxSize()) {
+                                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                            VeyraIconButton(VeyraIcons.Close, strings.text(TextKey.Close), { container.navigateBack() })
+                                        }
+                                        QueuePanel(snapshot, displayPlayer, navigation.viewedQueue, container::onMusicAction,
+                                            Modifier.weight(1f), screenOptions)
+                                    } else FullPlayer(snapshot, displayPlayer, container::onMusicAction, options = screenOptions)
+                                },
+                            ) { _ ->
+                                Column(Modifier.fillMaxSize()) {
+                                    AppHeader(navigation.copy(playerOpen = false), settings.offlineOnly, container)
+                                    if (mediaRuntime.phase != MediaRuntimePhase.READY &&
+                                        (mediaRuntime.phase != MediaRuntimePhase.REQUIRED || navigation.destination == AppDestination.SETTINGS)) {
+                                        MediaRuntimeIndicator(mediaRuntime, settings.offlineOnly, container::prepareMediaTools)
                                     }
-                                }
-                                if (!navigation.playerOpen && displayPlayer.hasCurrent) {
-                                    MiniPlayer(snapshot, displayPlayer, container::onMusicAction, options = screenOptions,
-                                        compactHeight = shortWindow)
-                                }
-                                if (!useRail && !navigation.playerOpen && !navigation.queueOpen) {
-                                    AppBottomNavigation(navigation.destination, density.fontScale >= 1.5f || windowWidth < 360.dp,
-                                        container::selectDestination)
+                                    Row(Modifier.weight(1f).fillMaxWidth()) {
+                                        Box(Modifier.weight(1f).fillMaxHeight()) {
+                                            when {
+                                                navigation.queueOpen && !sideQueue -> QueuePanel(snapshot, displayPlayer, navigation.viewedQueue,
+                                                    container::onMusicAction, options = screenOptions)
+                                                else -> {
+                                                    val detail = navigation.detail
+                                                    when (detail?.kind) {
+                                                        DetailKind.TRACK -> TrackDetailScreen(snapshot, detail.id, displayPlayer,
+                                                            container::onMusicAction, options = screenOptions, showHeader = false)
+                                                        DetailKind.EPISODE -> EpisodeDetailScreen(EpisodeDetailUiState(detail.id, snapshot,
+                                                            currentBinding = displayPlayer.executionBinding?.takeIf { it.mediaId == detail.id },
+                                                            downloads = screenDownloads, progressView = podcastProgress), container::onPodcastAction)
+                                                        DetailKind.SHOW -> PodcastShowScreen(PodcastShowUiState(detail.id, snapshot,
+                                                            options = podcastDetails.options[detail.id] ?: PodcastListOptions(),
+                                                            isLoading = detail.id in podcastDetails.refreshing && snapshot.shows[detail.id]?.lastRefreshEpochMs == null,
+                                                            isRefreshing = detail.id in podcastDetails.refreshing,
+                                                            failure = podcastDetails.failures[detail.id],
+                                                            downloads = screenDownloads,
+                                                            progressView = podcastProgress), container::onPodcastAction)
+                                                        DetailKind.PLAYLIST -> PlaylistDetailScreen(snapshot, detail.id, container::onMusicAction, options = screenOptions, playback = displayPlayer)
+                                                        DetailKind.COLLECTION -> detail.collection?.let { collection ->
+                                                            val state = collections[detail.id] ?: CollectionUiState(collection)
+                                                            CollectionDetailScreen(snapshot, state.copy(page = state.page.withArtwork(snapshot)),
+                                                                container::onMusicAction, options = screenOptions)
+                                                        }
+                                                        DetailKind.LICENSES -> LicensesScreen()
+                                                        null -> when (navigation.destination) {
+                                                            AppDestination.LISTEN -> ListenScreen(snapshot, displayPlayer,
+                                                                discovery.copy(page = discovery.page.withArtwork(snapshot)), container::onMusicAction, options = screenOptions)
+                                                            AppDestination.SEARCH -> SearchScreen(snapshot,
+                                                                search.copy(page = search.page.withArtwork(snapshot)), container::onMusicAction, options = screenOptions)
+                                                            AppDestination.PODCASTS -> PodcastsScreen(podcasts.copy(snapshot = snapshot, downloads = screenDownloads), container::onPodcastAction)
+                                                            AppDestination.LIBRARY -> LibraryScreen(snapshot, navigation.librarySection, container::onMusicAction, options = screenOptions)
+                                                            AppDestination.SETTINGS -> SettingsScreen(settings, container.platform.engine.capabilities, storageBytes,
+                                                                onSettingsChange = { action -> container.changeSettings { action.applyTo(it) } },
+                                                                onManageStorage = { container.onMusicAction(MusicUiAction.OpenLibrary(LibrarySection.DOWNLOADS)) },
+                                                                onOpenLicenses = container::openLicenses)
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        if (sideQueue && !navigation.playerOpen) {
+                                            VerticalDivider()
+                                            Column(Modifier.width(368.dp).fillMaxHeight()) {
+                                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                                    VeyraIconButton(VeyraIcons.Close, strings.text(TextKey.Close), { container.navigateBack() })
+                                                }
+                                                QueuePanel(snapshot, displayPlayer, navigation.viewedQueue, container::onMusicAction,
+                                                    Modifier.weight(1f), screenOptions)
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -247,7 +288,7 @@ private fun StartupFailure(failure: AppFailure, canRecover: Boolean, onRestore: 
 
 private val primaryDestinations = listOf(AppDestination.LISTEN, AppDestination.SEARCH, AppDestination.PODCASTS, AppDestination.LIBRARY)
 private fun AppDestination.label() = when (this) {
-    AppDestination.LISTEN -> TextKey.Listen
+    AppDestination.LISTEN -> TextKey.Home
     AppDestination.SEARCH -> TextKey.Search
     AppDestination.PODCASTS -> TextKey.Podcasts
     AppDestination.LIBRARY -> TextKey.Library
@@ -297,21 +338,34 @@ private fun AppNavigationRail(selected: AppDestination, expanded: Boolean, short
 @Composable
 private fun AppBottomNavigation(selected: AppDestination, compactLabels: Boolean, select: (AppDestination) -> Unit) {
     val strings = LocalStrings.current
-    val hasSelectedPrimary = selected in primaryDestinations
-    NavigationBar {
-        primaryDestinations.forEach { destination ->
-            val isSelected = destination == selected
-            // Material3's item imposes weight(1f) internally. Give each item its own Row
-            // rather than shrinking or clipping the selected Arabic/large-text label.
-            // In compact mode inactive icons retain 48dp targets; the selected label gets
-            // the remaining width. The slots still follow the app's RTL direction.
-            val slot = if (compactLabels && hasSelectedPrimary && !isSelected) Modifier.width(48.dp)
-                else Modifier.weight(1f)
-            Row(slot) {
-                NavigationBarItem(selected = isSelected, onClick = { select(destination) },
-                    icon = { Icon(destination.icon(), strings.text(destination.label())) },
-                    label = if (!compactLabels || isSelected) ({ NavigationLabel(destination) }) else null,
-                    modifier = Modifier.testTag("nav-${destination.name}"))
+    Surface(
+        modifier = Modifier.fillMaxWidth().testTag("bottom-navigation"),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+    ) {
+        Row(Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))
+            .padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            primaryDestinations.forEach { destination ->
+                val isSelected = destination == selected
+                Column(
+                    Modifier.weight(1f).clip(RoundedCornerShape(26.dp))
+                        .selectable(isSelected, role = Role.Tab, onClick = { select(destination) })
+                        .heightIn(min = 48.dp).padding(vertical = 3.dp).testTag("nav-${destination.name}"),
+                    horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp),
+                ) {
+                    Box(
+                        Modifier.size(44.dp).then(if (isSelected) Modifier.background(VeyraAccentGradient, CircleShape)
+                            else Modifier.background(MaterialTheme.colorScheme.surfaceContainerHighest, CircleShape)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(destination.icon(), if (compactLabels && !isSelected) strings.text(destination.label()) else null,
+                            tint = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(23.dp))
+                    }
+                    if (!compactLabels || isSelected) Text(strings.text(destination.label()),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (isSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center)
+                }
             }
         }
     }
@@ -328,15 +382,23 @@ private fun NavigationLabel(destination: AppDestination) {
 @Composable
 private fun AppHeader(navigation: AppNavigation, offline: Boolean, container: AppContainer) {
     val strings = LocalStrings.current
-    Surface(color = MaterialTheme.colorScheme.background) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).heightIn(min = 56.dp),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (navigation.canGoBack) VeyraIconButton(VeyraIcons.Back, strings.text(TextKey.Back), { container.navigateBack() })
-            else Icon(VeyraIcons.Brand, null, Modifier.padding(12.dp).size(24.dp), tint = MaterialTheme.colorScheme.primary)
-            Text(strings.text(TextKey.AppName), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-            if (offline) StatusBadge(strings.text(TextKey.Offline), icon = VeyraIcons.Download)
-            VeyraIconButton(VeyraIcons.Settings, strings.text(TextKey.Settings), { container.selectDestination(AppDestination.SETTINGS) })
+    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp).heightIn(min = 48.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        if (navigation.canGoBack) VeyraIconButton(VeyraIcons.Back, strings.text(TextKey.Back), { container.navigateBack() },
+            Modifier.background(MaterialTheme.colorScheme.surface.copy(alpha = .65f), RoundedCornerShape(17.dp)))
+        else Box(Modifier.size(44.dp).background(VeyraAccentGradient, RoundedCornerShape(16.dp)), contentAlignment = Alignment.Center) {
+            Icon(VeyraIcons.Brand, null, Modifier.size(25.dp), tint = Color.White)
         }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+            if (!navigation.canGoBack) Text(strings.text(TextKey.HomeGreeting), style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(strings.text(navigation.destination.label()),
+                style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        if (offline) StatusBadge(strings.text(TextKey.Offline), icon = VeyraIcons.Download)
+        if (navigation.destination != AppDestination.SETTINGS) VeyraIconButton(VeyraIcons.Settings, strings.text(TextKey.Settings),
+            { container.selectDestination(AppDestination.SETTINGS) },
+            Modifier.background(MaterialTheme.colorScheme.surface.copy(alpha = .65f), RoundedCornerShape(17.dp)))
     }
 }
 
@@ -347,7 +409,7 @@ internal fun LicensesScreen(readDocument: suspend (String) -> String = { Res.rea
     val strings = LocalStrings.current
     var documents by remember { mutableStateOf<List<Pair<String, String?>>?>(null) }
     LaunchedEffect(readDocument) {
-        val paths = listOf("NOTICE.md", "LICENSE", "kmpYT-LICENSE", "kmpYT-THIRD_PARTY_NOTICES.md", "THIRD_PARTY_NOTICES.txt")
+        val paths = listOf("NOTICE.md", "LICENSE", "kmpYT-LICENSE", "kmpYT-THIRD_PARTY_NOTICES.md", "nativeCmpkit-LICENSE", "THIRD_PARTY_NOTICES.txt")
             .map { "files/legal/$it" } + "files/licenses/ibm_plex_sans_arabic_ofl.txt"
         documents = paths.map { path ->
             val body = try { readDocument(path) }

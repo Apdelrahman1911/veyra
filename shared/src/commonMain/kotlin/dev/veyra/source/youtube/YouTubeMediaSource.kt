@@ -25,6 +25,10 @@ import dev.veyra.source.ResolvePurpose
 import dev.veyra.source.SourceCapabilities
 import dev.veyra.source.SourcePage
 import io.ktor.http.Url
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlin.time.Clock
@@ -67,7 +71,14 @@ class YouTubeMediaSource(
 
     private data class Cursor(val route: String, val page: YouTubeBrowsePage, val createdAtMs: Long)
     /** Both typed boundaries reuse this source's application-owned client and close lifetime. */
-    internal val audioExecution = YouTubeAudioExecution(client, nowEpochMs, ::requireOpen)
+    private val playbackWaitState = MutableStateFlow<SourcePlaybackWait?>(null)
+    /**
+     * The source-declared availability deadline the current playback preparation is honoring,
+     * for an accurate "starting in" countdown. Null when nothing is waiting.
+     */
+    val playbackWait: StateFlow<SourcePlaybackWait?> = playbackWaitState.asStateFlow()
+    internal val audioExecution = YouTubeAudioExecution(client, nowEpochMs, ::requireOpen) { playbackWaitState.value = it }
+    private val inspections = YouTubeInspectionReuse(nowEpochMs)
     val acquisitionGateway = YouTubeAcquisitionGateway(this)
 
     override suspend fun search(query: String, pageToken: String?): SourcePage = guarded {
@@ -84,9 +95,10 @@ class YouTubeMediaSource(
     }
 
     /** Direct inspection of this already-selected public video, never another title search. */
-    internal suspend fun inspectSelected(videoId: String): ExtractionReport = guarded {
+    internal suspend fun inspectSelected(videoId: String, fresh: Boolean = false): ExtractionReport = guarded {
         if (!VIDEO_ID.matches(videoId)) youtubeFailure(FailureCode.INVALID_STATE, "YOUTUBE_INVALID_VIDEO")
-        client.inspect(watchUrl(videoId))
+        if (fresh) inspections.forget(videoId) else inspections.take(videoId)?.let { return@guarded it }
+        client.inspectAudio(watchUrl(videoId)).also { inspections.offer(videoId, it) }
     }
 
     override suspend fun browse(request: BrowseRequest): SourcePage = guarded {
@@ -115,7 +127,8 @@ class YouTubeMediaSource(
 
     override suspend fun details(ref: SourceRef): MediaItem = guarded {
         val videoId = requireVideo(ref)
-        val report = client.inspect(watchUrl(videoId))
+        // A detail view's inspection is kept for an immediate play or download of the same video.
+        val report = inspections.peek(videoId) ?: client.inspectAudio(watchUrl(videoId)).also { inspections.offer(videoId, it) }
         // Public metadata may remain readable when playback requires authorization.
         // details never promises playability; resolve performs the access check.
         audioExecution.requireMedia(report, videoId).toMediaItem()
@@ -140,6 +153,7 @@ class YouTubeMediaSource(
                 // Legacy-only presentation. The typed boundary never calls this projection.
                 item = resolved.media.toMediaItem(),
                 resource = resolved.resource,
+                contentLength = resolved.contentLength,
             )
         }
     }
@@ -164,8 +178,20 @@ class YouTubeMediaSource(
         audioExecution.download(prepared, destinationPath, onProgress)
     }
 
+    /**
+     * Offline only: readies the stored, versioned player program so the first online
+     * preparation after a process start skips downloading and initializing it. Sends no
+     * request; a failure only means the next inspection does that work as before.
+     */
+    suspend fun prewarm(): Boolean {
+        if (browseLock.withLock { closed }) return false
+        return try { client.prewarm() } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { false }
+    }
+
     override suspend fun close() {
         browseLock.withLock { closed = true; cursors.clear() }
+        inspections.clear()
         client.close()
     }
 
@@ -174,7 +200,7 @@ class YouTubeMediaSource(
         if (item.id != mediaId(videoId) || item.kind != MediaKind.MUSIC) {
             youtubeFailure(FailureCode.INVALID_STATE, "YOUTUBE_MEDIA_IDENTITY_MISMATCH")
         }
-        return YouTubeAudioExecution.Input(videoId, inspect = { client.inspect(watchUrl(videoId)) })
+        return YouTubeAudioExecution.Input(videoId, inspect = reuseFirstInspection(false) { fresh -> inspectSelected(videoId, fresh) })
     }
 
     private suspend fun loadPage(route: String, pageToken: String?, first: suspend () -> YouTubeBrowsePage): SourcePage {

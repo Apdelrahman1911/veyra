@@ -483,6 +483,8 @@ class PodcastScreensTest {
                 progressView = progressView), actions::add)
         } }
 
+        scrollDetailTo("podcast-audio-details")
+        compose.onNodeWithTag("podcast-audio-details").performClick()
         compose.onNodeWithTag("podcast-episode-detail").performScrollToNode(hasText(current.firstResultTitle))
         compose.onNodeWithText(current.firstResultTitle).assertIsDisplayed()
         scrollDetailTo("podcast-progress-resume")
@@ -639,6 +641,8 @@ class PodcastScreensTest {
             playbackBindings = mapOf(current.id to current, newest.id to newest)), currentBinding = current)
         compose.setContent { TestFrame { EpisodeDetailScreen(state, actions::add) } }
 
+        scrollDetailTo("podcast-audio-details")
+        compose.onNodeWithTag("podcast-audio-details").performClick()
         compose.onNodeWithTag("podcast-episode-detail")
             .performScrollToNode(hasText(english.text(TextKey.CurrentAudioResolution)))
         compose.onNodeWithText(current.firstResultTitle).assertIsDisplayed()

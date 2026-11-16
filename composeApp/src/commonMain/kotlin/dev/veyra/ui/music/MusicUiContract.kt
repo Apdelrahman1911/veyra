@@ -12,7 +12,7 @@ import dev.veyra.ui.downloads.DownloadSurface
 
 enum class SearchScope { EVERYWHERE, LIBRARY }
 enum class SearchKind { ALL, MUSIC, PODCASTS }
-enum class LibrarySection { FAVORITES, PLAYLISTS, DOWNLOADS, LOCAL_FILES }
+enum class LibrarySection { OVERVIEW, FAVORITES, PLAYLISTS, DOWNLOADS, LOCAL_FILES }
 
 data class CatalogUiState(
     val provider: SourceProvider = SourceProvider.YOUTUBE,

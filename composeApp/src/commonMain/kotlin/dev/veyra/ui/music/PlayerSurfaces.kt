@@ -2,7 +2,13 @@ package dev.veyra.ui.music
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -25,7 +31,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -33,12 +38,13 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.key
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -69,6 +75,8 @@ import dev.veyra.playback.CrossfadePhase
 import dev.veyra.playback.CrossfadeState
 import dev.veyra.playback.SleepTimerMode
 import dev.veyra.playback.SleepTimerState
+import dev.veyra.ui.design.veyraAmbient
+import androidx.compose.foundation.shape.RoundedCornerShape
 import dev.veyra.ui.design.Artwork
 import dev.veyra.ui.design.EmptyState
 import dev.veyra.ui.design.ErrorState
@@ -78,6 +86,9 @@ import dev.veyra.ui.design.MetadataText
 import dev.veyra.ui.design.QuantityKey
 import dev.veyra.ui.design.TextKey
 import dev.veyra.ui.design.VeyraIcons
+import com.mohamedrejeb.calf.ui.slider.AdaptiveSlider
+import dev.veyra.nativecomponents.LocalNativeControlAccessibility
+import dev.veyra.nativecomponents.NativeControlAccessibility
 
 /** Always describes the audible session, never the queue that happens to be inspected. */
 @Composable
@@ -88,6 +99,7 @@ fun MiniPlayer(
     modifier: Modifier = Modifier,
     options: MusicUiOptions = MusicUiOptions(),
     compactHeight: Boolean = false,
+    docked: Boolean = false,
 ) {
     // The owner-selected occurrence is the identity. A neutral source recording has no
     // MediaItem and must still reach the same player surfaces.
@@ -97,7 +109,10 @@ fun MiniPlayer(
     // Both identities remain visible here and complete through the OpenPlayer action.
     val metadataLines = if (compactHeight) 1 else 2
     var timerDialog by remember { mutableStateOf(false) }
-    Surface(modifier = modifier.fillMaxWidth().testTag("mini-player"), color = MaterialTheme.colorScheme.surfaceContainerHigh, tonalElevation = 2.dp) {
+    Surface(modifier = modifier.fillMaxWidth()
+        .then(if (docked) Modifier else Modifier.padding(horizontal = 12.dp, vertical = 6.dp)).testTag("mini-player"),
+        shape = if (docked) RectangleShape else RoundedCornerShape(22.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh, tonalElevation = if (docked) 0.dp else 2.dp) {
         Column {
             Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 TextButton(
@@ -110,12 +125,12 @@ fun MiniPlayer(
                     Artwork(identity.artworkUrl, identity.title.orEmpty(), Modifier.size(44.dp), offlineOnly = snapshot.settings.offlineOnly, localPath = identity.localArtworkPath)
                     Column(Modifier.weight(1f).padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         MetadataText(identity.title ?: strings.text(TextKey.InformationUnavailable), Modifier.fillMaxWidth(), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface, maxLines = metadataLines, overflow = TextOverflow.Ellipsis)
-                        if (identity.resolvedTitle != null) {
+                        if (identity.resolvedTitle != null && identity.resolvedTitle != identity.title) {
                             Text(strings.format(TextKey.ResolvedTitleValue, identity.resolvedTitle), Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = metadataLines, overflow = TextOverflow.Ellipsis)
                         } else if (!identity.creator.isNullOrBlank()) MetadataText(identity.creator!!, Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        if (playback.crossfade?.phase == CrossfadePhase.OVERLAPPING) Text(strings.text(TextKey.CrossfadeActive), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                        if (playback.crossfade?.phase == CrossfadePhase.OVERLAPPING) Text(strings.text(TextKey.CrossfadeActive), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         if (playback.isBuffering || playback.failure != null) Text(
-                            playback.failure?.let(strings::errorFor) ?: strings.text(playbackStatus(playback)),
+                            playback.failure?.let(strings::errorFor) ?: playbackStatusLabel(playback, strings),
                             style = MaterialTheme.typography.labelSmall,
                             color = if (playback.failure == null) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
                             maxLines = metadataLines,
@@ -158,11 +173,19 @@ fun FullPlayer(
     val identity = playback.surfaceIdentity(snapshot)
     var timerDialog by remember { mutableStateOf(false) }
     var speedDialog by remember(playback.currentEntryId) { mutableStateOf(false) }
-    Surface(modifier.fillMaxSize().testTag("full-player"), color = MaterialTheme.colorScheme.surface) {
-        Column {
+    Surface(modifier.fillMaxSize().veyraAmbient().testTag("full-player"),
+        color = androidx.compose.ui.graphics.Color.Transparent, contentColor = MaterialTheme.colorScheme.onSurface) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(Modifier.padding(top = 8.dp, bottom = 4.dp).size(width = 36.dp, height = 4.dp)
+                .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .35f), CircleShape)
+                .testTag("player-drag-handle").clearAndSetSemantics { })
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(strings.text(TextKey.NowPlaying), Modifier.weight(1f).padding(horizontal = 8.dp).semantics { heading() }, style = MaterialTheme.typography.titleLarge)
-                ActionIcon(VeyraIcons.Close, strings.text(TextKey.ClosePlayer), { onAction(MusicUiAction.ClosePlayer) }, Modifier.testTag("close-player"))
+                ActionIcon(VeyraIcons.Collapse, strings.text(TextKey.ClosePlayer), { onAction(MusicUiAction.ClosePlayer) }, Modifier.testTag("close-player"))
+                Text(strings.text(TextKey.NowPlaying), Modifier.weight(1f).padding(horizontal = 8.dp).semantics { heading() },
+                    style = MaterialTheme.typography.titleMedium, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                ActionIcon(VeyraIcons.Queue, strings.text(TextKey.ShowQueue),
+                    { onAction(MusicUiAction.OpenQueue(playback.activeContext)) }, Modifier.testTag("player-queue-top"))
             }
             if (identity == null) {
                 EmptyState(strings.text(TextKey.NothingPlaying), strings.text(TextKey.NothingPlayingDescription), strings.text(TextKey.Search), { onAction(MusicUiAction.OpenSearch(SearchKind.ALL)) }, Modifier.fillMaxWidth())
@@ -186,7 +209,7 @@ fun FullPlayer(
                             PlayerDetails(identity, snapshot, playback, onAction, options, { timerDialog = true }, { speedDialog = true }, Modifier.weight(1f))
                         } else {
                             if (!compactIdentity) {
-                                Artwork(identity.artworkUrl, identity.title.orEmpty(), Modifier.size(224.dp), offlineOnly = snapshot.settings.offlineOnly, localPath = identity.localArtworkPath)
+                                Artwork(identity.artworkUrl, identity.title.orEmpty(), Modifier.widthIn(max = 320.dp).fillMaxWidth(.88f).aspectRatio(1f), offlineOnly = snapshot.settings.offlineOnly, localPath = identity.localArtworkPath)
                                 Spacer(Modifier.height(16.dp))
                             }
                             PlayerDetails(identity, snapshot, playback, onAction, options, { timerDialog = true }, { speedDialog = true },
@@ -223,10 +246,8 @@ private fun PlayerDetails(
     val compactIdentity = compactIdentityLines != null
     val catalogItem = identity.catalogItem
     val title = identity.title ?: strings.text(TextKey.InformationUnavailable)
+    var audioDetails by remember(playback.currentEntryId) { mutableStateOf(false) }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        if (!compactIdentity) identity.listingProvider?.let { provider ->
-            Text(strings.format(TextKey.OriginalMetadataSource, providerName(provider)), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-        }
         MetadataText(title, Modifier.fillMaxWidth().testTag("player-title"), style = MaterialTheme.typography.headlineSmall,
             maxLines = compactIdentityLines ?: 3, overflow = TextOverflow.Ellipsis)
         if (compactIdentity) {
@@ -247,7 +268,12 @@ private fun PlayerDetails(
             MetadataText(creator, Modifier.fillMaxWidth(), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(strings.text(playbackStatus(playback)), Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite }, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            // Online preparation can take several seconds; a visible spinner shows the app is working.
+            if (playback.isBuffering) androidx.compose.material3.CircularProgressIndicator(
+                Modifier.padding(end = 8.dp).size(16.dp).clearAndSetSemantics { },
+                strokeWidth = 2.dp,
+            )
+            Text(playbackStatusLabel(playback, strings), Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite }, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
             if (catalogItem != null) {
                 ActionIcon(savedIcon(catalogItem, snapshot.isSaved(catalogItem)), strings.text(savedActionLabel(catalogItem, snapshot.isSaved(catalogItem))), { onAction(MusicUiAction.ToggleFavorite(catalogItem)) }, Modifier.testTag("player-save"), isSelected = snapshot.isSaved(catalogItem))
                 MediaActionsMenu(catalogItem, snapshot, onAction, options = options)
@@ -256,32 +282,16 @@ private fun PlayerDetails(
         playback.failure?.let { failure ->
             ErrorState(strings.errorFor(failure), onRetry = { onAction(MusicUiAction.TogglePlayPause) }, modifier = Modifier.fillMaxWidth().testTag("player-error").semantics { liveRegion = LiveRegionMode.Polite })
         }
-        PlaybackProvenanceCard(view = identity.provenance)
-        val facts = playback.activeQueueFacts(snapshot)
+        if (identity.resolvedTitle != null && identity.resolvedTitle != identity.title && !compactIdentity) {
+            Text(strings.format(TextKey.ResolvedTitleValue, identity.resolvedTitle), style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         if (podcast) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 OutlinedButton(openSpeed, modifier = Modifier.heightIn(min = 48.dp).testTag("player-speed"), enabled = availableSpeeds(options.minSpeed, options.maxSpeed).isNotEmpty()) {
                     Text(strings.format(TextKey.SpeedValue, strings.localizeDigits(speedText(playback.effectiveSpeed))))
                 }
                 TextButton({ onAction(MusicUiAction.Next) }, enabled = playback.hasNextOccurrence(snapshot), modifier = Modifier.heightIn(min = 48.dp).testTag("player-next-episode")) { Text(strings.text(TextKey.NextEpisode)) }
-            }
-        } else {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                OutlinedButton(
-                    { onAction(MusicUiAction.SetShuffle(!facts.shuffle)) },
-                    modifier = Modifier.heightIn(min = 48.dp).testTag("player-shuffle").semantics { selected = facts.shuffle },
-                ) {
-                    Icon(VeyraIcons.Shuffle, null, Modifier.size(20.dp).padding(end = 4.dp))
-                    Text(strings.text(if (facts.shuffle) TextKey.ShuffleOn else TextKey.ShuffleOff))
-                }
-                OutlinedButton(
-                    { onAction(MusicUiAction.SetRepeat(nextRepeatMode(facts.repeat))) },
-                    modifier = Modifier.heightIn(min = 48.dp).testTag("player-repeat").semantics { selected = facts.repeat != RepeatMode.OFF },
-                ) {
-                    Icon(VeyraIcons.Repeat, null, Modifier.size(20.dp).padding(end = 4.dp))
-                    // Text states all three modes, so repeat-one never relies on colour or a tiny dot.
-                    Text(strings.text(repeatLabel(facts.repeat)))
-                }
             }
         }
         HorizontalDivider()
@@ -297,6 +307,13 @@ private fun PlayerDetails(
         }
         playback.sleepTimer?.let { TimerStatus(it, openTimer, { onAction(MusicUiAction.ClearSleepTimer) }, Modifier.testTag("player-timer")) }
         playback.crossfade?.let { CrossfadeStatus(it) }
+        TextButton({ audioDetails = !audioDetails }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("player-audio-details")
+            .semantics { stateDescription = strings.text(if (audioDetails) TextKey.ShowLess else TextKey.ShowMore) }) {
+            Icon(VeyraIcons.Info, null, Modifier.size(18.dp))
+            Text(strings.text(TextKey.AudioDetails), Modifier.padding(horizontal = 8.dp))
+        }
+        if (audioDetails) PlaybackProvenanceCard(view = identity.provenance)
+
     }
 }
 
@@ -304,17 +321,30 @@ private fun PlayerDetails(
 private fun PlayerTransport(identity: PlaybackSurfaceIdentity, snapshot: AppSnapshot, playback: PlaybackState, onAction: (MusicUiAction) -> Unit) {
     val strings = LocalStrings.current
     val podcast = identity.controlsMode == PlaybackControlsMode.PODCAST
-    Surface(Modifier.fillMaxWidth().testTag("player-transport"), color = MaterialTheme.colorScheme.surfaceContainerLow) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+    val facts = playback.activeQueueFacts(snapshot)
+    Surface(Modifier.fillMaxWidth().testTag("player-transport"), shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
+        Column(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))
+            .padding(horizontal = 20.dp, vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Column(Modifier.widthIn(max = 640.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 PlayerSeek(playback, onAction)
                 MediaDirection {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(if (podcast) 16.dp else 6.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically) {
+                        if (!podcast) ActionIcon(VeyraIcons.Shuffle, strings.text(if (facts.shuffle) TextKey.ShuffleOn else TextKey.ShuffleOff),
+                            { onAction(MusicUiAction.SetShuffle(!facts.shuffle)) }, Modifier.testTag("player-shuffle"), isSelected = facts.shuffle)
                         if (podcast) SkipButton(-snapshot.settings.skipBackSeconds.toLong() * 1_000L, strings.format(TextKey.SkipBackSeconds, strings.number(snapshot.settings.skipBackSeconds.toLong())), VeyraIcons.SkipBack, playback, onAction, "player-skip-back")
                         else ActionIcon(VeyraIcons.Previous, strings.text(TextKey.Previous), { onAction(MusicUiAction.Previous) }, Modifier.testTag("player-previous"))
                         PlayPauseButton(playback, onAction, Modifier.size(64.dp).testTag("player-toggle"), prominent = true)
                         if (podcast) SkipButton(snapshot.settings.skipForwardSeconds.toLong() * 1_000L, strings.format(TextKey.SkipForwardSeconds, strings.number(snapshot.settings.skipForwardSeconds.toLong())), VeyraIcons.SkipForward, playback, onAction, "player-skip-forward")
                         else ActionIcon(VeyraIcons.Next, strings.text(TextKey.Next), { onAction(MusicUiAction.Next) }, Modifier.testTag("player-next"), enabled = playback.hasNextOccurrence(snapshot))
+                        if (!podcast) Box {
+                            ActionIcon(VeyraIcons.Repeat, strings.text(repeatLabel(facts.repeat)),
+                                { onAction(MusicUiAction.SetRepeat(nextRepeatMode(facts.repeat))) }, Modifier.testTag("player-repeat"),
+                                isSelected = facts.repeat != RepeatMode.OFF, stateLabel = strings.text(repeatLabel(facts.repeat)))
+                            if (facts.repeat == RepeatMode.ONE) Box(Modifier.align(Alignment.BottomEnd).testTag("player-repeat-one-badge")) {
+                                Text(strings.number(1), Modifier.padding(4.dp).clearAndSetSemantics { },
+                                    style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
                     }
                 }
             }
@@ -357,45 +387,51 @@ private fun CrossfadeStatus(crossfade: CrossfadeState) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PlayerSeek(playback: PlaybackState, onAction: (MusicUiAction) -> Unit) {
     val strings = LocalStrings.current
     val duration = playback.durationMs?.takeIf { it > 0L }
     val enabled = playback.seekable && duration != null
-    val interactions = remember { MutableInteractionSource() }
-    // Native position samples may arrive while dragging. They must not steal the user's thumb.
-    var draft by remember(playback.currentEntryId, playback.generation) { mutableStateOf<Float?>(null) }
-    val shownPosition = draft?.let { seekPosition(it, duration ?: 0L) } ?: playback.positionMs
-    val spokenPosition = strings.format(TextKey.ProgressValue, strings.spokenDuration(shownPosition), strings.spokenDuration(duration))
-    MediaDirection {
-        Column(Modifier.fillMaxWidth()) {
-            Slider(
-                value = draft ?: seekFraction(playback.positionMs, duration),
-                onValueChange = { draft = it },
-                onValueChangeFinished = {
-                    draft?.let { fraction ->
-                        if (enabled && duration != null) onAction(MusicUiAction.Seek(seekPosition(fraction, duration), playback.currentEntryId, playback.generation))
-                    }
-                    draft = null
-                },
-                enabled = enabled,
-                interactionSource = interactions,
-                thumb = {
-                    // Material3 1.9.0 measures its gesture/merged-progress node from the thumb.
-                    // An outer 48dp allocation alone leaves that node at the default 44dp.
-                    // Enlarge the real thumb/layout, not just a test tag or reported bounds.
-                    SliderDefaults.Thumb(interactionSource = interactions, enabled = enabled,
-                        modifier = Modifier.height(48.dp))
-                },
-                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("player-seek").semantics {
-                    contentDescription = strings.text(TextKey.Seek)
-                    stateDescription = spokenPosition
-                },
-            )
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(strings.mediaTime(shownPosition), style = MaterialTheme.typography.labelMedium, modifier = Modifier.clearAndSetSemantics { contentDescription = strings.text(TextKey.Elapsed) + ": " + strings.spokenDuration(shownPosition) })
-                Text(strings.mediaTime(duration), style = MaterialTheme.typography.labelMedium, modifier = Modifier.clearAndSetSemantics { contentDescription = strings.text(TextKey.Duration) + ": " + strings.spokenDuration(duration) })
+    val owner = playback.currentEntryId to playback.generation
+    // Disposed UIKit controls can still deliver a final callback. Keep the current owner
+    // outside the keyed control so those callbacks cannot seek a different recording.
+    val activeOwner by rememberUpdatedState(owner)
+    key(owner) {
+        val interactions = remember { MutableInteractionSource() }
+        // Native position samples must not steal a draft, and a new owner starts fresh.
+        var draft by remember { mutableStateOf<Float?>(null) }
+        val shownPosition = draft?.let { seekPosition(it, duration ?: 0L) } ?: playback.positionMs
+        val label = strings.text(TextKey.Seek)
+        val spokenPosition = strings.format(TextKey.ProgressValue, strings.spokenDuration(shownPosition), strings.spokenDuration(duration))
+        MediaDirection {
+            Column(Modifier.fillMaxWidth()) {
+                CompositionLocalProvider(LocalNativeControlAccessibility provides NativeControlAccessibility(
+                    label = label,
+                    value = spokenPosition,
+                    languageTag = if (strings.isRtl) "ar" else "en",
+                )) {
+                    AdaptiveSlider(
+                        value = draft ?: seekFraction(playback.positionMs, duration),
+                        onValueChange = { if (enabled && activeOwner == owner) draft = it },
+                        onValueChangeFinished = {
+                            val fraction = draft
+                            draft = null
+                            if (fraction != null && enabled && duration != null && activeOwner == owner) {
+                                onAction(MusicUiAction.Seek(seekPosition(fraction, duration), owner.first, owner.second))
+                            }
+                        },
+                        enabled = enabled,
+                        interactionSource = interactions,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("player-seek").semantics {
+                            contentDescription = label
+                            stateDescription = spokenPosition
+                        },
+                    )
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(strings.mediaTime(shownPosition), style = MaterialTheme.typography.labelMedium, modifier = Modifier.clearAndSetSemantics { contentDescription = strings.text(TextKey.Elapsed) + ": " + strings.spokenDuration(shownPosition) })
+                    Text(strings.mediaTime(duration), style = MaterialTheme.typography.labelMedium, modifier = Modifier.clearAndSetSemantics { contentDescription = strings.text(TextKey.Duration) + ": " + strings.spokenDuration(duration) })
+                }
             }
         }
     }
@@ -590,7 +626,7 @@ fun QueuePanel(
 @Composable
 private fun QueueOccurrence(row: QueueItemRow, snapshot: AppSnapshot, context: QueueContext, onAction: (MusicUiAction) -> Unit, options: MusicUiOptions, audible: Boolean, isCurrent: Boolean = false) {
     val strings = LocalStrings.current
-    Surface(color = if (audible) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth().testTag("queue-entry-${row.entryId}").semantics { selected = isCurrent }) {
+    Surface(color = if (audible) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).testTag("queue-entry-${row.entryId}").semantics { selected = isCurrent }) {
         Column {
             TextButton({ onAction(MusicUiAction.PlayQueueEntry(context, row.entryId)) }, enabled = row.playable, modifier = Modifier.fillMaxWidth().heightIn(min = 72.dp).testTag("queue-play-${row.entryId}"), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp)) {
                 Artwork(row.artworkUrl, row.title.orEmpty(), Modifier.size(48.dp), offlineOnly = snapshot.settings.offlineOnly, localPath = row.localArtworkPath)
@@ -613,7 +649,7 @@ private fun QueueOccurrence(row: QueueItemRow, snapshot: AppSnapshot, context: Q
                 Icon(if (audible) VeyraIcons.Listen else VeyraIcons.Play, if (audible) strings.text(TextKey.CurrentItem) else strings.text(TextKey.Play), Modifier.size(20.dp))
             }
             row.mediaId?.let { options.unavailableItems[it] }?.let { failure ->
-                Text(strings.errorFor(failure), Modifier.padding(horizontal = 20.dp, vertical = 4.dp), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                Text(strings.errorFor(failure), Modifier.padding(horizontal = 20.dp, vertical = 4.dp), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
             }
         }
     }
@@ -622,6 +658,27 @@ private fun QueueOccurrence(row: QueueItemRow, snapshot: AppSnapshot, context: Q
 private fun queueLabel(context: QueueContext): TextKey = if (context == QueueContext.MUSIC) TextKey.MusicQueue else TextKey.PodcastQueue
 private fun repeatLabel(mode: RepeatMode): TextKey = when (mode) { RepeatMode.OFF -> TextKey.RepeatOff; RepeatMode.ALL -> TextKey.RepeatAll; RepeatMode.ONE -> TextKey.RepeatOne }
 private fun speedText(rate: Float): String = rate.toString().removeSuffix(".0")
+/** The source-declared availability wait the current preparation honors, if any (P8). */
+val LocalPlaybackWait = androidx.compose.runtime.staticCompositionLocalOf<dev.veyra.source.youtube.SourcePlaybackWait?> { null }
+
+/**
+ * "Starting in N s" while a declared availability wait is being honored, so a delayed start is
+ * shown as a known countdown rather than an open-ended preparation; otherwise the phase label.
+ */
+@OptIn(kotlin.time.ExperimentalTime::class)
+@Composable
+private fun playbackStatusLabel(playback: PlaybackState, strings: dev.veyra.ui.design.AppStrings): String {
+    val wait = LocalPlaybackWait.current
+    if (wait == null || playback.phase !in setOf(PlaybackPhase.RESOLVING, PlaybackPhase.PREPARING)) return strings.text(playbackStatus(playback))
+    fun now() = kotlin.time.Clock.System.now().toEpochMilliseconds()
+    var current by androidx.compose.runtime.remember(wait) { androidx.compose.runtime.mutableLongStateOf(now()) }
+    androidx.compose.runtime.LaunchedEffect(wait) {
+        while (current < wait.availableAtEpochMs) { kotlinx.coroutines.delay(250); current = now() }
+    }
+    val seconds = (wait.availableAtEpochMs - current + 999) / 1000
+    return if (seconds > 0) strings.format(TextKey.StartingIn, strings.number(seconds)) else strings.text(TextKey.PreparingAudio)
+}
+
 private fun playbackStatus(playback: PlaybackState): TextKey = when (playback.phase) {
     PlaybackPhase.IDLE -> TextKey.NothingPlaying
     PlaybackPhase.RESOLVING, PlaybackPhase.PREPARING -> TextKey.PreparingAudio

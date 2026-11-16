@@ -33,6 +33,49 @@ class YouTubeAudioSelectionTest {
         videoId, ProviderId.YOUTUBE, "Authored fixture", "https://www.youtube.com/watch?v=$videoId", formats.toList(),
     )
 
+    @Test fun iosPlaybackPrefersTheDeclaredNativeSabrBridgeForTheOriginalTrack() {
+        val progressive = aac.copy(audioTrackId = "ar.4", audioDisplayName = "Arabic original", audioIsDefault = false)
+        val sabr = progressive.copy(transport = TransportKind.SABR,
+            sabr = YouTubeSabrResource(videoId, requireNotNull(aac.url), "AQID", SabrFormatId(140, 1uL), SabrClientInfo(1, "authored")))
+        val dub = aac.copy(audioIsDefault = true, audioIsAutoDubbed = true)
+        assertEquals(sabr, selectYouTubeAudio(media(dub, progressive, sabr), broadEngine,
+            platformName = "iOS", supportsSabrPlayback = true))
+        assertEquals(progressive, selectYouTubeAudio(media(dub, progressive, sabr), broadEngine,
+            platformName = "iOS", supportsSabrPlayback = false))
+        for (platform in listOf("Android", "JVM")) {
+            assertEquals(progressive, selectYouTubeAudio(media(dub, progressive, sabr), broadEngine,
+                platformName = platform, supportsSabrPlayback = true))
+        }
+    }
+
+    @Test fun iosBridgePreferenceDoesNotChangeDownloadsOrAnExplicitSelection() {
+        val sabr = aac.copy(transport = TransportKind.SABR,
+            sabr = YouTubeSabrResource(videoId, requireNotNull(aac.url), "AQID", SabrFormatId(140, 1uL), SabrClientInfo(1, "authored")))
+        assertEquals(aac, selectYouTubeAudio(media(aac, sabr), broadEngine, purpose = ResolvePurpose.DOWNLOAD,
+            platformName = "iOS", supportsSabrPlayback = true))
+        assertEquals(aac, selectYouTubeAudio(media(aac, sabr), broadEngine, requiredKey = aac.audioSelectionKey(videoId),
+            platformName = "iOS", supportsSabrPlayback = true))
+        val dub = aac.copy(id = "140@en.2", audioTrackId = "en.2", audioIsAutoDubbed = true)
+        val original = sabr.copy(id = "140@ar.4", audioTrackId = "ar.4", audioDisplayName = "Arabic original")
+        assertEquals(dub, selectYouTubeAudio(media(dub, original), broadEngine, requiredKey = dub.audioSelectionKey(videoId),
+            platformName = "iOS", supportsSabrPlayback = true))
+    }
+
+    @Test fun iosBridgePreferenceStillRejectsUnusableOrIncompatibleOriginals() {
+        val sabr = aac.copy(transport = TransportKind.SABR, audioDisplayName = "Arabic original",
+            sabr = YouTubeSabrResource(videoId, requireNotNull(aac.url), "AQID", SabrFormatId(140, 1uL), SabrClientInfo(1, "authored")))
+        val original = aac.copy(audioDisplayName = "Arabic original")
+        for (unusable in listOf(sabr.copy(sabr = null), sabr.copy(segments = listOf(SegmentResource("https://media.example/part"))))) {
+            assertEquals(original, selectYouTubeAudio(media(original, unusable), broadEngine,
+                platformName = "iOS", supportsSabrPlayback = true))
+        }
+        val dub = aac.copy(audioIsAutoDubbed = true, audioIsDefault = true)
+        assertEquals(FailureCode.UNSUPPORTED_CODEC, assertFailsWith<VeyraException> {
+            selectYouTubeAudio(media(dub, sabr.copy(codecs = "mp4a.40.5")), broadEngine,
+                platformName = "iOS", supportsSabrPlayback = true)
+        }.failure.code)
+    }
+
     @Test fun prefersActualAacLcMp4WithoutInventingAnItag() {
         val unusualId = aac.copy(id = "actual-format-401")
         assertEquals(unusualId, selectYouTubeAudio(media(opus, unusualId), broadEngine))

@@ -327,6 +327,12 @@ object VeyraIcons {
         }
     }
 
+    val Collapse by lazy {
+        strokeIcon("Collapse") {
+            moveTo(5f, 9f); lineTo(12f, 16f); lineTo(19f, 9f)
+        }
+    }
+
     val ArrowDown by lazy {
         strokeIcon("Move down") {
             moveTo(5f, 13f); lineTo(12f, 20f); lineTo(19f, 13f)

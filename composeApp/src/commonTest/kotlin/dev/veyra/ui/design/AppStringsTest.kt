@@ -12,9 +12,20 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class AppStringsTest {
+    @Test fun expiredMediaLinksDoNotAskUsersToRestoreTheirDatabase() {
+        for (strings in listOf(AppStrings(LanguagePreference.ENGLISH), AppStrings(LanguagePreference.ARABIC))) {
+            assertEquals(strings.text(TextKey.SourceLinkExpired), strings.errorFor(
+                AppFailure(FailureCode.RECOVERY_REQUIRED, "YOUTUBE_SOURCE_EXPIRED")))
+            assertEquals(strings.text(TextKey.RecoveryRequired), strings.errorFor(
+                AppFailure(FailureCode.RECOVERY_REQUIRED, "database_recovery")))
+            assertEquals(strings.text(TextKey.RecoveryRequired), strings.errorFor(
+                AppFailure(FailureCode.RECOVERY_REQUIRED, "YOUTUBE_SOURCE_EXPIRED https://private.invalid")))
+        }
+    }
+
     private val english = AppStrings(LanguagePreference.ENGLISH)
     private val arabic = AppStrings(LanguagePreference.ARABIC)
-    private val placeholders = Regex("\\{([0-9]+)}")
+    private val placeholders = Regex("\\{([0-9]+)\\}")
 
     @Test fun everyKeyHasBilingualCopyAndTheSameContiguousPlaceholders() {
         TextKey.entries.forEach { key ->

@@ -188,6 +188,8 @@ data class HeartbeatPhysicalDownload(
     val leaseDurationMs: Long,
     val bytesDownloaded: Long,
     val totalBytes: Long?,
+    /** Only the active selected transfer may replace a discarded prefix or report its final output size. */
+    val allowProgressReset: Boolean = false,
 )
 
 /** The first selected key is fixed for this physical generation; same-C/key renewal only. */

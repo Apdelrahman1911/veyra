@@ -6,7 +6,7 @@ dependencyResolutionManagement {
     repositories { google(); mavenCentral() }
 }
 rootProject.name = "Veyra"
-include(":shared", ":composeApp")
+include(":shared", ":composeApp", ":nativeComponents")
 
 // Source-pinned composite, never MavenLocal or a floating upstream branch.
 val upstream = file("third_party/kmpYT")

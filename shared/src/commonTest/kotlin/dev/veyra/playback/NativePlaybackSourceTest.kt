@@ -18,6 +18,16 @@ class NativePlaybackSourceTest {
         override suspend fun close() { closeCalls++ }
     }
 
+    @Test fun exactProgressiveLengthSurvivesLegacyAndTypedNativeHandoffs() {
+        val fixture = PlaybackSelectionFixtures.single()
+        val typed = NativePlaybackSource.Acquired(source(fixture).copy(contentLength = 4_096L), fixture.selection())
+        typed.validateSelection()
+        assertEquals(4_096L, typed.contentLength)
+        val legacy = NativePlaybackSource.Legacy(ResolvedPlayable("authored", "https://fixture.invalid/audio", contentLength = 8_192L))
+        assertEquals(8_192L, legacy.contentLength)
+        assertNull(NativePlaybackSource.Legacy(ResolvedPlayable("authored", "https://fixture.invalid/audio")).contentLength)
+    }
+
     @Test fun everyTypedRequestKindAndExplicitModeUsesItsExactBoundSelection() {
         for (kind in AcquisitionKind.entries) for (mode in PlaybackControlsMode.entries) {
             val fixture = PlaybackSelectionFixtures.single(kind, mode)

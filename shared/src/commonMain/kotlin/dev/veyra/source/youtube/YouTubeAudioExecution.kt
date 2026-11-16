@@ -30,6 +30,8 @@ internal class YouTubeAudioExecution(
     private val client: YouTubeClient,
     private val nowEpochMs: () -> Long,
     private val requireOpen: suspend () -> Unit,
+    /** Reports a source-declared availability deadline while playback waits for it (null clears). */
+    private val onPlaybackWait: (SourcePlaybackWait?) -> Unit = {},
 ) {
     /** The boundary supplies a direct SAME-C inspector, never a search or another source. */
     class Input(
@@ -52,6 +54,7 @@ internal class YouTubeAudioExecution(
         val durationMs: Long?,
         val key: String,
         val resource: PlaybackResource?,
+        val contentLength: Long?,
     ) {
         override fun toString() = "YouTubeResolvedAudio(source=redacted,resource=redacted)"
     }
@@ -109,8 +112,13 @@ internal class YouTubeAudioExecution(
         val engine = capabilities.detached()
         val download = if (purpose == ResolvePurpose.DOWNLOAD) downloadPlan(input, engine, requiredKey) else null
         val selected = download?.selection ?: select(input, engine, requiredKey, purpose)
-        val playback = if (purpose == ResolvePurpose.PLAYBACK)
-            client.playbackPlan(selected.report, YouTubeFormatSelection(selected.audio.id), selected.media.id) else null
+        val playback = if (purpose == ResolvePurpose.PLAYBACK) {
+            val wait = selected.audio.availableAtEpochMs?.takeIf { it > nowEpochMs() }
+                ?.let { SourcePlaybackWait(input.videoId, it) }
+            onPlaybackWait(wait)
+            try { client.preparePlayback(selected.report, YouTubeFormatSelection(selected.audio.id), selected.media.id) }
+            finally { if (wait != null) onPlaybackWait(null) }
+        } else null
         val plan = playback?.plan ?: requireNotNull(download).plan
         requirePublicAudio(plan, selected.media.id)
         var opened: YouTubePlaybackResource? = null
@@ -136,6 +144,7 @@ internal class YouTubeAudioExecution(
                     ?: youtubeFailure(FailureCode.PARSE_FAILURE, "YOUTUBE_AUDIO_ENDPOINT_MISSING")
                 object : PlaybackResource {
                     override val localEndpoint = EphemeralPlaybackEndpoint(endpoint.url)
+                    override val failure get() = resource.failureCode?.let(::youtubePlaybackFailure)
                     override suspend fun close() {
                         try { resource.close() } catch (failure: Exception) { failure.asYouTubeFailure() }
                     }
@@ -158,6 +167,9 @@ internal class YouTubeAudioExecution(
                 durationMs = plan.primary.durationMs ?: selected.media.durationMs,
                 key = selected.key,
                 resource = owned,
+                contentLength = if (owned == null && plan.primary.transport == TransportKind.PROGRESSIVE &&
+                    plan.primary.initialization == null && plan.primary.segments.isEmpty())
+                    plan.primary.sizeBytes?.takeIf { it > 0L } else null,
             )
             requireOpen()
             currentCoroutineContext().ensureActive()

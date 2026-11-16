@@ -65,6 +65,8 @@ data class AcquisitionPlaybackSource(
     val isLocal: Boolean = false,
     val materializationAssetId: MaterializationAssetId? = null,
     val resource: PlaybackResource? = null,
+    /** Exact declared length of a direct progressive object; absent for remuxed/unknown sources. */
+    val contentLength: Long? = null,
 ) {
     init { require(isLocal == (materializationAssetId != null)) }
     fun ownedLoopbackUriOrNull(): String? = resource?.localEndpoint?.uri?.takeIf { !isLocal && it == uri }

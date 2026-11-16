@@ -25,6 +25,7 @@ sealed interface NativePlaybackSource {
 
     val uri: String get() = when (this) { is Legacy -> source.uri; is Acquired -> source.uri }
     val transport: StreamTransport get() = when (this) { is Legacy -> source.transport; is Acquired -> source.transport }
+    val contentLength: Long? get() = when (this) { is Legacy -> source.contentLength; is Acquired -> source.contentLength }
     val mimeType: String? get() = when (this) { is Legacy -> source.mimeType; is Acquired -> source.mimeType }
     val codecs: String? get() = when (this) { is Legacy -> source.codecs; is Acquired -> source.codecs }
     val headers: Map<String, String> get() = when (this) { is Legacy -> source.headers; is Acquired -> source.headers }

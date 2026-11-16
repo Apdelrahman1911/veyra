@@ -93,7 +93,8 @@ class PlaylistFlowsTest {
     @Test fun deletingAPlaylistIsAnExplicitReferenceOnlyAction() {
         val actions = mutableListOf<MusicUiAction>()
         ui.setContent { VeyraTheme(false, LanguagePreference.ENGLISH) { LibraryScreen(AppSnapshot(playlists = listOf(playlist)), LibrarySection.PLAYLISTS, { actions += it }, Modifier.size(900.dp, 680.dp)) } }
-        ui.onNodeWithContentDescription(strings.text(TextKey.DeletePlaylist)).performClick()
+        ui.onNodeWithContentDescription(strings.text(TextKey.MoreOptions)).performClick()
+        ui.onNodeWithText(strings.text(TextKey.DeletePlaylist)).performClick()
         ui.onNodeWithText(strings.format(TextKey.ConfirmDeletePlaylist, playlist.name)).assertIsDisplayed()
         assertTrue(actions.isEmpty())
         ui.onNodeWithTag("confirm-action").performClick()

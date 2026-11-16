@@ -54,6 +54,9 @@ data class PodcastDetailStatus(
     val options: Map<String, PodcastListOptions> = emptyMap(),
 )
 
+/** Lets the first frames and Room bootstrap settle before native runtime preparation. */
+private const val PLAYER_PROGRAM_PREWARM_DELAY_MS = 1_500L
+
 /**
  * One app-lifetime composition root. Screens emit intents; they never construct clients, players,
  * Room databases, or media transfer implementations. The optional seams are for real integration
@@ -167,6 +170,8 @@ class AppContainer(
     private val undoLibrary = MutableStateFlow<CatalogLibraryUndo?>(null)
     private val mutableStorageBytes = MutableStateFlow<Long?>(null)
     val storageBytes = mutableStorageBytes.asStateFlow()
+    /** The availability wait the current online playback preparation honors, for the countdown. */
+    val playbackWait: StateFlow<dev.veyra.source.youtube.SourcePlaybackWait?> get() = platform.youtube.playbackWait
     val musicOptions: StateFlow<MusicUiOptions> = combine(store.state, playback.state, undoLibrary,
         store.catalogLibraryUndoAvailability) { _, player, undo, availability ->
         MusicUiOptions(
@@ -331,6 +336,12 @@ class AppContainer(
                 }
             }
             mutableInitialization.value = AppInitialization.Ready
+            effects.launch {
+                // Offline-only readiness: prepares the stored player program after the first
+                // frames so the first online play/download skips that cold work. No request is sent.
+                delay(PLAYER_PROGRAM_PREWARM_DELAY_MS)
+                platform.youtube.prewarm()
+            }
             mutableNavigation.value.details.mapNotNull { it.collection }.distinctBy { it.id }.forEach { collection ->
                 if (snapshot.settings.offlineOnly) mutableCollections.update { it + (collection.id to CollectionUiState(
                     collection, failure = AppFailure(FailureCode.OFFLINE_POLICY))) }
@@ -385,7 +396,7 @@ class AppContainer(
     fun dismissNotice(id: String) { mutableNotice.update { if (it?.id == id) null else it } }
 
     fun selectDestination(destination: AppDestination) {
-        mutableNavigation.update { it.copy(destination = destination, details = emptyList(), playerOpen = false, queueOpen = false) }
+        mutableNavigation.update { it.copy(destination = destination, librarySection = if (destination == AppDestination.LIBRARY) LibrarySection.OVERVIEW else it.librarySection, details = emptyList(), playerOpen = false, queueOpen = false) }
         navigationWrites.trySend(Unit)
         if (destination == AppDestination.SETTINGS) refreshStorage()
     }

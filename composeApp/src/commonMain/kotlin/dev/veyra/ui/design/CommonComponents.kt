@@ -1,5 +1,8 @@
 package dev.veyra.ui.design
 
+import com.mohamedrejeb.calf.ui.button.AdaptiveIconButton
+import com.mohamedrejeb.calf.ui.progress.AdaptiveCircularProgressIndicator
+
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -150,7 +153,7 @@ fun LoadingState(modifier: Modifier = Modifier, label: String? = null) {
         verticalArrangement = Arrangement.spacedBy(VeyraSpacing.Medium),
     ) {
         // One verbal status. The progress decoration is not separately announced.
-        CircularProgressIndicator(modifier = Modifier.size(28.dp).clearAndSetSemantics { })
+        AdaptiveCircularProgressIndicator(modifier = Modifier.size(28.dp).clearAndSetSemantics { })
         Text(label ?: LocalStrings.current.text(TextKey.Loading), modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
     }
 }
@@ -178,7 +181,7 @@ fun VeyraIconButton(
         tooltip = { PlainTooltip { Text(label) } },
         state = rememberTooltipState(),
     ) {
-        IconButton(
+        AdaptiveIconButton(
             onClick = onClick,
             enabled = enabled,
             interactionSource = interactions,

@@ -137,10 +137,10 @@ fun MusicMediaRow(
     val ready = surface.isDownloaded(item.id)
     val savedBinding = surface.savedCatalogueBinding(item.id)
     val unavailable = options.unavailableItems[item.id]
-    Surface(modifier = modifier.fillMaxWidth().testTag("media-row-${item.id}"), color = if (isCurrent) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface) {
+    Surface(modifier = modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).testTag("media-row-${item.id}"), shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp), color = if (isCurrent) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.heightIn(min = 72.dp)) {
-                Artwork(item.artworkUrl, item.title, Modifier.size(48.dp), offlineOnly = snapshot.settings.offlineOnly, localPath = item.localArtworkPath)
+                Artwork(item.artworkUrl, item.title, Modifier.size(56.dp), offlineOnly = snapshot.settings.offlineOnly, localPath = item.localArtworkPath)
                 TextButton(
                     onClick = {
                         onAction(if (savedBinding != null) MusicUiAction.PlaySaved(item, savedBinding)
@@ -151,10 +151,9 @@ fun MusicMediaRow(
                     shape = RectangleShape,
                 ) {
                     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        MetadataText(item.title, modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        MetadataText(item.title, modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         if (item.creator.isNotBlank()) MetadataText(item.creator, modifier = Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(providerName(item.source.provider), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             item.durationMs?.takeIf { it >= 0 }?.let { Text(strings.mediaTime(it), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                             if (ready) Icon(VeyraIcons.Check, strings.text(TextKey.ReadyOffline), Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
                         }
@@ -273,12 +272,13 @@ internal fun savedIcon(item: MediaItem, saved: Boolean): ImageVector = when {
 @Composable
 internal fun ConfirmActionDialog(title: String, description: String, confirm: String, onDismiss: () -> Unit, onConfirm: () -> Unit) {
     val strings = LocalStrings.current
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title) },
-        text = { Text(description) },
-        confirmButton = { TextButton(onClick = onConfirm, modifier = Modifier.heightIn(min = 48.dp).testTag("confirm-action")) { Text(confirm) } },
-        dismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp).testTag("cancel-action")) { Text(strings.text(TextKey.Cancel)) } },
+    com.mohamedrejeb.calf.ui.dialog.AdaptiveAlertDialog(
+        onConfirm = onConfirm, onDismiss = onDismiss,
+        confirmText = confirm, dismissText = strings.text(TextKey.Cancel), title = title, text = description,
+        iosConfirmButtonStyle = com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosActionStyle.Default,
+        iosDismissButtonStyle = com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosActionStyle.Cancel,
+        materialConfirmButton = { TextButton(onClick = onConfirm, modifier = Modifier.heightIn(min = 48.dp).testTag("confirm-action")) { Text(confirm) } },
+        materialDismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp).testTag("cancel-action")) { Text(strings.text(TextKey.Cancel)) } },
     )
 }
 

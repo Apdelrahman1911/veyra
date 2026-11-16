@@ -2,6 +2,38 @@
 
 Only consequential choices belong here. Each final decision needs evidence, alternatives, and consequences; research detail lives in the linked reports.
 
+## D013 — Prefer source-original audio, not a configured language (accepted; owner clarification 2026-11-11)
+
+Automatic playback/download selection prefers a positively source-declared
+compatible original for the same recording, irrespective of app/device language.
+Do not hardcode Arabic or infer originality from a language code. Preserve explicit
+selectors and renewal provenance; an incompatible known original must not silently
+become a dub. Unknown provenance retains the existing default fallback rather than
+inventing a source claim. Retained explicit/dub files are not deleted or rewritten.
+The alternative of selecting a user-locale track was explicitly rejected by the
+owner. See `verification/online-preparation-original-audio-20261111.md` for authored
+multilingual regressions, physical source observations and verification limits.
+
+## D014 — Bounded media requests and single-use inspection reuse (accepted; owner request 2026-11-16)
+
+Large progressive objects are downloaded and streamed as exact HTTP ranges of at most
+8 MiB (downloads: up to 4 connections). Googlevideo paces larger single ranges to about
+the media bitrate (measured 32 KB/s vs ~3 MB/s). Only a contiguous, synced and hashed
+prefix is ever checkpointed. Every section must be an exact 206 of the same strong-ETag
+representation, or the transfer falls back to one verified request.
+
+Veyra may reuse one public audio inspection **once**, in memory only, while every declared
+media URL has at least 20 minutes of validity left and the report is at most 30 minutes old.
+Refresh paths always inspect fresh. Declared availability waits stay in the report and are
+still awaited, so reuse never shortens a declared wait; it only avoids starting a new one.
+This is an application-level policy; kmpYT itself still never caches media URLs.
+
+Queue playback may inspect the next music item 40 s before the current one ends: once per
+track, never offline, never for podcasts, never for saved local files. The public-client
+order stays TV-first. VisionOS-first measured ~170 ms faster but mainly changes whether a
+pre-roll wait is declared, so it is an owner decision. See
+`verification/media-pipeline-performance-20261116.md`.
+
 ## D001 — Scope, access, and repository visibility (accepted)
 The last user instruction overrides the earlier private default: create Veyra **public** when implementation begins. Use only free standard public-repository Actions runners and existing resources. All project files, temporary writes, cleanup and GitHub changes are confined to Veyra and kmpYT. No system configuration or unrelated repositories may change.
 

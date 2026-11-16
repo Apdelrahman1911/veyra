@@ -86,7 +86,11 @@
 			files = ();
 			inputPaths = ();
 			name = "Build Kotlin framework";
-			outputPaths = ();
+			outputPaths = (
+				"$(SRCROOT)/../composeApp/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)/Veyra.framework/Veyra",
+				"$(SRCROOT)/../composeApp/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)/Veyra.framework/Headers/Veyra.h",
+				"$(SRCROOT)/../composeApp/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)/Veyra.framework/Modules/module.modulemap",
+			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/bash;
 			shellScript = "\"$SRCROOT/../scripts/xcode-framework.sh\"\n";
@@ -138,9 +142,10 @@
 				INFOPLIST_FILE = iosApp/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks");
 				MARKETING_VERSION = 1.0.0;
-				OTHER_LDFLAGS = ("$(inherited)", "-framework", Veyra);
+				OTHER_LDFLAGS = ("$(inherited)", "$(SRCROOT)/../composeApp/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)/Veyra.framework/Veyra");
 				PRODUCT_BUNDLE_IDENTIFIER = dev.veyra.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_MODULE_NAME = VeyraHost;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
 				SWIFT_EMIT_LOC_STRINGS = NO;
@@ -160,9 +165,10 @@
 				INFOPLIST_FILE = iosApp/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks");
 				MARKETING_VERSION = 1.0.0;
-				OTHER_LDFLAGS = ("$(inherited)", "-framework", Veyra);
+				OTHER_LDFLAGS = ("$(inherited)", "$(SRCROOT)/../composeApp/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)/Veyra.framework/Veyra");
 				PRODUCT_BUNDLE_IDENTIFIER = dev.veyra.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_MODULE_NAME = VeyraHost;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
 				SWIFT_EMIT_LOC_STRINGS = NO;

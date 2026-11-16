@@ -72,6 +72,8 @@ class DownloadCoordinator(
     private val owner = newEntityId("download-owner")
     private val activityEpoch = MutableStateFlow(0L)
     private val mutableSchedulingChanges = MutableStateFlow(0L)
+    private val diagnosticRecorder = DownloadDiagnosticRecorder()
+    val diagnosticEvents: StateFlow<List<DownloadDiagnosticEvent>> = diagnosticRecorder.entries
     override val schedulingChanges: StateFlow<Long> = mutableSchedulingChanges.asStateFlow()
     private val claimDeferrals = MutableStateFlow<Map<DownloadClaimKey, DownloadClaimDeferral>>(emptyMap())
     // These three values are accessed only with commands + activeLock held, in that order.
@@ -144,6 +146,7 @@ class DownloadCoordinator(
                 changed = ::noteActivity, signalWork = ::signalWork, publishFailure = { publishFailure(it) },
                 publishCleanupFailure = ::publishCleanupFailure, failCheckpointAdmission = ::failPhysicalCheckpointAdmission,
                 allowanceExpired = ::physicalAllowanceExpired,
+                diagnostics = diagnosticRecorder,
             ))
     }
     private val batchWorkRuntime: DownloadBatchWorkRuntime? = acquisitionDependencies?.let { dependencies ->
@@ -372,7 +375,7 @@ class DownloadCoordinator(
                             if (physicalRuntime == null) store.flush().getOrThrow()
                             schedule()
                         } catch (cancelled: CancellationException) { throw cancelled }
-                        catch (error: Exception) { publishFailure(classify(error)) }
+                        catch (error: Exception) { publishFailure(classify(error), error) }
                         withTimeoutOrNull(pollingMs) { wake.receive() }
                     }
                 } finally { if (!initialized.isCompleted) initialized.cancel() }
@@ -383,7 +386,7 @@ class DownloadCoordinator(
                 while (isActive) {
                     try { reconcile() }
                     catch (cancelled: CancellationException) { throw cancelled }
-                    catch (error: Exception) { publishFailure(classify(error)) }
+                    catch (error: Exception) { publishFailure(classify(error), error) }
                     withTimeoutOrNull(pollingMs) { maintenanceWake.receive() }
                 }
             }
@@ -402,7 +405,7 @@ class DownloadCoordinator(
                         }
                     }
                     catch (cancelled: CancellationException) { throw cancelled }
-                    catch (error: Exception) { publishFailure(classify(error)) }
+                    catch (error: Exception) { publishFailure(classify(error), error) }
                 }
             }
             networkObserver = scope.launch {
@@ -1874,7 +1877,9 @@ class DownloadCoordinator(
     private fun requireOpen() { check(!lifecycle.value.closed) { "Download coordinator closed" } }
     private fun restartRequiredFailure() =
         AppFailure(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_failed_restart_required")
-    private fun publishFailure(failure: AppFailure?) {
+    private fun publishFailure(failure: AppFailure?, error: Throwable? = null) {
+        failure?.let { diagnosticRecorder.record(DownloadDiagnosticStage.HOST_FAILURE, it, error,
+            host = physicalHostState().diagnosticState()) }
         mutableFailure.update { lifecycle.value.drainFailure ?: cleanupFailure.value ?: failure }
     }
     private fun classify(error: Exception): AppFailure = when (error) {

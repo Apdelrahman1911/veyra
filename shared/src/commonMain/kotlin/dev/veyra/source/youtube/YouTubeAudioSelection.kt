@@ -5,6 +5,7 @@ import dev.kmpyt.extraction.Representation
 import dev.kmpyt.extraction.TrackRole
 import dev.kmpyt.extraction.TransportKind
 import dev.kmpyt.youtube.YouTubeFormatCapabilities
+import dev.kmpyt.youtube.YouTubeFormatSelection
 import dev.veyra.model.FailureCode
 import dev.veyra.model.StreamTransport
 import dev.veyra.playback.EngineCapabilities
@@ -114,9 +115,9 @@ internal fun selectYouTubeAudio(
             if (it.size != 1) youtubeFailure(FailureCode.RECOVERY_REQUIRED, "YOUTUBE_SELECTED_TRACK_CHANGED")
         }
     } else {
-        // Do not switch to a dubbed/nondefault language merely because its codec is
-        // easier to play. An unsupported actual default remains an explicit error.
-        allAudio.filter { it.audioIsDefault == true }.ifEmpty { allAudio }
+        YouTubeFormatSelection.originalAudioTracks(media).ifEmpty {
+            allAudio.filter { it.audioIsDefault == true }.ifEmpty { allAudio }
+        }
     }
     val supportedTransports = offered.filter {
         when (purpose) {
@@ -140,12 +141,15 @@ internal fun selectYouTubeAudio(
     if (supported.isEmpty()) youtubeFailure(FailureCode.UNSUPPORTED_CODEC, "YOUTUBE_NATIVE_AUDIO_UNSUPPORTED")
     val available = supported.filter { it.selectable || it.expiredSourceOnly() }
     if (available.isEmpty()) youtubeFailure(FailureCode.UNSUPPORTED_SOURCE, "YOUTUBE_AUDIO_SOURCE_UNAVAILABLE")
+    val transportPreference = if (purpose == ResolvePurpose.PLAYBACK &&
+        platformName.equals("iOS", ignoreCase = true) && supportsSabrPlayback) {
+        listOf(TransportKind.SABR, TransportKind.PROGRESSIVE, TransportKind.DASH, TransportKind.HLS, TransportKind.UNRESOLVED)
+    } else {
+        listOf(TransportKind.PROGRESSIVE, TransportKind.SABR, TransportKind.DASH, TransportKind.HLS, TransportKind.UNRESOLVED)
+    }
     return available.sortedWith(
         compareByDescending<Representation> { it.audioMime() == "audio/mp4" && it.audioCodec() == "mp4a.40.2" }
-            .thenBy { when (it.transport) {
-                TransportKind.PROGRESSIVE -> 0; TransportKind.SABR -> 1; TransportKind.DASH -> 2; TransportKind.HLS -> 3
-                TransportKind.UNRESOLVED -> 4
-            } }
+            .thenBy { transportPreference.indexOf(it.transport) }
             .thenBy { it.isDrc == true }
             .thenByDescending { it.bitrate ?: 0 }
             .thenBy { it.id },

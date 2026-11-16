@@ -115,7 +115,7 @@ class DownloadFiles internal constructor(directory: String, val fileSystem: File
     fun ownedPath(uri: String): Path = storageOperation {
         checkRootAncestors()
         if (uri.startsWith("file:", ignoreCase = true) || uri.startsWith("\\\\") || uri.startsWith("//")) corrupt()
-        val path = uri.toPath(normalize = true)
+        val path = relocateContainerPath(uri)
         val relative = runCatching { path.relativeTo(root) }.getOrNull()
         if (!path.isAbsolute || relative == null || ".." in relative.segments || relative.segments.isEmpty()) corrupt()
         var current: Path? = path
@@ -126,6 +126,18 @@ class DownloadFiles internal constructor(directory: String, val fileSystem: File
         }
         if (current != root) corrupt()
         path
+    }
+
+    private fun relocateContainerPath(value: String): Path {
+        val path = value.toPath(normalize = true)
+        val current = IOS_MEDIA_DIRECTORY.matchEntire(root.toString()) ?: return path
+        if (current.groupValues[2].isNotEmpty()) return path
+        val previous = IOS_MEDIA_DIRECTORY.matchEntire(path.toString()) ?: return path
+        fun containerNamespace(prefix: String): String =
+            if (prefix.startsWith("/private/var/")) prefix.removePrefix("/private") else prefix
+        if (containerNamespace(current.groupValues[1]) != containerNamespace(previous.groupValues[1])) return path
+        if (".." in value.toPath().segments) corrupt()
+        return root / previous.groupValues[2]
     }
 
     private fun checkRootAncestors() {
@@ -330,6 +342,7 @@ class DownloadFiles internal constructor(directory: String, val fileSystem: File
     private fun corrupt(): Nothing = throw VeyraException(AppFailure(FailureCode.CORRUPT_MEDIA, "owned_file_integrity"))
 
     private companion object {
+        val IOS_MEDIA_DIRECTORY = Regex("^(.*/Containers/Data/Application/)[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/Library/Application Support/Veyra/media(?:/(.*))?$")
         val MEDIA_DIRECTORY = Regex("media-[0-9a-f]{64}")
         val GENERATION_DIRECTORY = Regex("generation-[0-9a-f]{64}")
     }

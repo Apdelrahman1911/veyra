@@ -1,5 +1,6 @@
 package dev.veyra.ui.music
 
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -26,6 +27,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -37,6 +39,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import dev.veyra.model.AppSnapshot
@@ -69,13 +72,15 @@ fun TrackDetailScreen(
     onAction: (MusicUiAction) -> Unit,
     modifier: Modifier = Modifier,
     options: MusicUiOptions = MusicUiOptions(),
+    showHeader: Boolean = true,
 ) {
     val strings = LocalStrings.current
+    var audioDetails by rememberSaveable(mediaId) { mutableStateOf(false) }
     val item = (snapshot.media[mediaId] ?: playback.currentItem?.takeIf { it.id == mediaId })
         ?.takeIf { it.kind == MediaKind.MUSIC }
     var playlistPicker by remember(mediaId) { mutableStateOf(false) }
     Column(modifier.fillMaxSize().testTag("track-detail")) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (showHeader) Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             ActionIcon(VeyraIcons.Back, strings.text(TextKey.Back), { onAction(MusicUiAction.NavigateBack) }, Modifier.testTag("track-back"))
             Text(strings.text(TextKey.TrackDetails), Modifier.weight(1f).padding(start = 8.dp).semantics { heading() }, style = MaterialTheme.typography.titleLarge)
         }
@@ -126,12 +131,17 @@ fun TrackDetailScreen(
                                 { onAction(MusicUiAction.ToggleFavorite(item)) },
                                 modifier = Modifier.heightIn(min = 48.dp).testTag("track-favorite").semantics { selected = item.id in snapshot.favoriteIds },
                             ) { Text(strings.text(savedActionLabel(item, snapshot.isSaved(item)))) }
-                            OutlinedButton({ onAction(MusicUiAction.Enqueue(item, playNext = true)) }, modifier = Modifier.heightIn(min = 48.dp).testTag("track-play-next")) { Text(strings.text(TextKey.PlayNext)) }
-                            OutlinedButton({ onAction(MusicUiAction.Enqueue(item, playNext = false)) }, modifier = Modifier.heightIn(min = 48.dp).testTag("track-enqueue")) { Text(strings.text(TextKey.AddToEnd)) }
-                            TextButton({ playlistPicker = true }, modifier = Modifier.heightIn(min = 48.dp).testTag("track-playlist")) { Text(strings.text(TextKey.AddToPlaylist)) }
+                            MediaActionsMenu(item, snapshot, onAction, options = options)
                             if (current) TextButton({ onAction(MusicUiAction.OpenPlayer) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.OpenPlayer)) }
                         }
                     }
+                    item(key = "audio-details-toggle") {
+                        TextButton({ audioDetails = !audioDetails }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                            .testTag("track-audio-details").semantics { stateDescription = strings.text(if (audioDetails) TextKey.ShowLess else TextKey.ShowMore) }) {
+                            Text(strings.text(TextKey.AudioDetails))
+                        }
+                    }
+                    if (audioDetails) {
                     // There can be two different recordings: the currently loaded session and an
                     // older downloaded asset. Their receipts and measured durations stay separate.
                     if (current) item(key = "current-audio") {
@@ -158,6 +168,7 @@ fun TrackDetailScreen(
                     if (!current && !ready && presentation.previousBinding == null) item(key = "audio-policy") {
                         PlaybackProvenanceCard(item, null)
                     }
+                    }
                     item(key = "download") { TrackDownloadSection(item, presentation.downloadEntry, snapshot.settings.offlineOnly, onAction, options) }
                     if (item.description.isNotBlank()) item(key = "description") {
                         Column(Modifier.testTag("track-description"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -182,7 +193,7 @@ private fun TrackHero(item: MediaItem, snapshot: AppSnapshot) {
             Artwork(item.artworkUrl, item.title, Modifier.size(168.dp), snapshot.settings.offlineOnly, item.localArtworkPath)
             TrackMetadata(item, snapshot, Modifier.weight(1f))
         } else Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Artwork(item.artworkUrl, item.title, Modifier.size(128.dp), snapshot.settings.offlineOnly, item.localArtworkPath)
+            Artwork(item.artworkUrl, item.title, Modifier.fillMaxWidth(.72f).aspectRatio(1f), snapshot.settings.offlineOnly, item.localArtworkPath)
             TrackMetadata(item, snapshot, Modifier.fillMaxWidth())
         }
     }

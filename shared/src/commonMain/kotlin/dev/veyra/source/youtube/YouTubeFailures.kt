@@ -1,12 +1,21 @@
 package dev.veyra.source.youtube
 
 import dev.kmpyt.extraction.ExtractionReport
+import dev.kmpyt.extraction.TrackRole
 import dev.veyra.model.AppFailure
 import dev.veyra.model.FailureCode
 import dev.veyra.model.VeyraException
 import kotlinx.coroutines.CancellationException
 
 internal fun youtubeFailure(code: FailureCode, detail: String): Nothing = throw VeyraException(AppFailure(code, detail))
+
+internal fun youtubePlaybackFailure(code: String): AppFailure = when (code) {
+    "SABR_PROTECTION_RETRY_LIMIT", "SABR_PROTECTION_CONTEXT_UNAVAILABLE", "SABR_PROTECTION_REFRESH_FAILED",
+    "SABR_RESOURCE_NOT_AUTHORIZED" -> AppFailure(FailureCode.PROVIDER_ACCESS_REQUIRED, "YOUTUBE_STREAM_ACCESS_REQUIRED")
+    "SABR_HTTP_UNAVAILABLE", "SABR_HTTP_REQUEST_FAILED", "SABR_PLAYBACK_BUFFER_TIMEOUT" ->
+        AppFailure(FailureCode.NETWORK_UNAVAILABLE, "YOUTUBE_STREAM_INTERRUPTED")
+    else -> AppFailure(FailureCode.NETWORK_UNAVAILABLE, "YOUTUBE_STREAM_UNAVAILABLE")
+}
 
 /** Inspect only public stable diagnostic codes, never the accompanying response/error text. */
 internal fun ExtractionReport.sourceFailure(): AppFailure? {
@@ -18,7 +27,11 @@ internal fun ExtractionReport.sourceFailure(): AppFailure? {
         has("PUBLIC_RESPONSE_RATE_LIMITED") -> AppFailure(FailureCode.RATE_LIMITED, "YOUTUBE_RATE_LIMITED")
         has("PUBLIC_VIDEO_NOT_FOUND") -> AppFailure(FailureCode.NOT_FOUND, "YOUTUBE_NOT_FOUND")
         has("VIDEO_ID_MISMATCH", "VIDEO_ID_MISSING") -> AppFailure(FailureCode.PARSE_FAILURE, "YOUTUBE_IDENTITY_MISMATCH")
-        has("PLAYER_UNAVAILABLE") -> AppFailure(FailureCode.UNSUPPORTED_SOURCE, "YOUTUBE_PLAYER_UNAVAILABLE")
+        // The report combines independent public client responses for the same video.
+        // An unavailable optional client must not poison audio another response actually
+        // declares playable. Authorization/rate limits above remain blocking for all clients.
+        has("PLAYER_UNAVAILABLE") && media.none { item -> item.representations.any { it.role == TrackRole.AUDIO && it.selectable } } ->
+            AppFailure(FailureCode.UNSUPPORTED_SOURCE, "YOUTUBE_PLAYER_UNAVAILABLE")
         has("TRANSPORT_TIMEOUT", "TRANSPORT_DNS_FAILURE", "TRANSPORT_TLS_FAILURE", "TRANSPORT_CONNECTION_FAILURE", "TRANSPORT_FAILURE", "NETWORK_OR_RESPONSE_LIMIT", "PUBLIC_RESPONSE_HTTP_ERROR") ->
             AppFailure(FailureCode.NETWORK_UNAVAILABLE, "YOUTUBE_NETWORK_UNAVAILABLE")
         else -> null

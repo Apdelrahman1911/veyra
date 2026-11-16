@@ -11,6 +11,8 @@ import kotlinx.coroutines.launch
 import platform.Foundation.NSDate
 import platform.Foundation.NSRunLoop
 import platform.Foundation.NSThread
+import platform.Foundation.dateWithTimeIntervalSinceNow
+import platform.Foundation.runUntilDate
 import platform.QuartzCore.CACurrentMediaTime
 
 /** Pump Darwin callbacks; runBlocking(Main) would deadlock native main-thread lifecycle tests. */

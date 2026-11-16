@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -52,6 +53,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.error
 import androidx.compose.ui.semantics.heading
@@ -71,6 +73,8 @@ import dev.veyra.ui.design.Artwork
 import dev.veyra.ui.design.EmptyState
 import dev.veyra.ui.design.ErrorState
 import dev.veyra.ui.design.LoadingState
+import dev.veyra.ui.design.AccentButton
+import dev.veyra.ui.design.ScreenIntro
 import dev.veyra.ui.design.LocalStrings
 import dev.veyra.ui.design.MetadataText
 import dev.veyra.ui.design.TextKey
@@ -104,14 +108,11 @@ fun PodcastsScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(strings.text(TextKey.Podcasts), style = MaterialTheme.typography.headlineLarge,
                         modifier = Modifier.semantics { heading() })
-                    Text(strings.text(TextKey.FollowLocalDescription), style = MaterialTheme.typography.bodyMedium,
+                    Text(strings.text(TextKey.PodcastsSubtitle), style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { onAction(PodcastAction.FindPodcasts) }, modifier = Modifier.testTag("podcasts-find")) {
-                            Icon(VeyraIcons.Search, null, modifier = Modifier.size(20.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text(strings.text(TextKey.FindPodcasts))
-                        }
+                        AccentButton(strings.text(TextKey.FindPodcasts), { onAction(PodcastAction.FindPodcasts) },
+                            Modifier.testTag("podcasts-find"), icon = VeyraIcons.Search)
                         OutlinedButton(onClick = { onAction(PodcastAction.OpenAddFeed) }, enabled = !state.snapshot.settings.offlineOnly,
                             modifier = Modifier.testTag("podcasts-add-feed")) {
                             Icon(VeyraIcons.Add, null, modifier = Modifier.size(20.dp))
@@ -129,7 +130,7 @@ fun PodcastsScreen(
                     }
                 }
             }
-            item(key = "audio-policy") { PodcastAudioResolutionNotice() }
+
             if (state.snapshot.settings.offlineOnly) item(key = "offline") { PodcastOfflineNotice() }
             if (state.isLoading || state.isRefreshing) {
                 item(key = "loading") { PodcastLoadingIndicator() }
@@ -213,7 +214,6 @@ fun PodcastShowScreen(
             contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            item(key = "back") { PodcastBackButton { onAction(PodcastAction.NavigateBack) } }
             if (show == null) {
                 item(key = "missing-show") {
                     if (state.isLoading || state.isRefreshing) PodcastLoadingIndicator() else ErrorState(
@@ -251,7 +251,7 @@ fun PodcastShowScreen(
                         }
                     }
                 }
-                item(key = "audio-policy") { PodcastAudioResolutionNotice() }
+
                 if (state.snapshot.settings.offlineOnly) item(key = "offline") { PodcastOfflineNotice() }
                 if (state.isLoading || state.isRefreshing) item(key = "refreshing") { PodcastLoadingIndicator() }
                 state.failure?.let { failure ->
@@ -298,6 +298,7 @@ fun EpisodeDetailScreen(
     modifier: Modifier = Modifier,
 ) {
     val strings = LocalStrings.current
+    var audioDetails by rememberSaveable(state.mediaId) { mutableStateOf(false) }
     val episode = state.episode
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         LazyColumn(
@@ -305,7 +306,6 @@ fun EpisodeDetailScreen(
             contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            item(key = "back") { PodcastBackButton { onAction(PodcastAction.NavigateBack) } }
             if (episode == null) {
                 item(key = "missing-episode") {
                     if (state.isLoading) PodcastLoadingIndicator() else ErrorState(
@@ -333,7 +333,13 @@ fun EpisodeDetailScreen(
                 item(key = "episode-metadata") { PodcastEpisodeMetadata(row) }
                 item(key = "episode-status") { PodcastEpisodeStatus(row) }
                 item(key = "audio-policy") {
-                    if (row.binding == null) PodcastAudioResolutionNotice() else PodcastEpisodeProvenance(row, onAction)
+                    Column {
+                        TextButton({ audioDetails = !audioDetails }, modifier = Modifier.heightIn(min = 48.dp)
+                            .testTag("podcast-audio-details").semantics { stateDescription = strings.text(if (audioDetails) TextKey.ShowLess else TextKey.ShowMore) }) { Text(strings.text(TextKey.AudioDetails)) }
+                        if (audioDetails) {
+                            if (row.binding == null) PodcastAudioResolutionNotice() else PodcastEpisodeProvenance(row, onAction)
+                        }
+                    }
                 }
                 if (row.resumeActionable) item(key = "episode-progress") {
                     Column(modifier = Modifier.testTag("podcast-progress-current"),
@@ -368,7 +374,7 @@ fun EpisodeDetailScreen(
                 }
                 if (episode.description.isNotBlank()) item(key = "episode-notes") {
                     PodcastExpandableText(episode.description, strings.text(TextKey.EpisodeNotes), episode.id,
-                        initialLines = 12, disclaimer = strings.text(TextKey.OriginalDescriptionNotice))
+                        initialLines = 4, disclaimer = strings.text(TextKey.OriginalDescriptionNotice))
                 }
                 if (episode.attribution != null || row.show?.attribution != null || row.show?.copyright != null ||
                     podcastPublisherUrl(row) != null) item(key = "episode-source") {
@@ -418,7 +424,7 @@ fun PodcastShowRow(
     ) {
         Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(14.dp),
             verticalAlignment = Alignment.Top) {
-            Artwork(show.artworkUrl, show.title, Modifier.size(64.dp).clip(RoundedCornerShape(14.dp)), offlineOnly,
+            Artwork(show.artworkUrl, show.title, Modifier.size(72.dp).clip(RoundedCornerShape(18.dp)), offlineOnly,
                 localPath = show.localArtworkPath)
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 MetadataText(show.title, style = MaterialTheme.typography.titleMedium,
