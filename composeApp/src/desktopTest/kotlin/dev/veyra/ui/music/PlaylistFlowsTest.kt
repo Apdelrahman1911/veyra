@@ -35,6 +35,8 @@ import dev.veyra.ui.design.VeyraTheme
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.longClick
 import org.junit.Rule
 import org.junit.Test
 
@@ -80,6 +82,17 @@ class PlaylistFlowsTest {
         ui.onNode(hasContentDescription(strings.text(TextKey.RemoveFromPlaylist)) and hasAnyAncestor(hasTestTag("playlist-entry-copy-b"))).performClick()
         assertEquals(listOf<MusicUiAction>(MusicUiAction.RemovePlaylistEntry(playlist.id, "copy-b")), actions)
         assertEquals(2, snapshot.playlists.single().entries.size)
+    }
+
+    @Test fun longPressingASongOpensItsActionsWithoutPlayingIt() {
+        val snapshot = AppSnapshot(media = mapOf(track.id to track), playlists = listOf(playlist))
+        val actions = mutableListOf<MusicUiAction>()
+        ui.setContent { VeyraTheme(false, LanguagePreference.ENGLISH) { MusicMediaRow(track, snapshot, { actions += it }, Modifier.size(800.dp, 200.dp)) } }
+        ui.onNodeWithTag("play-${track.id}").performTouchInput { longClick() }
+        ui.onNodeWithText(strings.text(TextKey.PlayNext)).assertIsDisplayed().performClick()
+        assertEquals(listOf<MusicUiAction>(MusicUiAction.Enqueue(track, playNext = true)), actions)
+        ui.onNodeWithTag("play-${track.id}").performClick()
+        assertEquals(MusicUiAction.Play(track), actions.last())
     }
 
     @Test fun addSongsSelectsSeveralTracksAndAddsThemInOneAction() {

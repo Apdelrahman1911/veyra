@@ -1,5 +1,6 @@
 package dev.veyra.ui.music
 
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -137,18 +138,24 @@ fun MusicMediaRow(
     val ready = surface.isDownloaded(item.id)
     val savedBinding = surface.savedCatalogueBinding(item.id)
     val unavailable = options.unavailableItems[item.id]
+    val menu = remember(item.id) { mutableStateOf(false) }
     Surface(modifier = modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).testTag("media-row-${item.id}"), shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp), color = if (isCurrent) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.heightIn(min = 72.dp)) {
                 Artwork(item.artworkUrl, item.title, Modifier.size(56.dp), offlineOnly = snapshot.settings.offlineOnly, localPath = item.localArtworkPath)
-                TextButton(
-                    onClick = {
-                        onAction(if (savedBinding != null) MusicUiAction.PlaySaved(item, savedBinding)
-                        else MusicUiAction.Play(item))
-                    },
-                    modifier = Modifier.weight(1f).heightIn(min = 56.dp).testTag("play-${item.id}"),
-                    // Multiline metadata must not inherit a pill clip at its corner lines.
-                    shape = RectangleShape,
+                // Tap plays; long-press (or a secondary click) opens the same actions as the ⋮ menu.
+                Box(
+                    Modifier.weight(1f).heightIn(min = 56.dp)
+                        .combinedClickable(
+                            role = androidx.compose.ui.semantics.Role.Button,
+                            onLongClickLabel = strings.format(TextKey.MoreActionsFor, item.title),
+                            onLongClick = { menu.value = true },
+                            onClick = {
+                                onAction(if (savedBinding != null) MusicUiAction.PlaySaved(item, savedBinding)
+                                else MusicUiAction.Play(item))
+                            },
+                        ).padding(horizontal = 12.dp, vertical = 8.dp).testTag("play-${item.id}"),
+                    contentAlignment = Alignment.CenterStart,
                 ) {
                     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         MetadataText(item.title, modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -170,7 +177,7 @@ fun MusicMediaRow(
                     { onAction(MusicUiAction.ToggleFavorite(item)) },
                     isSelected = snapshot.isSaved(item),
                 )
-                MediaActionsMenu(item, snapshot, onAction, options = options)
+                MediaActionsMenu(item, snapshot, onAction, options = options, menuState = menu)
             }
             unavailable?.let {
                 Text(strings.errorFor(it), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(start = 56.dp, bottom = 6.dp))
@@ -186,9 +193,12 @@ internal fun MediaActionsMenu(
     onAction: (MusicUiAction) -> Unit,
     modifier: Modifier = Modifier,
     options: MusicUiOptions = MusicUiOptions(),
+    /** Lets the owning row open this menu, e.g. on long-press. */
+    menuState: androidx.compose.runtime.MutableState<Boolean>? = null,
 ) {
     val strings = LocalStrings.current
-    var menu by remember(item.id) { mutableStateOf(false) }
+    val ownMenu = remember(item.id) { mutableStateOf(false) }
+    var menu by (menuState ?: ownMenu)
     var picker by remember(item.id) { mutableStateOf(false) }
     var removeDownload by remember(item.id) { mutableStateOf(false) }
     val surface = options.downloadSurface(snapshot)
