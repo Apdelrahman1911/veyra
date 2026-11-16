@@ -215,21 +215,17 @@ fun SettingsScreen(
 private fun SettingsSection(titleKey: TextKey, content: @Composable ColumnScope.() -> Unit) {
     val strings = LocalStrings.current
     val title = strings.text(titleKey)
-    var expanded by rememberSaveable(titleKey) { mutableStateOf(false) }
+    // Always open: every setting is one tap away, with the group title as a heading.
     Surface(modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surface,
         shape = RoundedCornerShape(24.dp)) {
         // Native iOS switches/sliders paint their whole host area with the card colour.
         androidx.compose.runtime.CompositionLocalProvider(
             dev.veyra.nativecomponents.LocalNativeControlBackground provides MaterialTheme.colorScheme.surface) {
-        Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextButton(onClick = { expanded = !expanded }, modifier = Modifier.fillMaxWidth().sizeIn(minHeight = 56.dp)
-                .testTag("settings-section-${titleKey.name}")
-                .semantics { heading(); stateDescription = if (expanded) strings.text(TextKey.ShowLess) else strings.text(TextKey.ShowMore) }) {
-                Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurface)
-                Icon(if (expanded) VeyraIcons.ArrowUp else VeyraIcons.ChevronForward, null)
+            Column(Modifier.padding(horizontal = 20.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text(title, Modifier.fillMaxWidth().testTag("settings-section-${titleKey.name}").semantics { heading() },
+                    style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurface)
+                content()
             }
-            if (expanded) Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(16.dp), content = content)
-        }
         }
     }
 }

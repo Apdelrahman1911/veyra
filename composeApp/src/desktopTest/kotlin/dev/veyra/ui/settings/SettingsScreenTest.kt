@@ -89,9 +89,9 @@ class SettingsScreenTest {
 
     private fun expandSection(section: TextKey) {
         if (expandedSections.add(section)) {
+            // Sections are always open; reaching the heading is enough.
             val header = "settings-section-${section.name}"
             compose.onNodeWithTag("settings-list").performScrollToNode(hasTestTag(header))
-            compose.onNodeWithTag(header).performClick()
         }
     }
 
@@ -318,13 +318,11 @@ class SettingsScreenTest {
         } }
         scrollTo("settings-language-ARABIC")
         compose.onNodeWithTag("settings-language-ARABIC").performClick().assertIsSelected()
-        compose.onNodeWithTag("settings-section-Appearance")
-            .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, arabic.text(TextKey.ShowLess)))
-        // Navigate within the still-open section without using the expansion helper again.
+        // The section stays open after the language change; its controls remain reachable.
         compose.onNodeWithTag("settings-list").performScrollToNode(hasTestTag("settings-language-ENGLISH"))
         compose.onNodeWithTag("settings-language-ENGLISH").performClick().assertIsSelected()
-        compose.onNodeWithTag("settings-section-Appearance")
-            .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, english.text(TextKey.ShowLess)))
+        compose.onNodeWithTag("settings-list").performScrollToNode(hasTestTag("settings-section-Appearance"))
+        compose.onNodeWithTag("settings-section-Appearance").assertIsDisplayed()
     }
 
     @Test fun arabicTwoHundredPercentControlsStayInsideANarrowScrollableFrame() {

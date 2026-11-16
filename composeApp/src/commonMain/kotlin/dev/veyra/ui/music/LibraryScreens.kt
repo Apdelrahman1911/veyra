@@ -119,6 +119,22 @@ fun LibraryScreen(
                     EmptyState(strings.text(TextKey.CreateFirstPlaylist), strings.text(TextKey.NoPlaylistsDescription),
                         strings.text(TextKey.NewPlaylist), { create = true }, Modifier.padding(horizontal = 20.dp))
                 } else items(playlists, key = { it.id }) { PlaylistLibraryRow(it, snapshot, onAction) }
+                // Every saved song in one searchable list, without opening another section.
+                item {
+                    Text(strings.text(TextKey.LibrarySongs), Modifier.padding(start = 20.dp, end = 20.dp, top = 12.dp).semantics { heading() },
+                        style = MaterialTheme.typography.titleLarge)
+                }
+                item {
+                    OutlinedTextField(query, { query = it }, label = { Text(strings.text(TextKey.SearchLocal)) }, singleLine = true,
+                        leadingIcon = { Icon(VeyraIcons.Search, null) },
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).testTag("library-query"))
+                }
+                val songs = playlistCandidates(snapshot).filter { matchesMediaQuery(it, query) }
+                if (songs.isEmpty()) item {
+                    EmptyState(strings.text(if (query.isBlank()) TextKey.EmptyLibrary else TextKey.NoResults),
+                        strings.text(if (query.isBlank()) TextKey.EmptyFavoritesDescription else TextKey.NoResultsDescription),
+                        strings.text(TextKey.SearchMusic), { onAction(MusicUiAction.OpenSearch()) }, Modifier.padding(horizontal = 20.dp))
+                } else items(songs, key = { "song-${it.id}" }) { MusicMediaRow(it, snapshot, onAction, options = options) }
             }
         } else if (selectedSection == LibrarySection.DOWNLOADS) {
             DownloadsContent(snapshot, onAction, Modifier.weight(1f), options) {

@@ -153,6 +153,7 @@ enum class TextKey(internal val english: String, internal val arabic: String) {
     EditPlaylist("Edit", "تعديل"),
     DoneEditing("Done", "تم"),
     YourPlaylists("Your playlists", "قوائم التشغيل"),
+    LibrarySongs("Songs", "الأغاني"),
     SeeAll("See all", "عرض الكل"),
     CreateFirstPlaylist("Create your first playlist", "أنشئ أول قائمة تشغيل"),
     NewPlaylistNameHint("New playlist name", "اسم قائمة جديدة"),

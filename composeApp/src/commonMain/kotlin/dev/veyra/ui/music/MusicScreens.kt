@@ -40,8 +40,11 @@ fun ListenScreen(
     options: MusicUiOptions = MusicUiOptions(),
 ) {
     val strings = LocalStrings.current
-    LaunchedEffect(discovery.loaded, snapshot.settings.offlineOnly) {
-        if (!snapshot.settings.offlineOnly && !discovery.loaded && !discovery.loading) onAction(MusicUiAction.Discover(discovery.provider))
+    // Suggestions load by themselves only for a new library with nothing of its own to show;
+    // otherwise one tap loads them (no network just for opening the screen).
+    val newLibrary = snapshot.history.isEmpty() && snapshot.favoriteIds.isEmpty()
+    LaunchedEffect(discovery.loaded, snapshot.settings.offlineOnly, newLibrary) {
+        if (newLibrary && !snapshot.settings.offlineOnly && !discovery.loaded && !discovery.loading) onAction(MusicUiAction.Discover(discovery.provider))
     }
     val current = playback.surfaceIdentity(snapshot)
     val recent = remember(snapshot.history, snapshot.media) {
@@ -100,6 +103,12 @@ fun ListenScreen(
             item { CollectionLink(strings.text(TextKey.Downloads), strings.text(TextKey.OfflineModeDescription), VeyraIcons.Download,
                 { onAction(MusicUiAction.OpenLibrary(LibrarySection.DOWNLOADS)) }, Modifier.padding(horizontal = 24.dp)) }
         } else {
+            if (!discovery.loaded && !discovery.loading) item {
+                OutlinedButton({ onAction(MusicUiAction.Discover(discovery.provider)) },
+                    Modifier.padding(horizontal = 24.dp).heightIn(min = 48.dp).testTag("discovery-load")) {
+                    Icon(VeyraIcons.Refresh, null, Modifier.padding(end = 8.dp)); Text(strings.text(TextKey.DiscoverMusic))
+                }
+            }
             if (discovery.loading) item { LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 24.dp).testTag("discovery-loading")) }
             discovery.failure?.let { failure -> item {
                 if (failure.code == FailureCode.NOT_FOUND && discovery.page.isEmpty()) {
