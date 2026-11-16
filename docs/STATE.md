@@ -1,5 +1,41 @@
 # Veyra — resumable state
 
+## UI redesign, part 1: playlists, library, settings, interaction — 2026-11-16
+
+Owner request: creating playlists was hard and everyday interaction clunky.
+
+**Playlists**
+- Library home has a prominent New playlist button, plus shortcut tiles for Favorites,
+  Downloads and On this device.
+- Playlists are listed inline, and there's a searchable list of all saved songs.
+- Home has a Your playlists shelf with a New playlist tile.
+- New playlists get a suggested name and open immediately.
+- The playlist screen offers Play, Shuffle and **Add songs**: multi-select from the library,
+  added in one edit (`AddAllToPlaylist`).
+- Rename and delete are in a menu; reorder and remove only in Edit mode.
+- Track details have a visible Add to playlist button.
+
+**Interaction**
+- Long-press a song to open its actions.
+- Settings groups are always open.
+- Escape goes back even from focused icon buttons, and focus is restored after the queue
+  opens.
+- Navigation labels wrap at large Arabic text.
+- Listen fetches suggestions on its own only for a new library.
+- The player opens source details when the played recording differs from the requested one
+  (D005).
+
+**Media and iOS**
+- iOS native switches and sliders no longer show black areas.
+- Offline play hashes with CommonCrypto/MessageDigest.
+- The iOS progressive loopback reuses redirects, caches windows and reads ahead.
+
+**Tests:** desktop UI suite 496/496, from 17 pre-existing failures; shared JVM and iOS
+simulator suites pass; Android and iOS compile.
+
+**Installed:** on the owner's iPhone (development-signed). The Android phone was not
+connected.
+
 ## Media pipeline performance (sections, reuse, warm-next, hedging, countdown) — Android device-measured — 2026-11-16
 
 Owner-approved Snaptube-parity work, without bypasses or integrity tokens (D014).
