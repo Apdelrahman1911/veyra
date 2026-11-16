@@ -87,6 +87,11 @@ import org.junit.After
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TestName
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
+import androidx.navigationevent.NavigationEventDispatcher
+import androidx.navigationevent.NavigationEventInput
+import androidx.compose.ui.platform.findDefaultNavigationEventDispatcherOwner
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -102,6 +107,19 @@ class CoreShellFlowsTest {
     @get:Rule val testName = TestName()
     private val english = AppStrings(LanguagePreference.ENGLISH)
     private var fixture: CoreShellTestFixture? = null
+    /**
+     * A desktop window turns a key the scene leaves unconsumed into a back event (Escape on
+     * key-down) through `BackNavigationEventInput`; dialogs dismiss on that back event. The test
+     * scene has no window, so [deliverKey] performs the same final routing step.
+     */
+    private var backDispatcher: NavigationEventDispatcher? = null
+    private val backInput by lazy { EscapeBackInput().also { input -> requireNotNull(backDispatcher).addInput(input) } }
+
+    /** Mirrors Compose's desktop window input: an unconsumed Escape key-down completes "back". */
+    private class EscapeBackInput : NavigationEventInput() {
+        fun onKeyEvent(event: KeyEvent): Boolean =
+            if (event.type == KeyEventType.KeyDown && event.key == Key.Escape) { dispatchOnBackCompleted(); true } else false
+    }
     private var mounted by mutableStateOf(true)
     private var viewport by mutableStateOf(DpSize(960.dp, 720.dp))
     private val music = CoreShellTestFixture.music
@@ -871,12 +889,14 @@ class CoreShellFlowsTest {
         capture("fixture-shell-en-light-fresh-typed-queue")
     }
 
+    @OptIn(androidx.compose.runtime.InternalComposeApi::class)
     private fun show(initial: AppSnapshot = CoreShellTestFixture.snapshot(), width: Dp = 960.dp, height: Dp = 720.dp,
         typedTitles: CoreShellTypedTitles = CoreShellTypedTitles()): CoreShellTestFixture {
         val app = runBlocking { withTimeout(20_000L) { CoreShellTestFixture.create(initial, typedTitles) } }
         fixture = app
         viewport = DpSize(width, height)
         ui.setContent {
+            backDispatcher = findDefaultNavigationEventDispatcherOwner()?.navigationEventDispatcher
             CompositionLocalProvider(LocalDensity provides Density(1f, 1f)) {
                 Box(Modifier.size(viewport.width, viewport.height)) { if (mounted) VeyraApp(app.container) }
             }
@@ -977,7 +997,7 @@ class CoreShellFlowsTest {
         ui.runOnUiThread {
             val scene = (ui as DesktopComposeTestRule).scene
             fun dispatch(event: KeyEvent, phase: String) {
-                val consumed = scene.sendKeyEvent(event)
+                val consumed = deliverKey(scene, event)
                 keyDispatches += "scene=${scene.javaClass.name}, key=$key, phase=$phase, ctrl=$ctrl, consumed=$consumed"
             }
             dispatch(KeyEvent(key, KeyEventType.KeyDown, isCtrlPressed = ctrl), "down")
@@ -998,13 +1018,18 @@ class CoreShellFlowsTest {
         ui.waitForIdle()
         val consumed = ui.runOnUiThread {
             val scene = (ui as DesktopComposeTestRule).scene
-            val handled = scene.sendKeyEvent(KeyEvent(key, type, isShiftPressed = shift))
+            val handled = deliverKey(scene, KeyEvent(key, type, isShiftPressed = shift))
             keyDispatches += "scene=${scene.javaClass.name}, key=$key, phase=$type, shift=$shift, consumed=$handled"
             handled
         }
         ui.waitForIdle()
         return consumed
     }
+
+    /** The scene first, then (as a desktop window does) the back-navigation input. */
+    @OptIn(InternalComposeUiApi::class)
+    private fun deliverKey(scene: androidx.compose.ui.scene.ComposeScene, event: KeyEvent): Boolean =
+        scene.sendKeyEvent(event) || backInput.onKeyEvent(event)
 
     private fun escape() = sendKey(Key.Escape)
 

@@ -5,7 +5,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.only
-import androidx.compose.foundation.layout.safeDrawing
+import dev.veyra.ui.design.chromeBottom
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -326,7 +326,7 @@ private fun PlayerTransport(identity: PlaybackSurfaceIdentity, snapshot: AppSnap
     val podcast = identity.controlsMode == PlaybackControlsMode.PODCAST
     val facts = playback.activeQueueFacts(snapshot)
     Surface(Modifier.fillMaxWidth().testTag("player-transport"), shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
-        Column(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))
+        Column(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.chromeBottom)
             .padding(horizontal = 20.dp, vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Column(Modifier.widthIn(max = 640.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 PlayerSeek(playback, onAction)

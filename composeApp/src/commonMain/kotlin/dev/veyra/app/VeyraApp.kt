@@ -39,6 +39,7 @@ import dev.veyra.data.StoreStatus
 import dev.veyra.model.*
 import dev.veyra.playback.PlaybackState
 import dev.veyra.source.SourcePage
+import dev.veyra.ui.design.chromeBottom
 import dev.veyra.ui.design.*
 import dev.veyra.ui.downloads.downloadSurface
 import dev.veyra.ui.music.*
@@ -184,7 +185,7 @@ fun VeyraApp(container: AppContainer, modifier: Modifier = Modifier) {
                                 bottomBar = {
                                     if (!useRail && !navigation.queueOpen) AppBottomNavigation(navigation.destination,
                                         density.fontScale >= 1.5f || windowWidth < 360.dp, container::selectDestination)
-                                    else if (displayPlayer.hasCurrent) Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.safeDrawing))
+                                    else if (displayPlayer.hasCurrent) Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.chromeBottom))
                                 },
                                 expandedPlayer = {
                                     if (navigation.queueOpen && sideQueue) Row(Modifier.fillMaxSize()) {
@@ -357,7 +358,7 @@ private fun AppBottomNavigation(selected: AppDestination, compactLabels: Boolean
         modifier = Modifier.fillMaxWidth().testTag("bottom-navigation"),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
     ) {
-        Row(Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))
+        Row(Modifier.windowInsetsPadding(WindowInsets.chromeBottom)
             .padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             primaryDestinations.forEach { destination ->
                 val isSelected = destination == selected
