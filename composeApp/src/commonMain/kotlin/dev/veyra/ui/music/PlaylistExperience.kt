@@ -182,3 +182,37 @@ internal fun PlaylistCover(playlist: Playlist, snapshot: AppSnapshot, modifier: 
         else Icon(VeyraIcons.Music, null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
     }
 }
+
+/** Playlists one tap from Home: a "New playlist" tile, then recently changed playlists. */
+@Composable
+internal fun PlaylistShelf(snapshot: AppSnapshot, onAction: (MusicUiAction) -> Unit, modifier: Modifier = Modifier) {
+    val strings = LocalStrings.current
+    var create by remember { mutableStateOf(false) }
+    val playlists = remember(snapshot.playlists) { snapshot.playlists.sortedByDescending { it.updatedEpochMs }.take(12) }
+    androidx.compose.foundation.lazy.LazyRow(modifier.fillMaxWidth().testTag("home-playlists"),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 24.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        item(key = "new") {
+            Column(Modifier.widthIn(max = 120.dp).clickable(role = Role.Button) { create = true }.testTag("home-new-playlist"),
+                verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Box(Modifier.size(120.dp).background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(16.dp)),
+                    contentAlignment = Alignment.Center) {
+                    Icon(VeyraIcons.Add, null, Modifier.size(36.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                }
+                Text(strings.text(TextKey.NewPlaylist), style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        items(playlists, key = { it.id }) { playlist ->
+            Column(Modifier.widthIn(max = 120.dp).clickable(role = Role.Button) { onAction(MusicUiAction.OpenPlaylist(playlist.id)) }
+                .testTag("home-playlist-${playlist.id}"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                PlaylistCover(playlist, snapshot, Modifier.size(120.dp))
+                MetadataText(playlist.name, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(strings.format(TextKey.TrackCount, strings.number(playlist.entries.size.toLong())),
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+    if (create) PlaylistNameDialog(onDismiss = { create = false },
+        suggestedName = defaultPlaylistName(snapshot.playlists) { strings.text(TextKey.DefaultPlaylistName).replace("{0}", it) },
+        onSave = { onAction(MusicUiAction.CreatePlaylist(it, openAfter = true)); create = false })
+}

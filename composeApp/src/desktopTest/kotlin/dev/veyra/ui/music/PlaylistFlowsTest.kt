@@ -84,6 +84,20 @@ class PlaylistFlowsTest {
         assertEquals(2, snapshot.playlists.single().entries.size)
     }
 
+    @Test fun homeOffersPlaylistsAndCreatesOneInATap() {
+        val snapshot = AppSnapshot(media = mapOf(track.id to track), playlists = listOf(playlist), history = emptyList())
+        val actions = mutableListOf<MusicUiAction>()
+        ui.setContent { VeyraTheme(false, LanguagePreference.ENGLISH) {
+            ListenScreen(snapshot, dev.veyra.playback.PlaybackState(), CatalogUiState(loaded = true), { actions += it }, Modifier.size(900.dp, 900.dp))
+        } }
+        ui.onNodeWithTag("listen-screen").performScrollToNode(hasTestTag("home-playlists"))
+        ui.onNodeWithTag("home-playlist-${playlist.id}").performClick()
+        assertEquals(MusicUiAction.OpenPlaylist(playlist.id), actions.last())
+        ui.onNodeWithTag("home-new-playlist").performClick()
+        ui.onNodeWithTag("playlist-save").performClick()
+        assertEquals(MusicUiAction.CreatePlaylist("Playlist 2", openAfter = true), actions.last())
+    }
+
     @Test fun longPressingASongOpensItsActionsWithoutPlayingIt() {
         val snapshot = AppSnapshot(media = mapOf(track.id to track), playlists = listOf(playlist))
         val actions = mutableListOf<MusicUiAction>()

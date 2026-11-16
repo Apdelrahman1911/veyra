@@ -90,6 +90,8 @@ fun ListenScreen(
                 }
             }
         }
+        item { SectionTitle(strings.text(TextKey.YourPlaylists)) }
+        item { PlaylistShelf(snapshot, onAction) }
         if (recent.isNotEmpty()) {
             item { SectionTitle(strings.text(TextKey.JumpBackIn)) }
             item { ArtworkShelf(recent, snapshot, options, onAction) }
