@@ -22,6 +22,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -131,6 +132,10 @@ fun TrackDetailScreen(
                                 { onAction(MusicUiAction.ToggleFavorite(item)) },
                                 modifier = Modifier.heightIn(min = 48.dp).testTag("track-favorite").semantics { selected = item.id in snapshot.favoriteIds },
                             ) { Text(strings.text(savedActionLabel(item, snapshot.isSaved(item)))) }
+                            if (item.kind == MediaKind.MUSIC) OutlinedButton({ playlistPicker = true },
+                                modifier = Modifier.heightIn(min = 48.dp).testTag("track-playlist")) {
+                                Icon(VeyraIcons.Add, null, Modifier.padding(end = 6.dp)); Text(strings.text(TextKey.AddToPlaylist))
+                            }
                             MediaActionsMenu(item, snapshot, onAction, options = options)
                             if (current) TextButton({ onAction(MusicUiAction.OpenPlayer) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.OpenPlayer)) }
                         }

@@ -202,7 +202,9 @@ class TrackDetailFlowsTest {
             TrackDetailScreen(snapshot().copy(playlists = listOf(playlist)), track.id, PlaybackState(),
                 { actions += it }, Modifier.size(900.dp, 720.dp), options)
         } }
-        chooseTrackAction(TextKey.AddToPlaylist)
+        // The visible button opens the picker in one tap.
+        scrollTo("track-playlist")
+        ui.onNodeWithTag("track-playlist").performClick()
         ui.onNodeWithText(playlist.name).performClick()
         scrollTo("track-source-link")
         ui.onNodeWithTag("track-source-link").performClick()

@@ -104,6 +104,16 @@ fun VeyraApp(container: AppContainer, modifier: Modifier = Modifier) {
                         backgroundIsFocused = focus.isFocused
                         shellHasFocus = focus.hasFocus
                         if (!focus.isFocused) pressed = emptySet()
+                    }.onPreviewKeyEvent { event ->
+                        // A child may consume the key-up; release Escape here so the next press counts.
+                        if (event.key == Key.Escape && event.type == KeyEventType.KeyUp) pressed = pressed - event.key
+                        // Back navigation sees Escape before focused children (an icon button's
+                        // tooltip otherwise consumes it). Dialogs are separate windows and keep it.
+                        if (event.key == Key.Escape && event.type == KeyEventType.KeyDown && navigation.canGoBack &&
+                            !event.isCtrlPressed && !event.isAltPressed && !event.isMetaPressed) {
+                            if (event.key !in pressed) { pressed = pressed + event.key; container.navigateBack() }
+                            true
+                        } else false
                     }.onKeyEvent { event ->
                     if (event.type == KeyEventType.KeyUp) { pressed = pressed - event.key; return@onKeyEvent false }
                     if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
@@ -131,6 +141,11 @@ fun VeyraApp(container: AppContainer, modifier: Modifier = Modifier) {
                     // separate modal layers own focus. Do not key this effect on focus loss.
                     LaunchedEffect(initialization, navigation, windowIsFocused) {
                         if (!windowIsFocused) pressed = emptySet()
+                        // A navigation change can remove the focused control (e.g. the Queue button
+                        // when the queue opens). Its focus loss is reported a frame later, so check
+                        // after it settles; otherwise Escape/shortcuts have no focused path at all.
+                        androidx.compose.runtime.withFrameNanos { }
+                        androidx.compose.runtime.withFrameNanos { }
                         if (initialization is AppInitialization.Ready && windowIsFocused && !shellHasFocus) {
                             backgroundFocus.requestFocus()
                         }
@@ -361,7 +376,8 @@ private fun AppBottomNavigation(selected: AppDestination, compactLabels: Boolean
                             tint = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(23.dp))
                     }
-                    if (!compactLabels || isSelected) Text(strings.text(destination.label()),
+                    // The label fills its slot so long/large Arabic labels wrap instead of overflowing.
+                    if (!compactLabels || isSelected) Text(strings.text(destination.label()), Modifier.fillMaxWidth(),
                         style = MaterialTheme.typography.labelSmall,
                         color = if (isSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center)
@@ -385,7 +401,7 @@ private fun AppHeader(navigation: AppNavigation, offline: Boolean, container: Ap
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp).heightIn(min = 48.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         if (navigation.canGoBack) VeyraIconButton(VeyraIcons.Back, strings.text(TextKey.Back), { container.navigateBack() },
-            Modifier.background(MaterialTheme.colorScheme.surface.copy(alpha = .65f), RoundedCornerShape(17.dp)))
+            Modifier.background(MaterialTheme.colorScheme.surface.copy(alpha = .65f), RoundedCornerShape(17.dp)).testTag("header-back"))
         else Box(Modifier.size(44.dp).background(VeyraAccentGradient, RoundedCornerShape(16.dp)), contentAlignment = Alignment.Center) {
             Icon(VeyraIcons.Brand, null, Modifier.size(25.dp), tint = Color.White)
         }

@@ -246,7 +246,10 @@ private fun PlayerDetails(
     val compactIdentity = compactIdentityLines != null
     val catalogItem = identity.catalogItem
     val title = identity.title ?: strings.text(TextKey.InformationUnavailable)
-    var audioDetails by remember(playback.currentEntryId) { mutableStateOf(false) }
+    // Source details stay folded, except when the playing recording differs from the one
+    // requested: D005 requires that difference to be disclosed, not hidden behind a toggle.
+    val differs = identity.provenance?.let { it.requestedTitle != null && it.requestedTitle != it.resolvedTitle } == true
+    var audioDetails by remember(playback.currentEntryId, differs) { mutableStateOf(differs) }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         MetadataText(title, Modifier.fillMaxWidth().testTag("player-title"), style = MaterialTheme.typography.headlineSmall,
             maxLines = compactIdentityLines ?: 3, overflow = TextOverflow.Ellipsis)

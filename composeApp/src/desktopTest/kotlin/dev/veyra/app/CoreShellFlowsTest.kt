@@ -200,7 +200,9 @@ class CoreShellFlowsTest {
         val paused = downloads.getValue("ui-fixture-paused-download")
         assertEquals(DownloadStatus.PAUSED, paused.status)
         assertTrue(paused.userPaused)
-        ui.onNodeWithContentDescription(english.format(TextKey.MoreActionsFor, music.title)).performClick()
+        // Songs follow the playlist actions on the Library home; reach the row first.
+        libraryScrollTo("play-${music.id}")
+        ui.onNodeWithContentDescription(english.format(TextKey.MoreActionsFor, music.title)).performScrollTo().performClick()
         ui.onNodeWithText(english.text(TextKey.Details)).performClick()
         await { app.container.navigation.value.detail == AppDetail(DetailKind.TRACK, music.id) }
         assertTrue(app.engine.loads.isEmpty())
@@ -217,7 +219,7 @@ class CoreShellFlowsTest {
         val duplicated = app.store.state.value.playlists.single()
         assertEquals(listOf("playlist-first", "playlist-copy"), duplicated.entries.take(2).map { it.id })
 
-        ui.onNodeWithTag("track-back").performClick()
+        ui.onNodeWithTag("header-back").performClick()
         await { app.container.navigation.value.detail == null }
         libraryScrollTo("library-PLAYLISTS")
         ui.onNodeWithTag("library-PLAYLISTS").performClick()
@@ -320,11 +322,16 @@ class CoreShellFlowsTest {
         assertTrue(app.engine.seeks.last().positionMs > position)
         assertEquals(generation, app.engine.seeks.last().generation)
         assertEquals("music-now", app.container.playback.state.value.currentEntryId)
+        // A seek may legitimately re-issue play to resume; count from after it settles.
+        ui.waitForIdle()
+        val playsAfterSeek = app.engine.plays.size
+        val pausesAfterSeek = app.engine.pauses.size
 
         ui.onNodeWithTag("player-toggle").assertIsDisplayed().focus().performKeyInput { pressKey(Key.Spacebar) }
         await { !app.container.playback.state.value.desiredPlaying && !app.container.playback.state.value.isPlaying }
-        assertEquals(pausesBefore + 1, app.engine.pauses.size)
-        assertEquals(playingBefore, app.engine.plays.size, "A control's Space must not also reach the global Play/Pause shortcut")
+        ui.waitForIdle()
+        assertEquals(pausesAfterSeek + 1, app.engine.pauses.size)
+        assertEquals(playsAfterSeek, app.engine.plays.size, "A control's Space must not also reach the global Play/Pause shortcut")
     }
 
     @Test fun escapeClosesADialogThenQueueThenPlayerWithoutChangingTheAudioOwner() {
@@ -647,7 +654,7 @@ class CoreShellFlowsTest {
     @Test fun compactNavigationKeepsEverySelectedLabelUnclippedAt200PercentInBothLanguages() {
         val app = show(CoreShellTestFixture.snapshot(settings = AppSettings(language = LanguagePreference.ENGLISH,
             theme = ThemeMode.DARK, textScale = 2f)), 320.dp, 760.dp)
-        val destinations = listOf(AppDestination.LISTEN to TextKey.Listen, AppDestination.SEARCH to TextKey.Search,
+        val destinations = listOf(AppDestination.LISTEN to TextKey.Home, AppDestination.SEARCH to TextKey.Search,
             AppDestination.PODCASTS to TextKey.Podcasts, AppDestination.LIBRARY to TextKey.Library)
         listOf(LanguagePreference.ENGLISH, LanguagePreference.ARABIC).forEach { language ->
             app.container.changeSettings { it.copy(language = language) }

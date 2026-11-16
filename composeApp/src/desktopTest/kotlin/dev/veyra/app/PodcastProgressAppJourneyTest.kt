@@ -10,6 +10,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
@@ -218,8 +219,9 @@ class PodcastProgressAppJourneyTest {
                 compose.onNodeWithTag("podcast-episode-detail").assertIsDisplayed()
                 compose.onNodeWithTag("podcast-episode-detail")
                     .performScrollToNode(hasTestTag("podcast-progress-current"))
-                compose.onNodeWithText(strings.format(TextKey.ResumeAt, strings.mediaTime(45_000L)))
-                    .assertIsDisplayed()
+                // The progress line (the Play button may say the same) shows the checkpoint.
+                compose.onNodeWithTag("podcast-progress-resume").assertIsDisplayed()
+                    .assertTextEquals(strings.format(TextKey.ResumeAt, strings.mediaTime(45_000L)))
                 val binding = requireNotNull(fixture.container.playback.state.value.currentSelection?.bindingId)
                 val savedCheckpoint = fixture.container.store.acquisition.playbackView().checkpoints.values
                     .single { it.bindingId == binding }

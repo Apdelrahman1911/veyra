@@ -112,7 +112,8 @@ class TypedPlaybackSurfacesTest {
             }
         }
         ui.onNodeWithTag("player-title").assertTextEquals(currentMedia.title)
-        ui.onNodeWithTag("player-audio-details").performScrollTo().performClick()
+        // A requested/resolved difference opens the source details by itself (D005 disclosure).
+        ui.onNodeWithTag("player-audio-details").performScrollTo()
         ui.onNode(hasText("Current executed C") and hasAnyAncestor(hasTestTag("playback-provenance")),
             useUnmergedTree = true).performScrollTo().assertIsDisplayed()
         ui.onNodeWithTag("player-crossfade").performScrollTo().assertIsDisplayed()

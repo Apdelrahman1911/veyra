@@ -355,7 +355,8 @@ class MusicSurfacesTest {
             .assertTextEquals(arabic.format(TextKey.ResolvedTitleValue, receipt.firstResultTitle))
         ui.onNodeWithTag("mini-open-player").performClick()
         ui.onNodeWithTag("full-player").assertIsDisplayed()
-        ui.onNodeWithTag("player-audio-details").performScrollTo().performClick()
+        // A requested/resolved difference opens the source details by itself (D005 disclosure).
+        ui.onNodeWithTag("player-audio-details").performScrollTo()
         ui.onNodeWithText(arabic.text(TextKey.ShowMore)).performScrollTo().performClick()
         listOf(receipt.queryTitle, receipt.firstResultTitle).forEach { title ->
             ui.onNode(hasText(title) and hasAnyAncestor(hasTestTag("playback-provenance")), useUnmergedTree = true)
@@ -428,7 +429,8 @@ class MusicSurfacesTest {
         val incomingReceipt = PlaybackBinding("incoming-binding", next.id, next.title, FirstResultKind.VIDEO, "incoming-result", "Different incoming recording", selectedVideoId = "incoming-result")
         var playback by mutableStateOf(playing(requested, queue).copy(executionBinding = receipt, crossfade = CrossfadeState(CrossfadePhase.PREPARING, next, "next")))
         ui.setContent { VeyraTheme(false, LanguagePreference.ENGLISH) { FullPlayer(AppSnapshot(media = listOf(requested, next).associateBy { it.id }), playback, {}, Modifier.size(1_000.dp, 700.dp)) } }
-        ui.onNodeWithTag("player-audio-details").performScrollTo().performClick()
+        // A requested/resolved difference opens the source details by itself (D005 disclosure).
+        ui.onNodeWithTag("player-audio-details").performScrollTo()
         ui.onNodeWithText(receipt.firstResultTitle).performScrollTo().assertIsDisplayed()
         ui.onNodeWithText(strings.text(TextKey.SourceMismatchDetected)).performScrollTo().assertIsDisplayed()
         ui.onNodeWithTag("player-crossfade").performScrollTo()
