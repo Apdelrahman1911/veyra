@@ -192,3 +192,38 @@ unchanged. No integrity token, alternate client or restriction workaround was ad
   client contract the watch page supplies (visitor data, signature timestamp, player URL).
   Replacing it requires creating an undocumented anonymous client context
   (`/youtubei/v1/visitor_id`). P7 hedging addresses its stall outliers instead.
+
+## iPhone playback repair: declared-wait videos (same day, physical iPhone 17)
+
+Owner report: `_VMJ4YSPx3A` played on Android but failed on iOS with
+`YOUTUBE_STREAM_ACCESS_REQUIRED`. The cause was traced with a redacted, debug-only console
+(names, counts, statuses and byte ranges only; no URLs).
+
+1. **The wait was missing.**
+   - iOS prefers SABR, whose track comes from the WEB watch response. That response declared
+     no wait, while the TV response for the same visitor declared a 5 s start ad.
+   - **Fix (kmpYT `9ee319a`):** every track of one inspection gets the longest declared
+     deadline. A wait can only lengthen.
+2. **SABR was still refused** (`SABR_RESOURCE_NOT_AUTHORIZED`) after the 5 s wait was honored.
+3. **Direct progressive in AVPlayer fails** with -11800 / -12190 (open-ended request refused;
+   2026-11-11 record).
+4. **Fix (kmpYT `7f4a6dd`, Veyra):**
+   - The iOS owned loopback now serves a single progressive audio object as exact ≤1 MiB range
+     windows, with caller authorization and download policy on every request and redirect.
+   - iOS uses it whenever the source declares a pre-roll wait; SABR remains first otherwise.
+5. **Result:** the video played to the end on the iPhone, with 22 exact range responses, all
+   HTTP 206.
+
+**Clearer errors.** `RECOVERY_REQUIRED` playback-selection details no longer show "Saved data
+needs recovery":
+- `acquisition_selection_unplayable`: YouTube's first result for the title is not a playable
+  video (D005), for example "This video is hilarious - Apollo Qeshta".
+- Collection first results and transient selection or native states each get their own message.
+- Data and download integrity cases keep the recovery text.
+
+**Tests:** shared JVM 1,269/1,269; iOS simulator `IosProgressiveLoopbackTest` 2/2 and
+`IosProgressiveRangeTest` 4/4; `AppStringsTest`; Android and iOS compile.
+
+**Known gap:** a response that declares a start ad without a duration computes no wait
+(`waitMs=0`). Such an item keeps the SABR preference and may still be refused on the first
+attempt.

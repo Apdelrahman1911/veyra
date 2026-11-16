@@ -23,6 +23,17 @@ class AppStringsTest {
         }
     }
 
+    @Test fun playbackSelectionProblemsDoNotAskUsersToRestoreTheirData() {
+        for (strings in listOf(AppStrings(LanguagePreference.ENGLISH), AppStrings(LanguagePreference.ARABIC))) {
+            fun message(detail: String) = strings.errorFor(AppFailure(FailureCode.RECOVERY_REQUIRED, detail))
+            assertEquals(strings.text(TextKey.FirstResultNotPlayable), message("acquisition_selection_unplayable"))
+            assertEquals(strings.text(TextKey.FirstResultCollection), message("acquisition_collection_action_required"))
+            assertEquals(strings.text(TextKey.PlaybackTryAgain), message("acquisition_outcome_unknown"))
+            assertEquals(strings.text(TextKey.PlaybackRestartRequired), message("native_audio_owner_closed"))
+            assertEquals(strings.text(TextKey.RecoveryRequired), message("download_checkpoint_stale"))
+        }
+    }
+
     private val english = AppStrings(LanguagePreference.ENGLISH)
     private val arabic = AppStrings(LanguagePreference.ARABIC)
     private val placeholders = Regex("\\{([0-9]+)\\}")

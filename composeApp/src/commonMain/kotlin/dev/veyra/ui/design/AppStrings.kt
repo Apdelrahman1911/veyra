@@ -470,6 +470,10 @@ enum class TextKey(internal val english: String, internal val arabic: String) {
     CorruptMedia("This file is incomplete or damaged. Download or import it again.", "هذا الملف غير مكتمل أو تالف. نزّله أو استورده مجددًا."),
     ParseFailure("The source returned unreadable data. Your saved information is kept.", "أرجع المصدر بيانات يتعذّر قراءتها. ستبقى معلوماتك المحفوظة."),
     RecoveryRequired("Saved data needs recovery. Keep your files and restore a valid backup before continuing.", "تحتاج البيانات المحفوظة إلى استعادة. احتفظ بملفاتك واستعد نسخة احتياطية سليمة قبل المتابعة."),
+    FirstResultNotPlayable("YouTube's first result for this title isn't a playable video, so it can't be played.", "النتيجة الأولى على يوتيوب لهذا العنوان ليست مقطعًا قابلًا للتشغيل، لذا لا يمكن تشغيله."),
+    FirstResultCollection("YouTube's first result for this title is a collection. Open it to choose an item.", "النتيجة الأولى على يوتيوب لهذا العنوان مجموعة. افتحها لاختيار عنصر."),
+    PlaybackTryAgain("This item couldn't be prepared. Try playing it again.", "تعذّر تجهيز هذا العنصر. حاول تشغيله مرة أخرى."),
+    PlaybackRestartRequired("Audio playback needs Veyra to be restarted.", "يحتاج تشغيل الصوت إلى إعادة تشغيل ڤيرا."),
     RecoveryBackupPrompt("Restore the last valid backup? Your library will return to that backup, so later changes may be missing. Veyra keeps the damaged files and does not reset your library.", "هل تريد الاستعادة من آخر نسخة احتياطية سليمة؟ ستعود مكتبتك إلى حالة تلك النسخة، وقد لا تظهر التغييرات اللاحقة. سيحتفظ ڤيرا بالملفات التالفة ولن يعِد ضبط مكتبتك."),
     RecoveryRestoreBackup("Restore last valid backup", "استعادة آخر نسخة احتياطية سليمة"),
     FutureSchema("This library was saved by a newer Veyra version. Update the app; do not reset the library.", "حُفظت هذه المكتبة بإصدار أحدث من ڤيرا. حدّث التطبيق ولا تعِد ضبط المكتبة."),
@@ -749,10 +753,17 @@ class AppStrings(
         FailureCode.STORAGE_IO -> TextKey.StorageError
         FailureCode.CORRUPT_MEDIA -> TextKey.CorruptMedia
         FailureCode.PARSE_FAILURE -> TextKey.ParseFailure
-        FailureCode.RECOVERY_REQUIRED -> if (failure.detail == "YOUTUBE_SOURCE_EXPIRED") {
-            TextKey.SourceLinkExpired
-        } else {
-            TextKey.RecoveryRequired
+        // Only data/download integrity problems ask for recovery; playback selection problems
+        // must not tell the user their saved data is damaged.
+        FailureCode.RECOVERY_REQUIRED -> when (failure.detail) {
+            "YOUTUBE_SOURCE_EXPIRED", "kmpyt_source_expired" -> TextKey.SourceLinkExpired
+            "acquisition_selection_unplayable" -> TextKey.FirstResultNotPlayable
+            "acquisition_collection_action_required" -> TextKey.FirstResultCollection
+            "acquisition_outcome_unknown", "acquisition_selection_not_attached", "acquisition_stale_library_revision",
+            "YOUTUBE_RUNTIME_UNAVAILABLE", "YOUTUBE_SELECTED_TRACK_CHANGED" -> TextKey.PlaybackTryAgain
+            "native_audio_owner_closed", "native_audio_cleanup", "native_reader_release_unacknowledged",
+            "playback_resource_cleanup" -> TextKey.PlaybackRestartRequired
+            else -> TextKey.RecoveryRequired
         }
         FailureCode.FUTURE_SCHEMA -> TextKey.FutureSchema
         FailureCode.INVALID_STATE -> TextKey.InvalidState

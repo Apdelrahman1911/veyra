@@ -48,6 +48,14 @@ class YouTubeAudioSelectionTest {
         }
     }
 
+    @Test fun iosPlaybackUsesTheProgressiveFileWhenTheSourceDeclaresAWait() {
+        val progressive = aac.copy(availableAtEpochMs = 5_000)
+        val sabr = progressive.copy(id = "140-sabr", transport = TransportKind.SABR,
+            sabr = YouTubeSabrResource(videoId, requireNotNull(aac.url), "AQID", SabrFormatId(140, 1uL), SabrClientInfo(1, "authored")))
+        assertEquals(progressive, selectYouTubeAudio(media(sabr, progressive), broadEngine,
+            platformName = "iOS", supportsSabrPlayback = true))
+    }
+
     @Test fun iosBridgePreferenceDoesNotChangeDownloadsOrAnExplicitSelection() {
         val sabr = aac.copy(transport = TransportKind.SABR,
             sabr = YouTubeSabrResource(videoId, requireNotNull(aac.url), "AQID", SabrFormatId(140, 1uL), SabrClientInfo(1, "authored")))

@@ -123,7 +123,11 @@ internal class YouTubeAudioExecution(
         requirePublicAudio(plan, selected.media.id)
         var opened: YouTubePlaybackResource? = null
         try {
-            val owned = if (playback != null && plan.primary.transport == TransportKind.SABR) {
+            // iOS AVPlayer cannot open these progressive objects directly (open-ended request is
+            // refused); its owned loopback reads them as exact ranges, like static SABR.
+            val loopbackProgressive = client.platformName.equals("iOS", ignoreCase = true) && client.supportsSabrPlayback &&
+                plan.primary.transport == TransportKind.PROGRESSIVE && plan.audio == null
+            val owned = if (playback != null && (plan.primary.transport == TransportKind.SABR || loopbackProgressive)) {
                 requireOpen()
                 val resource = client.openPlayback(playback, SourcePlaybackAuthorization { request, resourceUrl ->
                     requireOpen()
@@ -131,7 +135,7 @@ internal class YouTubeAudioExecution(
                         youtubeFailure(FailureCode.INVALID_STATE, "YOUTUBE_PLAYBACK_IDENTITY_CHANGED")
                     }
                     PublicUrlPolicy.normalize(resourceUrl)
-                    val initial = Url(requireNotNull(plan.primary.sabr).endpoint)
+                    val initial = Url(plan.primary.sabr?.endpoint ?: requireNotNull(plan.primary.url))
                     val actual = Url(resourceUrl)
                     fun googleVideo(host: String) = host == "googlevideo.com" || host.endsWith(".googlevideo.com")
                     if (actual.host != initial.host && !(googleVideo(actual.host) && googleVideo(initial.host))) {

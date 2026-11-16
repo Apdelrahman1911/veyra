@@ -141,7 +141,11 @@ internal fun selectYouTubeAudio(
     if (supported.isEmpty()) youtubeFailure(FailureCode.UNSUPPORTED_CODEC, "YOUTUBE_NATIVE_AUDIO_UNSUPPORTED")
     val available = supported.filter { it.selectable || it.expiredSourceOnly() }
     if (available.isEmpty()) youtubeFailure(FailureCode.UNSUPPORTED_SOURCE, "YOUTUBE_AUDIO_SOURCE_UNAVAILABLE")
-    val transportPreference = if (purpose == ResolvePurpose.PLAYBACK &&
+    // iOS prefers SABR for seeking, but a SABR session for a response that declares a pre-roll
+    // wait was refused even after the wait was honored (2026-11-16, `_VMJ4YSPx3A`), while the
+    // progressive file with the same honored wait plays. Use progressive whenever a wait exists.
+    val declaresWait = available.any { it.availableAtEpochMs != null }
+    val transportPreference = if (purpose == ResolvePurpose.PLAYBACK && !declaresWait &&
         platformName.equals("iOS", ignoreCase = true) && supportsSabrPlayback) {
         listOf(TransportKind.SABR, TransportKind.PROGRESSIVE, TransportKind.DASH, TransportKind.HLS, TransportKind.UNRESOLVED)
     } else {
