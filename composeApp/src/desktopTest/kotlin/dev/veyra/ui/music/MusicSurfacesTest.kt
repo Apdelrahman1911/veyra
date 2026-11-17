@@ -410,6 +410,39 @@ class MusicSurfacesTest {
         ui.onNodeWithTag("player-repeat").assertContentDescriptionEquals(strings.text(TextKey.RepeatOff))
     }
 
+    @Test fun searchExploreCardsOpenDiscoveryAndPodcasts() {
+        val actions = mutableListOf<MusicUiAction>()
+        ui.setContent { VeyraTheme(false, LanguagePreference.ENGLISH) { SearchScreen(AppSnapshot(), SearchUiState(), { actions += it }, Modifier.size(900.dp, 900.dp)) } }
+        ui.onNodeWithTag("search-explore-music").performClick()
+        assertEquals(MusicUiAction.ExploreMusic, actions.last())
+        ui.onNodeWithTag("search-explore-podcasts").performClick()
+        assertEquals(MusicUiAction.ExplorePodcasts, actions.last())
+    }
+
+    @Test fun exploreMusicScrollsHomeToDiscover() {
+        var discovery by mutableStateOf(CatalogUiState(loaded = true))
+        ui.setContent { VeyraTheme(false, LanguagePreference.ENGLISH) {
+            ListenScreen(AppSnapshot(), PlaybackState(), discovery, {}, Modifier.size(390.dp, 420.dp))
+        } }
+        ui.runOnIdle { discovery = discovery.copy(revealRequest = 1) }
+        ui.onNodeWithTag("discover-title", useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    @Test fun yourLibraryShowsEverythingAfterThePodcastsTab() {
+        val snapshot = AppSnapshot(media = mapOf(music.id to music))
+        val actions = mutableListOf<MusicUiAction>()
+        // The state the Podcasts tab leaves behind, then Your library selected on top of it.
+        val podcasts = SearchUiState(scope = SearchScope.EVERYWHERE, kind = SearchKind.PODCASTS, provider = SourceProvider.RSS)
+        var state by mutableStateOf(podcasts)
+        ui.setContent { VeyraTheme(false, LanguagePreference.ENGLISH) { SearchScreen(snapshot, state, { actions += it }, Modifier.size(900.dp, 700.dp)) } }
+        ui.onNodeWithTag("search-scope-library").performClick()
+        assertEquals(MusicUiAction.SearchChanged("", SearchScope.LIBRARY, SearchKind.ALL, SourceProvider.RSS), actions.last())
+        // Even a library scope that still carries the podcast kind lists the saved music.
+        ui.runOnIdle { state = podcasts.copy(scope = SearchScope.LIBRARY) }
+        ui.onNodeWithTag("play-${music.id}").assertIsDisplayed()
+        ui.onAllNodesWithText(strings.text(TextKey.NoResults)).assertCountEquals(0)
+    }
+
     @Test fun sourceFailureDoesNotHideLocalSearchResultsOrEchoDiagnosticText() {
         val local = music.copy(title = "Local calm recording")
         val state = SearchUiState(query = "calm", searched = true, failure = AppFailure(FailureCode.PROVIDER_ACCESS_REQUIRED, detail = "internal diagnostic sentinel"))

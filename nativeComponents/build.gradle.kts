@@ -28,6 +28,17 @@ kotlin {
                 "com/mohamedrejeb/calf/ui/ExperimentalCalfUiApi.kt",
                 "com/mohamedrejeb/calf/ui/dialog/**",
                 "com/mohamedrejeb/calf/ui/uikit/IosKeyboardType.kt",
+                "com/mohamedrejeb/calf/ui/uikit/UIKitImage.kt",
+                "com/mohamedrejeb/calf/ui/utils/BitmapPixelBytes.kt",
+                "com/mohamedrejeb/calf/ui/dropdown/**",
+                "com/mohamedrejeb/calf/ui/sheet/**",
+                "com/mohamedrejeb/calf/ui/navigation/AdaptiveNavigationBar.kt",
+                "com/mohamedrejeb/calf/ui/navigation/UIKitUITabBarItem.kt",
+                "com/mohamedrejeb/calf/ui/navigation/UIKitTabBarConfiguration.kt",
+                "com/mohamedrejeb/calf/ui/navigation/AdaptiveTopBar.kt",
+                "com/mohamedrejeb/calf/ui/navigation/UIKitNavigationBarConfiguration.kt",
+                "com/mohamedrejeb/calf/ui/navigation/UIKitUIBarButtonItem.kt",
+                "com/mohamedrejeb/calf/ui/gesture/AdaptiveClickable.kt",
                 "com/mohamedrejeb/calf/ui/button/AdaptiveIconButton.kt",
                 "com/mohamedrejeb/calf/ui/button/LiquidGlassButtonColors.kt",
                 "com/mohamedrejeb/calf/ui/button/CupertinoButton.kt",
@@ -48,19 +59,47 @@ kotlin {
             kotlin.srcDir(ui.resolve("materialMain/kotlin"))
             kotlin.include(
                 "com/mohamedrejeb/calf/ui/dialog/**",
+                "com/mohamedrejeb/calf/ui/dropdown/**",
+                "com/mohamedrejeb/calf/ui/sheet/**",
+                "com/mohamedrejeb/calf/ui/navigation/AdaptiveNavigationBar.material.kt",
+                "com/mohamedrejeb/calf/ui/navigation/AdaptiveTopBar.material.kt",
+                "com/mohamedrejeb/calf/ui/gesture/AdaptiveClickable.material.kt",
                 "com/mohamedrejeb/calf/ui/button/AdaptiveIconButton.material.kt",
                 "com/mohamedrejeb/calf/ui/toggle/AdaptiveSwitch.material.kt",
                 "dev/veyra/nativecomponents/**",
                 "com/mohamedrejeb/calf/ui/progress/AdaptiveCircularProgressIndicator.material.kt",
             )
         }
-        androidMain { dependsOn(materialMain) }
-        val desktopMain by getting { dependsOn(materialMain) }
+        androidMain {
+            dependsOn(materialMain)
+            kotlin.srcDir(ui.resolve("androidMain/kotlin"))
+            kotlin.include("com/mohamedrejeb/calf/ui/dropdown/**", "dev/veyra/nativecomponents/**")
+        }
+        val desktopMain by getting {
+            dependsOn(materialMain)
+            kotlin.srcDir(ui.resolve("nonAndroidMain/kotlin"))
+            kotlin.include("com/mohamedrejeb/calf/ui/dropdown/**", "dev/veyra/nativecomponents/**")
+        }
         iosMain {
             kotlin.srcDir(ui.resolve("iosMain/kotlin"))
+            kotlin.srcDir(ui.resolve("nonAndroidMain/kotlin"))
             kotlin.include(
                 "com/mohamedrejeb/calf/ui/dialog/**",
                 "com/mohamedrejeb/calf/ui/utils/ThemeUtils.kt",
+                "com/mohamedrejeb/calf/ui/utils/SystemUtils.kt",
+                "com/mohamedrejeb/calf/ui/utils/ColorHelper.kt",
+                "com/mohamedrejeb/calf/ui/utils/ImageUtils.kt",
+                "com/mohamedrejeb/calf/ui/dropdown/**",
+                "com/mohamedrejeb/calf/ui/sheet/**",
+                "com/mohamedrejeb/calf/ui/navigation/AdaptiveNavigationBar.ios.kt",
+                "com/mohamedrejeb/calf/ui/navigation/TabBarManager.kt",
+                "com/mohamedrejeb/calf/ui/navigation/IosBarHeightCache.kt",
+                "com/mohamedrejeb/calf/ui/navigation/LocalIosTabBarPadding.kt",
+                "com/mohamedrejeb/calf/ui/navigation/AdaptiveTopBar.ios.kt",
+                "com/mohamedrejeb/calf/ui/navigation/TopBarManager.kt",
+                "com/mohamedrejeb/calf/ui/navigation/LocalIosTopBarPadding.kt",
+                "com/mohamedrejeb/calf/ui/toolbar/ToolbarManager.kt",
+                "com/mohamedrejeb/calf/ui/gesture/AdaptiveClickable.ios.kt",
                 "com/mohamedrejeb/calf/ui/utils/IosKeyboardTypeUtils.kt",
                 "com/mohamedrejeb/calf/ui/progress/AdaptiveCircularProgressIndicator.ios.kt",
                 "dev/veyra/nativecomponents/**",

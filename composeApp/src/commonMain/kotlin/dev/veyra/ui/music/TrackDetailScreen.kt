@@ -1,5 +1,7 @@
 package dev.veyra.ui.music
 
+import dev.veyra.ui.design.ActionButton
+import dev.veyra.ui.design.NativeMenu
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -117,7 +119,7 @@ fun TrackDetailScreen(
                                 current && playback.phase == PlaybackPhase.ERROR -> TextKey.Retry
                                 else -> TextKey.Play
                             }
-                            Button(
+                            ActionButton(strings.text(playLabel), "play.fill", true,
                                 {
                                     onAction(when {
                                         current -> MusicUiAction.TogglePlayPause
@@ -128,11 +130,12 @@ fun TrackDetailScreen(
                                 enabled = current || ready || !snapshot.settings.offlineOnly,
                                 modifier = Modifier.heightIn(min = 48.dp).testTag("track-play"),
                             ) { Text(strings.text(playLabel)) }
-                            OutlinedButton(
+                            ActionButton(strings.text(savedActionLabel(item, snapshot.isSaved(item))),
+                                if (item.id in snapshot.favoriteIds) "heart.fill" else "heart", false,
                                 { onAction(MusicUiAction.ToggleFavorite(item)) },
                                 modifier = Modifier.heightIn(min = 48.dp).testTag("track-favorite").semantics { selected = item.id in snapshot.favoriteIds },
                             ) { Text(strings.text(savedActionLabel(item, snapshot.isSaved(item)))) }
-                            if (item.kind == MediaKind.MUSIC) OutlinedButton({ playlistPicker = true },
+                            if (item.kind == MediaKind.MUSIC) ActionButton(strings.text(TextKey.AddToPlaylist), "text.badge.plus", false, { playlistPicker = true },
                                 modifier = Modifier.heightIn(min = 48.dp).testTag("track-playlist")) {
                                 Icon(VeyraIcons.Add, null, Modifier.padding(end = 6.dp)); Text(strings.text(TextKey.AddToPlaylist))
                             }
@@ -289,20 +292,15 @@ private fun TrackDownloadSection(item: MediaItem, record: DownloadSurfaceEntry?,
                                 modifier = Modifier.heightIn(min = 48.dp).testTag("track-download-validate")) {
                                 Text(strings.text(TextKey.ValidateDownload))
                             }
-                            DropdownMenu(expanded = memberMenu, onDismissRequest = { memberMenu = false }) {
+                            NativeMenu(expanded = memberMenu, onDismiss = { memberMenu = false }) {
                                 choices.forEachIndexed { index, choice ->
-                                    DropdownMenuItem(
-                                        text = { Text(strings.format(TextKey.ValidateDownloadMember,
-                                            strings.number((index + 1).toLong()))) },
-                                        onClick = {
-                                            memberMenu = false
-                                            onAction(MusicUiAction.ValidateRetainedDownload(choice.jobId,
-                                                choice.bindingId, choice.batchId, choice.memberPosition,
-                                                choice.expectedIntentRevision))
-                                        },
-                                        modifier = Modifier.testTag(
-                                            "track-download-validate-member-${choice.memberPosition}"),
-                                    )
+                                    item(strings.format(TextKey.ValidateDownloadMember, strings.number((index + 1).toLong())),
+                                        tag = "track-download-validate-member-${choice.memberPosition}", symbol = "checkmark.shield") {
+                                        memberMenu = false
+                                        onAction(MusicUiAction.ValidateRetainedDownload(choice.jobId,
+                                            choice.bindingId, choice.batchId, choice.memberPosition,
+                                            choice.expectedIntentRevision))
+                                    }
                                 }
                             }
                         }
@@ -310,7 +308,7 @@ private fun TrackDownloadSection(item: MediaItem, record: DownloadSurfaceEntry?,
                         color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("track-download-validate-unavailable"))
                 } else TextButton({ onAction(MusicUiAction.ResumeDownload(record.id)) }, enabled = supported && !offline, modifier = Modifier.heightIn(min = 48.dp).testTag("track-download-retry")) { Text(strings.text(TextKey.Retry)) }
                 DownloadStatus.VERIFYING -> Unit
-                DownloadStatus.COMPLETE, DownloadStatus.CANCELLED, null -> if (!ready && supported) OutlinedButton({ onAction(MusicUiAction.Download(item)) }, enabled = !offline, modifier = Modifier.heightIn(min = 48.dp).testTag("track-download-start")) { Text(strings.text(if (record == null) TextKey.Download else TextKey.Retry)) }
+                DownloadStatus.COMPLETE, DownloadStatus.CANCELLED, null -> if (!ready && supported) ActionButton(strings.text(if (record == null) TextKey.Download else TextKey.Retry), "arrow.down.circle", false, { onAction(MusicUiAction.Download(item)) }, enabled = !offline, modifier = Modifier.heightIn(min = 48.dp).testTag("track-download-start")) { Text(strings.text(if (record == null) TextKey.Download else TextKey.Retry)) }
             }
             if (record != null && !rechecking && !retainedFailure && record.status !in setOf(DownloadStatus.COMPLETE, DownloadStatus.CANCELLED)) TextButton({ onAction(MusicUiAction.CancelDownload(record.id)) }, modifier = Modifier.heightIn(min = 48.dp).testTag("track-download-cancel")) { Text(strings.text(TextKey.CancelDownload)) }
             if (record?.status == DownloadStatus.COMPLETE || rechecking || retainedFailure) TextButton({ remove = true }, modifier = Modifier.heightIn(min = 48.dp).testTag("track-download-remove")) { Text(strings.text(TextKey.RemoveDownload)) }

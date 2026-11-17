@@ -1,6 +1,6 @@
 package dev.veyra.ui.music
 
-import androidx.compose.foundation.background
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -17,6 +17,9 @@ import androidx.compose.material3.SheetValue
 import androidx.compose.material3.rememberBottomSheetScaffoldState
 import androidx.compose.material3.rememberStandardBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.State
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -27,6 +30,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
@@ -34,9 +38,17 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import dev.veyra.nativecomponents.LocalNativeControlsCovered
 import kotlin.math.abs
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
+
+/**
+ * Where the player sheet's top edge is, measured from the top of the [ExpandablePlayerScaffold]
+ * content: 0 while the full player covers the content. Native chrome that UIKit draws above
+ * Compose (the iOS navigation bar) reads it to step aside as the player slides over it.
+ */
+internal val LocalPlayerSheetTop = staticCompositionLocalOf<State<Dp>> { mutableStateOf(Dp.Infinity) }
 
 /** One persistent sheet; dragging changes its pixels, while navigation records settled outcomes. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -72,8 +84,23 @@ internal fun ExpandablePlayerScaffold(
                 (1f - offset / travel).coerceIn(0f, 1f)
             }
         }
+        val sheetTop = remember(sheet, travel) {
+            derivedStateOf {
+                val offset = runCatching { sheet.requireOffset() }.getOrDefault(if (requestedExpanded) 0f else travel)
+                with(density) { offset.toDp() }
+            }
+        }
         val showExpanded by remember(progress) { derivedStateOf { progress.value > .01f } }
         val showCompact by remember(progress) { derivedStateOf { progress.value < .34f } }
+        // Material3 recomputes the sheet's anchors only when the sheet node is remeasured, and a new
+        // peek height alone does not remeasure it. The first layout uses a fallback peek until the
+        // compact content is measured (and the peek changes again with the keyboard, font scale or
+        // the iOS tab bar), so the collapsed sheet would rest at a stale height. Flipping the sheet's
+        // height by one pixel on every peek change remeasures it; the expanded anchor moves by at
+        // most that pixel.
+        var anchorEpoch by remember { mutableIntStateOf(0) }
+        LaunchedEffect(peek) { anchorEpoch++ }
+        val sheetContentHeight = sheetHeight - with(density) { (anchorEpoch % 2).toDp() }
         LaunchedEffect(sheet, expanded) {
             if (expanded) sheet.expand() else sheet.partialExpand()
         }
@@ -98,21 +125,25 @@ internal fun ExpandablePlayerScaffold(
             sheetPeekHeight = peek,
             sheetMaxWidth = Dp.Unspecified,
             sheetShape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-            sheetContainerColor = MaterialTheme.colorScheme.background,
+            // Collapsed, the sheet is only the floating mini player and the tab bar over the app's
+            // own background; it turns opaque as it opens into the full player.
+            sheetContainerColor = Color.Transparent,
             sheetTonalElevation = 0.dp,
             sheetShadowElevation = 0.dp,
             sheetDragHandle = null,
             sheetSwipeEnabled = hasPlayer && dragEnabled,
             containerColor = Color.Transparent,
             sheetContent = {
-                Box(Modifier.fillMaxWidth().height(sheetHeight).testTag("expandable-player")) {
+                val background = MaterialTheme.colorScheme.background
+                Box(Modifier.fillMaxWidth().height(sheetContentHeight).testTag("expandable-player")
+                    .drawBehind { drawRect(background.copy(alpha = (progress.value * 5f).coerceIn(0f, 1f))) }) {
                     if (showExpanded) {
                         Box(Modifier.fillMaxSize().graphicsLayer {
                             alpha = ((progress.value - .12f) / .88f).coerceIn(0f, 1f)
                         }) { expandedPlayer() }
                     }
                     if (showCompact) {
-                        Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                        Column(Modifier.fillMaxWidth()
                             .onSizeChanged { measuredPeek = with(density) { it.height.toDp() } }
                             .graphicsLayer { alpha = (1f - progress.value * 3f).coerceIn(0f, 1f) }) {
                             if (hasPlayer) compactPlayer()
@@ -124,7 +155,10 @@ internal fun ExpandablePlayerScaffold(
         ) { padding ->
             Box(Modifier.fillMaxSize().padding(padding)
                 .then(if (showExpanded) Modifier.clearAndSetSemantics { } else Modifier)) {
-                content(PaddingValues())
+                // Native UIKit controls in the content draw above Compose; hide them while the player covers them.
+                CompositionLocalProvider(LocalPlayerSheetTop provides sheetTop, LocalNativeControlsCovered provides showExpanded) {
+                    content(PaddingValues())
+                }
             }
         }
     }

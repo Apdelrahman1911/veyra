@@ -21,6 +21,7 @@ import platform.UIKit.*
 import dev.veyra.nativecomponents.intrinsicControlSize
 import dev.veyra.nativecomponents.nativeControlContainer
 import dev.veyra.nativecomponents.nativeControlProperties
+import dev.veyra.nativecomponents.LocalNativeControlsCovered
 import platform.darwin.NSObject
 
 /** Compatibility actual for Veyra's compiler; the control itself is UIKit's UISwitch. */
@@ -31,6 +32,7 @@ actual fun AdaptiveSwitch(checked: Boolean, onCheckedChange: ((Boolean) -> Unit)
     interactionSource: MutableInteractionSource) {
     val layoutDirection = LocalLayoutDirection.current
     val dark = isDark(MaterialTheme.colorScheme.background)
+    val covered = LocalNativeControlsCovered.current
     val callback = rememberUpdatedState(onCheckedChange)
     val target = remember { SwitchTarget { callback.value?.invoke(it) } }
     // The host is exactly as wide as the switch UIKit draws on this iOS release (never a fixed
@@ -43,6 +45,7 @@ actual fun AdaptiveSwitch(checked: Boolean, onCheckedChange: ((Boolean) -> Unit)
         },
         modifier = modifier.size(intrinsic.width.coerceAtLeast(48.dp), intrinsic.height.coerceAtLeast(48.dp)),
         update = { container ->
+            container.hidden = covered
             val it = container.subviews.first() as UISwitch
             it.setOn(checked, animated = false)
             it.enabled = enabled

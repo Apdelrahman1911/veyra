@@ -1,5 +1,7 @@
 package dev.veyra.ui.design
 
+import androidx.compose.ui.semantics.Role
+import com.mohamedrejeb.calf.ui.gesture.adaptiveClickable
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -18,6 +20,8 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.veyra.nativecomponents.NativeButton
+import dev.veyra.nativecomponents.NativeButtonStyle
 
 /** Shared atmosphere rather than separate backgrounds on every scrolling surface. */
 @Composable
@@ -43,15 +47,20 @@ fun AccentButton(
     modifier: Modifier = Modifier,
     icon: ImageVector? = null,
     enabled: Boolean = true,
+    symbol: String? = null,
 ) {
-    Button(
-        onClick, modifier.heightIn(min = 48.dp).background(VeyraAccentGradient, CircleShape),
-        enabled = enabled, shape = CircleShape,
-        colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent, contentColor = Color.White),
-        contentPadding = PaddingValues(horizontal = 22.dp, vertical = 12.dp),
-    ) {
-        icon?.let { Icon(it, null, Modifier.size(19.dp)); Spacer(Modifier.width(8.dp)) }
-        Text(label, style = MaterialTheme.typography.labelLarge)
+    // iOS: a native filled UIButton; elsewhere the accent gradient pill.
+    NativeButton(label, onClick, NativeButtonStyle.Prominent, MaterialTheme.colorScheme.primary, modifier,
+        symbol = symbol, enabled = enabled) {
+        Button(
+            onClick, modifier.heightIn(min = 48.dp).background(VeyraAccentGradient, CircleShape),
+            enabled = enabled, shape = CircleShape,
+            colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent, contentColor = Color.White),
+            contentPadding = PaddingValues(horizontal = 22.dp, vertical = 12.dp),
+        ) {
+            icon?.let { Icon(it, null, Modifier.size(19.dp)); Spacer(Modifier.width(8.dp)) }
+            Text(label, style = MaterialTheme.typography.labelLarge)
+        }
     }
 }
 
@@ -91,7 +100,8 @@ fun CollectionLink(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Surface(onClick = onClick, modifier = modifier.fillMaxWidth(), shape = RoundedCornerShape(22.dp),
+    Surface(modifier = modifier.fillMaxWidth().adaptiveClickable(role = Role.Button, shape = RoundedCornerShape(22.dp), onClick = onClick),
+        shape = RoundedCornerShape(22.dp),
         color = MaterialTheme.colorScheme.surface, border = BorderStroke(1.dp, LocalVeyraColors.current.outlineSubtle.copy(alpha = .65f))) {
         Row(Modifier.padding(16.dp).heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(14.dp)) {

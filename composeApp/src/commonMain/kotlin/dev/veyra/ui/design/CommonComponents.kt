@@ -109,7 +109,7 @@ fun EmptyState(
             modifier = Modifier.widthIn(max = 520.dp),
         )
         if (actionLabel != null && onAction != null) {
-            Button(onClick = onAction, modifier = Modifier.heightIn(min = VeyraSpacing.TouchTarget)) {
+            ActionButton(actionLabel, null, true, onClick = onAction, modifier = Modifier.heightIn(min = VeyraSpacing.TouchTarget)) {
                 Text(actionLabel)
             }
         }
@@ -137,7 +137,7 @@ fun ErrorState(
             Icon(VeyraIcons.Warning, contentDescription = null, modifier = Modifier.size(24.dp))
             Text(message, style = MaterialTheme.typography.bodyMedium)
             if (onRetry != null) {
-                Button(onClick = onRetry, modifier = Modifier.heightIn(min = VeyraSpacing.TouchTarget)) {
+                ActionButton(strings.text(TextKey.Retry), "arrow.clockwise", true, onClick = onRetry, modifier = Modifier.heightIn(min = VeyraSpacing.TouchTarget)) {
                     Text(strings.text(TextKey.Retry))
                 }
             }

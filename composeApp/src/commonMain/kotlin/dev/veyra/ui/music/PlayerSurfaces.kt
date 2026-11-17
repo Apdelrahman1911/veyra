@@ -1,5 +1,28 @@
 package dev.veyra.ui.music
 
+import dev.veyra.playback.AudioOrigin
+import dev.veyra.ui.design.SegmentedTabs
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.text.font.FontWeight
+import dev.veyra.ui.design.LocalVeyraColors
+import androidx.compose.ui.semantics.Role
+import com.mohamedrejeb.calf.ui.gesture.adaptiveClickable
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.BorderStroke
+import dev.veyra.ui.design.ActionButton
+import com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosAction
+import com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosActionStyle
+import com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosProperties
+import com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosStyle
+import dev.veyra.nativecomponents.NativeAlert
+import dev.veyra.nativecomponents.NativeBarButton
+import dev.veyra.nativecomponents.NativeToolbar
+import dev.veyra.nativecomponents.nativeToolbarAvailable
+import dev.veyra.nativecomponents.nativeToolbarClearance
+import dev.veyra.nativecomponents.NativeButton
+import dev.veyra.nativecomponents.NativeButtonStyle
+import dev.veyra.nativecomponents.NativeDurationPicker
+import dev.veyra.nativecomponents.NativeSheet
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.WindowInsets
@@ -105,37 +128,51 @@ fun MiniPlayer(
     // MediaItem and must still reach the same player surfaces.
     val identity = playback.surfaceIdentity(snapshot) ?: return
     val strings = LocalStrings.current
-    // Short panes reserve room for the actual screen, not a second multi-line detail view.
+    // One line each at normal sizes keeps the bar a calm, fixed-height strip. Large text gets a
+    // second line instead of truncating most of a title; short panes always keep one line.
     // Both identities remain visible here and complete through the OpenPlayer action.
-    val metadataLines = if (compactHeight) 1 else 2
+    val largeText = LocalDensity.current.fontScale >= 1.3f
+    val metadataLines = if (compactHeight || !largeText) 1 else 2
     var timerDialog by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(if (compactHeight) 20.dp else 26.dp)
+    // A floating card that sits with the tab bar rather than a slab across the screen.
     Surface(modifier = modifier.fillMaxWidth()
-        .then(if (docked) Modifier else Modifier.padding(horizontal = 12.dp, vertical = 6.dp)).testTag("mini-player"),
-        shape = if (docked) RectangleShape else RoundedCornerShape(22.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh, tonalElevation = if (docked) 0.dp else 2.dp) {
+        .padding(horizontal = if (docked) 20.dp else 12.dp, vertical = 6.dp).testTag("mini-player"),
+        shape = shape,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        border = BorderStroke(1.dp, LocalVeyraColors.current.outlineSubtle.copy(alpha = .7f)),
+        shadowElevation = 10.dp) {
         Column {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                TextButton(
-                    onClick = { onAction(MusicUiAction.OpenPlayer) },
-                    modifier = Modifier.weight(1f).heightIn(min = 64.dp).testTag("mini-open-player"),
-                    contentPadding = PaddingValues(4.dp),
-                    // Multiline metadata must not inherit a pill clip at its corner lines.
-                    shape = RectangleShape,
+            Row(Modifier.fillMaxWidth().padding(start = 6.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    Modifier.weight(1f).heightIn(min = 52.dp)
+                        .adaptiveClickable(role = Role.Button, shape = RoundedCornerShape(20.dp)) { onAction(MusicUiAction.OpenPlayer) }
+                        .testTag("mini-open-player").padding(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Artwork(identity.artworkUrl, identity.title.orEmpty(), Modifier.size(44.dp), offlineOnly = snapshot.settings.offlineOnly, localPath = identity.localArtworkPath)
-                    Column(Modifier.weight(1f).padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        MetadataText(identity.title ?: strings.text(TextKey.InformationUnavailable), Modifier.fillMaxWidth(), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface, maxLines = metadataLines, overflow = TextOverflow.Ellipsis)
+                    Artwork(identity.artworkUrl, identity.title.orEmpty(), Modifier.size(if (compactHeight) 40.dp else 46.dp), offlineOnly = snapshot.settings.offlineOnly, localPath = identity.localArtworkPath)
+                    Column(Modifier.weight(1f).padding(start = 12.dp, end = 4.dp), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                        MetadataText(identity.title ?: strings.text(TextKey.InformationUnavailable), Modifier.fillMaxWidth(),
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.onSurface, maxLines = metadataLines, overflow = TextOverflow.Ellipsis)
+                        val status = when {
+                            playback.failure != null -> strings.errorFor(playback.failure!!)
+                            playback.isBuffering -> playbackStatusLabel(playback, strings)
+                            playback.crossfade?.phase == CrossfadePhase.OVERLAPPING -> strings.text(TextKey.CrossfadeActive)
+                            else -> null
+                        }
                         if (identity.resolvedTitle != null && identity.resolvedTitle != identity.title) {
                             Text(strings.format(TextKey.ResolvedTitleValue, identity.resolvedTitle), Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = metadataLines, overflow = TextOverflow.Ellipsis)
-                        } else if (!identity.creator.isNullOrBlank()) MetadataText(identity.creator!!, Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        if (playback.crossfade?.phase == CrossfadePhase.OVERLAPPING) Text(strings.text(TextKey.CrossfadeActive), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        if (playback.isBuffering || playback.failure != null) Text(
-                            playback.failure?.let(strings::errorFor) ?: playbackStatusLabel(playback, strings),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (playback.failure == null) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
-                            maxLines = metadataLines,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                        } else if (status == null && !identity.creator.isNullOrBlank()) Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (playback.audioOrigin == AudioOrigin.DOWNLOADED_FILE) DownloadedMark()
+                            MetadataText(identity.creator!!, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        status?.let {
+                            Text(it, style = MaterialTheme.typography.labelSmall,
+                                color = if (playback.failure != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                                maxLines = metadataLines, overflow = TextOverflow.Ellipsis)
+                        }
                     }
                 }
                 MediaDirection {
@@ -151,13 +188,43 @@ fun MiniPlayer(
             playback.sleepTimer?.let { timer ->
                 TimerStatus(timer, onOpen = { timerDialog = true }, onCancel = { onAction(MusicUiAction.ClearSleepTimer) }, modifier = Modifier.padding(horizontal = 8.dp).testTag("mini-timer"))
             }
-            if (playback.isBuffering) LinearProgressIndicator(Modifier.fillMaxWidth().height(2.dp).clearAndSetSemantics { })
+            // A slim inset line inside the card, the same direction as the player's timeline.
+            val progressModifier = Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, bottom = 6.dp)
+                .height(3.dp).clip(CircleShape).clearAndSetSemantics { }
+            if (playback.isBuffering) LinearProgressIndicator(progressModifier,
+                color = MaterialTheme.colorScheme.primary, trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = .12f))
             else if ((playback.durationMs ?: 0L) > 0L) MediaDirection {
-                LinearProgressIndicator(progress = { seekFraction(playback.positionMs, playback.durationMs) }, modifier = Modifier.fillMaxWidth().height(2.dp).clearAndSetSemantics { })
+                LinearProgressIndicator(progress = { seekFraction(playback.positionMs, playback.durationMs) }, modifier = progressModifier,
+                    color = MaterialTheme.colorScheme.primary, trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = .12f),
+                    strokeCap = StrokeCap.Round, gapSize = 0.dp, drawStopIndicator = {})
             }
         }
     }
     if (timerDialog) SleepTimerDialog(identity, playback, onAction, onDismiss = { timerDialog = false })
+}
+
+/** Says plainly whether the audio is the saved file on this device or an online stream. */
+@Composable
+private fun AudioOriginBadge(origin: AudioOrigin) {
+    val strings = LocalStrings.current
+    val downloaded = origin == AudioOrigin.DOWNLOADED_FILE
+    Surface(shape = CircleShape, color = if (downloaded) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest,
+        contentColor = if (downloaded) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.testTag("audio-origin-${origin.name}")) {
+        Row(Modifier.padding(horizontal = 10.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Icon(if (downloaded) VeyraIcons.Download else VeyraIcons.Volume, null, Modifier.size(14.dp))
+            Text(strings.text(if (downloaded) TextKey.PlayingFromDownload else TextKey.PlayingOnline), style = MaterialTheme.typography.labelMedium)
+        }
+    }
+}
+
+/** A small mark in the mini player for audio played from the downloaded file. */
+@Composable
+private fun DownloadedMark() {
+    val strings = LocalStrings.current
+    Icon(VeyraIcons.Download, strings.text(TextKey.PlayingFromDownload), Modifier.padding(end = 4.dp).size(13.dp).testTag("mini-downloaded"),
+        tint = MaterialTheme.colorScheme.primary)
 }
 
 /** Layout adapts to its pane, rather than assuming a desktop window or a portrait phone. */
@@ -272,11 +339,14 @@ private fun PlayerDetails(
         }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             // Online preparation can take several seconds; a visible spinner shows the app is working.
-            if (playback.isBuffering) androidx.compose.material3.CircularProgressIndicator(
+            if (playback.isBuffering) com.mohamedrejeb.calf.ui.progress.AdaptiveCircularProgressIndicator(
                 Modifier.padding(end = 8.dp).size(16.dp).clearAndSetSemantics { },
                 strokeWidth = 2.dp,
             )
-            Text(playbackStatusLabel(playback, strings), Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite }, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(playbackStatusLabel(playback, strings), Modifier.semantics { liveRegion = LiveRegionMode.Polite }, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                playback.audioOrigin?.let { AudioOriginBadge(it) }
+            }
             if (catalogItem != null) {
                 ActionIcon(savedIcon(catalogItem, snapshot.isSaved(catalogItem)), strings.text(savedActionLabel(catalogItem, snapshot.isSaved(catalogItem))), { onAction(MusicUiAction.ToggleFavorite(catalogItem)) }, Modifier.testTag("player-save"), isSelected = snapshot.isSaved(catalogItem))
                 MediaActionsMenu(catalogItem, snapshot, onAction, options = options)
@@ -291,7 +361,7 @@ private fun PlayerDetails(
         }
         if (podcast) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                OutlinedButton(openSpeed, modifier = Modifier.heightIn(min = 48.dp).testTag("player-speed"), enabled = availableSpeeds(options.minSpeed, options.maxSpeed).isNotEmpty()) {
+                ActionButton(strings.format(TextKey.SpeedValue, strings.localizeDigits(speedText(playback.effectiveSpeed))), "gauge.with.needle", false, openSpeed, modifier = Modifier.heightIn(min = 48.dp).testTag("player-speed"), enabled = availableSpeeds(options.minSpeed, options.maxSpeed).isNotEmpty()) {
                     Text(strings.format(TextKey.SpeedValue, strings.localizeDigits(speedText(playback.effectiveSpeed))))
                 }
                 TextButton({ onAction(MusicUiAction.Next) }, enabled = playback.hasNextOccurrence(snapshot), modifier = Modifier.heightIn(min = 48.dp).testTag("player-next-episode")) { Text(strings.text(TextKey.NextEpisode)) }
@@ -299,11 +369,11 @@ private fun PlayerDetails(
         }
         HorizontalDivider()
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            OutlinedButton({ onAction(MusicUiAction.OpenQueue(playback.activeContext)) }, modifier = Modifier.heightIn(min = 48.dp).testTag("player-queue")) {
+            ActionButton(strings.text(TextKey.Queue), "list.bullet", false, { onAction(MusicUiAction.OpenQueue(playback.activeContext)) }, modifier = Modifier.heightIn(min = 48.dp).testTag("player-queue")) {
                 Icon(VeyraIcons.Queue, null, Modifier.size(20.dp).padding(end = 4.dp))
                 Text(strings.text(TextKey.Queue))
             }
-            OutlinedButton(openTimer, modifier = Modifier.heightIn(min = 48.dp).testTag("player-sleep")) {
+            ActionButton(strings.text(TextKey.SleepTimer), "moon.zzz", false, openTimer, modifier = Modifier.heightIn(min = 48.dp).testTag("player-sleep")) {
                 Icon(VeyraIcons.Timer, null, Modifier.size(20.dp).padding(end = 4.dp))
                 Text(strings.text(TextKey.SleepTimer))
             }
@@ -487,6 +557,49 @@ private fun SleepTimerDialog(identity: PlaybackSurfaceIdentity, playback: Playba
     var endOfEpisode by remember(identity.key) { mutableStateOf(false) }
     val validMinutes = validatedTimerMinutes(minutes)
     val podcast = identity.controlsMode == PlaybackControlsMode.PODCAST
+    // iOS: a native action sheet of presets; "Custom duration" opens the countdown wheel in a native sheet.
+    var customStep by remember { mutableStateOf(false) }
+    fun set(minutesValue: Int) { onAction(MusicUiAction.SetSleepMinutes(minutesValue)); onDismiss() }
+    val material: @Composable () -> Unit = { SleepTimerMaterialDialog(playback, podcast, minutes, { minutes = it }, endOfEpisode,
+        { endOfEpisode = it }, validMinutes, onAction, onDismiss) }
+    if (!customStep) NativeAlert(
+        ios = AlertDialogIosProperties(
+            title = strings.text(TextKey.SleepTimer),
+            text = strings.text(TextKey.TimerActiveDescription),
+            style = AlertDialogIosStyle.ActionSheet,
+            actions = buildList {
+                listOf(15, 30, 45, 60).forEach { preset ->
+                    add(AlertDialogIosAction(strings.quantity(QuantityKey.Minutes, preset), AlertDialogIosActionStyle.Default, onClick = { set(preset) }))
+                }
+                if (podcast) add(AlertDialogIosAction(strings.text(TextKey.EndOfEpisode), AlertDialogIosActionStyle.Default,
+                    onClick = { onAction(MusicUiAction.SleepAtEpisodeEnd); onDismiss() }))
+                add(AlertDialogIosAction(strings.text(TextKey.CustomDuration), AlertDialogIosActionStyle.Default, onClick = { customStep = true }))
+                if (playback.sleepTimer != null) add(AlertDialogIosAction(strings.text(TextKey.CancelTimer), AlertDialogIosActionStyle.Destructive,
+                    onClick = { onAction(MusicUiAction.ClearSleepTimer); onDismiss() }))
+                add(AlertDialogIosAction(strings.text(TextKey.Cancel), AlertDialogIosActionStyle.Cancel, onClick = onDismiss))
+            },
+        ),
+        onDismiss = onDismiss,
+        material = material,
+    ) else NativeSheet(onDismiss = onDismiss, containerColor = MaterialTheme.colorScheme.surface, material = material) {
+        // iOS: the system countdown wheel (hours and minutes) in a native sheet.
+        var wheelMinutes by remember { mutableStateOf(30) }
+        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(strings.text(TextKey.CustomDuration), style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.semantics { heading() })
+            NativeDurationPicker(wheelMinutes, { wheelMinutes = it }, strings.text(TextKey.CustomDuration)) {}
+            NativeButton(strings.text(TextKey.SetTimer), { set(wheelMinutes) }, NativeButtonStyle.Prominent,
+                MaterialTheme.colorScheme.primary, Modifier.fillMaxWidth(), symbol = "timer") {}
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun SleepTimerMaterialDialog(playback: PlaybackState, podcast: Boolean, minutes: String, setMinutes: (String) -> Unit,
+    endOfEpisode: Boolean, setEndOfEpisode: (Boolean) -> Unit, validMinutes: Int?, onAction: (MusicUiAction) -> Unit, onDismiss: () -> Unit) {
+    val strings = LocalStrings.current
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(strings.text(TextKey.SleepTimer)) },
@@ -495,12 +608,12 @@ private fun SleepTimerDialog(identity: PlaybackSurfaceIdentity, playback: Playba
                 Text(strings.text(TextKey.TimerActiveDescription), style = MaterialTheme.typography.bodyMedium)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(15, 30, 45, 60).forEach { preset ->
-                        FilterChip(!endOfEpisode && validMinutes == preset, { minutes = preset.toString(); endOfEpisode = false }, { Text(strings.quantity(QuantityKey.Minutes, preset)) }, modifier = Modifier.heightIn(min = 48.dp))
+                        FilterChip(!endOfEpisode && validMinutes == preset, { setMinutes(preset.toString()); setEndOfEpisode(false) }, { Text(strings.quantity(QuantityKey.Minutes, preset)) }, modifier = Modifier.heightIn(min = 48.dp))
                     }
                 }
                 OutlinedTextField(
                     value = minutes,
-                    onValueChange = { minutes = it; endOfEpisode = false },
+                    onValueChange = { setMinutes(it); setEndOfEpisode(false) },
                     label = { Text(strings.text(TextKey.CustomDuration)) },
                     supportingText = { Text(strings.text(TextKey.TimerDurationHint)) },
                     isError = !endOfEpisode && validMinutes == null,
@@ -508,7 +621,7 @@ private fun SleepTimerDialog(identity: PlaybackSurfaceIdentity, playback: Playba
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth().testTag("sleep-minutes"),
                 )
-                if (podcast) FilterChip(endOfEpisode, { endOfEpisode = true }, { Text(strings.text(TextKey.EndOfEpisode)) }, modifier = Modifier.heightIn(min = 48.dp).testTag("sleep-episode-end"))
+                if (podcast) FilterChip(endOfEpisode, { setEndOfEpisode(true) }, { Text(strings.text(TextKey.EndOfEpisode)) }, modifier = Modifier.heightIn(min = 48.dp).testTag("sleep-episode-end"))
                 if (playback.sleepTimer != null) TextButton({ onAction(MusicUiAction.ClearSleepTimer); onDismiss() }, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.CancelTimer)) }
             }
         },
@@ -535,6 +648,47 @@ private fun SpeedDialog(identity: PlaybackSurfaceIdentity, snapshot: AppSnapshot
     val showId = identity.catalogItem?.showId
     var speed by remember(identity.key) { mutableStateOf(playback.speed) }
     var forThisShow by remember(identity.key) { mutableStateOf(showId != null && showId in snapshot.settings.showSpeeds) }
+    // iOS: a native action sheet of speeds (current one checked); for a podcast show a second sheet
+    // then asks whether the speed applies to this show or to all podcasts.
+    var chosen by remember(identity.key) { mutableStateOf<Float?>(null) }
+    val material: @Composable () -> Unit = { SpeedMaterialDialog(supported, showId, speed, { speed = it }, forThisShow, { forThisShow = it }, onAction, onDismiss) }
+    val pending = chosen
+    if (pending == null) NativeAlert(
+        ios = AlertDialogIosProperties(
+            title = strings.text(TextKey.PlaybackSpeed),
+            style = AlertDialogIosStyle.ActionSheet,
+            actions = supported.map { rate ->
+                val label = strings.format(TextKey.SpeedValue, strings.localizeDigits(speedText(rate)))
+                AlertDialogIosAction(if (rate == playback.speed) "$label  ✓" else label, AlertDialogIosActionStyle.Default, onClick = {
+                    if (showId != null) chosen = rate else { onAction(MusicUiAction.SetSpeed(rate, false)); onDismiss() }
+                })
+            } + AlertDialogIosAction(strings.text(TextKey.Cancel), AlertDialogIosActionStyle.Cancel, onClick = onDismiss),
+        ),
+        onDismiss = onDismiss,
+        material = material,
+    ) else NativeAlert(
+        ios = AlertDialogIosProperties(
+            title = strings.text(TextKey.SpeedScope),
+            text = strings.format(TextKey.SpeedValue, strings.localizeDigits(speedText(pending))),
+            style = AlertDialogIosStyle.ActionSheet,
+            actions = listOf(
+                AlertDialogIosAction(strings.text(TextKey.ThisShow), AlertDialogIosActionStyle.Default,
+                    onClick = { onAction(MusicUiAction.SetSpeed(pending, true)); onDismiss() }, isPreferred = forThisShow),
+                AlertDialogIosAction(strings.text(TextKey.AllPodcasts), AlertDialogIosActionStyle.Default,
+                    onClick = { onAction(MusicUiAction.SetSpeed(pending, false)); onDismiss() }, isPreferred = !forThisShow),
+                AlertDialogIosAction(strings.text(TextKey.Cancel), AlertDialogIosActionStyle.Cancel, onClick = onDismiss),
+            ),
+        ),
+        onDismiss = onDismiss,
+        material = material,
+    )
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun SpeedMaterialDialog(supported: List<Float>, showId: String?, speed: Float, setSpeed: (Float) -> Unit,
+    forThisShow: Boolean, setForThisShow: (Boolean) -> Unit, onAction: (MusicUiAction) -> Unit, onDismiss: () -> Unit) {
+    val strings = LocalStrings.current
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(strings.text(TextKey.PlaybackSpeed)) },
@@ -542,17 +696,15 @@ private fun SpeedDialog(identity: PlaybackSurfaceIdentity, snapshot: AppSnapshot
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     supported.forEach { rate ->
-                        FilterChip(speed == rate, { speed = rate }, { Text(strings.format(TextKey.SpeedValue, strings.localizeDigits(speedText(rate)))) }, modifier = Modifier.heightIn(min = 48.dp).testTag("speed-$rate"))
+                        FilterChip(speed == rate, { setSpeed(rate) }, { Text(strings.format(TextKey.SpeedValue, strings.localizeDigits(speedText(rate)))) }, modifier = Modifier.heightIn(min = 48.dp).testTag("speed-$rate"))
                     }
                 }
                 if (showId != null) {
                     Text(strings.text(TextKey.SpeedScope), style = MaterialTheme.typography.labelLarge)
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilterChip(forThisShow, { forThisShow = true }, { Text(strings.text(TextKey.ThisShow)) }, modifier = Modifier.heightIn(min = 48.dp))
-                        FilterChip(!forThisShow, { forThisShow = false }, { Text(strings.text(TextKey.AllPodcasts)) }, modifier = Modifier.heightIn(min = 48.dp))
-                    }
+                    SegmentedTabs(listOf(strings.text(TextKey.ThisShow), strings.text(TextKey.AllPodcasts)),
+                        if (forThisShow) 0 else 1, { setForThisShow(it == 0) })
                 }
-                TextButton({ speed = 1f }, enabled = 1f in supported, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.ResetSpeed)) }
+                TextButton({ setSpeed(1f) }, enabled = 1f in supported, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.ResetSpeed)) }
             }
         },
         confirmButton = { TextButton({ onAction(MusicUiAction.SetSpeed(speed, forThisShow)); onDismiss() }, enabled = speed in supported, modifier = Modifier.heightIn(min = 48.dp).testTag("speed-confirm")) { Text(strings.text(TextKey.Apply)) } },
@@ -570,19 +722,26 @@ fun QueuePanel(
     onAction: (MusicUiAction) -> Unit,
     modifier: Modifier = Modifier,
     options: MusicUiOptions = MusicUiOptions(),
+    bottomEdgeFree: Boolean = false,
 ) {
     val strings = LocalStrings.current
     val surface = playback.queueSurface(viewedContext, snapshot)
     val pending = surface.upcoming
     var clear by remember(viewedContext) { mutableStateOf(false) }
-    LazyColumn(modifier.fillMaxSize().testTag("queue-panel"), contentPadding = PaddingValues(bottom = 24.dp)) {
+    // iOS: queue-wide actions live in a native bottom toolbar instead of the list, where nothing
+    // else (the mini player) occupies the bottom edge.
+    val toolbar = nativeToolbarAvailable && bottomEdgeFree
+    if (toolbar) NativeToolbar(buildList {
+        add(NativeBarButton(strings.text(TextKey.ClearUpcoming), "trash", enabled = pending.isNotEmpty()) { clear = true })
+        if (viewedContext in options.undoableQueueContexts)
+            add(NativeBarButton(strings.text(TextKey.UndoQueueEdit), "arrow.uturn.backward") { onAction(MusicUiAction.UndoQueue(viewedContext)) })
+    })
+    LazyColumn(modifier.fillMaxSize().testTag("queue-panel"), contentPadding = PaddingValues(bottom = 24.dp + if (toolbar) nativeToolbarClearance else 0.dp)) {
         item {
             SectionTitle(strings.text(TextKey.Queue))
-            FlowRow(Modifier.padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                QueueContext.entries.forEach { context ->
-                    FilterChip(viewedContext == context, { onAction(MusicUiAction.ViewQueue(context)) }, { Text(strings.text(queueLabel(context))) }, modifier = Modifier.heightIn(min = 48.dp).testTag("view-queue-${context.name}"))
-                }
-            }
+            SegmentedTabs(QueueContext.entries.map { strings.text(queueLabel(it)) }, QueueContext.entries.indexOf(viewedContext),
+                { onAction(MusicUiAction.ViewQueue(QueueContext.entries[it])) }, Modifier.padding(horizontal = 20.dp),
+                tags = QueueContext.entries.map { "view-queue-${it.name}" })
             Text(strings.format(TextKey.ViewingQueue, strings.text(queueLabel(viewedContext))), Modifier.padding(horizontal = 20.dp, vertical = 4.dp), style = MaterialTheme.typography.bodyMedium)
             if (playback.hasCurrent) Text(strings.format(TextKey.ActiveQueue, strings.text(queueLabel(playback.activeContext))), Modifier.padding(horizontal = 20.dp, vertical = 4.dp).testTag("active-queue-label"), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
         }
@@ -595,7 +754,7 @@ fun QueuePanel(
         }
         item {
             SectionTitle(strings.text(TextKey.Upcoming), description = strings.quantity(QuantityKey.Items, pending.size))
-            FlowRow(Modifier.padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (!toolbar) FlowRow(Modifier.padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton({ clear = true }, enabled = pending.isNotEmpty(), modifier = Modifier.heightIn(min = 48.dp).testTag("clear-upcoming")) { Text(strings.text(TextKey.ClearUpcoming)) }
                 if (viewedContext in options.undoableQueueContexts) TextButton({ onAction(MusicUiAction.UndoQueue(viewedContext)) }, modifier = Modifier.heightIn(min = 48.dp).testTag("undo-queue")) { Text(strings.text(TextKey.UndoQueueEdit)) }
             }

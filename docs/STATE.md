@@ -1,5 +1,105 @@
 # Veyra — resumable state
 
+## Player, tabs, search scope and downloaded playback — 2026-11-17
+
+Owner requests after the native-components pass below.
+
+**UI**
+- The header title names the open item (playlist, track, episode, show, collection) instead of
+  the tab.
+- Mini player: a floating rounded card aligned with the tab bar, one-line metadata (two at large
+  text), status in one coloured line, a slim inset progress line. The collapsed sheet is now
+  transparent behind it and turns opaque as it opens.
+- `NativeSegmentedControl` (UIKit `UISegmentedControl`, Material segmented row elsewhere) via
+  the app's `SegmentedTabs`: Search scope, queue context, library sort, downloads filter, podcast
+  speed scope, search source. The five-way podcast episode filter stays chips.
+- Search: Explore music opens Home and scrolls to Discover (loading it if needed); Podcasts opens
+  the Podcasts tab. They only re-focused the search box before.
+
+**Fixes**
+- "Your library" after the Podcasts tab listed nothing: the library scope kept the podcast kind.
+  The library scope now always matches everything you keep.
+- Downloaded items streamed online from every path except a single row tap. Play/Enqueue (play
+  all, shuffle, playlists, collections, episodes) captured a fresh request per item, so the saved
+  binding was never used. The controller now reuses a verified download's own accepted request
+  (D014). `PlaybackState.audioOrigin` drives a "Playing your download" / "Streaming online" badge.
+
+**Tests:** shared 1270/0; desktop 501 (0 failures, 1 skipped); Android compiles. The saved-
+playback test now expects Play to use the file, with a mixed-collection case.
+
+**Verified:** Simulator (iPhone 17, iOS 26) for the tabs, search scope, explore cards, mini
+player and full player. Installed and launched on the owner's iPhone. Downloaded-file playback
+through Play has not been checked with a real download on a device.
+
+## Native iOS components from nativeCmpkit — 2026-11-17
+
+Owner request: use every applicable nativeCmpkit component so the iOS app is as native as possible.
+
+**iOS now uses (Android and desktop keep their Material composables and test tags)**
+- `UITabBar` (Liquid Glass on iOS 26) for Home, Search, Podcasts and Library. It stays behind
+  the keyboard, as in iOS apps, and leaves with the mini player when the full player opens.
+- `UIMenu` pull-down menus for every menu: song, playlist, episode, podcast sort and download
+  validation. Items show SF Symbols, and destructive items are red.
+- `UIAlertController` alerts for every confirmation. Native text fields for playlist names, RSS
+  feed URLs and the custom sleep duration.
+- Action sheets for Add to playlist, sleep timer presets and playback speed.
+- A `UISheetPresentationController` page sheet for Add songs.
+- Cupertino activity indicators.
+- A `UINavigationBar` for the screen header: the title, a back chevron and a Settings gear as
+  SF Symbol bar button items with VoiceOver labels. It steps aside while the player sheet covers
+  its area.
+- Native `UIButton`s (filled for the main action, gray otherwise, SF Symbols) for the action
+  buttons on Home, playlists, collections, track and episode details, podcasts, the player,
+  empty and error states (`ActionButton`, `AccentButton`).
+- A `UIToolbar` with Clear upcoming and Undo for the queue in the full player.
+- The sleep timer's custom duration is the `UIDatePicker` countdown wheel in a half-height sheet.
+- iOS press-scale feedback (`adaptiveClickable`) on cards, tiles and shelves.
+- Wrappers: `NativeMenu`, `ActionButton` (app), and `NativeAlert`, `NativeSheet`, `NativeTabBar`,
+  `NativeTopBar`, `NativeToolbar`, `NativeButton`, `NativeDurationPicker` (nativeComponents).
+- Not used as-is: `AdaptiveToolbar` (needs Material 3 Expressive, absent from the pinned
+  Material 3), `AdaptiveTimePicker` (clock time, not a duration) and `AdaptiveButton`'s Compose
+  Liquid Glass. Native glass in content cannot sample the Compose Metal canvas and draws a gray
+  rectangle, so in-content buttons use the standard filled/gray styles.
+
+**nativeCmpkit fixes** (branch `fix/ios-menu-alert-lifecycle`, pinned at `4e700e5`)
+- The menu version check rejected iOS 18.0 and 26.0 for `performPrimaryAction`.
+- An alert dismissed twice after an action, and was seeded with the confirm callback as its
+  dismiss callback.
+- The outside-tap recognizer swallowed taps on the alert's own buttons.
+- Empty title and message strings left blank rows.
+- iPad action sheets had no popover anchor.
+- The tab bar could not show "no selection" (Settings).
+- Bar button items had no VoiceOver label, and the navigation bar could not take the app's tint.
+
+**App fixes**
+- The collapsed player sheet now re-anchors when its peek height changes. Material3 kept the
+  first-frame fallback height, which left a 23 pt gap under the bar.
+- `scripts/package-notices.py` now generates the nativeCmpkit license from the pinned submodule.
+  The bundled copy had been added by hand, so `--check` was failing.
+- UISwitch/UISlider, hosted above the Compose canvas, drew on top of the full player. They now
+  hide while the player covers the screen.
+- `scripts/build-ios.sh` can leave `Veyra.debug.dylib` unrelinked after only Kotlin changed, so
+  the app runs the old code. Deleting that dylib before building forces the relink; the script
+  is not fixed yet.
+
+**Tests:** desktop UI 498 (0 failures, 1 skipped); Android assembleDebug and lintDebug pass;
+notice tooling 75/75.
+
+**Simulator-verified:** iPhone 17, iOS 26.
+- Tab bar switching.
+- New playlist alert and Create.
+- Playlist UIMenu.
+- Add songs sheet.
+- Sleep timer action sheet.
+- Full player hides the tab bar.
+- Native top bar: Home title and Settings gear; Settings back chevron returns Home; the bar
+  and the Settings switch hide under the full player and return when it closes.
+- Native buttons on Home, an empty playlist and the player; the sleep countdown wheel set a
+  31-minute timer; the queue toolbar appears in the full player and leaves with the queue.
+- Press feedback was not checked by eye (a screenshot cannot show the press).
+
+**Not yet checked:** a physical device and iPad.
+
 ## UI redesign, part 1: playlists, library, settings, interaction — 2026-11-16
 
 Owner request: creating playlists was hard and everyday interaction clunky.

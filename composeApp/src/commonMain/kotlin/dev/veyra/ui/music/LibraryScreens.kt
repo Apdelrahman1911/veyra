@@ -1,5 +1,10 @@
 package dev.veyra.ui.music
 
+import dev.veyra.ui.design.SegmentedTabs
+import androidx.compose.ui.semantics.Role
+import com.mohamedrejeb.calf.ui.gesture.adaptiveClickable
+import dev.veyra.ui.design.ActionButton
+import dev.veyra.ui.design.NativeMenu
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
@@ -90,7 +95,7 @@ fun LibraryScreen(
             LazyColumn(Modifier.fillMaxSize().testTag("library-list"), contentPadding = PaddingValues(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 item { ScreenIntro(strings.text(TextKey.Library), strings.text(TextKey.LibrarySubtitle)) }
                 item {
-                    Button(onClick = { create = true }, modifier = Modifier.padding(horizontal = 20.dp).fillMaxWidth().heightIn(min = 52.dp).testTag("new-playlist")) {
+                    ActionButton(strings.text(TextKey.NewPlaylist), "plus", true, onClick = { create = true }, modifier = Modifier.padding(horizontal = 20.dp).fillMaxWidth().heightIn(min = 52.dp).testTag("new-playlist")) {
                         Icon(VeyraIcons.Add, null, Modifier.padding(end = 8.dp)); Text(strings.text(TextKey.NewPlaylist))
                     }
                 }
@@ -150,12 +155,12 @@ fun LibraryScreen(
                 item {
                     FlowRow(Modifier.padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (selectedSection == LibrarySection.PLAYLISTS) {
-                            Button(onClick = { create = true }, modifier = Modifier.heightIn(min = 48.dp).testTag("new-playlist")) { Text(strings.text(TextKey.NewPlaylist)) }
+                            ActionButton(strings.text(TextKey.NewPlaylist), "plus", true, onClick = { create = true }, modifier = Modifier.heightIn(min = 48.dp).testTag("new-playlist")) { Text(strings.text(TextKey.NewPlaylist)) }
                         } else {
-                            FilterChip(!sortByCreator, { sortByCreator = false }, { Text(strings.text(TextKey.SortByName)) }, modifier = Modifier.heightIn(min = 48.dp))
-                            FilterChip(sortByCreator, { sortByCreator = true }, { Text(strings.text(TextKey.SortByCreator)) }, modifier = Modifier.heightIn(min = 48.dp))
+                            SegmentedTabs(listOf(strings.text(TextKey.SortByName), strings.text(TextKey.SortByCreator)),
+                                if (sortByCreator) 1 else 0, { sortByCreator = it == 1 }, Modifier.fillMaxWidth())
                         }
-                        if (options.supportsImport) OutlinedButton(onClick = { onAction(MusicUiAction.ImportAudio) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.ImportAudio)) }
+                        if (options.supportsImport) ActionButton(strings.text(TextKey.ImportAudio), "square.and.arrow.down", false, onClick = { onAction(MusicUiAction.ImportAudio) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.ImportAudio)) }
                         if (options.canUndoLibrary) TextButton(onClick = { onAction(MusicUiAction.UndoLibrary) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.UndoLibraryEdit)) }
                     }
                 }
@@ -206,7 +211,8 @@ private fun LibrarySection.label(): TextKey = when (this) {
 @Composable
 private fun LibraryShortcut(title: String, subtitle: String?, icon: androidx.compose.ui.graphics.vector.ImageVector,
     onClick: () -> Unit, modifier: Modifier = Modifier) {
-    androidx.compose.material3.Surface(onClick = onClick, modifier = modifier.heightIn(min = 96.dp), shape = RoundedCornerShape(20.dp),
+    androidx.compose.material3.Surface(modifier = modifier.heightIn(min = 96.dp)
+        .adaptiveClickable(role = Role.Button, shape = RoundedCornerShape(20.dp), onClick = onClick), shape = RoundedCornerShape(20.dp),
         color = MaterialTheme.colorScheme.surface) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Icon(icon, null, tint = MaterialTheme.colorScheme.primary)
@@ -222,8 +228,10 @@ private fun PlaylistLibraryRow(playlist: Playlist, snapshot: AppSnapshot, onActi
     var rename by remember(playlist.id) { mutableStateOf(false) }
     var delete by remember(playlist.id) { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
-    androidx.compose.material3.Surface(onClick = { onAction(MusicUiAction.OpenPlaylist(playlist.id)) },
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).testTag("playlist-row-${playlist.id}"),
+    androidx.compose.material3.Surface(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp)
+            .adaptiveClickable(role = Role.Button, shape = RoundedCornerShape(20.dp)) { onAction(MusicUiAction.OpenPlaylist(playlist.id)) }
+            .testTag("playlist-row-${playlist.id}"),
         shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface) {
         Row(Modifier.padding(start = 12.dp, top = 10.dp, bottom = 10.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -235,9 +243,9 @@ private fun PlaylistLibraryRow(playlist: Playlist, snapshot: AppSnapshot, onActi
             }
             Box {
                 ActionIcon(VeyraIcons.MoreOptions, strings.text(TextKey.PlaylistOptions), { menu = true })
-                DropdownMenu(menu, { menu = false }) {
-                    DropdownMenuItem(text = { Text(strings.text(TextKey.RenamePlaylist)) }, onClick = { menu = false; rename = true })
-                    DropdownMenuItem(text = { Text(strings.text(TextKey.DeletePlaylist)) }, onClick = { menu = false; delete = true })
+                NativeMenu(menu, { menu = false }) {
+                    item(strings.text(TextKey.RenamePlaylist), symbol = "pencil") { menu = false; rename = true }
+                    item(strings.text(TextKey.DeletePlaylist), destructive = true, symbol = "trash") { menu = false; delete = true }
                 }
             }
         }
@@ -294,20 +302,20 @@ fun PlaylistDetailScreen(
                 }
                 Box {
                     ActionIcon(VeyraIcons.MoreOptions, strings.text(TextKey.PlaylistOptions), { menu = true }, Modifier.testTag("playlist-menu"))
-                    DropdownMenu(menu, { menu = false }) {
-                        DropdownMenuItem(text = { Text(strings.text(TextKey.RenamePlaylist)) }, onClick = { menu = false; rename = true })
-                        DropdownMenuItem(text = { Text(strings.text(TextKey.DeletePlaylist)) }, onClick = { menu = false; delete = true })
+                    NativeMenu(menu, { menu = false }) {
+                        item(strings.text(TextKey.RenamePlaylist), symbol = "pencil") { menu = false; rename = true }
+                        item(strings.text(TextKey.DeletePlaylist), destructive = true, symbol = "trash") { menu = false; delete = true }
                     }
                 }
             }
             FlowRow(Modifier.padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button({ play(false) }, enabled = availableItems.isNotEmpty(), modifier = Modifier.heightIn(min = 48.dp)) {
+                ActionButton(strings.text(TextKey.Play), "play.fill", true, { play(false) }, enabled = availableItems.isNotEmpty(), modifier = Modifier.heightIn(min = 48.dp)) {
                     Icon(VeyraIcons.Play, null, Modifier.padding(end = 6.dp)); Text(strings.text(TextKey.Play))
                 }
-                OutlinedButton({ play(true) }, enabled = availableItems.isNotEmpty(), modifier = Modifier.heightIn(min = 48.dp)) {
+                ActionButton(strings.text(TextKey.Shuffle), "shuffle", false, { play(true) }, enabled = availableItems.isNotEmpty(), modifier = Modifier.heightIn(min = 48.dp)) {
                     Icon(VeyraIcons.Shuffle, null, Modifier.padding(end = 6.dp)); Text(strings.text(TextKey.Shuffle))
                 }
-                OutlinedButton({ adding = true }, modifier = Modifier.heightIn(min = 48.dp).testTag("playlist-add-songs")) {
+                ActionButton(strings.text(TextKey.AddSongs), "plus", false, { adding = true }, modifier = Modifier.heightIn(min = 48.dp).testTag("playlist-add-songs")) {
                     Icon(VeyraIcons.Add, null, Modifier.padding(end = 6.dp)); Text(strings.text(TextKey.AddSongs))
                 }
                 if (playlist.entries.isNotEmpty()) TextButton({ editing = !editing }, modifier = Modifier.heightIn(min = 48.dp).testTag("playlist-edit")) {
@@ -367,10 +375,9 @@ private fun DownloadsContent(snapshot: AppSnapshot, onAction: (MusicUiAction) ->
         item { header() }
         item {
             Text(strings.format(TextKey.StorageUsed, strings.byteSize(bytes)), Modifier.padding(horizontal = 24.dp, vertical = 8.dp), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            SegmentedTabs(listOf(TextKey.All, TextKey.InProgress, TextKey.Completed, TextKey.NeedsAttention).map { strings.text(it) },
+                filter, { filter = it }, Modifier.padding(horizontal = 20.dp).testTag("downloads-filter"))
             FlowRow(Modifier.padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(TextKey.All, TextKey.InProgress, TextKey.Completed, TextKey.NeedsAttention).forEachIndexed { index, label ->
-                    FilterChip(filter == index, { filter = index }, { Text(strings.text(label)) }, modifier = Modifier.heightIn(min = 48.dp))
-                }
                 TextButton({ onAction(MusicUiAction.ManageStorage) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.ManageStorage)) }
             }
         }
@@ -417,13 +424,13 @@ private fun DownloadRow(entry: DownloadSurfaceEntry, snapshot: AppSnapshot, onAc
         entry.failure?.let { Text(strings.errorFor(it), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (entry.ready || entry.checking) {
-                if (item != null && entry.ready) Button(
+                if (item != null && entry.ready) ActionButton(strings.text(TextKey.Play), "play.fill", true,
                     {
                         onAction(if (savedBinding != null) MusicUiAction.PlaySaved(item, savedBinding)
                         else MusicUiAction.Play(item))
                     },
                     modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.Play)) }
-                OutlinedButton({ remove = true }, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.RemoveDownload)) }
+                ActionButton(strings.text(TextKey.RemoveDownload), "trash", false, { remove = true }, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.RemoveDownload)) }
             } else {
                 val retainedFailure = entry.status == DownloadStatus.FAILED && entry.hasOwnedBytes &&
                     !entry.cleanupPending && entry.origin != DownloadSurfaceOrigin.LEGACY
@@ -446,20 +453,15 @@ private fun DownloadRow(entry: DownloadSurfaceEntry, snapshot: AppSnapshot, onAc
                                     modifier = Modifier.heightIn(min = 48.dp).testTag("validate-${entry.id}")) {
                                     Text(strings.text(TextKey.ValidateDownload))
                                 }
-                                DropdownMenu(expanded = memberMenu, onDismissRequest = { memberMenu = false }) {
+                                NativeMenu(expanded = memberMenu, onDismiss = { memberMenu = false }) {
                                     choices.forEachIndexed { index, choice ->
-                                        DropdownMenuItem(
-                                            text = { Text(strings.format(TextKey.ValidateDownloadMember,
-                                                strings.number((index + 1).toLong()))) },
-                                            onClick = {
-                                                memberMenu = false
-                                                onAction(MusicUiAction.ValidateRetainedDownload(choice.jobId,
-                                                    choice.bindingId, choice.batchId, choice.memberPosition,
-                                                    choice.expectedIntentRevision))
-                                            },
-                                            modifier = Modifier.testTag(
-                                                "validate-member-${entry.id}-${choice.memberPosition}"),
-                                        )
+                                        item(strings.format(TextKey.ValidateDownloadMember, strings.number((index + 1).toLong())),
+                                            tag = "validate-member-${entry.id}-${choice.memberPosition}", symbol = "checkmark.shield") {
+                                            memberMenu = false
+                                            onAction(MusicUiAction.ValidateRetainedDownload(choice.jobId,
+                                                choice.bindingId, choice.batchId, choice.memberPosition,
+                                                choice.expectedIntentRevision))
+                                        }
                                     }
                                 }
                             }
@@ -476,7 +478,7 @@ private fun DownloadRow(entry: DownloadSurfaceEntry, snapshot: AppSnapshot, onAc
                     DownloadStatus.VERIFYING -> Unit
                 }
                 if (retainedFailure) {
-                    OutlinedButton({ remove = true }, modifier = Modifier.heightIn(min = 48.dp).testTag("remove-retained-${entry.id}")) { Text(strings.text(TextKey.RemoveDownload)) }
+                    ActionButton(strings.text(TextKey.RemoveDownload), "trash", false, { remove = true }, modifier = Modifier.heightIn(min = 48.dp).testTag("remove-retained-${entry.id}")) { Text(strings.text(TextKey.RemoveDownload)) }
                 } else if (entry.status !in setOf(DownloadStatus.CANCELLED, DownloadStatus.COMPLETE)) {
                     TextButton({ onAction(MusicUiAction.CancelDownload(entry.id)) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.CancelDownload)) }
                 }

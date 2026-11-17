@@ -365,6 +365,8 @@ enum class TextKey(internal val english: String, internal val arabic: String) {
     CrossfadePreparing("Preparing next track…", "جارٍ تجهيز المقطع التالي…"),
     CrossfadeReady("Next track ready for crossfade", "المقطع التالي جاهز للتداخل"),
     CrossfadeActive("Crossfading", "جارٍ تداخل المقاطع"),
+    PlayingFromDownload("Playing your download", "يُشغَّل من التنزيل"),
+    PlayingOnline("Streaming online", "بث عبر الإنترنت"),
     CrossfadeNextTrack("Incoming track: {0}", "المقطع القادم: {0}"),
     CrossfadeProgress("Crossfade progress: {0}%", "تقدّم التداخل: {0}%"),
     CrossfadeUnavailable("Crossfade is unavailable for this transition.", "تداخل المقاطع غير متاح لهذا الانتقال."),

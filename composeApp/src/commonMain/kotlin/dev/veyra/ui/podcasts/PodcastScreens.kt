@@ -2,6 +2,17 @@
 
 package dev.veyra.ui.podcasts
 
+import dev.veyra.ui.design.ActionButton
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
+import androidx.compose.runtime.rememberUpdatedState
+import com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosAction
+import com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosActionStyle
+import com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosProperties
+import com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosTextField
+import com.mohamedrejeb.calf.ui.uikit.IosKeyboardType
+import dev.veyra.nativecomponents.NativeAlert
+import dev.veyra.ui.design.NativeMenu
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -112,8 +123,8 @@ fun PodcastsScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         AccentButton(strings.text(TextKey.FindPodcasts), { onAction(PodcastAction.FindPodcasts) },
-                            Modifier.testTag("podcasts-find"), icon = VeyraIcons.Search)
-                        OutlinedButton(onClick = { onAction(PodcastAction.OpenAddFeed) }, enabled = !state.snapshot.settings.offlineOnly,
+                            Modifier.testTag("podcasts-find"), icon = VeyraIcons.Search, symbol = "magnifyingglass")
+                        ActionButton(strings.text(TextKey.AddRssFeed), "plus", false, onClick = { onAction(PodcastAction.OpenAddFeed) }, enabled = !state.snapshot.settings.offlineOnly,
                             modifier = Modifier.testTag("podcasts-add-feed")) {
                             Icon(VeyraIcons.Add, null, modifier = Modifier.size(20.dp))
                             Spacer(Modifier.width(8.dp))
@@ -229,13 +240,13 @@ fun PodcastShowScreen(
                 item(key = "show-actions") {
                     val followed = show.id in state.snapshot.followedShowIds
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { onAction(PodcastAction.SetFollowed(show.id, !followed)) },
+                        ActionButton(strings.text(if (followed) TextKey.Unfollow else TextKey.Follow), if (followed) "checkmark" else "plus", true, onClick = { onAction(PodcastAction.SetFollowed(show.id, !followed)) },
                             modifier = Modifier.testTag("podcast-follow")) {
                             Icon(if (followed) VeyraIcons.Check else VeyraIcons.Add, null, modifier = Modifier.size(20.dp))
                             Spacer(Modifier.width(8.dp))
                             Text(strings.text(if (followed) TextKey.Unfollow else TextKey.Follow))
                         }
-                        OutlinedButton(onClick = { onAction(PodcastAction.RefreshShow(show.id)) },
+                        ActionButton(strings.text(TextKey.Refresh), "arrow.clockwise", false, onClick = { onAction(PodcastAction.RefreshShow(show.id)) },
                             enabled = !state.isRefreshing && !state.snapshot.settings.offlineOnly) {
                             Icon(VeyraIcons.Refresh, null, modifier = Modifier.size(20.dp))
                             Spacer(Modifier.width(8.dp))
@@ -470,16 +481,14 @@ private fun PodcastEpisodeFilters(state: PodcastShowUiState, onAction: (PodcastA
                     Spacer(Modifier.width(6.dp))
                     Text(strings.text(state.options.sort.textKey()))
                 }
-                DropdownMenu(expanded = sortExpanded, onDismissRequest = { sortExpanded = false }) {
+                NativeMenu(expanded = sortExpanded, onDismiss = { sortExpanded = false }) {
                     PodcastEpisodeSort.entries.forEach { sort ->
-                        DropdownMenuItem(
-                            text = { Text(strings.text(sort.textKey())) },
-                            leadingIcon = { if (state.options.sort == sort) Icon(VeyraIcons.Check, null) },
-                            onClick = {
-                                sortExpanded = false
-                                onAction(PodcastAction.SetShowListOptions(state.showId, state.options.copy(sort = sort)))
-                            },
-                        )
+                        val current = state.options.sort == sort
+                        item(strings.text(sort.textKey()), icon = if (current) VeyraIcons.Check else null,
+                            symbol = if (current) "checkmark" else null) {
+                            sortExpanded = false
+                            onAction(PodcastAction.SetShowListOptions(state.showId, state.options.copy(sort = sort)))
+                        }
                     }
                 }
             }
@@ -661,7 +670,31 @@ private fun AddPodcastFeedDialog(state: AddPodcastFeedUiState, offline: Boolean,
     val strings = LocalStrings.current
     val canSubmit = state.url.isNotBlank() && !state.isSubmitting && !offline
     val failureMessage = state.failure?.let(strings::errorFor)
-    AlertDialog(
+    // iOS: a native alert with a URL text field. UIKit closes an alert whenever one of its buttons is
+    // tapped, so after "Add" it stays closed while the feed is checked; a failure presents it again
+    // with the error, and success closes the flow from the owner.
+    val currentUrl by rememberUpdatedState(state.url)
+    var awaitingResult by remember { mutableStateOf(false) }
+    var attempt by remember { mutableStateOf(0) }
+    LaunchedEffect(state.isSubmitting, state.failure) {
+        if (awaitingResult && !state.isSubmitting && state.failure != null) { awaitingResult = false; attempt++ }
+    }
+    if (!awaitingResult) key(attempt) { NativeAlert(
+        ios = AlertDialogIosProperties(
+            title = strings.text(TextKey.AddRssFeed),
+            text = listOfNotNull(failureMessage, strings.text(TextKey.AddFeedDescription), strings.text(TextKey.FeedPrivateWarning),
+                strings.text(TextKey.OfflineDescription).takeIf { offline }).joinToString("\n\n"),
+            actions = listOf(
+                AlertDialogIosAction(strings.text(TextKey.Cancel), AlertDialogIosActionStyle.Cancel,
+                    onClick = { onAction(PodcastAction.DismissAddFeed) }),
+                AlertDialogIosAction(strings.text(TextKey.AddFeed), AlertDialogIosActionStyle.Default, isPreferred = true, enabled = canSubmit,
+                    onClick = { awaitingResult = true; onAction(PodcastAction.SubmitFeed(currentUrl.trim())) }),
+            ),
+            textFields = listOf(AlertDialogIosTextField(placeholder = strings.text(TextKey.FeedUrlHint), initialValue = state.url,
+                keyboardType = IosKeyboardType.URL, onValueChange = { onAction(PodcastAction.FeedUrlChanged(it)) })),
+        ),
+        onDismiss = { onAction(PodcastAction.DismissAddFeed) },
+    ) { AlertDialog(
         onDismissRequest = { onAction(PodcastAction.DismissAddFeed) },
         modifier = Modifier.testTag("podcast-add-feed-dialog"),
         title = { Text(strings.text(TextKey.AddRssFeed)) },
@@ -696,7 +729,7 @@ private fun AddPodcastFeedDialog(state: AddPodcastFeedUiState, offline: Boolean,
             TextButton(onClick = { onAction(PodcastAction.SubmitFeed(state.url.trim())) }, enabled = canSubmit,
                 modifier = Modifier.testTag("podcast-submit-feed")) {
                 if (state.isSubmitting) {
-                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    com.mohamedrejeb.calf.ui.progress.AdaptiveCircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                     Spacer(Modifier.width(8.dp))
                 }
                 Text(strings.text(if (state.isSubmitting) TextKey.Loading else TextKey.AddFeed))
@@ -705,7 +738,7 @@ private fun AddPodcastFeedDialog(state: AddPodcastFeedUiState, offline: Boolean,
         dismissButton = {
             TextButton(onClick = { onAction(PodcastAction.DismissAddFeed) }) { Text(strings.text(TextKey.Cancel)) }
         },
-    )
+    ) } }
 }
 
 private fun PodcastEpisodeFilter.textKey(): TextKey = when (this) {

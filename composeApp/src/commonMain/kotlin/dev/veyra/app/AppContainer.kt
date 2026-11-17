@@ -812,6 +812,14 @@ class AppContainer(
             MusicUiAction.RunSearch -> runSearch(false)
             MusicUiAction.LoadMoreSearch -> runSearch(true)
             is MusicUiAction.Discover -> discover(action.provider, false)
+            MusicUiAction.ExploreMusic -> {
+                navigate { it.copy(destination = AppDestination.LISTEN, details = emptyList(), playerOpen = false, queueOpen = false) }
+                val discovery = mutableDiscovery.value
+                if (!discovery.loaded && !discovery.loading && !store.state.value.settings.offlineOnly) discover(discovery.provider, false)
+                mutableDiscovery.update { it.copy(revealRequest = discovery.revealRequest + 1) }
+            }
+            MusicUiAction.ExplorePodcasts ->
+                navigate { it.copy(destination = AppDestination.PODCASTS, details = emptyList(), playerOpen = false, queueOpen = false) }
             MusicUiAction.LoadMoreDiscovery -> discover(mutableDiscovery.value.provider, true)
             is MusicUiAction.OpenSearch -> {
                 navigate { it.copy(destination = AppDestination.SEARCH, details = emptyList(), playerOpen = false, queueOpen = false) }

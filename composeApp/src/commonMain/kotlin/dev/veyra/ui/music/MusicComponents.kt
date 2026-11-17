@@ -49,6 +49,13 @@ import dev.veyra.model.MediaItem
 import dev.veyra.model.MediaKind
 import dev.veyra.model.Playlist
 import dev.veyra.model.SourceProvider
+import dev.veyra.ui.design.NativeMenu
+import dev.veyra.ui.design.displayMetadata
+import dev.veyra.nativecomponents.NativeAlert
+import com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosAction
+import com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosActionStyle
+import com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosProperties
+import com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosStyle
 import dev.veyra.ui.design.Artwork
 import dev.veyra.ui.design.AppStrings
 import dev.veyra.ui.design.LocalStrings
@@ -205,56 +212,52 @@ internal fun MediaActionsMenu(
     val download = surface.forMedia(item.id)
     Box(modifier) {
         ActionIcon(VeyraIcons.MoreOptions, strings.format(TextKey.MoreActionsFor, item.title), { menu = true })
-        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+        NativeMenu(expanded = menu, onDismiss = { menu = false }) {
             fun dispatch(action: MusicUiAction) { menu = false; onAction(action) }
-            DropdownMenuItem(text = { Text(strings.text(TextKey.PlayNext)) }, onClick = { dispatch(MusicUiAction.Enqueue(item, playNext = true)) })
-            DropdownMenuItem(text = { Text(strings.text(TextKey.AddToEnd)) }, onClick = { dispatch(MusicUiAction.Enqueue(item, playNext = false)) })
-            DropdownMenuItem(text = { Text(strings.text(savedActionLabel(item, snapshot.isSaved(item)))) }, onClick = { dispatch(MusicUiAction.ToggleFavorite(item)) })
-            if (item.kind == MediaKind.MUSIC) DropdownMenuItem(text = { Text(strings.text(TextKey.AddToPlaylist)) }, onClick = { menu = false; picker = true })
+            val saved = snapshot.isSaved(item)
+            item(strings.text(TextKey.PlayNext), symbol = "text.line.first.and.arrowtriangle.forward") { dispatch(MusicUiAction.Enqueue(item, playNext = true)) }
+            item(strings.text(TextKey.AddToEnd), symbol = "text.line.last.and.arrowtriangle.forward") { dispatch(MusicUiAction.Enqueue(item, playNext = false)) }
+            divider()
+            item(strings.text(savedActionLabel(item, saved)), symbol = savedSymbol(item, saved)) { dispatch(MusicUiAction.ToggleFavorite(item)) }
+            if (item.kind == MediaKind.MUSIC) item(strings.text(TextKey.AddToPlaylist), symbol = "text.badge.plus") { menu = false; picker = true }
+            divider()
             if (download != null && (download.ready || download.checking)) {
-                if (download.checking) DropdownMenuItem(text = { Text(strings.downloadStatus(download.status)) }, onClick = {},
-                    modifier = Modifier.testTag("menu-download-status-${item.id}"), enabled = false)
-                DropdownMenuItem(text = { Text(strings.text(TextKey.RemoveDownload)) }, onClick = { menu = false; removeDownload = true })
+                if (download.checking) item(strings.downloadStatus(download.status), tag = "menu-download-status-${item.id}", enabled = false) {}
+                item(strings.text(TextKey.RemoveDownload), destructive = true, symbol = "trash") { menu = false; removeDownload = true }
             } else if (download != null && download.status !in setOf(DownloadStatus.CANCELLED, DownloadStatus.COMPLETE)) {
                 val retainedFailure = download.status == DownloadStatus.FAILED && download.hasOwnedBytes &&
                     !download.cleanupPending && download.origin != DownloadSurfaceOrigin.LEGACY
                 when (download.status) {
-                    DownloadStatus.QUEUED, DownloadStatus.RESOLVING, DownloadStatus.RUNNING -> DropdownMenuItem(text = { Text(strings.text(TextKey.PauseDownload)) }, onClick = { dispatch(MusicUiAction.PauseDownload(download.id)) })
-                    DownloadStatus.PAUSED, DownloadStatus.WAITING_NETWORK, DownloadStatus.NEEDS_FOREGROUND -> DropdownMenuItem(text = { Text(strings.text(TextKey.ResumeDownload)) }, onClick = { dispatch(MusicUiAction.ResumeDownload(download.id)) })
+                    DownloadStatus.QUEUED, DownloadStatus.RESOLVING, DownloadStatus.RUNNING ->
+                        item(strings.text(TextKey.PauseDownload), symbol = "pause.circle") { dispatch(MusicUiAction.PauseDownload(download.id)) }
+                    DownloadStatus.PAUSED, DownloadStatus.WAITING_NETWORK, DownloadStatus.NEEDS_FOREGROUND ->
+                        item(strings.text(TextKey.ResumeDownload), symbol = "arrow.down.circle") { dispatch(MusicUiAction.ResumeDownload(download.id)) }
                     DownloadStatus.FAILED -> if (retainedFailure) {
                         val target = download.retainedValidation
                         val choices = download.retainedValidationChoices
-                        if (target != null) DropdownMenuItem(
-                            text = { Text(strings.text(TextKey.ValidateDownload)) },
-                            onClick = { dispatch(MusicUiAction.ValidateRetainedDownload(target.jobId,
+                        if (target != null) item(strings.text(TextKey.ValidateDownload), tag = "menu-validate-${item.id}", symbol = "checkmark.shield") {
+                            dispatch(MusicUiAction.ValidateRetainedDownload(target.jobId,
                                 target.bindingId, target.batchId, target.memberPosition,
-                                target.expectedIntentRevision)) },
-                            modifier = Modifier.testTag("menu-validate-${item.id}"),
-                        ) else if (choices.isNotEmpty()) choices.forEachIndexed { index, choice ->
-                            DropdownMenuItem(
-                                text = { Text(strings.format(TextKey.ValidateDownloadMember,
-                                    strings.number((index + 1).toLong()))) },
-                                onClick = { dispatch(MusicUiAction.ValidateRetainedDownload(choice.jobId,
+                                target.expectedIntentRevision))
+                        } else if (choices.isNotEmpty()) choices.forEachIndexed { index, choice ->
+                            item(strings.format(TextKey.ValidateDownloadMember, strings.number((index + 1).toLong())),
+                                tag = "menu-validate-member-${item.id}-${choice.memberPosition}", symbol = "checkmark.shield") {
+                                dispatch(MusicUiAction.ValidateRetainedDownload(choice.jobId,
                                     choice.bindingId, choice.batchId, choice.memberPosition,
-                                    choice.expectedIntentRevision)) },
-                                modifier = Modifier.testTag("menu-validate-member-${item.id}-${choice.memberPosition}"),
-                            )
-                        } else DropdownMenuItem(
-                            text = { Text(strings.text(TextKey.RetainedValidationUnavailable)) },
-                            onClick = {}, enabled = false,
-                            modifier = Modifier.testTag("menu-validate-unavailable-${item.id}"),
-                        )
-                        DropdownMenuItem(text = { Text(strings.text(TextKey.RemoveDownload)) },
-                            onClick = { menu = false; removeDownload = true })
-                    } else DropdownMenuItem(text = { Text(strings.text(TextKey.Retry)) }, onClick = { dispatch(MusicUiAction.ResumeDownload(download.id)) })
-                    DownloadStatus.VERIFYING -> DropdownMenuItem(text = { Text(strings.text(TextKey.DownloadVerifying)) }, onClick = {}, enabled = false)
+                                    choice.expectedIntentRevision))
+                            }
+                        } else item(strings.text(TextKey.RetainedValidationUnavailable), tag = "menu-validate-unavailable-${item.id}", enabled = false) {}
+                        item(strings.text(TextKey.RemoveDownload), destructive = true, symbol = "trash") { menu = false; removeDownload = true }
+                    } else item(strings.text(TextKey.Retry), symbol = "arrow.clockwise") { dispatch(MusicUiAction.ResumeDownload(download.id)) }
+                    DownloadStatus.VERIFYING -> item(strings.text(TextKey.DownloadVerifying), enabled = false) {}
                     DownloadStatus.COMPLETE, DownloadStatus.CANCELLED -> Unit
                 }
-                if (!retainedFailure) DropdownMenuItem(text = { Text(strings.text(TextKey.CancelDownload)) }, onClick = { dispatch(MusicUiAction.CancelDownload(download.id)) })
+                if (!retainedFailure) item(strings.text(TextKey.CancelDownload), symbol = "xmark.circle") { dispatch(MusicUiAction.CancelDownload(download.id)) }
             } else if (item.source.provider in options.downloadableProviders) {
-                DropdownMenuItem(text = { Text(strings.text(TextKey.Download)) }, onClick = { dispatch(MusicUiAction.Download(item)) })
+                item(strings.text(TextKey.Download), symbol = "arrow.down.circle") { dispatch(MusicUiAction.Download(item)) }
             }
-            DropdownMenuItem(text = { Text(strings.text(TextKey.Details)) }, onClick = { dispatch(MusicUiAction.OpenMedia(item)) })
+            divider()
+            item(strings.text(TextKey.Details), symbol = "info.circle") { dispatch(MusicUiAction.OpenMedia(item)) }
         }
     }
     if (picker) PlaylistPicker(item, snapshot.playlists, onAction, onDismiss = { picker = false })
@@ -271,6 +274,13 @@ internal fun savedActionLabel(item: MediaItem, saved: Boolean): TextKey = when {
     item.kind == MediaKind.EPISODE -> if (saved) TextKey.Unsave else TextKey.SaveForLater
     saved -> TextKey.Unfavorite
     else -> TextKey.Favorite
+}
+
+/** SF Symbol matching [savedIcon] for native iOS menus. */
+internal fun savedSymbol(item: MediaItem, saved: Boolean): String = when {
+    item.kind == MediaKind.EPISODE -> if (saved) "bookmark.slash" else "bookmark"
+    saved -> "heart.slash"
+    else -> "heart"
 }
 
 internal fun savedIcon(item: MediaItem, saved: Boolean): ImageVector = when {
@@ -308,7 +318,23 @@ internal fun PlaylistPicker(item: MediaItem, playlists: List<Playlist>, onAction
             onAction(MusicUiAction.AddToPlaylist(playlist.id, item, allowDuplicate = true)); onDismiss()
         }
     } else {
-        AlertDialog(
+        fun choose(playlist: Playlist) {
+            if (playlist.entries.any { it.mediaId == item.id }) duplicate = playlist
+            else { onAction(MusicUiAction.AddToPlaylist(playlist.id, item)); onDismiss() }
+        }
+        // iOS: a native action sheet listing the playlists, then "New playlist" and Cancel.
+        NativeAlert(
+            ios = AlertDialogIosProperties(
+                title = strings.text(TextKey.AddToPlaylist),
+                text = if (playlists.isEmpty()) strings.text(TextKey.NoPlaylists) else "",
+                style = AlertDialogIosStyle.ActionSheet,
+                actions = playlists.map { playlist ->
+                    AlertDialogIosAction(displayMetadata(playlist.name), AlertDialogIosActionStyle.Default, onClick = { choose(playlist) })
+                } + AlertDialogIosAction(strings.text(TextKey.NewPlaylist), AlertDialogIosActionStyle.Default, onClick = { creating = true }) +
+                    AlertDialogIosAction(strings.text(TextKey.Cancel), AlertDialogIosActionStyle.Cancel, onClick = onDismiss),
+            ),
+            onDismiss = onDismiss,
+        ) { AlertDialog(
             onDismissRequest = onDismiss,
             title = { Text(strings.text(TextKey.AddToPlaylist)) },
             text = {
@@ -316,10 +342,7 @@ internal fun PlaylistPicker(item: MediaItem, playlists: List<Playlist>, onAction
                     if (playlists.isEmpty()) Text(strings.text(TextKey.NoPlaylists), style = MaterialTheme.typography.bodyMedium)
                     LazyColumn(Modifier.heightIn(max = 320.dp).fillMaxWidth()) {
                         items(playlists, key = { it.id }) { playlist ->
-                            TextButton(onClick = {
-                                if (playlist.entries.any { it.mediaId == item.id }) duplicate = playlist
-                                else { onAction(MusicUiAction.AddToPlaylist(playlist.id, item)); onDismiss() }
-                            }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                            TextButton(onClick = { choose(playlist) }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
                                 MetadataText(playlist.name, Modifier.fillMaxWidth(), maxLines = 2, overflow = TextOverflow.Ellipsis)
                             }
                         }
@@ -328,6 +351,6 @@ internal fun PlaylistPicker(item: MediaItem, playlists: List<Playlist>, onAction
             },
             confirmButton = { Button(onClick = { creating = true }, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.NewPlaylist)) } },
             dismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.Cancel)) } },
-        )
+        ) }
     }
 }

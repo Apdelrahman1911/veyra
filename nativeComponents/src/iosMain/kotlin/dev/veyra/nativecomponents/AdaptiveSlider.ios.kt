@@ -18,6 +18,7 @@ import platform.Foundation.NSSelectorFromString
 import platform.UIKit.*
 import dev.veyra.nativecomponents.nativeControlContainer
 import dev.veyra.nativecomponents.nativeControlProperties
+import dev.veyra.nativecomponents.LocalNativeControlsCovered
 import platform.darwin.NSObject
 import kotlin.math.roundToInt
 
@@ -28,6 +29,7 @@ actual fun AdaptiveSlider(value: Float, onValueChange: (Float) -> Unit, modifier
     onValueChangeFinished: (() -> Unit)?, colors: SliderColors, interactionSource: MutableInteractionSource) {
     val layoutDirection = LocalLayoutDirection.current
     val dark = isDark(MaterialTheme.colorScheme.background)
+    val covered = LocalNativeControlsCovered.current
     val accessibility = LocalNativeControlAccessibility.current
     val callback = rememberUpdatedState(onValueChange)
     val finished = rememberUpdatedState(onValueChangeFinished)
@@ -49,6 +51,7 @@ actual fun AdaptiveSlider(value: Float, onValueChange: (Float) -> Unit, modifier
         }, fill = true) },
         modifier = modifier,
         update = { container ->
+            container.hidden = covered
             val it = container.subviews.first() as UISlider
             if (!it.tracking) it.value = ((value - valueRange.start) / (valueRange.endInclusive - valueRange.start)).coerceIn(0f, 1f)
             it.enabled = enabled

@@ -1,5 +1,11 @@
 package dev.veyra.app
 
+import androidx.compose.foundation.layout.ime
+import dev.veyra.nativecomponents.NativeBarButton
+import dev.veyra.nativecomponents.NativeTab
+import dev.veyra.nativecomponents.NativeTopBar
+import dev.veyra.ui.music.LocalPlayerSheetTop
+import dev.veyra.nativecomponents.NativeTabBar
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
@@ -197,19 +203,19 @@ fun VeyraApp(container: AppContainer, modifier: Modifier = Modifier) {
                                                 VeyraIconButton(VeyraIcons.Close, strings.text(TextKey.Close), { container.navigateBack() })
                                             }
                                             QueuePanel(snapshot, displayPlayer, navigation.viewedQueue, container::onMusicAction,
-                                                Modifier.weight(1f), screenOptions)
+                                                Modifier.weight(1f), screenOptions, bottomEdgeFree = true)
                                         }
                                     } else if (navigation.queueOpen) Column(Modifier.fillMaxSize()) {
                                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                                             VeyraIconButton(VeyraIcons.Close, strings.text(TextKey.Close), { container.navigateBack() })
                                         }
                                         QueuePanel(snapshot, displayPlayer, navigation.viewedQueue, container::onMusicAction,
-                                            Modifier.weight(1f), screenOptions)
+                                            Modifier.weight(1f), screenOptions, bottomEdgeFree = true)
                                     } else FullPlayer(snapshot, displayPlayer, container::onMusicAction, options = screenOptions)
                                 },
                             ) { _ ->
                                 Column(Modifier.fillMaxSize()) {
-                                    AppHeader(navigation.copy(playerOpen = false), settings.offlineOnly, container)
+                                    AppHeader(navigation.copy(playerOpen = false), navigation.headerTitle(snapshot, strings), settings.offlineOnly, container)
                                     if (mediaRuntime.phase != MediaRuntimePhase.READY &&
                                         (mediaRuntime.phase != MediaRuntimePhase.REQUIRED || navigation.destination == AppDestination.SETTINGS)) {
                                         MediaRuntimeIndicator(mediaRuntime, settings.offlineOnly, container::prepareMediaTools)
@@ -218,7 +224,7 @@ fun VeyraApp(container: AppContainer, modifier: Modifier = Modifier) {
                                         Box(Modifier.weight(1f).fillMaxHeight()) {
                                             when {
                                                 navigation.queueOpen && !sideQueue -> QueuePanel(snapshot, displayPlayer, navigation.viewedQueue,
-                                                    container::onMusicAction, options = screenOptions)
+                                                    container::onMusicAction, options = screenOptions, bottomEdgeFree = !displayPlayer.hasCurrent)
                                                 else -> {
                                                     val detail = navigation.detail
                                                     when (detail?.kind) {
@@ -287,18 +293,25 @@ private fun StartupFailure(failure: AppFailure, canRecover: Boolean, onRestore: 
         ErrorState(strings.errorFor(failure))
         if (canRecover) {
             Text(strings.text(TextKey.RecoveryBackupPrompt), style = MaterialTheme.typography.bodyMedium)
-            Button(onClick = { confirm = true }, modifier = Modifier.heightIn(min = 48.dp).testTag("recovery-restore")) {
+            ActionButton(strings.text(TextKey.RecoveryRestoreBackup), "arrow.counterclockwise", true, onClick = { confirm = true }, modifier = Modifier.heightIn(min = 48.dp).testTag("recovery-restore")) {
                 Text(strings.text(TextKey.RecoveryRestoreBackup))
             }
         }
     }
-    if (confirm) AlertDialog(
-        onDismissRequest = { confirm = false },
+    if (confirm) com.mohamedrejeb.calf.ui.dialog.AdaptiveAlertDialog(
+        onConfirm = { confirm = false; onRestore() },
+        onDismiss = { confirm = false },
+        confirmText = strings.text(TextKey.RecoveryRestoreBackup),
+        dismissText = strings.text(TextKey.Cancel),
+        title = strings.text(TextKey.RecoveryRestoreBackup),
+        text = strings.text(TextKey.RecoveryBackupPrompt),
         modifier = Modifier.testTag("recovery-confirm-dialog"),
-        title = { Text(strings.text(TextKey.RecoveryRestoreBackup)) },
-        text = { Text(strings.text(TextKey.RecoveryBackupPrompt), modifier = Modifier.verticalScroll(rememberScrollState())) },
-        confirmButton = { TextButton(onClick = { confirm = false; onRestore() }, modifier = Modifier.testTag("recovery-confirm")) { Text(strings.text(TextKey.RecoveryRestoreBackup)) } },
-        dismissButton = { TextButton(onClick = { confirm = false }, modifier = Modifier.testTag("recovery-cancel")) { Text(strings.text(TextKey.Cancel)) } },
+        materialTitle = { Text(strings.text(TextKey.RecoveryRestoreBackup)) },
+        materialText = { Text(strings.text(TextKey.RecoveryBackupPrompt), modifier = Modifier.verticalScroll(rememberScrollState())) },
+        materialConfirmButton = { TextButton(onClick = { confirm = false; onRestore() }, modifier = Modifier.testTag("recovery-confirm")) { Text(strings.text(TextKey.RecoveryRestoreBackup)) } },
+        materialDismissButton = { TextButton(onClick = { confirm = false }, modifier = Modifier.testTag("recovery-cancel")) { Text(strings.text(TextKey.Cancel)) } },
+        iosConfirmButtonStyle = com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosActionStyle.Destructive,
+        iosDismissButtonStyle = com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosActionStyle.Cancel,
     )
 }
 
@@ -351,8 +364,37 @@ private fun AppNavigationRail(selected: AppDestination, expanded: Boolean, short
     }
 }
 
+private fun AppDestination.symbol() = when (this) {
+    AppDestination.LISTEN -> "house"
+    AppDestination.SEARCH -> "magnifyingglass"
+    AppDestination.PODCASTS -> "mic"
+    AppDestination.LIBRARY -> "square.stack"
+    AppDestination.SETTINGS -> "gearshape"
+}
+
+private fun AppDestination.selectedSymbol() = when (this) {
+    AppDestination.SEARCH -> "magnifyingglass"
+    else -> symbol() + ".fill"
+}
+
 @Composable
 private fun AppBottomNavigation(selected: AppDestination, compactLabels: Boolean, select: (AppDestination) -> Unit) {
+    val strings = LocalStrings.current
+    // iOS: a real UITabBar. While the keyboard is up it stays at the bottom edge behind the keyboard,
+    // as in iOS apps, so the bottom chrome reserves no room for it above the keyboard.
+    val tabs = primaryDestinations.map { NativeTab(strings.text(it.label()), it.symbol(), it.selectedSymbol()) }
+    val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    NativeTabBar(
+        tabs = tabs,
+        selectedIndex = primaryDestinations.indexOf(selected),
+        onSelect = { index -> primaryDestinations.getOrNull(index)?.let(select) },
+        selectedColor = MaterialTheme.colorScheme.primary,
+        reserveSpace = !imeVisible,
+    ) { MaterialBottomNavigation(selected, compactLabels, select) }
+}
+
+@Composable
+private fun MaterialBottomNavigation(selected: AppDestination, compactLabels: Boolean, select: (AppDestination) -> Unit) {
     val strings = LocalStrings.current
     Surface(
         modifier = Modifier.fillMaxWidth().testTag("bottom-navigation"),
@@ -396,8 +438,51 @@ private fun NavigationLabel(destination: AppDestination) {
     Text(LocalStrings.current.text(destination.label()), Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
 }
 
+/**
+ * The header names what is on screen: the open playlist, show, episode, track or collection, else
+ * the destination. An item whose name is not known yet (or is blank) falls back to the destination.
+ */
+private fun AppNavigation.headerTitle(snapshot: AppSnapshot, strings: AppStrings): String {
+    val destinationTitle = strings.text(destination.label())
+    val detail = detail ?: return destinationTitle
+    val name = when (detail.kind) {
+        DetailKind.TRACK, DetailKind.EPISODE -> snapshot.media[detail.id]?.title
+        DetailKind.SHOW -> snapshot.shows[detail.id]?.title
+        DetailKind.PLAYLIST -> snapshot.playlists.firstOrNull { it.id == detail.id }?.name
+        DetailKind.COLLECTION -> detail.collection?.title
+        DetailKind.LICENSES -> strings.text(TextKey.Licenses)
+    }
+    return name?.takeIf { it.isNotBlank() } ?: destinationTitle
+}
+
 @Composable
-private fun AppHeader(navigation: AppNavigation, offline: Boolean, container: AppContainer) {
+private fun AppHeader(navigation: AppNavigation, title: String, offline: Boolean, container: AppContainer) {
+    val strings = LocalStrings.current
+    // iOS: a real UINavigationBar. UIKit draws it above Compose, so it steps aside as soon as the
+    // player sheet slides over its area, and comes back when the sheet leaves it.
+    val sheetTop = LocalPlayerSheetTop.current
+    val uncovered by remember(sheetTop) { derivedStateOf { sheetTop.value > 72.dp } }
+    val leading = if (navigation.canGoBack) listOf(NativeBarButton(strings.text(TextKey.Back), "chevron.backward") {
+        container.navigateBack()
+    }) else emptyList()
+    val trailing = buildList {
+        if (navigation.destination != AppDestination.SETTINGS) add(NativeBarButton(strings.text(TextKey.Settings), "gearshape") {
+            container.selectDestination(AppDestination.SETTINGS)
+        })
+        if (offline) add(NativeBarButton(strings.text(TextKey.Offline), "icloud.slash", enabled = false) {})
+    }
+    NativeTopBar(
+        title = title,
+        leading = leading,
+        trailing = trailing,
+        titleColor = MaterialTheme.colorScheme.onSurface,
+        tintColor = MaterialTheme.colorScheme.primary,
+        visible = uncovered,
+    ) { MaterialAppHeader(navigation, title, offline, container) }
+}
+
+@Composable
+private fun MaterialAppHeader(navigation: AppNavigation, title: String, offline: Boolean, container: AppContainer) {
     val strings = LocalStrings.current
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp).heightIn(min = 48.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -409,8 +494,7 @@ private fun AppHeader(navigation: AppNavigation, offline: Boolean, container: Ap
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
             if (!navigation.canGoBack) Text(strings.text(TextKey.HomeGreeting), style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(strings.text(navigation.destination.label()),
-                style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         if (offline) StatusBadge(strings.text(TextKey.Offline), icon = VeyraIcons.Download)
         if (navigation.destination != AppDestination.SETTINGS) VeyraIconButton(VeyraIcons.Settings, strings.text(TextKey.Settings),

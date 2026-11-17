@@ -20,6 +20,8 @@ data class CatalogUiState(
     val loading: Boolean = false,
     val loaded: Boolean = false,
     val failure: AppFailure? = null,
+    /** Bumped by Explore music so Home scrolls its Discover section into view. */
+    val revealRequest: Int = 0,
 )
 
 data class SearchUiState(
@@ -71,6 +73,10 @@ sealed interface MusicUiAction {
     data class Discover(val provider: SourceProvider) : MusicUiAction
     data object LoadMoreDiscovery : MusicUiAction
     data class OpenSearch(val kind: SearchKind = SearchKind.MUSIC) : MusicUiAction
+    /** Home's music discovery, loaded if it has not been yet. */
+    data object ExploreMusic : MusicUiAction
+    /** The Podcasts destination, where shows are followed and browsed. */
+    data object ExplorePodcasts : MusicUiAction
     data class OpenLibrary(val section: LibrarySection) : MusicUiAction
     data class OpenPlaylist(val playlistId: String) : MusicUiAction
     data class OpenCollection(val collection: MediaCollection) : MusicUiAction

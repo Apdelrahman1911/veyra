@@ -1,5 +1,8 @@
 package dev.veyra.ui.music
 
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.semantics.Role
+import com.mohamedrejeb.calf.ui.gesture.adaptiveClickable
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -19,6 +22,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
+import dev.veyra.ui.design.SegmentedTabs
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -51,7 +55,15 @@ fun ListenScreen(
         snapshot.history.asReversed().mapNotNull { snapshot.media[it.mediaId] }.distinctBy { it.id }.take(8)
     }
     val favorites = remember(snapshot.favoriteIds, snapshot.media) { snapshot.favoriteIds.mapNotNull { snapshot.media[it] }.take(8) }
-    LazyColumn(modifier.fillMaxSize().testTag("listen-screen"), contentPadding = PaddingValues(bottom = 24.dp),
+    val listState = rememberLazyListState()
+    // Explore music lands here: bring the Discover heading into view. Its index follows the
+    // items above it (header, continue card, shortcuts, playlists, recent, favorites).
+    val discoverIndex = 1 + (if (current != null) 1 else 0) + 1 + 2 +
+        (if (recent.isNotEmpty()) 2 else 0) + (if (favorites.isNotEmpty()) 2 else 0)
+    LaunchedEffect(discovery.revealRequest) {
+        if (discovery.revealRequest > 0) listState.animateScrollToItem(discoverIndex)
+    }
+    LazyColumn(modifier.fillMaxSize().testTag("listen-screen"), state = listState, contentPadding = PaddingValues(bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
             Column(Modifier.padding(horizontal = 24.dp, vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -62,7 +74,9 @@ fun ListenScreen(
         }
         if (current != null) item {
             Surface(Modifier.padding(horizontal = 24.dp).fillMaxWidth().testTag("home-open-player")
-                .clickable(onClickLabel = strings.text(TextKey.OpenPlayer)) { onAction(MusicUiAction.OpenPlayer) },
+                .adaptiveClickable(onClickLabel = strings.text(TextKey.OpenPlayer), role = Role.Button, shape = RoundedCornerShape(24.dp)) {
+                    onAction(MusicUiAction.OpenPlayer)
+                },
                 shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface,
                 border = BorderStroke(1.dp, LocalVeyraColors.current.outlineSubtle)) {
                 Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -82,10 +96,10 @@ fun ListenScreen(
         }
         item {
             Row(Modifier.padding(horizontal = 24.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedButton({ onAction(MusicUiAction.OpenLibrary(LibrarySection.FAVORITES)) }, Modifier.weight(1f).heightIn(min = 48.dp)) {
+                ActionButton(strings.text(TextKey.Favorites), "heart", false, { onAction(MusicUiAction.OpenLibrary(LibrarySection.FAVORITES)) }, Modifier.weight(1f).heightIn(min = 48.dp)) {
                     Icon(VeyraIcons.FavoriteBorder, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text(strings.text(TextKey.Favorites))
                 }
-                OutlinedButton({ onAction(MusicUiAction.OpenLibrary(LibrarySection.DOWNLOADS)) }, Modifier.weight(1f).heightIn(min = 48.dp)) {
+                ActionButton(strings.text(TextKey.Downloads), "arrow.down.circle", false, { onAction(MusicUiAction.OpenLibrary(LibrarySection.DOWNLOADS)) }, Modifier.weight(1f).heightIn(min = 48.dp)) {
                     Icon(VeyraIcons.Download, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text(strings.text(TextKey.Downloads))
                 }
             }
@@ -100,13 +114,13 @@ fun ListenScreen(
             item { SectionTitle(strings.text(TextKey.Favorites)) }
             item { ArtworkShelf(favorites, snapshot, options, onAction) }
         }
-        item { SectionTitle(strings.text(TextKey.DiscoverMusic), description = strings.text(TextKey.MadeForYourLibrary)) }
+        item(key = "discover-title") { Box(Modifier.testTag("discover-title")) { SectionTitle(strings.text(TextKey.DiscoverMusic), description = strings.text(TextKey.MadeForYourLibrary)) } }
         if (snapshot.settings.offlineOnly) {
             item { CollectionLink(strings.text(TextKey.Downloads), strings.text(TextKey.OfflineModeDescription), VeyraIcons.Download,
                 { onAction(MusicUiAction.OpenLibrary(LibrarySection.DOWNLOADS)) }, Modifier.padding(horizontal = 24.dp)) }
         } else {
             if (!discovery.loaded && !discovery.loading) item {
-                OutlinedButton({ onAction(MusicUiAction.Discover(discovery.provider)) },
+                ActionButton(strings.text(TextKey.DiscoverMusic), "arrow.clockwise", false, { onAction(MusicUiAction.Discover(discovery.provider)) },
                     Modifier.padding(horizontal = 24.dp).heightIn(min = 48.dp).testTag("discovery-load")) {
                     Icon(VeyraIcons.Refresh, null, Modifier.padding(end = 8.dp)); Text(strings.text(TextKey.DiscoverMusic))
                 }
@@ -158,10 +172,10 @@ fun ListenScreen(
 private fun ArtworkShelf(items: List<MediaItem>, snapshot: AppSnapshot, options: MusicUiOptions, onAction: (MusicUiAction) -> Unit) {
     LazyRow(contentPadding = PaddingValues(horizontal = 24.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
         items(items, key = { it.id }) { item ->
-            Surface(onClick = {
+            Surface(modifier = Modifier.width(152.dp).adaptiveClickable(role = Role.Button, shape = RoundedCornerShape(22.dp)) {
                 val binding = options.downloadSurface(snapshot).savedCatalogueBinding(item.id)
                 onAction(if (binding == null) MusicUiAction.Play(item) else MusicUiAction.PlaySaved(item, binding))
-            }, modifier = Modifier.width(152.dp).testTag("shelf-${item.id}"), shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.surface) {
+            }.testTag("shelf-${item.id}"), shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.surface) {
                 Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
                     Box {
                         Artwork(item.artworkUrl, item.title, Modifier.fillMaxWidth().aspectRatio(1f), snapshot.settings.offlineOnly, item.localArtworkPath)
@@ -208,11 +222,14 @@ fun SearchScreen(
             if (!latestState.loading && !latestState.searched) latestAction(MusicUiAction.RunSearch)
         }
     }
-    val local = remember(snapshot, state.query, state.kind, options.downloads) {
-        libraryMedia(snapshot, options.downloads).filter { matchesSearchKind(it, state.kind) && matchesMediaQuery(it, state.query) }
+    // "Your library" means everything you keep, whichever kind the online tabs last searched;
+    // only the online scope narrows local matches to music or podcasts.
+    val localKind = if (state.scope == SearchScope.LIBRARY) SearchKind.ALL else state.kind
+    val local = remember(snapshot, state.query, localKind, options.downloads) {
+        libraryMedia(snapshot, options.downloads).filter { matchesSearchKind(it, localKind) && matchesMediaQuery(it, state.query) }
     }
-    val localPlaylists = remember(snapshot.playlists, state.query, state.kind) {
-        if (state.kind == SearchKind.PODCASTS) emptyList() else snapshot.playlists.filter { mediaSearchKey(state.query.trim()) in mediaSearchKey(it.name) }
+    val localPlaylists = remember(snapshot.playlists, state.query, localKind) {
+        if (localKind == SearchKind.PODCASTS) emptyList() else snapshot.playlists.filter { mediaSearchKey(state.query.trim()) in mediaSearchKey(it.name) }
     }
     fun change(query: String = state.query, scope: SearchScope = state.scope, kind: SearchKind = state.kind, provider: SourceProvider = state.provider) {
         onAction(MusicUiAction.SearchChanged(query, scope, kind, provider))
@@ -237,15 +254,13 @@ fun SearchScreen(
                 ActionIcon(VeyraIcons.FilterList, strings.text(TextKey.SearchOptions), { filtersOpen = !filtersOpen },
                     Modifier.testTag("search-options"), isSelected = filtersOpen)
             }
-            FlowRow(Modifier.padding(horizontal = 24.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(state.scope == SearchScope.EVERYWHERE && state.kind != SearchKind.PODCASTS,
-                    { change(scope = SearchScope.EVERYWHERE, kind = SearchKind.MUSIC, provider = if (state.provider == SourceProvider.RSS) SourceProvider.YOUTUBE else state.provider) },
-                    { Text(strings.text(TextKey.Music)) }, modifier = Modifier.heightIn(min = 48.dp))
-                FilterChip(state.scope == SearchScope.EVERYWHERE && state.kind == SearchKind.PODCASTS,
-                    { change(scope = SearchScope.EVERYWHERE, kind = SearchKind.PODCASTS, provider = SourceProvider.RSS) },
-                    { Text(strings.text(TextKey.Podcasts)) }, modifier = Modifier.heightIn(min = 48.dp))
-                FilterChip(state.scope == SearchScope.LIBRARY, { change(scope = SearchScope.LIBRARY) },
-                    { Text(strings.text(TextKey.YourLibrary)) }, modifier = Modifier.heightIn(min = 48.dp))
+            SearchScopeTabs(state, Modifier.padding(horizontal = 24.dp, vertical = 8.dp)) { index ->
+                when (index) {
+                    0 -> change(scope = SearchScope.EVERYWHERE, kind = SearchKind.MUSIC,
+                        provider = if (state.provider == SourceProvider.RSS) SourceProvider.YOUTUBE else state.provider)
+                    1 -> change(scope = SearchScope.EVERYWHERE, kind = SearchKind.PODCASTS, provider = SourceProvider.RSS)
+                    else -> change(scope = SearchScope.LIBRARY, kind = SearchKind.ALL)
+                }
             }
             if (filtersOpen) Surface(Modifier.padding(horizontal = 24.dp).fillMaxWidth(), shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.surface) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -283,9 +298,9 @@ fun SearchScreen(
                 if (!state.loading && !state.searched && state.query.isBlank()) item {
                     Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         CollectionLink(strings.text(TextKey.ExploreMusic), strings.text(TextKey.MadeForYourLibrary), VeyraIcons.Music,
-                            { change(query = "", kind = SearchKind.MUSIC); filtersOpen = false; searchFocus.requestFocus() })
+                            { filtersOpen = false; onAction(MusicUiAction.ExploreMusic) }, Modifier.testTag("search-explore-music"))
                         CollectionLink(strings.text(TextKey.Podcasts), strings.text(TextKey.PodcastsSubtitle), VeyraIcons.Podcasts,
-                            { change(kind = SearchKind.PODCASTS, provider = SourceProvider.RSS); searchFocus.requestFocus() })
+                            { onAction(MusicUiAction.ExplorePodcasts) }, Modifier.testTag("search-explore-podcasts"))
                     }
                 }
                 if (state.page.nextPageToken != null) item {
@@ -299,11 +314,9 @@ fun SearchScreen(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun SourceChoices(selected: SourceProvider, onSelect: (SourceProvider) -> Unit, modifier: Modifier = Modifier) {
-    FlowRow(modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        listOf(SourceProvider.YOUTUBE, SourceProvider.COMMONS).forEach { provider ->
-            FilterChip(selected = selected == provider, onClick = { onSelect(provider) }, label = { Text(providerName(provider)) }, modifier = Modifier.heightIn(min = 48.dp).testTag("source-${provider.name}"))
-        }
-    }
+    val providers = listOf(SourceProvider.YOUTUBE, SourceProvider.COMMONS)
+    SegmentedTabs(providers.map { providerName(it) }, providers.indexOf(selected), { onSelect(providers[it]) }, modifier,
+        tags = providers.map { "source-${it.name}" })
 }
 
 private fun SourcePage.isEmpty(): Boolean = items.isEmpty() && shows.isEmpty() && collections.isEmpty()
@@ -340,4 +353,17 @@ private fun CollectionSearchRow(collection: MediaCollection, offlineOnly: Boolea
             Text(providerName(collection.source.provider), style = MaterialTheme.typography.labelSmall)
         }
     }
+}
+
+/** Music, Podcasts or Your library: one choice, so a segmented control rather than filter chips. */
+@Composable
+private fun SearchScopeTabs(state: SearchUiState, modifier: Modifier, onSelect: (Int) -> Unit) {
+    val strings = LocalStrings.current
+    val selected = when {
+        state.scope == SearchScope.LIBRARY -> 2
+        state.kind == SearchKind.PODCASTS -> 1
+        else -> 0
+    }
+    SegmentedTabs(listOf(strings.text(TextKey.Music), strings.text(TextKey.Podcasts), strings.text(TextKey.YourLibrary)),
+        selected, onSelect, modifier.testTag("search-scope"), tags = listOf("search-scope-music", "search-scope-podcasts", "search-scope-library"))
 }

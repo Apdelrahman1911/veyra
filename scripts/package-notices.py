@@ -27,6 +27,8 @@ ROOT = Path(__file__).resolve().parents[1]
 LEGAL = Path("composeApp/src/commonMain/composeResources/files/legal")
 GPL_SHA256 = "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
 MIT_SHA256 = "2b48ffd17a0263667e7df9b64b277520776571b1ce73365134b7e92a6d114bcb"
+# Complete Apache-2.0 text retained by the pinned nativeCmpkit (Calf successor) checkout.
+APACHE_SHA256 = "188187b988999fc9f6ecdae6ba6e49e4f53f0488ec5af68acbfff3b2cf0c8722"
 MAX_DOCUMENT = 4 * 1024 * 1024
 MAX_NOTICES = 128 * 1024 * 1024
 MAX_ARTIFACT = 1024 * 1024 * 1024
@@ -164,7 +166,23 @@ def source_notices(root: Path, test_worktree: Path | None = None) -> tuple[dict[
             raise NoticeError("Oversized committed source notice")
         if git(upstream, "show", object_name) != files[name]:
             raise NoticeError("kmpYT notice is not the exact committed file: " + upstream_name)
-    source = {"kmpytPin": pin, "kmpytNoticeRevision": revision,
+    # nativeCmpkit UI sources are compiled from their own pinned submodule; bundle its exact grant.
+    kit_pin = read_bounded(owned(root, root / "gradle/nativecmpkit.commit"), 128).decode("utf-8").strip()
+    if not re.fullmatch(r"[a-f0-9]{40}", kit_pin):
+        raise NoticeError("Full immutable nativeCmpkit pin required")
+    kit = owned(root, root / "third_party/nativeCmpkit")
+    kit_revision = git(kit, "rev-parse", "HEAD").decode("ascii").strip()
+    if kit_revision != kit_pin:
+        raise NoticeError("Actual nativeCmpkit checkout differs from gradle/nativecmpkit.commit")
+    kit_license = owned(root, kit / "LICENSE")
+    if not kit_license.is_file() or kit_license.stat().st_size > MAX_DOCUMENT:
+        raise NoticeError("Complete source notice missing: nativeCmpkit-LICENSE")
+    files["nativeCmpkit-LICENSE"] = read_bounded(kit_license)
+    if digest(files["nativeCmpkit-LICENSE"]) != APACHE_SHA256:
+        raise NoticeError("nativeCmpkit Apache-2.0 text differs from the complete reviewed license")
+    if git(kit, "show", kit_revision + ":LICENSE") != files["nativeCmpkit-LICENSE"]:
+        raise NoticeError("nativeCmpkit notice is not the exact committed file: LICENSE")
+    source = {"kmpytPin": pin, "kmpytNoticeRevision": revision, "nativecmpkitPin": kit_pin,
               "mode": "test-only-license-worktree" if test_worktree else "actual-pinned-checkout",
               "publicationVerified": False}
     return files, source
@@ -956,6 +974,7 @@ def generate(root: Path, inventory_paths: list[Path], test_worktree: Path | None
         "NOTICE.md — unmodified root software/source notice.\n"
         "kmpYT-LICENSE — complete reviewed MIT text from the recorded upstream revision.\n"
         "kmpYT-THIRD_PARTY_NOTICES.md — unmodified pinned upstream audit/fixture notice.\n"
+        "nativeCmpkit-LICENSE — complete Apache-2.0 text from the pinned nativeCmpkit revision.\n"
         "THIRD_PARTY_NOTICES.txt — retained asset/dependency texts and explicit open coverage issues.\n"
         "index.json — exact hashes, production coordinates, provenance and nonclaims.\n\n"
         "Binary redistribution readiness is NOT established by this generator.\n").encode("utf-8")

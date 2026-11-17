@@ -1,5 +1,15 @@
 package dev.veyra.ui.music
 
+import com.mohamedrejeb.calf.ui.gesture.adaptiveClickable
+import dev.veyra.ui.design.ActionButton
+import androidx.compose.foundation.layout.ColumnScope
+import com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosAction
+import com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosActionStyle
+import com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosProperties
+import com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosTextField
+import dev.veyra.nativecomponents.NativeAlert
+import dev.veyra.nativecomponents.NativeSheet
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -80,7 +90,23 @@ internal fun PlaylistNameDialog(initialName: String = "", onDismiss: () -> Unit,
     val valid = validatedPlaylistName(field.text)
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
-    AlertDialog(
+    // iOS: a native alert with a UITextField. The name it holds is read when Save is tapped.
+    var nativeName by remember(start) { mutableStateOf(start) }
+    val nativeValid = validatedPlaylistName(nativeName)
+    NativeAlert(
+        ios = AlertDialogIosProperties(
+            title = strings.text(if (creating) TextKey.NewPlaylist else TextKey.RenamePlaylist),
+            actions = listOf(
+                AlertDialogIosAction(strings.text(TextKey.Cancel), AlertDialogIosActionStyle.Cancel, onClick = onDismiss),
+                AlertDialogIosAction(strings.text(if (creating) TextKey.Create else TextKey.Rename), AlertDialogIosActionStyle.Default,
+                    onClick = { validatedPlaylistName(nativeName)?.let(onSave) ?: onDismiss() },
+                    isPreferred = true, enabled = nativeValid != null),
+            ),
+            textFields = listOf(AlertDialogIosTextField(placeholder = strings.text(TextKey.PlaylistName), initialValue = start,
+                onValueChange = { nativeName = it })),
+        ),
+        onDismiss = onDismiss,
+    ) { AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(strings.text(if (creating) TextKey.NewPlaylist else TextKey.RenamePlaylist)) },
         text = {
@@ -96,7 +122,7 @@ internal fun PlaylistNameDialog(initialName: String = "", onDismiss: () -> Unit,
             }
         },
         dismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.Cancel)) } },
-    )
+    ) }
 }
 
 /** Songs the user can add to a playlist: the library's music, favourites first, then by title. */
@@ -119,10 +145,7 @@ internal fun AddSongsDialog(snapshot: AppSnapshot, playlist: Playlist, onAction:
     val present = remember(playlist) { playlist.entries.mapTo(mutableSetOf()) { it.mediaId } }
     val candidates = remember(snapshot.media, snapshot.favoriteIds) { playlistCandidates(snapshot) }
     val shown = candidates.filter { matchesMediaQuery(it, query) }
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(Modifier.widthIn(max = 560.dp).fillMaxWidth().padding(16.dp).heightIn(max = 720.dp).testTag("add-songs"),
-            shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
-            Column(Modifier.padding(vertical = 16.dp)) {
+    val body: @Composable ColumnScope.() -> Unit = {
                 Text(strings.text(TextKey.AddSongs), Modifier.padding(horizontal = 24.dp).semantics { heading() },
                     style = MaterialTheme.typography.titleLarge)
                 MetadataText(playlist.name, Modifier.padding(horizontal = 24.dp, vertical = 2.dp), style = MaterialTheme.typography.bodyMedium,
@@ -159,7 +182,7 @@ internal fun AddSongsDialog(snapshot: AppSnapshot, playlist: Playlist, onAction:
                     TextButton({ onDismiss(); onFindMusic() }, Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.FindMusic)) }
                     Box(Modifier.weight(1f))
                     TextButton(onDismiss, Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.Cancel)) }
-                    Button({
+                    ActionButton(strings.format(TextKey.AddSelectedSongs, strings.number(selected.size.toLong())), "plus", true, {
                         val items = candidates.filter { it.id in selected }
                         if (items.isNotEmpty()) onAction(MusicUiAction.AddAllToPlaylist(playlist.id, items))
                         onDismiss()
@@ -167,8 +190,17 @@ internal fun AddSongsDialog(snapshot: AppSnapshot, playlist: Playlist, onAction:
                         Text(strings.format(TextKey.AddSelectedSongs, strings.number(selected.size.toLong())))
                     }
                 }
+    }
+    // iOS: a native page sheet (grabber, detents, swipe to dismiss). Elsewhere: the Compose dialog.
+    NativeSheet(onDismiss = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainerHigh, material = {
+        Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            Surface(Modifier.widthIn(max = 560.dp).fillMaxWidth().padding(16.dp).heightIn(max = 720.dp).testTag("add-songs"),
+                shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+                Column(Modifier.padding(vertical = 16.dp), content = body)
             }
         }
+    }) {
+        Column(Modifier.fillMaxWidth().padding(top = 24.dp, bottom = 16.dp).testTag("add-songs"), content = body)
     }
 }
 
@@ -193,7 +225,7 @@ internal fun PlaylistShelf(snapshot: AppSnapshot, onAction: (MusicUiAction) -> U
         contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 24.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         item(key = "new") {
-            Column(Modifier.widthIn(max = 120.dp).clickable(role = Role.Button) { create = true }.testTag("home-new-playlist"),
+            Column(Modifier.widthIn(max = 120.dp).adaptiveClickable(role = Role.Button, shape = RoundedCornerShape(16.dp)) { create = true }.testTag("home-new-playlist"),
                 verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Box(Modifier.size(120.dp).background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(16.dp)),
                     contentAlignment = Alignment.Center) {
@@ -203,7 +235,7 @@ internal fun PlaylistShelf(snapshot: AppSnapshot, onAction: (MusicUiAction) -> U
             }
         }
         items(playlists, key = { it.id }) { playlist ->
-            Column(Modifier.widthIn(max = 120.dp).clickable(role = Role.Button) { onAction(MusicUiAction.OpenPlaylist(playlist.id)) }
+            Column(Modifier.widthIn(max = 120.dp).adaptiveClickable(role = Role.Button, shape = RoundedCornerShape(16.dp)) { onAction(MusicUiAction.OpenPlaylist(playlist.id)) }
                 .testTag("home-playlist-${playlist.id}"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 PlaylistCover(playlist, snapshot, Modifier.size(120.dp))
                 MetadataText(playlist.name, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
