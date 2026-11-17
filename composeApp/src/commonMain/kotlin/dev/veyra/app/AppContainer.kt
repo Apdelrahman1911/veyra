@@ -133,6 +133,10 @@ class AppContainer(
     )
     val downloads = DownloadCoordinator(store, files, resolver, executionGateway, platform.validator,
         platform.engine.capabilities, scope, platform.downloadExecution, clock,
+        // Work, network and settings changes wake the scheduler at once; this poll is only the
+        // fallback for timed retries and foreign lease expiry. Each pass reads the whole library,
+        // so a one-second poll kept the CPU busy (and the phone warm) with nothing to do.
+        pollingMs = 15_000,
         beforePhysicalDelete = { asset -> playback.releaseForAssetRemoval(asset.mediaId).getOrThrow() },
         networkState = platform.downloadNetworkState,
         acquisitionDependencies = acquisitionDependencies)
@@ -417,6 +421,8 @@ class AppContainer(
         if (action is MusicUiAction.Download || action is MusicUiAction.DownloadCollection ||
             action is MusicUiAction.ResumeDownload) {
             if (rejectUncoveredDownloadIntent()) return
+            // Resolving the first result takes a network round trip; acknowledge the tap at once.
+            if (action is MusicUiAction.Download) inform(TextKey.DownloadPreparing)
         }
         submit { handleMusic(action) }
     }
@@ -424,6 +430,7 @@ class AppContainer(
     fun onPodcastAction(action: PodcastAction) {
         if (action is PodcastAction.Download || action is PodcastAction.ResumeDownload) {
             if (rejectUncoveredDownloadIntent()) return
+            if (action is PodcastAction.Download) inform(TextKey.DownloadPreparing)
         }
         submit { handlePodcast(action) }
     }
@@ -958,7 +965,9 @@ class AppContainer(
                 store.undoCatalogLibrary(undo)
                 undoLibrary.value = null
             }
-            is MusicUiAction.Download -> download(action.item)
+            is MusicUiAction.Download -> download(action.item).let { started ->
+                effects.launch { if (started.await()) inform(TextKey.DownloadStarted) }
+            }
             is MusicUiAction.DownloadCollection -> {
                 val pending = action.items.distinctBy { it.id }.map(::download)
                 effects.launch { if (pending.isNotEmpty() && pending.awaitAll().all { it }) inform(TextKey.DownloadsQueued) }
@@ -1068,7 +1077,9 @@ class AppContainer(
             is PodcastAction.PlayNext -> command(PlaybackCommand.Enqueue(QueueContext.PODCAST, listOf(episode(action.mediaId)), EnqueuePosition.NEXT))
             is PodcastAction.AddToEnd -> command(PlaybackCommand.Enqueue(QueueContext.PODCAST, listOf(episode(action.mediaId))))
             PodcastAction.OpenQueue -> navigate { it.copy(queueOpen = true, viewedQueue = QueueContext.PODCAST) }
-            is PodcastAction.Download -> download(episode(action.mediaId))
+            is PodcastAction.Download -> download(episode(action.mediaId)).let { started ->
+                effects.launch { if (started.await()) inform(TextKey.DownloadStarted) }
+            }
             is PodcastAction.PauseDownload -> downloadEffect { downloads.pause(action.downloadId) }
             is PodcastAction.ResumeDownload -> downloadEffect(requiresCoverage = true) { resumeDownload(action.downloadId) }
             is PodcastAction.CancelDownload -> downloadEffect { downloads.cancel(action.downloadId) }

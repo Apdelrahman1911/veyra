@@ -1479,11 +1479,18 @@ internal class DownloadPhysicalRuntime(
                     var lastProgress: Long? = null
                     diagnosticStage = DownloadDiagnosticStage.SOURCE_TRANSFER
                     val result = prepared.transfer(part.toString()) { progress ->
-                        ensureRun(run, network = true)
+                        val now = clock.monotonicMs()
+                        // A restarted transport (fewer bytes than saved) is recorded at once.
+                        val due = lastProgress == null || now - lastProgress!! >= PROGRESS_CHECKPOINT_MS ||
+                            progress.bytesDownloaded == progress.totalBytes || progress.bytesDownloaded < run.current.job.bytesDownloaded
+                        // Sources report every received buffer (a few KiB). The full check reads the
+                        // whole library for the global parallelism limit, so it runs with each
+                        // checkpoint; per buffer only the in-memory ownership gates run. Reading the
+                        // database per buffer held transfers to one buffer per read and kept a core busy.
+                        if (due) ensureRun(run, network = true) else ensureRunOwnership(run, network = true)
                         if (progress.bytesDownloaded < 0 || progress.totalBytes?.let { it < progress.bytesDownloaded } == true)
                             fail(FailureCode.CORRUPT_MEDIA, "invalid_transfer_count")
-                        val now = clock.monotonicMs()
-                        if (lastProgress == null || now - lastProgress!! >= 500 || progress.bytesDownloaded == progress.totalBytes) {
+                        if (due) {
                             checkpoint(run, progress.bytesDownloaded, progress.totalBytes)
                             lastProgress = now
                         }
@@ -1856,6 +1863,13 @@ internal class DownloadPhysicalRuntime(
             throw CancellationException("Download transfer slot retired by parallelism policy")
     }
 
+    /** [ensureRun] without its database read: cancellation, host state and ownership epoch only. */
+    private suspend fun ensureRunOwnership(run: DownloadPhysicalRun, network: Boolean) {
+        currentCoroutineContext().ensureActive()
+        ensureHost(run.hostGeneration, network)
+        if (epochs.isRevoked(run.epoch)) throw CancellationException("Download physical ownership revoked")
+    }
+
     private fun ensureHost(generation: Long, network: Boolean) {
         val state = host.state()
         state.failure?.let { throw VeyraException(it) }
@@ -2002,6 +2016,8 @@ internal class DownloadPhysicalRuntime(
     private fun fail(code: FailureCode, detail: String): Nothing = throw VeyraException(AppFailure(code, detail))
     private companion object {
         const val LOCAL_RECHECK_MS = 5_000L
+        /** Each progress checkpoint is a whole-library Room transaction; keep it well under the lease. */
+        const val PROGRESS_CHECKPOINT_MS = 1_500L
         /** Bounded real handoff allowance for a scheduler-owned removal; never an unbounded wait. */
         const val REMOVAL_OWNER_GRACE_MS = 5_000L
         val RETRYABLE = setOf(FailureCode.NETWORK_UNAVAILABLE, FailureCode.RATE_LIMITED)

@@ -91,6 +91,7 @@ fun VeyraApp(container: AppContainer, modifier: Modifier = Modifier) {
         VeyraTheme(dark, language) {
             val strings = LocalStrings.current
             val snackbar = remember { SnackbarHostState() }
+            var snackbarChrome by remember { mutableStateOf(0.dp to false) }
             val latestNotice = notice
             LaunchedEffect(latestNotice?.id, language) {
                 latestNotice?.let { message ->
@@ -194,6 +195,7 @@ fun VeyraApp(container: AppContainer, modifier: Modifier = Modifier) {
                                         density.fontScale >= 1.5f || windowWidth < 360.dp, container::selectDestination)
                                     else if (displayPlayer.hasCurrent) Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.chromeBottom))
                                 },
+                                onChromeChange = { bottom, open -> snackbarChrome = bottom to open },
                                 expandedPlayer = {
                                     if (navigation.queueOpen && sideQueue) Row(Modifier.fillMaxSize()) {
                                         FullPlayer(snapshot, displayPlayer, container::onMusicAction,
@@ -279,7 +281,13 @@ fun VeyraApp(container: AppContainer, modifier: Modifier = Modifier) {
                             }
                         }
                     }
-                    SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(12.dp).widthIn(max = 640.dp))
+                    // Above the mini player and tab bar (native tab bars draw over Compose); with the full
+                    // player open, at the top so it never covers the transport.
+                    val (chromeBottom, playerOpen) = snackbarChrome
+                    SnackbarHost(snackbar, if (playerOpen) Modifier.align(Alignment.TopCenter)
+                        .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top)).padding(12.dp).widthIn(max = 640.dp)
+                        else Modifier.align(Alignment.BottomCenter).padding(start = 12.dp, end = 12.dp, bottom = chromeBottom + 8.dp)
+                        .widthIn(max = 640.dp))
                 }
             }
         }

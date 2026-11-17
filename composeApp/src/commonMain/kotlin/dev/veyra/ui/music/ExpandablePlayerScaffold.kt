@@ -64,6 +64,7 @@ internal fun ExpandablePlayerScaffold(
     compactPlayer: @Composable () -> Unit,
     bottomBar: @Composable () -> Unit,
     expandedPlayer: @Composable () -> Unit,
+    onChromeChange: (bottom: Dp, playerOpen: Boolean) -> Unit = { _, _ -> },
     content: @Composable (PaddingValues) -> Unit,
 ) {
     val density = LocalDensity.current
@@ -94,6 +95,9 @@ internal fun ExpandablePlayerScaffold(
         }
         val showExpanded by remember(progress) { derivedStateOf { progress.value > .01f } }
         val showCompact by remember(progress) { derivedStateOf { progress.value < .34f } }
+        // Transient messages sit above the floating chrome, or clear of the full player's transport.
+        val chromeChanged by rememberUpdatedState(onChromeChange)
+        LaunchedEffect(peek, showExpanded) { chromeChanged(peek, showExpanded) }
         // Material3 recomputes the sheet's anchors only when the sheet node is remeasured, and a new
         // peek height alone does not remeasure it. The first layout uses a fallback peek until the
         // compact content is measured (and the peek changes again with the keyboard, font scale or

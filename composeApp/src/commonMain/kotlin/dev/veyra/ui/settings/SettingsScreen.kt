@@ -1,6 +1,5 @@
 package dev.veyra.ui.settings
 
-import androidx.compose.foundation.BorderStroke
 import dev.veyra.ui.design.bottomChrome
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -10,6 +9,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
+import androidx.compose.foundation.indication
+import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -33,9 +34,7 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import com.mohamedrejeb.calf.ui.slider.AdaptiveSlider
 import androidx.compose.material3.Surface
@@ -98,7 +97,7 @@ fun SettingsScreen(
             modifier = Modifier.widthIn(max = 880.dp).fillMaxSize().testTag("settings-list"),
             contentPadding = PaddingValues(start = VeyraSpacing.Large, end = VeyraSpacing.Large, top = VeyraSpacing.Section,
                 bottom = bottomChrome(VeyraSpacing.Section)),
-            verticalArrangement = Arrangement.spacedBy(VeyraSpacing.Section),
+            verticalArrangement = Arrangement.spacedBy(VeyraSpacing.Large),
         ) {
             item("title") {
                 ScreenIntro(strings.text(TextKey.Settings), strings.text(TextKey.SettingsSubtitle))
@@ -229,21 +228,18 @@ fun SettingsScreen(
 private fun SettingsSection(titleKey: TextKey, icon: ImageVector, content: @Composable ColumnScope.() -> Unit) {
     val strings = LocalStrings.current
     val title = strings.text(titleKey)
-    // Always open: every setting is one tap away, with the group title as a heading above its card.
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(Modifier.padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Box(Modifier.size(30.dp).background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
-                contentAlignment = Alignment.Center) {
-                Icon(icon, null, Modifier.size(17.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
-            }
+    // A grouped list: a small tinted heading above one quiet card of compact rows.
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Icon(icon, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
             Text(title, Modifier.weight(1f).testTag("settings-section-${titleKey.name}").semantics { heading() },
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-                color = MaterialTheme.colorScheme.onSurface)
+                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                color = MaterialTheme.colorScheme.primary)
         }
         Surface(modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surface,
-            shape = RoundedCornerShape(22.dp)) {
-            Column(Modifier.padding(horizontal = 18.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            shape = RoundedCornerShape(18.dp)) {
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 content()
             }
         }
@@ -258,7 +254,7 @@ private fun SettingsNote(text: String) {
 
 @Composable
 private fun SettingsDivider() {
-    HorizontalDivider(color = LocalVeyraColors.current.outlineSubtle.copy(alpha = .6f))
+    HorizontalDivider(color = LocalVeyraColors.current.outlineSubtle.copy(alpha = .5f))
 }
 
 /** A row that opens another screen: icon, title, optional detail and a trailing chevron. */
@@ -269,35 +265,38 @@ private fun SettingsLinkRow(title: String, icon: ImageVector, onClick: () -> Uni
     val focused by interactions.collectIsFocusedAsState()
     val shape = RoundedCornerShape(VeyraRadii.Small)
     Row(
-        modifier.fillMaxWidth().sizeIn(minHeight = 56.dp)
+        modifier.fillMaxWidth().sizeIn(minHeight = VeyraSpacing.TouchTarget)
             .then(if (focused) Modifier.border(2.dp, LocalVeyraColors.current.primary, shape) else Modifier)
             .clip(shape)
             .clickable(interactionSource = interactions, indication = LocalIndication.current, role = Role.Button, onClick = onClick)
-            .padding(vertical = 6.dp),
+            .padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Icon(icon, null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.primary)
+        Icon(icon, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium))
+            Text(title, style = MaterialTheme.typography.bodyLarge)
             detail?.invoke()
         }
-        Icon(VeyraIcons.ChevronForward, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Icon(VeyraIcons.ChevronForward, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ChoiceGroup(title: String, content: @Composable () -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(VeyraSpacing.Small)) {
-        Text(title, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
+    Column {
+        Text(title, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.semantics { heading() })
+        // The chips draw 34dp tall inside full 48dp touch targets, so rows stay tight.
         FlowRow(modifier = Modifier.fillMaxWidth().selectableGroup(),
-            horizontalArrangement = Arrangement.spacedBy(VeyraSpacing.Small),
-            verticalArrangement = Arrangement.spacedBy(VeyraSpacing.Small)) { content() }
+            horizontalArrangement = Arrangement.spacedBy(6.dp)) { content() }
     }
 }
 
-/** Wrapping, minimum-48dp pills; the chosen one is filled and checked. Keyboard focus adds a ring. */
+/**
+ * A compact chip: it draws 34dp tall but takes taps across a full 48dp target. The chosen one is
+ * filled and checked; keyboard focus adds a ring.
+ */
 @Composable
 private fun SettingsButton(label: String, onClick: () -> Unit, selected: Boolean? = null, enabled: Boolean = true,
     modifier: Modifier = Modifier) {
@@ -305,24 +304,29 @@ private fun SettingsButton(label: String, onClick: () -> Unit, selected: Boolean
     val focused by interactions.collectIsFocusedAsState()
     val colors = LocalVeyraColors.current
     val chosen = selected == true
-    OutlinedButton(
-        onClick = onClick, enabled = enabled, interactionSource = interactions,
-        // Reserve space for a separate focus ring so focusing an already-selected choice is
-        // distinguishable, without moving controls or reducing the inner 48dp target.
-        modifier = modifier.then(if (focused) Modifier.border(2.dp, colors.primary, CircleShape) else Modifier)
-            .padding(VeyraSpacing.Tiny)
-            .sizeIn(minWidth = VeyraSpacing.TouchTarget, minHeight = VeyraSpacing.TouchTarget)
+    val shape = CircleShape
+    Box(
+        modifier.sizeIn(minWidth = VeyraSpacing.TouchTarget, minHeight = VeyraSpacing.TouchTarget)
+            .clickable(interactionSource = interactions, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
             .semantics { if (selected != null) this.selected = selected },
-        border = if (chosen) null else BorderStroke(1.dp, colors.outline),
-        shape = CircleShape,
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-        colors = ButtonDefaults.outlinedButtonColors(
-            containerColor = if (chosen) colors.primary else MaterialTheme.colorScheme.surfaceContainerLow,
-            contentColor = if (chosen) MaterialTheme.colorScheme.onPrimary else colors.onSurface,
-        ),
+        contentAlignment = Alignment.Center,
     ) {
-        if (chosen) Icon(VeyraIcons.Check, null, Modifier.padding(end = 6.dp).size(16.dp))
-        Text(label, style = MaterialTheme.typography.labelLarge)
+        Row(
+            Modifier.sizeIn(minHeight = 34.dp)
+                .then(if (focused) Modifier.border(2.dp, colors.primary, shape) else Modifier)
+                .clip(shape)
+                .background(if (chosen) colors.primary else MaterialTheme.colorScheme.surfaceContainerLow)
+                .then(if (chosen) Modifier else Modifier.border(1.dp, colors.outlineSubtle, shape))
+                .indication(interactions, LocalIndication.current)
+                .alpha(if (enabled) 1f else .38f)
+                .padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (chosen) Icon(VeyraIcons.Check, null, Modifier.padding(end = 4.dp).size(14.dp),
+                tint = MaterialTheme.colorScheme.onPrimary)
+            Text(label, style = MaterialTheme.typography.labelLarge,
+                color = if (chosen) MaterialTheme.colorScheme.onPrimary else colors.onSurface)
+        }
     }
 }
 
@@ -339,14 +343,16 @@ private fun ToggleSetting(title: String, description: String, checked: Boolean, 
             .toggleable(value = checked, enabled = enabled, role = Role.Switch, interactionSource = interactions,
                 indication = LocalIndication.current, onValueChange = onChange)
             .semantics(mergeDescendants = true) { stateDescription = strings.text(if (checked) TextKey.SettingOn else TextKey.SettingOff) }
-            .padding(VeyraSpacing.Small),
+            .padding(vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(VeyraSpacing.Medium), verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(VeyraSpacing.Tiny)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
             Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        AdaptiveSwitch(checked = checked, onCheckedChange = null, enabled = enabled,
+        // On iOS the switch is a native UISwitch drawn above Compose that takes its own taps, so it
+        // must report them itself; the row stays toggleable for the rest of its area.
+        AdaptiveSwitch(checked = checked, onCheckedChange = if (enabled) onChange else null, enabled = enabled,
             modifier = Modifier.sizeIn(minWidth = VeyraSpacing.TouchTarget, minHeight = VeyraSpacing.TouchTarget).clearAndSetSemantics { })
     }
 }

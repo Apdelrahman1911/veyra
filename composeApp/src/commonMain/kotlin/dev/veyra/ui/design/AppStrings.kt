@@ -375,6 +375,8 @@ enum class TextKey(internal val english: String, internal val arabic: String) {
     Download("Download", "تنزيل"),
     NotDownloaded("Not downloaded", "غير منزّل"),
     DownloadQueued("Queued for download", "في انتظار التنزيل"),
+    DownloadPreparing("Preparing download…", "جارٍ تجهيز التنزيل…"),
+    DownloadStarted("Download started. Follow it in Library › Downloads.", "بدأ التنزيل. تابعه في المكتبة › التنزيلات."),
     DownloadsQueued("Downloads queued", "التنزيلات في قائمة الانتظار"),
     DownloadResolving("Preparing download…", "جارٍ تجهيز التنزيل…"),
     Downloading("Downloading…", "جارٍ التنزيل…"),
