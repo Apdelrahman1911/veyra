@@ -1834,23 +1834,27 @@ class PlaybackController(
                     require(command.items.isNotEmpty() && command.startIndex in command.items.indices &&
                         command.items.all { contextFor(it) == command.context })
                     require(!command.startFromBeginning || command.context == QueueContext.PODCAST)
-                    val before = read()
                     val mode = PlaybackControlsMode.valueOf(command.context.name)
-                    val prepared = catalogueAdmission(command.items, mode, before)
-                    admit(PlaybackCommand.AdmitAcquisition(prepared, command.context,
-                        before.acquisition.queues.getValue(command.context).editRevision, QueueAdmissionOperation.REPLACE,
-                        activate = true, startOccurrenceId = prepared.occurrences[command.startIndex].id,
-                        startFromBeginning = command.startFromBeginning),
-                        command.shuffle ?: before.acquisition.queues.getValue(command.context).shuffle)
+                    retryingStaleCatalogue {
+                        val before = read()
+                        val prepared = catalogueAdmission(command.items, mode, before)
+                        admit(PlaybackCommand.AdmitAcquisition(prepared, command.context,
+                            before.acquisition.queues.getValue(command.context).editRevision, QueueAdmissionOperation.REPLACE,
+                            activate = true, startOccurrenceId = prepared.occurrences[command.startIndex].id,
+                            startFromBeginning = command.startFromBeginning),
+                            command.shuffle ?: before.acquisition.queues.getValue(command.context).shuffle)
+                    }
                 }
                 is PlaybackCommand.Enqueue -> {
                     require(command.items.all { contextFor(it) == command.context })
                     if (command.items.isEmpty()) return true
-                    val before = read()
-                    val prepared = catalogueAdmission(command.items, PlaybackControlsMode.valueOf(command.context.name), before)
-                    admit(PlaybackCommand.AdmitAcquisition(prepared, command.context,
-                        before.acquisition.queues.getValue(command.context).editRevision,
-                        if (command.position == EnqueuePosition.NEXT) QueueAdmissionOperation.INSERT_NEXT else QueueAdmissionOperation.APPEND))
+                    retryingStaleCatalogue {
+                        val before = read()
+                        val prepared = catalogueAdmission(command.items, PlaybackControlsMode.valueOf(command.context.name), before)
+                        admit(PlaybackCommand.AdmitAcquisition(prepared, command.context,
+                            before.acquisition.queues.getValue(command.context).editRevision,
+                            if (command.position == EnqueuePosition.NEXT) QueueAdmissionOperation.INSERT_NEXT else QueueAdmissionOperation.APPEND))
+                    }
                 }
                 is PlaybackCommand.PlayEntry -> {
                     val before = read()

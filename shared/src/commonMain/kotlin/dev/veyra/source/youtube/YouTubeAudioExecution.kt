@@ -147,7 +147,9 @@ internal class YouTubeAudioExecution(
                 val endpoint = resource.endpoints.singleOrNull { it.role == TrackRole.AUDIO }
                     ?: youtubeFailure(FailureCode.PARSE_FAILURE, "YOUTUBE_AUDIO_ENDPOINT_MISSING")
                 object : PlaybackResource {
-                    override val localEndpoint = EphemeralPlaybackEndpoint(endpoint.url)
+                    // The same exact object as VOD HLS when kmpYT indexed it as fragmented MP4:
+                    // AVPlayer otherwise reads every fragment before it starts playing.
+                    override val localEndpoint = EphemeralPlaybackEndpoint(endpoint.hlsPlaylistUrl ?: endpoint.url)
                     override val failure get() = resource.failureCode?.let(::youtubePlaybackFailure)
                     override suspend fun close() {
                         try { resource.close() } catch (failure: Exception) { failure.asYouTubeFailure() }

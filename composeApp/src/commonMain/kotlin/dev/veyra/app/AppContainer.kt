@@ -642,6 +642,28 @@ class AppContainer(
      * still be ready. A fresh Play/R2 is never substituted; stale readiness fails closed.
      */
     private suspend fun playSaved(item: MediaItem, bindingIdValue: String) {
+        // The saved view is a snapshot; an unrelated library write (artwork caching, for example)
+        // between reading it and the admission CAS makes it stale without making the request
+        // wrong. A refused admission writes nothing, so wait for the next consistent view and
+        // revalidate everything from it, a bounded number of times.
+        repeat(STALE_CATALOGUE_ATTEMPTS - 1) {
+            val seen = downloads.acquisitionPresentation.value.view.snapshot.revision
+            try {
+                return playSavedOnce(item, bindingIdValue)
+            } catch (failure: VeyraException) {
+                if (!failure.isStaleCatalogue() && failure.failure.detail != "saved_recording_view_stale") throw failure
+                withTimeoutOrNull(2_000) {
+                    downloads.acquisitionPresentation.first { presentation ->
+                        presentation.view.snapshot.revision != seen &&
+                            presentation.view.snapshot.revision == presentation.view.acquisition.libraryRevision
+                    }
+                }
+            }
+        }
+        playSavedOnce(item, bindingIdValue)
+    }
+
+    private suspend fun playSavedOnce(item: MediaItem, bindingIdValue: String) {
         val media = store.state.value.media[item.id]
             ?: throw VeyraException(AppFailure(FailureCode.NOT_FOUND))
         val bindingId = ExecutionBindingId(bindingIdValue)
@@ -730,18 +752,22 @@ class AppContainer(
     }
 
     private suspend fun selectExistingMedia(item: MediaItem): Pair<AcquisitionRequestId, ExecutionBindingId> {
-        val view = store.acquisitionView()
-        val current = view.snapshot.media[item.id]
-            ?: throw VeyraException(AppFailure(FailureCode.RECOVERY_REQUIRED, "download_acquisition_selection_required"))
-        if (current.kind != item.kind || current.source.provider != item.source.provider ||
-            current.source.canonicalId != item.source.canonicalId) {
-            throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "download_catalog_identity_changed"))
+        // An unrelated library write (artwork caching) between the read and the capture CAS only
+        // makes the read stale; the refused capture wrote nothing, so re-read and revalidate.
+        val captured = retryingStaleCatalogue {
+            val view = store.acquisitionView()
+            val current = view.snapshot.media[item.id]
+                ?: throw VeyraException(AppFailure(FailureCode.RECOVERY_REQUIRED, "download_acquisition_selection_required"))
+            if (current.kind != item.kind || current.source.provider != item.source.provider ||
+                current.source.canonicalId != item.source.canonicalId) {
+                throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "download_catalog_identity_changed"))
+            }
+            // Freeze the displayed immutable metadata itself, not the newer catalogue row. The
+            // expected-revision admission is the same-owner transaction check; the complete-title
+            // query is exactly what the user tapped even if an unrelated metadata edit landed.
+            acquisition.capture(acquisitionOwner.captures.media(item, view.snapshot).metadata,
+                expectedCatalogRevision = view.snapshot.revision)
         }
-        // Freeze the displayed immutable metadata itself, not the newer catalogue row. The
-        // expected-revision admission is the same-owner transaction check; the complete-title
-        // query is exactly what the user tapped even if an unrelated metadata edit landed.
-        val captured = acquisition.capture(acquisitionOwner.captures.media(item, view.snapshot).metadata,
-            expectedCatalogRevision = view.snapshot.revision)
         if (captured.request.completeTitle != item.title ||
             (captured.request.metadata as? MediaCapture)?.media?.id != item.id) {
             throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "download_catalog_capture_required"))
