@@ -1,6 +1,7 @@
 package dev.veyra.ui.music
 
 import dev.veyra.playback.AudioOrigin
+import dev.veyra.ui.design.bottomChrome
 import dev.veyra.ui.design.SegmentedTabs
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
@@ -8,6 +9,10 @@ import dev.veyra.ui.design.LocalVeyraColors
 import androidx.compose.ui.semantics.Role
 import com.mohamedrejeb.calf.ui.gesture.adaptiveClickable
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.blur
 import androidx.compose.foundation.BorderStroke
 import dev.veyra.ui.design.ActionButton
 import com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosAction
@@ -242,57 +247,98 @@ fun FullPlayer(
     var speedDialog by remember(playback.currentEntryId) { mutableStateOf(false) }
     Surface(modifier.fillMaxSize().veyraAmbient().testTag("full-player"),
         color = androidx.compose.ui.graphics.Color.Transparent, contentColor = MaterialTheme.colorScheme.onSurface) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(Modifier.padding(top = 8.dp, bottom = 4.dp).size(width = 36.dp, height = 4.dp)
-                .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .35f), CircleShape)
-                .testTag("player-drag-handle").clearAndSetSemantics { })
-            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                ActionIcon(VeyraIcons.Collapse, strings.text(TextKey.ClosePlayer), { onAction(MusicUiAction.ClosePlayer) }, Modifier.testTag("close-player"))
-                Text(strings.text(TextKey.NowPlaying), Modifier.weight(1f).padding(horizontal = 8.dp).semantics { heading() },
-                    style = MaterialTheme.typography.titleMedium, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis)
-                ActionIcon(VeyraIcons.Queue, strings.text(TextKey.ShowQueue),
-                    { onAction(MusicUiAction.OpenQueue(playback.activeContext)) }, Modifier.testTag("player-queue-top"))
+        Box(Modifier.fillMaxSize()) {
+            // The cover itself, softly blurred, tints the whole player; a scrim keeps text legible.
+            if (identity != null) {
+                Artwork(identity.artworkUrl, identity.title.orEmpty(), Modifier.fillMaxSize().blur(72.dp).alpha(.55f),
+                    offlineOnly = snapshot.settings.offlineOnly, localPath = identity.localArtworkPath)
+                val canvas = MaterialTheme.colorScheme.background
+                Box(Modifier.fillMaxSize().background(Brush.verticalGradient(
+                    listOf(canvas.copy(alpha = .35f), canvas.copy(alpha = .7f), canvas.copy(alpha = .94f)))))
             }
-            if (identity == null) {
-                EmptyState(strings.text(TextKey.NothingPlaying), strings.text(TextKey.NothingPlayingDescription), strings.text(TextKey.Search), { onAction(MusicUiAction.OpenSearch(SearchKind.ALL)) }, Modifier.fillMaxWidth())
-            } else {
-                BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
-                    // The measured space left above transport, not window orientation, decides
-                    // when decoration yields to both listing and executed-recording identities.
-                    val fontScale = LocalDensity.current.fontScale.coerceAtLeast(1f)
-                    val compactIdentity = maxHeight < 420.dp || fontScale >= 1.5f
-                    val identityLines = if (maxHeight < (180f * fontScale).dp) 1 else 2
-                    val split = !compactIdentity && maxWidth >= (720f * fontScale).dp
-                    Column(
-                        Modifier.fillMaxWidth().testTag("player-details").verticalScroll(rememberScrollState())
-                            .padding(horizontal = 20.dp, vertical = if (compactIdentity) 8.dp else 20.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        if (split) Row(Modifier.widthIn(max = 1_120.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(32.dp)) {
-                            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                                Artwork(identity.artworkUrl, identity.title.orEmpty(), Modifier.widthIn(max = 400.dp).fillMaxWidth().aspectRatio(1f), offlineOnly = snapshot.settings.offlineOnly, localPath = identity.localArtworkPath)
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(Modifier.padding(top = 8.dp, bottom = 2.dp).size(width = 40.dp, height = 5.dp)
+                    .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .35f), CircleShape)
+                    .testTag("player-drag-handle").clearAndSetSemantics { })
+                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                    ActionIcon(VeyraIcons.Collapse, strings.text(TextKey.ClosePlayer), { onAction(MusicUiAction.ClosePlayer) }, Modifier.testTag("close-player"),
+                        contentColor = MaterialTheme.colorScheme.onSurface)
+                    Column(Modifier.weight(1f).padding(horizontal = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(strings.text(TextKey.NowPlaying), Modifier.semantics { heading() },
+                            style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        if (identity != null) Text(strings.text(queueLabel(playback.activeContext)),
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    ActionIcon(VeyraIcons.Queue, strings.text(TextKey.ShowQueue),
+                        { onAction(MusicUiAction.OpenQueue(playback.activeContext)) }, Modifier.testTag("player-queue-top"),
+                        contentColor = MaterialTheme.colorScheme.onSurface)
+                }
+                if (identity == null) {
+                    EmptyState(strings.text(TextKey.NothingPlaying), strings.text(TextKey.NothingPlayingDescription), strings.text(TextKey.Search), { onAction(MusicUiAction.OpenSearch(SearchKind.ALL)) }, Modifier.fillMaxWidth())
+                } else {
+                    BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+                        // The measured space left above transport, not window orientation, decides
+                        // when decoration yields to both listing and executed-recording identities.
+                        val fontScale = LocalDensity.current.fontScale.coerceAtLeast(1f)
+                        val compactIdentity = maxHeight < 420.dp || fontScale >= 1.5f
+                        val identityLines = if (maxHeight < (180f * fontScale).dp) 1 else 2
+                        val split = !compactIdentity && maxWidth >= (720f * fontScale).dp
+                        val cover = Modifier.shadow(28.dp, RoundedCornerShape(28.dp), clip = false,
+                            ambientColor = MaterialTheme.colorScheme.primary, spotColor = MaterialTheme.colorScheme.primary)
+                        Column(
+                            Modifier.fillMaxWidth().testTag("player-details").verticalScroll(rememberScrollState())
+                                .padding(horizontal = 24.dp, vertical = if (compactIdentity) 8.dp else 16.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            if (split) Row(Modifier.widthIn(max = 1_120.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(40.dp),
+                                verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Artwork(identity.artworkUrl, identity.title.orEmpty(), Modifier.widthIn(max = 420.dp).fillMaxWidth().aspectRatio(1f).then(cover), offlineOnly = snapshot.settings.offlineOnly, localPath = identity.localArtworkPath)
+                                }
+                                PlayerDetails(identity, snapshot, playback, onAction, options, { timerDialog = true }, { speedDialog = true }, Modifier.weight(1f))
+                            } else {
+                                if (!compactIdentity) {
+                                    Artwork(identity.artworkUrl, identity.title.orEmpty(), Modifier.widthIn(max = 360.dp).fillMaxWidth().aspectRatio(1f).then(cover), offlineOnly = snapshot.settings.offlineOnly, localPath = identity.localArtworkPath)
+                                    Spacer(Modifier.height(28.dp))
+                                }
+                                PlayerDetails(identity, snapshot, playback, onAction, options, { timerDialog = true }, { speedDialog = true },
+                                    Modifier.widthIn(max = 560.dp).fillMaxWidth(), compactIdentityLines = if (compactIdentity) identityLines else null)
                             }
-                            PlayerDetails(identity, snapshot, playback, onAction, options, { timerDialog = true }, { speedDialog = true }, Modifier.weight(1f))
-                        } else {
-                            if (!compactIdentity) {
-                                Artwork(identity.artworkUrl, identity.title.orEmpty(), Modifier.widthIn(max = 320.dp).fillMaxWidth(.88f).aspectRatio(1f), offlineOnly = snapshot.settings.offlineOnly, localPath = identity.localArtworkPath)
-                                Spacer(Modifier.height(16.dp))
-                            }
-                            PlayerDetails(identity, snapshot, playback, onAction, options, { timerDialog = true }, { speedDialog = true },
-                                Modifier.widthIn(max = 560.dp).fillMaxWidth(), compactIdentityLines = if (compactIdentity) identityLines else null)
                         }
                     }
+                    // Essential pause/seek/skip never sit below an arbitrarily long receipt or
+                    // creator name. Resizing and reading details must not hide the active transport.
+                    PlayerTransport(identity, snapshot, playback, onAction)
                 }
-                HorizontalDivider()
-                // Essential pause/seek/skip never sit below an arbitrarily long receipt or
-                // creator name. Resizing and reading details must not hide the active transport.
-                PlayerTransport(identity, snapshot, playback, onAction)
             }
         }
     }
     if (timerDialog && identity != null) SleepTimerDialog(identity, playback, onAction, onDismiss = { timerDialog = false })
     if (speedDialog && identity?.controlsMode == PlaybackControlsMode.PODCAST) SpeedDialog(identity, snapshot, playback, options, onAction, onDismiss = { speedDialog = false })
+}
+
+/** A labelled round tool under the title: an icon in a soft circle with a short caption. */
+@Composable
+private fun PlayerTool(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit,
+    modifier: Modifier = Modifier, active: Boolean = false, enabled: Boolean = true, stateLabel: String? = null) {
+    Column(modifier.widthIn(min = 64.dp).clip(RoundedCornerShape(16.dp))
+        .adaptiveClickable(role = Role.Button, enabled = enabled, shape = RoundedCornerShape(16.dp), onClick = onClick)
+        .semantics(mergeDescendants = true) { stateLabel?.let { stateDescription = it } }
+        .padding(horizontal = 6.dp, vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Box(Modifier.size(44.dp).background(if (active) MaterialTheme.colorScheme.primary
+            else MaterialTheme.colorScheme.onSurface.copy(alpha = .07f), CircleShape), contentAlignment = Alignment.Center) {
+            Icon(icon, null, Modifier.size(21.dp), tint = when {
+                !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = .38f)
+                active -> MaterialTheme.colorScheme.onPrimary
+                else -> MaterialTheme.colorScheme.onSurface
+            })
+        }
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+    }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -317,9 +363,26 @@ private fun PlayerDetails(
     // requested: D005 requires that difference to be disclosed, not hidden behind a toggle.
     val differs = identity.provenance?.let { it.requestedTitle != null && it.requestedTitle != it.resolvedTitle } == true
     var audioDetails by remember(playback.currentEntryId, differs) { mutableStateOf(differs) }
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        MetadataText(title, Modifier.fillMaxWidth().testTag("player-title"), style = MaterialTheme.typography.headlineSmall,
-            maxLines = compactIdentityLines ?: 3, overflow = TextOverflow.Ellipsis)
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(if (compactIdentity) 8.dp else 14.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                MetadataText(title, Modifier.fillMaxWidth().testTag("player-title"),
+                    style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+                    maxLines = compactIdentityLines ?: 3, overflow = TextOverflow.Ellipsis)
+                identity.creator?.takeIf { it.isNotBlank() }?.let { creator ->
+                    MetadataText(creator, Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            if (catalogItem != null) Row(verticalAlignment = Alignment.CenterVertically) {
+                val saved = snapshot.isSaved(catalogItem)
+                ActionIcon(savedIcon(catalogItem, saved), strings.text(savedActionLabel(catalogItem, saved)), { onAction(MusicUiAction.ToggleFavorite(catalogItem)) },
+                    Modifier.testTag("player-save"), isSelected = saved,
+                    containerColor = androidx.compose.ui.graphics.Color.Transparent,
+                    contentColor = if (saved) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+                MediaActionsMenu(catalogItem, snapshot, onAction, options = options)
+            }
+        }
         if (compactIdentity) {
             // This preview describes only the current owner's receipt, never a latest library
             // lookup. Full immutable query/result titles remain in the disclosure below.
@@ -334,23 +397,18 @@ private fun PlayerDetails(
                     style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
             }
         }
-        identity.creator?.takeIf { it.isNotBlank() }?.let { creator ->
-            MetadataText(creator, Modifier.fillMaxWidth(), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            // Online preparation can take several seconds; a visible spinner shows the app is working.
-            if (playback.isBuffering) com.mohamedrejeb.calf.ui.progress.AdaptiveCircularProgressIndicator(
-                Modifier.padding(end = 8.dp).size(16.dp).clearAndSetSemantics { },
-                strokeWidth = 2.dp,
-            )
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(playbackStatusLabel(playback, strings), Modifier.semantics { liveRegion = LiveRegionMode.Polite }, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                playback.audioOrigin?.let { AudioOriginBadge(it) }
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp),
+            itemVerticalAlignment = Alignment.CenterVertically) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.heightIn(min = 26.dp)) {
+                // Online preparation can take several seconds; a visible spinner shows the app is working.
+                if (playback.isBuffering) com.mohamedrejeb.calf.ui.progress.AdaptiveCircularProgressIndicator(
+                    Modifier.padding(end = 8.dp).size(14.dp).clearAndSetSemantics { },
+                    strokeWidth = 2.dp,
+                )
+                Text(playbackStatusLabel(playback, strings), Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                    style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
-            if (catalogItem != null) {
-                ActionIcon(savedIcon(catalogItem, snapshot.isSaved(catalogItem)), strings.text(savedActionLabel(catalogItem, snapshot.isSaved(catalogItem))), { onAction(MusicUiAction.ToggleFavorite(catalogItem)) }, Modifier.testTag("player-save"), isSelected = snapshot.isSaved(catalogItem))
-                MediaActionsMenu(catalogItem, snapshot, onAction, options = options)
-            }
+            playback.audioOrigin?.let { AudioOriginBadge(it) }
         }
         playback.failure?.let { failure ->
             ErrorState(strings.errorFor(failure), onRetry = { onAction(MusicUiAction.TogglePlayPause) }, modifier = Modifier.fillMaxWidth().testTag("player-error").semantics { liveRegion = LiveRegionMode.Polite })
@@ -359,34 +417,26 @@ private fun PlayerDetails(
             Text(strings.format(TextKey.ResolvedTitleValue, identity.resolvedTitle), style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        if (podcast) {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                ActionButton(strings.format(TextKey.SpeedValue, strings.localizeDigits(speedText(playback.effectiveSpeed))), "gauge.with.needle", false, openSpeed, modifier = Modifier.heightIn(min = 48.dp).testTag("player-speed"), enabled = availableSpeeds(options.minSpeed, options.maxSpeed).isNotEmpty()) {
-                    Text(strings.format(TextKey.SpeedValue, strings.localizeDigits(speedText(playback.effectiveSpeed))))
-                }
-                TextButton({ onAction(MusicUiAction.Next) }, enabled = playback.hasNextOccurrence(snapshot), modifier = Modifier.heightIn(min = 48.dp).testTag("player-next-episode")) { Text(strings.text(TextKey.NextEpisode)) }
+        // One calm row of tools instead of large buttons: each is a round icon with a caption.
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            if (podcast) {
+                val speed = strings.format(TextKey.SpeedValue, strings.localizeDigits(speedText(playback.effectiveSpeed)))
+                PlayerTool(VeyraIcons.Refresh, speed, openSpeed, Modifier.testTag("player-speed"),
+                    active = playback.effectiveSpeed != 1f, enabled = availableSpeeds(options.minSpeed, options.maxSpeed).isNotEmpty())
+                PlayerTool(VeyraIcons.Next, strings.text(TextKey.NextEpisode), { onAction(MusicUiAction.Next) },
+                    Modifier.testTag("player-next-episode"), enabled = playback.hasNextOccurrence(snapshot))
             }
-        }
-        HorizontalDivider()
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            ActionButton(strings.text(TextKey.Queue), "list.bullet", false, { onAction(MusicUiAction.OpenQueue(playback.activeContext)) }, modifier = Modifier.heightIn(min = 48.dp).testTag("player-queue")) {
-                Icon(VeyraIcons.Queue, null, Modifier.size(20.dp).padding(end = 4.dp))
-                Text(strings.text(TextKey.Queue))
-            }
-            ActionButton(strings.text(TextKey.SleepTimer), "moon.zzz", false, openTimer, modifier = Modifier.heightIn(min = 48.dp).testTag("player-sleep")) {
-                Icon(VeyraIcons.Timer, null, Modifier.size(20.dp).padding(end = 4.dp))
-                Text(strings.text(TextKey.SleepTimer))
-            }
+            PlayerTool(VeyraIcons.Timer, strings.text(TextKey.SleepTimer), openTimer, Modifier.testTag("player-sleep"),
+                active = playback.sleepTimer != null)
+            PlayerTool(VeyraIcons.Info, strings.text(TextKey.AudioDetails), { audioDetails = !audioDetails },
+                Modifier.testTag("player-audio-details"), active = audioDetails,
+                stateLabel = strings.text(if (audioDetails) TextKey.ShowLess else TextKey.ShowMore))
+            PlayerTool(VeyraIcons.Queue, strings.text(TextKey.Queue), { onAction(MusicUiAction.OpenQueue(playback.activeContext)) },
+                Modifier.testTag("player-queue"))
         }
         playback.sleepTimer?.let { TimerStatus(it, openTimer, { onAction(MusicUiAction.ClearSleepTimer) }, Modifier.testTag("player-timer")) }
         playback.crossfade?.let { CrossfadeStatus(it) }
-        TextButton({ audioDetails = !audioDetails }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("player-audio-details")
-            .semantics { stateDescription = strings.text(if (audioDetails) TextKey.ShowLess else TextKey.ShowMore) }) {
-            Icon(VeyraIcons.Info, null, Modifier.size(18.dp))
-            Text(strings.text(TextKey.AudioDetails), Modifier.padding(horizontal = 8.dp))
-        }
         if (audioDetails) PlaybackProvenanceCard(view = identity.provenance)
-
     }
 }
 
@@ -395,28 +445,34 @@ private fun PlayerTransport(identity: PlaybackSurfaceIdentity, snapshot: AppSnap
     val strings = LocalStrings.current
     val podcast = identity.controlsMode == PlaybackControlsMode.PODCAST
     val facts = playback.activeQueueFacts(snapshot)
-    Surface(Modifier.fillMaxWidth().testTag("player-transport"), shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
-        Column(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.chromeBottom)
-            .padding(horizontal = 20.dp, vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Column(Modifier.widthIn(max = 640.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                PlayerSeek(playback, onAction)
-                MediaDirection {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(if (podcast) 16.dp else 6.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically) {
-                        if (!podcast) ActionIcon(VeyraIcons.Shuffle, strings.text(if (facts.shuffle) TextKey.ShuffleOn else TextKey.ShuffleOff),
-                            { onAction(MusicUiAction.SetShuffle(!facts.shuffle)) }, Modifier.testTag("player-shuffle"), isSelected = facts.shuffle)
-                        if (podcast) SkipButton(-snapshot.settings.skipBackSeconds.toLong() * 1_000L, strings.format(TextKey.SkipBackSeconds, strings.number(snapshot.settings.skipBackSeconds.toLong())), VeyraIcons.SkipBack, playback, onAction, "player-skip-back")
-                        else ActionIcon(VeyraIcons.Previous, strings.text(TextKey.Previous), { onAction(MusicUiAction.Previous) }, Modifier.testTag("player-previous"))
-                        PlayPauseButton(playback, onAction, Modifier.size(64.dp).testTag("player-toggle"), prominent = true)
-                        if (podcast) SkipButton(snapshot.settings.skipForwardSeconds.toLong() * 1_000L, strings.format(TextKey.SkipForwardSeconds, strings.number(snapshot.settings.skipForwardSeconds.toLong())), VeyraIcons.SkipForward, playback, onAction, "player-skip-forward")
-                        else ActionIcon(VeyraIcons.Next, strings.text(TextKey.Next), { onAction(MusicUiAction.Next) }, Modifier.testTag("player-next"), enabled = playback.hasNextOccurrence(snapshot))
-                        if (!podcast) Box {
-                            ActionIcon(VeyraIcons.Repeat, strings.text(repeatLabel(facts.repeat)),
-                                { onAction(MusicUiAction.SetRepeat(nextRepeatMode(facts.repeat))) }, Modifier.testTag("player-repeat"),
-                                isSelected = facts.repeat != RepeatMode.OFF, stateLabel = strings.text(repeatLabel(facts.repeat)))
-                            if (facts.repeat == RepeatMode.ONE) Box(Modifier.align(Alignment.BottomEnd).testTag("player-repeat-one-badge")) {
-                                Text(strings.number(1), Modifier.padding(4.dp).clearAndSetSemantics { },
-                                    style = MaterialTheme.typography.labelSmall)
-                            }
+    Column(Modifier.fillMaxWidth().testTag("player-transport").windowInsetsPadding(WindowInsets.chromeBottom)
+        .padding(start = 24.dp, end = 24.dp, top = 2.dp, bottom = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(Modifier.widthIn(max = 640.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            PlayerSeek(playback, onAction)
+            MediaDirection {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = if (podcast) Arrangement.spacedBy(28.dp, Alignment.CenterHorizontally) else Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically) {
+                    if (!podcast) ActionIcon(VeyraIcons.Shuffle, strings.text(if (facts.shuffle) TextKey.ShuffleOn else TextKey.ShuffleOff),
+                        { onAction(MusicUiAction.SetShuffle(!facts.shuffle)) }, Modifier.testTag("player-shuffle"), isSelected = facts.shuffle,
+                        containerColor = androidx.compose.ui.graphics.Color.Transparent,
+                        contentColor = if (facts.shuffle) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant, iconSize = 22.dp)
+                    if (podcast) SkipButton(-snapshot.settings.skipBackSeconds.toLong() * 1_000L, strings.format(TextKey.SkipBackSeconds, strings.number(snapshot.settings.skipBackSeconds.toLong())), VeyraIcons.SkipBack, playback, onAction, "player-skip-back")
+                    else ActionIcon(VeyraIcons.Previous, strings.text(TextKey.Previous), { onAction(MusicUiAction.Previous) }, Modifier.size(60.dp).testTag("player-previous"),
+                        contentColor = MaterialTheme.colorScheme.onSurface, iconSize = 34.dp)
+                    PlayPauseButton(playback, onAction, Modifier.size(72.dp).testTag("player-toggle"), prominent = true)
+                    if (podcast) SkipButton(snapshot.settings.skipForwardSeconds.toLong() * 1_000L, strings.format(TextKey.SkipForwardSeconds, strings.number(snapshot.settings.skipForwardSeconds.toLong())), VeyraIcons.SkipForward, playback, onAction, "player-skip-forward")
+                    else ActionIcon(VeyraIcons.Next, strings.text(TextKey.Next), { onAction(MusicUiAction.Next) }, Modifier.size(60.dp).testTag("player-next"),
+                        enabled = playback.hasNextOccurrence(snapshot), contentColor = MaterialTheme.colorScheme.onSurface, iconSize = 34.dp)
+                    if (!podcast) Box {
+                        val repeating = facts.repeat != RepeatMode.OFF
+                        ActionIcon(VeyraIcons.Repeat, strings.text(repeatLabel(facts.repeat)),
+                            { onAction(MusicUiAction.SetRepeat(nextRepeatMode(facts.repeat))) }, Modifier.testTag("player-repeat"),
+                            isSelected = repeating, stateLabel = strings.text(repeatLabel(facts.repeat)),
+                            containerColor = androidx.compose.ui.graphics.Color.Transparent,
+                            contentColor = if (repeating) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant, iconSize = 22.dp)
+                        if (facts.repeat == RepeatMode.ONE) Box(Modifier.align(Alignment.BottomEnd).testTag("player-repeat-one-badge")) {
+                            Text(strings.number(1), Modifier.padding(4.dp).clearAndSetSemantics { },
+                                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                         }
                     }
                 }
@@ -501,9 +557,9 @@ private fun PlayerSeek(playback: PlaybackState, onAction: (MusicUiAction) -> Uni
                         },
                     )
                 }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(strings.mediaTime(shownPosition), style = MaterialTheme.typography.labelMedium, modifier = Modifier.clearAndSetSemantics { contentDescription = strings.text(TextKey.Elapsed) + ": " + strings.spokenDuration(shownPosition) })
-                    Text(strings.mediaTime(duration), style = MaterialTheme.typography.labelMedium, modifier = Modifier.clearAndSetSemantics { contentDescription = strings.text(TextKey.Duration) + ": " + strings.spokenDuration(duration) })
+                Row(Modifier.fillMaxWidth().padding(horizontal = 2.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(strings.mediaTime(shownPosition), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.clearAndSetSemantics { contentDescription = strings.text(TextKey.Elapsed) + ": " + strings.spokenDuration(shownPosition) })
+                    Text(strings.mediaTime(duration), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.clearAndSetSemantics { contentDescription = strings.text(TextKey.Duration) + ": " + strings.spokenDuration(duration) })
                 }
             }
         }
@@ -516,11 +572,20 @@ private fun PlayPauseButton(playback: PlaybackState, onAction: (MusicUiAction) -
     val strings = LocalStrings.current
     val pause = showsPause(playback)
     val label = strings.text(if (pause) TextKey.Pause else if (playback.phase == PlaybackPhase.ERROR) TextKey.Retry else TextKey.Play)
-    ActionIcon(
+    if (prominent) ActionIcon(
         if (pause) VeyraIcons.Pause else VeyraIcons.Play,
         label,
         { onAction(MusicUiAction.TogglePlayPause) },
-        if (prominent) modifier.background(MaterialTheme.colorScheme.primaryContainer, CircleShape) else modifier,
+        modifier.shadow(14.dp, CircleShape, ambientColor = MaterialTheme.colorScheme.primary, spotColor = MaterialTheme.colorScheme.primary),
+        containerColor = MaterialTheme.colorScheme.primary,
+        contentColor = MaterialTheme.colorScheme.onPrimary,
+        iconSize = 36.dp,
+    ) else ActionIcon(
+        if (pause) VeyraIcons.Pause else VeyraIcons.Play,
+        label,
+        { onAction(MusicUiAction.TogglePlayPause) },
+        modifier,
+        contentColor = MaterialTheme.colorScheme.onSurface,
     )
 }
 
@@ -528,7 +593,8 @@ private fun PlayPauseButton(playback: PlaybackState, onAction: (MusicUiAction) -
 private fun SkipButton(milliseconds: Long, label: String, image: androidx.compose.ui.graphics.vector.ImageVector, playback: PlaybackState, onAction: (MusicUiAction) -> Unit, tag: String) {
     val strings = LocalStrings.current
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        ActionIcon(image, label, { onAction(MusicUiAction.Skip(milliseconds, playback.currentEntryId, playback.generation)) }, Modifier.testTag(tag), enabled = playback.seekable)
+        ActionIcon(image, label, { onAction(MusicUiAction.Skip(milliseconds, playback.currentEntryId, playback.generation)) }, Modifier.size(56.dp).testTag(tag),
+            enabled = playback.seekable, contentColor = MaterialTheme.colorScheme.onSurface, iconSize = 32.dp)
         Text(strings.number(kotlin.math.abs(milliseconds / 1_000L)), style = MaterialTheme.typography.labelSmall, modifier = Modifier.clearAndSetSemantics { })
     }
 }
@@ -736,7 +802,7 @@ fun QueuePanel(
         if (viewedContext in options.undoableQueueContexts)
             add(NativeBarButton(strings.text(TextKey.UndoQueueEdit), "arrow.uturn.backward") { onAction(MusicUiAction.UndoQueue(viewedContext)) })
     })
-    LazyColumn(modifier.fillMaxSize().testTag("queue-panel"), contentPadding = PaddingValues(bottom = 24.dp + if (toolbar) nativeToolbarClearance else 0.dp)) {
+    LazyColumn(modifier.fillMaxSize().testTag("queue-panel"), contentPadding = PaddingValues(bottom = bottomChrome(24.dp) + if (toolbar) nativeToolbarClearance else 0.dp)) {
         item {
             SectionTitle(strings.text(TextKey.Queue))
             SegmentedTabs(QueueContext.entries.map { strings.text(queueLabel(it)) }, QueueContext.entries.indexOf(viewedContext),

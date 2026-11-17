@@ -9,6 +9,9 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.union
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 
 /**
  * The bottom area persistent chrome (bottom navigation, mini/full player transport) must keep
@@ -22,3 +25,14 @@ import androidx.compose.runtime.Composable
  */
 val WindowInsets.Companion.chromeBottom: WindowInsets
     @Composable get() = WindowInsets.systemBars.union(WindowInsets.displayCutout).exclude(WindowInsets.ime).only(WindowInsetsSides.Bottom)
+
+/**
+ * Height of the floating chrome (mini player and tab bar) that screen content scrolls beneath.
+ * The chrome itself is transparent around its floating cards, so content runs to the bottom edge
+ * and each scrolling screen adds this to its own end padding to let its last row clear the cards.
+ */
+val LocalBottomChromeHeight = staticCompositionLocalOf { 0.dp }
+
+/** A scrolling screen's bottom padding: its own [extra] space plus the floating chrome above it. */
+@Composable
+fun bottomChrome(extra: Dp): Dp = LocalBottomChromeHeight.current + extra

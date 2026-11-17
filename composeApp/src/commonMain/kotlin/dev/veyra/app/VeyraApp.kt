@@ -1,6 +1,7 @@
 package dev.veyra.app
 
 import androidx.compose.foundation.layout.ime
+import dev.veyra.ui.design.bottomChrome
 import dev.veyra.nativecomponents.NativeBarButton
 import dev.veyra.nativecomponents.NativeTab
 import dev.veyra.nativecomponents.NativeTopBar
@@ -519,7 +520,7 @@ internal fun LicensesScreen(readDocument: suspend (String) -> String = { Res.rea
             path.substringAfterLast('/') to body
         }
     }
-    LazyColumn(Modifier.fillMaxSize().testTag("licenses-screen"), contentPadding = PaddingValues(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    LazyColumn(Modifier.fillMaxSize().testTag("licenses-screen"), contentPadding = PaddingValues(start = 24.dp, top = 24.dp, end = 24.dp, bottom = bottomChrome(24.dp)), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item { Text(strings.text(TextKey.Licenses), style = MaterialTheme.typography.headlineLarge, modifier = Modifier.semantics { heading() }) }
         item { Text(strings.text(TextKey.LegalOriginalTerms), style = MaterialTheme.typography.bodyMedium) }
         if (documents == null) item { LoadingState() }

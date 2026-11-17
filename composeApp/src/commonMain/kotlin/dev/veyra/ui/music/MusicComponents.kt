@@ -85,6 +85,9 @@ internal fun ActionIcon(
     enabled: Boolean = true,
     isSelected: Boolean? = null,
     stateLabel: String? = null,
+    containerColor: androidx.compose.ui.graphics.Color? = null,
+    contentColor: androidx.compose.ui.graphics.Color? = null,
+    iconSize: androidx.compose.ui.unit.Dp = 24.dp,
 ) {
     VeyraIconButton(
         icon = image,
@@ -94,6 +97,9 @@ internal fun ActionIcon(
         modifier = modifier,
         selected = isSelected,
         stateLabel = stateLabel,
+        containerColor = containerColor,
+        contentColor = contentColor,
+        iconSize = iconSize,
     )
 }
 

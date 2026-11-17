@@ -42,6 +42,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.junit4.DesktopComposeTestRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
@@ -969,16 +970,32 @@ class CoreShellFlowsTest {
     private fun queueScrollTo(tag: String) {
         ui.onNodeWithTag("queue-panel").performScrollToNode(hasTestTag(tag))
         ui.onNodeWithTag(tag).performScrollTo()
+        clearOfFloatingChrome("queue-panel", tag)
     }
 
     private fun libraryScrollTo(tag: String) {
         ui.onNodeWithTag("library-list").performScrollToNode(hasTestTag(tag))
         ui.onNodeWithTag(tag).performScrollTo()
+        clearOfFloatingChrome("library-list", tag)
     }
 
     private fun trackScrollTo(tag: String) {
         ui.onNodeWithTag("track-detail-content").performScrollToNode(hasTestTag(tag))
         ui.onNodeWithTag(tag).performScrollTo()
+        clearOfFloatingChrome("track-detail-content", tag)
+    }
+
+    /**
+     * Screens scroll beneath the floating mini player and tab bar, as a person sees them. A row
+     * scrolled only "into the viewport" can sit under that chrome, where a tap reaches the chrome;
+     * lift it above the chrome first, the way a person scrolls a little further before tapping.
+     */
+    private fun clearOfFloatingChrome(listTag: String, tag: String) {
+        val chrome = ui.onAllNodesWithTag("mini-player").fetchSemanticsNodes().firstOrNull()?.boundsInRoot?.top ?: return
+        val bottom = ui.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot.bottom
+        if (bottom <= chrome) return
+        ui.onNodeWithTag(listTag).performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, bottom - chrome + 8f) }
+        ui.waitForIdle()
     }
 
     private fun SemanticsNodeInteraction.focus(): SemanticsNodeInteraction =

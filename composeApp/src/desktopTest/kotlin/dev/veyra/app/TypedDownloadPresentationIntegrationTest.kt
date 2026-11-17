@@ -162,6 +162,47 @@ class TypedDownloadPresentationIntegrationTest {
     }
 
     @Test
+    fun deletingACompletedDownloadRemovesItsFileAndItsRowFromDownloads() = runBlocking {
+        withTimeout(120_000L) {
+            val directory = TypedDownloadPresentationSupport.workDirectory()
+            val item = TypedDownloadPresentationSupport.youtubeItem()
+            var app: TypedDownloadPresentationSupport? = null
+            try {
+                app = TypedDownloadPresentationSupport(directory)
+                app.initialize()
+                app.store.upsertCatalog(listOf(item)).getOrThrow()
+                app.app.onMusicAction(MusicUiAction.Download(item))
+                val completed = withTimeout(40_000L) {
+                    app.app.downloads.acquisitionPresentation.first { presentation ->
+                        presentation.view.acquisition.assetUses.isNotEmpty() &&
+                            presentation.states.values.any { it.status == DownloadStatus.COMPLETE }
+                    }
+                }
+                val job = completed.states.values.single { it.status == DownloadStatus.COMPLETE }
+                val asset = assertNotNull(job.assetId?.let(completed.view.acquisition.materializations::get))
+                assertTrue(Files.exists(Path.of(asset.uri)))
+                assertNotNull(downloadSurface(app.app.library.value, completed).entries.singleOrNull { it.id == job.id })
+
+                app.app.onMusicAction(MusicUiAction.RemoveDownload(job.id))
+                val removed = withTimeout(40_000L) {
+                    app.app.downloads.acquisitionPresentation.first { presentation ->
+                        val current = presentation.view.acquisition.physicalDownloads[job.id]
+                        current == null || current.assetId == null && !current.cleanupPending &&
+                            current.status == DownloadStatus.CANCELLED
+                    }
+                }
+                assertFalse(Files.exists(Path.of(asset.uri)), "Deleting a download removes its file")
+                val surface = downloadSurface(app.app.library.value, removed)
+                assertNull(surface.entries.singleOrNull { it.id == job.id }, "A deleted download leaves the Downloads list")
+                assertEquals(0L, surface.storageBytes())
+                assertTrue(item.id in app.app.library.value.media, "The catalogue item itself stays")
+            } finally {
+                try { app?.close() } catch (_: Exception) {}
+            }
+        }
+    }
+
+    @Test
     fun completedNeutralTypedDownloadProjectsHonestlyAndColdRevalidationUsesTheSameScreen() = runBlocking {
         withTimeout(180_000L) {
             val directory = TypedDownloadPresentationSupport.workDirectory()

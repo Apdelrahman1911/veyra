@@ -9,6 +9,7 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import com.mohamedrejeb.calf.ui.utils.applyLayoutDirection
 import com.mohamedrejeb.calf.ui.utils.applyTheme
 import com.mohamedrejeb.calf.ui.utils.isDark
+import com.mohamedrejeb.calf.ui.utils.toUIColor
 import androidx.compose.ui.viewinterop.UIKitView
 import dev.veyra.nativecomponents.LocalNativeControlAccessibility
 import kotlinx.cinterop.BetaInteropApi
@@ -57,6 +58,8 @@ actual fun AdaptiveSlider(value: Float, onValueChange: (Float) -> Unit, modifier
             it.enabled = enabled
             it.applyLayoutDirection(layoutDirection)
             it.applyTheme(dark)
+            // The filled part follows the app's theme colour rather than the system blue.
+            it.minimumTrackTintColor = colors.activeTrackColor.toUIColor()
             it.accessibilityLabel = accessibility?.label
             it.accessibilityValue = accessibility?.value
             it.accessibilityLanguage = accessibility?.languageTag

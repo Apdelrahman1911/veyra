@@ -1,6 +1,7 @@
 package dev.veyra.ui.music
 
 import dev.veyra.ui.design.ActionButton
+import dev.veyra.ui.design.bottomChrome
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -79,7 +80,7 @@ fun CollectionDetailScreen(
         else onAction(MusicUiAction.PlayCollection(tracks, shuffle))
     }
     val matching = tracks.withIndex().filter { matchesMediaQuery(it.value, query) }
-    LazyColumn(modifier.fillMaxSize().testTag("collection-detail"), contentPadding = PaddingValues(bottom = 24.dp)) {
+    LazyColumn(modifier.fillMaxSize().testTag("collection-detail"), contentPadding = PaddingValues(bottom = bottomChrome(24.dp))) {
         item {
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(providerName(collection.source.provider), Modifier.weight(1f).padding(start = 8.dp), style = MaterialTheme.typography.titleMedium)

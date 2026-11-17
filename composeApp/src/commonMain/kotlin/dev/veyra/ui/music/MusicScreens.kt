@@ -1,6 +1,7 @@
 package dev.veyra.ui.music
 
 import androidx.compose.foundation.lazy.rememberLazyListState
+import dev.veyra.ui.design.bottomChrome
 import androidx.compose.ui.semantics.Role
 import com.mohamedrejeb.calf.ui.gesture.adaptiveClickable
 import androidx.compose.foundation.BorderStroke
@@ -63,7 +64,7 @@ fun ListenScreen(
     LaunchedEffect(discovery.revealRequest) {
         if (discovery.revealRequest > 0) listState.animateScrollToItem(discoverIndex)
     }
-    LazyColumn(modifier.fillMaxSize().testTag("listen-screen"), state = listState, contentPadding = PaddingValues(bottom = 24.dp),
+    LazyColumn(modifier.fillMaxSize().testTag("listen-screen"), state = listState, contentPadding = PaddingValues(bottom = bottomChrome(24.dp)),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
             Column(Modifier.padding(horizontal = 24.dp, vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -234,7 +235,7 @@ fun SearchScreen(
     fun change(query: String = state.query, scope: SearchScope = state.scope, kind: SearchKind = state.kind, provider: SourceProvider = state.provider) {
         onAction(MusicUiAction.SearchChanged(query, scope, kind, provider))
     }
-    LazyColumn(modifier.fillMaxSize().testTag("search-screen"), contentPadding = PaddingValues(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    LazyColumn(modifier.fillMaxSize().testTag("search-screen"), contentPadding = PaddingValues(bottom = bottomChrome(24.dp)), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         item {
             ScreenIntro(strings.text(TextKey.Search), strings.text(TextKey.SearchSubtitle))
             Row(Modifier.padding(horizontal = 24.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {

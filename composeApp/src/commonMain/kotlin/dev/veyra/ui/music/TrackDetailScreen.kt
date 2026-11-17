@@ -1,6 +1,7 @@
 package dev.veyra.ui.music
 
 import dev.veyra.ui.design.ActionButton
+import dev.veyra.ui.design.bottomChrome
 import dev.veyra.ui.design.NativeMenu
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Arrangement
@@ -90,7 +91,7 @@ fun TrackDetailScreen(
         Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
             LazyColumn(
                 Modifier.widthIn(max = 1_000.dp).fillMaxSize().testTag("track-detail-content"),
-                contentPadding = PaddingValues(20.dp),
+                contentPadding = PaddingValues(start = 20.dp, top = 20.dp, end = 20.dp, bottom = bottomChrome(20.dp)),
                 verticalArrangement = Arrangement.spacedBy(20.dp),
             ) {
                 if (item == null) {

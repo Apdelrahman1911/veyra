@@ -5,6 +5,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.calculateStartPadding
+import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -153,10 +155,15 @@ internal fun ExpandablePlayerScaffold(
                 }
             },
         ) { padding ->
-            Box(Modifier.fillMaxSize().padding(padding)
+            // Content runs beneath the floating mini player and tab bar instead of stopping above
+            // them on a blank strip; scrolling screens pad their own end by the chrome's height.
+            val layoutDirection = androidx.compose.ui.platform.LocalLayoutDirection.current
+            Box(Modifier.fillMaxSize().padding(start = padding.calculateStartPadding(layoutDirection),
+                top = padding.calculateTopPadding(), end = padding.calculateEndPadding(layoutDirection))
                 .then(if (showExpanded) Modifier.clearAndSetSemantics { } else Modifier)) {
                 // Native UIKit controls in the content draw above Compose; hide them while the player covers them.
-                CompositionLocalProvider(LocalPlayerSheetTop provides sheetTop, LocalNativeControlsCovered provides showExpanded) {
+                CompositionLocalProvider(LocalPlayerSheetTop provides sheetTop, LocalNativeControlsCovered provides showExpanded,
+                    dev.veyra.ui.design.LocalBottomChromeHeight provides padding.calculateBottomPadding()) {
                     content(PaddingValues())
                 }
             }

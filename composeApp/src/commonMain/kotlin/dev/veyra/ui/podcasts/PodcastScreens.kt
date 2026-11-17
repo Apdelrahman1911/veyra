@@ -3,6 +3,7 @@
 package dev.veyra.ui.podcasts
 
 import dev.veyra.ui.design.ActionButton
+import dev.veyra.ui.design.bottomChrome
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.key
 import androidx.compose.runtime.rememberUpdatedState
@@ -112,7 +113,7 @@ fun PodcastsScreen(
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         LazyColumn(
             modifier = Modifier.widthIn(max = 1120.dp).fillMaxSize().testTag("podcasts-screen"),
-            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 24.dp),
+            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 24.dp, bottom = bottomChrome(24.dp)),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item(key = "heading") {
@@ -222,7 +223,7 @@ fun PodcastShowScreen(
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         LazyColumn(
             modifier = Modifier.widthIn(max = 1120.dp).fillMaxSize().testTag("podcast-show-screen"),
-            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp),
+            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 20.dp, bottom = bottomChrome(20.dp)),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             if (show == null) {
@@ -314,7 +315,7 @@ fun EpisodeDetailScreen(
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         LazyColumn(
             modifier = Modifier.widthIn(max = 1000.dp).fillMaxSize().testTag("podcast-episode-detail"),
-            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp),
+            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 20.dp, bottom = bottomChrome(20.dp)),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             if (episode == null) {
