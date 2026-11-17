@@ -427,9 +427,11 @@ class DownloadCoordinator(
             }
             if (physicalRuntime != null && idlePollingMs != pollingMs) idleObserver = scope.launch {
                 // Writes that bypass the coordinator's own signals are caught on their publication
-                // while the loops sleep through an idle wait, instead of by a tight poll.
-                store.acquisitionViews.drop(1).collect {
-                    if (idleWaiting) { idleWaiting = false; wake.trySend(Unit); maintenanceWake.trySend(Unit) }
+                // while the loops sleep through an idle wait, instead of by a tight poll. Only a
+                // publication that gives the downloads work wakes them: playback checkpoints publish
+                // every few seconds, and each loop pass is a full library read.
+                store.acquisitionViews.drop(1).conflate().collect {
+                    if (idleWaiting && nextPollMs() < idlePollingMs) { wake.trySend(Unit); maintenanceWake.trySend(Unit) }
                 }
             }
             policyObserver = scope.launch {

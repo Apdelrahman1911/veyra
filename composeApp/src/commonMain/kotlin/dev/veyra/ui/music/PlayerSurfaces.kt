@@ -199,7 +199,8 @@ fun MiniPlayer(
             if (playback.isBuffering) LinearProgressIndicator(progressModifier,
                 color = MaterialTheme.colorScheme.primary, trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = .12f))
             else if ((playback.durationMs ?: 0L) > 0L) MediaDirection {
-                LinearProgressIndicator(progress = { seekFraction(playback.positionMs, playback.durationMs) }, modifier = progressModifier,
+                val position = livePosition(playback)
+                LinearProgressIndicator(progress = { seekFraction(position(), playback.durationMs) }, modifier = progressModifier,
                     color = MaterialTheme.colorScheme.primary, trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = .12f),
                     strokeCap = StrokeCap.Round, gapSize = 0.dp, drawStopIndicator = {})
             }
@@ -525,11 +526,12 @@ private fun PlayerSeek(playback: PlaybackState, onAction: (MusicUiAction) -> Uni
     // Disposed UIKit controls can still deliver a final callback. Keep the current owner
     // outside the keyed control so those callbacks cannot seek a different recording.
     val activeOwner by rememberUpdatedState(owner)
+    val position = livePosition(playback)
     key(owner) {
         val interactions = remember { MutableInteractionSource() }
         // Native position samples must not steal a draft, and a new owner starts fresh.
         var draft by remember { mutableStateOf<Float?>(null) }
-        val shownPosition = draft?.let { seekPosition(it, duration ?: 0L) } ?: playback.positionMs
+        val shownPosition = draft?.let { seekPosition(it, duration ?: 0L) } ?: position()
         val label = strings.text(TextKey.Seek)
         val spokenPosition = strings.format(TextKey.ProgressValue, strings.spokenDuration(shownPosition), strings.spokenDuration(duration))
         MediaDirection {
@@ -540,7 +542,7 @@ private fun PlayerSeek(playback: PlaybackState, onAction: (MusicUiAction) -> Uni
                     languageTag = if (strings.isRtl) "ar" else "en",
                 )) {
                     AdaptiveSlider(
-                        value = draft ?: seekFraction(playback.positionMs, duration),
+                        value = draft ?: seekFraction(position(), duration),
                         onValueChange = { if (enabled && activeOwner == owner) draft = it },
                         onValueChangeFinished = {
                             val fraction = draft
@@ -888,6 +890,21 @@ private fun repeatLabel(mode: RepeatMode): TextKey = when (mode) { RepeatMode.OF
 private fun speedText(rate: Float): String = rate.toString().removeSuffix(".0")
 /** The source-declared availability wait the current preparation honors, if any (P8). */
 val LocalPlaybackWait = androidx.compose.runtime.staticCompositionLocalOf<dev.veyra.source.youtube.SourcePlaybackWait?> { null }
+
+/**
+ * The live playback position, which moves four times a second. The app root strips it from the
+ * [PlaybackState] it passes down so a tick recomposes only the timelines that read this, not the
+ * whole app. Null (previews, tests) falls back to the passed state's own position.
+ */
+val LocalPlaybackPosition = androidx.compose.runtime.staticCompositionLocalOf<androidx.compose.runtime.State<Long>?> { null }
+
+/** Reads the position where it is used: in a draw lambda this only redraws, never recomposes. */
+@Composable
+private fun livePosition(playback: PlaybackState): () -> Long {
+    val live = LocalPlaybackPosition.current
+    return if (live == null) { { playback.positionMs } } else { { live.value } }
+}
+
 
 /**
  * "Starting in N s" while a declared availability wait is being honored, so a delayed start is

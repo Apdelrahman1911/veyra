@@ -388,9 +388,12 @@ class LibraryStore internal constructor(
             observing = true
             observerScope.launch {
                 try {
-                    persistence.changes().collect {
+                    persistence.changedRevisions().collect { revision ->
                         mutex.withLock {
                             if (mutableStatus.value !is StoreStatus.Ready) return@withLock
+                            // This store's own commits are already published; re-reading the whole
+                            // library for them doubled the cost of every write.
+                            if (revision != null && revision == mutableState.value.revision) return@withLock
                             readLatest()
                         }
                     }

@@ -124,6 +124,9 @@ class AppContainer(
     val resolver = AppSourceResolver(store, files, platform.validator, executionGateway, clock,
         materializationEvidence = acquisitionOwner.materializationEvidence)
     val playback = PlaybackController(store, platform.engine, resolver, scope, clock,
+        // Each periodic save is a full transactional library read, write and readback (the D006
+        // integrity guard). Pause, seek, stop and backgrounding still save at once.
+        checkpointIntervalMs = 15_000,
         acquisition = acquisitionOwner.playbackServices, testHooks = playbackTestHooks)
     private val acquisition = acquisitionOwner.acquisition
     private val downloadBatches = acquisitionOwner.batches

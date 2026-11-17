@@ -62,7 +62,12 @@ fun VeyraApp(container: AppContainer, modifier: Modifier = Modifier) {
     val snapshot by container.library.collectAsState()
     val initialization by container.initialization.collectAsState()
     val navigation by container.navigation.collectAsState()
-    val player by container.playback.state.collectAsState()
+    val playerState = container.playback.state.collectAsState()
+    // The position moves four times a second while playing. Only the timelines read it, through
+    // LocalPlaybackPosition; everything else gets a state without it so a tick does not
+    // recompose the whole app.
+    val livePosition = remember { derivedStateOf { playerState.value.positionMs } }
+    val player by remember { derivedStateOf(structuralEqualityPolicy()) { playerState.value.copy(positionMs = 0L, bufferedPositionMs = null) } }
     val playbackWait by container.playbackWait.collectAsState()
     val options by container.musicOptions.collectAsState()
     val search by container.search.collectAsState()
@@ -87,7 +92,7 @@ fun VeyraApp(container: AppContainer, modifier: Modifier = Modifier) {
         Density(deviceDensity.density, deviceDensity.fontScale * settings.textScale)
     }
     CompositionLocalProvider(LocalDensity provides density, LocalRemoteArtworkAllowed provides false,
-        dev.veyra.ui.music.LocalPlaybackWait provides playbackWait) {
+        dev.veyra.ui.music.LocalPlaybackWait provides playbackWait, dev.veyra.ui.music.LocalPlaybackPosition provides livePosition) {
         VeyraTheme(dark, language) {
             val strings = LocalStrings.current
             val snackbar = remember { SnackbarHostState() }
