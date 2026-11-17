@@ -1,5 +1,6 @@
 package dev.veyra.downloads
 
+import dev.veyra.platform.BlockingIo
 import dev.veyra.acquisition.AcquisitionDownloadExecutor
 import dev.veyra.data.LibraryAcquisitionView
 import dev.veyra.data.LibraryStore
@@ -41,6 +42,11 @@ class DownloadCoordinator(
     private val executionGate: DownloadExecutionGate = ProcessLifetimeDownloadGate,
     private val clock: Clock = SystemClock(),
     private val pollingMs: Long = 1_000,
+    /**
+     * Fallback wait when the durable wake plan has nothing pending and nothing runs: every work,
+     * network and settings change already wakes the loops, so this only bounds a missed signal.
+     */
+    private val idlePollingMs: Long = pollingMs,
     private val leaseDurationMs: Long = 120_000,
     private val heartbeatMs: Long = minOf(pollingMs, 20_000),
     /** Root must await actual native file release, not just an accepted/queued Stop command. */
@@ -49,7 +55,7 @@ class DownloadCoordinator(
     /** Production schema3 MUST inject the same-owner ports; null is legacy schema2/test compatibility only. */
     acquisitionDependencies: DownloadAcquisitionDependencies? = null,
 ) : DownloadScheduling {
-    private val scope = CoroutineScope(parentScope.coroutineContext + SupervisorJob(parentScope.coroutineContext[Job]) + Dispatchers.IO)
+    private val scope = CoroutineScope(parentScope.coroutineContext + SupervisorJob(parentScope.coroutineContext[Job]) + BlockingIo)
     // Public item actions enter this mutex BEFORE their first possible suspension. The app's
     // undispatched intent admission relies on that order; slow join/native/file work stays outside.
     private val commands = Mutex()
@@ -86,6 +92,8 @@ class DownloadCoordinator(
     private var reconciler: Job? = null
     private var startup: CompletableDeferred<Unit>? = null
     private var policyObserver: Job? = null
+    private var idleObserver: Job? = null
+    @kotlin.concurrent.Volatile private var idleWaiting = false
     private var networkObserver: Job? = null
     private var lastSweepMs: Long? = null
     private data class Lifecycle(val started: Boolean = false, val suspended: Boolean = false, val closed: Boolean = false,
@@ -171,7 +179,7 @@ class DownloadCoordinator(
      */
     val dependencyReleaseSafeAfterClose: Boolean get() = dependencyReleaseSafe.value
 
-    init { require(pollingMs > 0 && leaseDurationMs in 1_000..600_000 && heartbeatMs in 1 until leaseDurationMs) }
+    init { require(pollingMs > 0 && idlePollingMs >= pollingMs && leaseDurationMs in 1_000..600_000 && heartbeatMs in 1 until leaseDurationMs) }
 
     /** One coherent snapshot: never merge a newer Room revision with an older download map. */
     val presentation: StateFlow<AppSnapshot> = if (physicalRuntime != null) {
@@ -322,6 +330,33 @@ class DownloadCoordinator(
         return DownloadSchedulingKey(owner, schedulingRevision)
     }
 
+    /**
+     * How long the scheduler and reconciler may sleep before their fallback pass. Each pass reads
+     * the whole library, so with no owned work and no due or timed entry in the wake plan of the
+     * latest published view they wait for a signal (bounded by [idlePollingMs]); otherwise they
+     * keep the regular [pollingMs] cadence, or wake sooner for a nearer due time.
+     */
+    private suspend fun nextPollMs(): Long {
+        if (physicalRuntime == null || idlePollingMs == pollingMs) return pollingMs
+        return activeLock.withLock {
+            if (lifecycle.value.drainsInFlight != 0 || active.isNotEmpty() || maintenance.isNotEmpty() ||
+                hasPendingCleanupOwners || cleanupFailure.value != null) return@withLock pollingMs
+            val inputs = schedulingInputs(store.acquisitionViews.value)
+            val host = checkNotNull(inputs.physicalHost)
+            val now = clock.epochMs()
+            val plan = withPendingDownloadBatchWork(projectPhysicalDownloadWakePlan(checkNotNull(inputs.physical), host, now,
+                DownloadSchedulingKey(owner, schedulingRevision)), checkNotNull(inputs.batchWork), host, now)
+            val next = listOfNotNull(plan.nextLocalEpochMs, plan.nextNetworkEpochMs).minOrNull()
+            val wait = when {
+                plan.hasDueWork -> pollingMs
+                next != null -> (next - now).coerceIn(1, pollingMs)
+                else -> idlePollingMs
+            }
+            idleWaiting = wait == idlePollingMs
+            wait
+        }
+    }
+
     private suspend fun buildSchedulingPlan(): BuiltPlan {
         if (physicalRuntime != null) {
             val view = store.acquisitionView() // ONE same-owner transaction/read barrier.
@@ -363,7 +398,7 @@ class DownloadCoordinator(
                 return@withLock startup!!
             }
             store.initialize().getOrThrow()
-            withContext(Dispatchers.IO) { files.initialize() }
+            withContext(BlockingIo) { files.initialize() }
             lifecycle.value = lifecycle.value.copy(started = true, checksActivated = activation == DownloadActivation.USER_SESSION)
             noteActivity()
             val initialized = CompletableDeferred<Unit>().also { startup = it }
@@ -376,7 +411,7 @@ class DownloadCoordinator(
                             schedule()
                         } catch (cancelled: CancellationException) { throw cancelled }
                         catch (error: Exception) { publishFailure(classify(error), error) }
-                        withTimeoutOrNull(pollingMs) { wake.receive() }
+                        withTimeoutOrNull(nextPollMs()) { wake.receive() }
                     }
                 } finally { if (!initialized.isCompleted) initialized.cancel() }
             }
@@ -387,7 +422,14 @@ class DownloadCoordinator(
                     try { reconcile() }
                     catch (cancelled: CancellationException) { throw cancelled }
                     catch (error: Exception) { publishFailure(classify(error), error) }
-                    withTimeoutOrNull(pollingMs) { maintenanceWake.receive() }
+                    withTimeoutOrNull(nextPollMs()) { maintenanceWake.receive() }
+                }
+            }
+            if (physicalRuntime != null && idlePollingMs != pollingMs) idleObserver = scope.launch {
+                // Writes that bypass the coordinator's own signals are caught on their publication
+                // while the loops sleep through an idle wait, instead of by a tight poll.
+                store.acquisitionViews.drop(1).collect {
+                    if (idleWaiting) { idleWaiting = false; wake.trySend(Unit); maintenanceWake.trySend(Unit) }
                 }
             }
             policyObserver = scope.launch {
@@ -834,7 +876,7 @@ class DownloadCoordinator(
                     }
                     running
                 }
-                cancelAndJoinJobs(listOfNotNull(scheduler, reconciler, policyObserver, networkObserver) + jobs)
+                cancelAndJoinJobs(listOfNotNull(scheduler, reconciler, policyObserver, idleObserver, networkObserver) + jobs)
                 for (retained in retrying) {
                     if (cleanupOwners.value[retained.token] === retained) attemptCleanup(retained, retryFailed = true)
                 }
@@ -1199,7 +1241,7 @@ class DownloadCoordinator(
                         throw VeyraException(AppFailure(FailureCode.UNSUPPORTED_CODEC, "download_execution_not_supported"))
                     val representation = claim.record.representationId ?: source.representationId
                     updateOwned(claim) { it.copy(status = DownloadStatus.RUNNING, representationId = representation) }
-                    val part = withContext(Dispatchers.IO) { files.prepareStagingPath(claim.record.stagingPath!!) }
+                    val part = withContext(BlockingIo) { files.prepareStagingPath(claim.record.stagingPath!!) }
                     var lastProgress: Long? = null
                     val result = gateway.download(binding, part.toString(), capabilities, representation) { progress ->
                         currentCoroutineContext().ensureActive()

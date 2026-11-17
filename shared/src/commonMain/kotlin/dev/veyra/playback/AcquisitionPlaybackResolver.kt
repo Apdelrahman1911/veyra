@@ -1,5 +1,6 @@
 package dev.veyra.playback
 
+import dev.veyra.platform.BlockingIo
 import dev.veyra.data.*
 import dev.veyra.downloads.*
 import dev.veyra.model.*
@@ -79,7 +80,7 @@ class AcquisitionPlaybackResolver(
             var retainedReader: RetainedValidationReader? = null
             val duration: Long?
             try {
-                withContext(NonCancellable + Dispatchers.IO) {
+                withContext(NonCancellable + BlockingIo) {
                     val lease = files.tryLeasePaths(listOf(asset.uri), scope)
                         ?: fail(FailureCode.INVALID_STATE, "offline_file_busy")
                     acquired = DownloadLeaseCleanup(listOf(lease)).also(cleanup::register)
@@ -105,7 +106,7 @@ class AcquisitionPlaybackResolver(
                 currentCoroutineContext().ensureActive()
             } finally {
                 // Register before fallible close. No implicit retry after any unknown native result.
-                withContext(NonCancellable + Dispatchers.IO) {
+                withContext(NonCancellable + BlockingIo) {
                     acquired?.let { owned ->
                         // A thrown decoder teardown is not a file-release receipt. The strong
                         // native holder and OS path lease survive together until explicit close.
@@ -193,7 +194,7 @@ class AcquisitionPlaybackResolver(
     internal suspend fun retainedReaderFailure(): AppFailure? {
         // Matching resolve jobs are drained first; unrelated active validators remain untouched.
         // An explicit close/removal may consume only a positive release, not retry an unknown one.
-        withContext(NonCancellable + Dispatchers.IO) {
+        withContext(NonCancellable + BlockingIo) {
             retainedValidationReaders.value.forEach { owner ->
                 owner.lease.lock.withLock {
                     if (retainedValidationReaders.value.none { it === owner }) return@withLock

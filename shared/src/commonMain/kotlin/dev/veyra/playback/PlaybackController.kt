@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.sync.Mutex
@@ -29,6 +30,9 @@ private const val GRACEFUL_SHUTDOWN_TIMEOUT_MS = 5_000L
 class PlaybackTestHooks {
     @Volatile var beforeActivate: (suspend () -> Unit)? = null
 }
+
+/** Tick period while nothing plays: policy and sleep-timer checks only. */
+private const val PAUSED_TICK_MS = 2_000L
 
 /**
  * Single application-lifetime owner of two saved queue contexts and one native transport.
@@ -241,7 +245,11 @@ class PlaybackController(
         ownerScope.launch { store.state.collect { messages.send(Message.SnapshotChanged(it)) } }
         ownerScope.launch {
             while (isActive) {
-                delay(250)
+                // Playback moves the position, crossfade and checkpoints four times a second. While
+                // paused the tick only re-checks policy and the sleep timer, so it slows down and
+                // resumes its full rate the moment playback starts.
+                if (mutableState.value.isPlaying) delay(250)
+                else withTimeoutOrNull(PAUSED_TICK_MS) { mutableState.first { it.isPlaying } }
                 messages.trySend(Message.Tick)
             }
         }

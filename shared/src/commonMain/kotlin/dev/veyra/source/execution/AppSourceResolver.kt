@@ -1,5 +1,6 @@
 package dev.veyra.source.execution
 
+import dev.veyra.platform.BlockingIo
 import dev.veyra.data.LibraryStore
 import dev.veyra.data.LibraryTransactionOwned
 import dev.veyra.data.getOrThrow
@@ -21,7 +22,6 @@ import io.ktor.http.Url
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.IO
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
@@ -249,7 +249,7 @@ class AppSourceResolver(
         var acquired: DownloadLeaseCleanup? = null
         var nativeRetained = false
         try {
-            withContext(NonCancellable + Dispatchers.IO) {
+            withContext(NonCancellable + BlockingIo) {
                 val lease = files.tryLeasePaths(listOf(asset.uri), scope)
                     ?: fail(FailureCode.INVALID_STATE, "offline_file_busy")
                 acquired = DownloadLeaseCleanup(listOf(lease)).also(cleanup::register)
@@ -308,7 +308,7 @@ class AppSourceResolver(
                 representationId = asset.representationId, item = item, executionBinding = binding,
             )
         } finally {
-            withContext(NonCancellable + Dispatchers.IO) {
+            withContext(NonCancellable + BlockingIo) {
                 if (!nativeRetained) acquired?.let { lease ->
                     try { lease.close(); cleanup.remove(lease) }
                     catch (_: Throwable) { fail(FailureCode.STORAGE_IO, "offline_file_lease_release") }
@@ -381,7 +381,7 @@ class AppSourceResolver(
     }
 
     override suspend fun retainedReaderFailure(): AppFailure? {
-        withContext(NonCancellable + Dispatchers.IO) {
+        withContext(NonCancellable + BlockingIo) {
             retainedValidation.value.forEach { owner ->
                 owner.lease.lock.withLock {
                     if (retainedValidation.value.none { it === owner }) return@withLock

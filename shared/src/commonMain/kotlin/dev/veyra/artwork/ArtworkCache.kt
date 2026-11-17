@@ -1,5 +1,6 @@
 package dev.veyra.artwork
 
+import dev.veyra.platform.BlockingIo
 import dev.veyra.data.LibraryStore
 import dev.veyra.data.getOrThrow
 import dev.veyra.model.AppSnapshot
@@ -18,7 +19,6 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.IO
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
@@ -52,7 +52,7 @@ class ArtworkCache(
     private val store: LibraryStore,
     private val files: ArtworkFiles,
     private val http: SafeHttp,
-    private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val dispatcher: CoroutineDispatcher = BlockingIo,
     maximumConcurrentRequests: Int = 2,
 ) {
     private val lifetime = SupervisorJob()

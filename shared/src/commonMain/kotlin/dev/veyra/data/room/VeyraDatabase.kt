@@ -1,5 +1,6 @@
 package dev.veyra.data.room
 
+import dev.veyra.platform.BlockingIo
 import androidx.room.ConstructedBy
 import androidx.room.Database
 import androidx.room.RoomDatabase
@@ -9,7 +10,6 @@ import androidx.sqlite.SQLiteConnection
 import androidx.sqlite.execSQL
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.IO
 
 @Database(
     entities = [
@@ -134,7 +134,7 @@ val MIGRATION_1_2: Migration = object : Migration(1, 2) {
 
 fun buildVeyraDatabase(
     builder: RoomDatabase.Builder<VeyraDatabase>,
-    dispatcher: CoroutineDispatcher = Dispatchers.IO,
+    dispatcher: CoroutineDispatcher = BlockingIo,
 ): VeyraDatabase = builder
     .setDriver(VeyraSQLiteDriver())
     .setQueryCoroutineContext(dispatcher)

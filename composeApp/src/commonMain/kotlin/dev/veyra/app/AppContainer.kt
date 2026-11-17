@@ -1,5 +1,6 @@
 package dev.veyra.app
 
+import dev.veyra.platform.BlockingIo
 import dev.veyra.acquisition.AcquisitionCaptureFactory
 import dev.veyra.acquisition.AcquisitionResolution
 import dev.veyra.acquisition.AcquisitionCoordinator
@@ -137,6 +138,8 @@ class AppContainer(
         // fallback for timed retries and foreign lease expiry. Each pass reads the whole library,
         // so a one-second poll kept the CPU busy (and the phone warm) with nothing to do.
         pollingMs = 15_000,
+        // With no download work pending or timed, nothing is due until a change signals the loops.
+        idlePollingMs = 600_000,
         beforePhysicalDelete = { asset -> playback.releaseForAssetRemoval(asset.mediaId).getOrThrow() },
         networkState = platform.downloadNetworkState,
         acquisitionDependencies = acquisitionDependencies)
@@ -292,7 +295,7 @@ class AppContainer(
         try {
             val snapshot = store.initialize().getOrThrow()
             acquisitionOwner.initialize()
-            withContext(Dispatchers.IO) { files.initialize() }
+            withContext(BlockingIo) { files.initialize() }
             artwork.initialize()
             mutableNavigation.value = AppNavigation.restore(snapshot)
             mutablePodcastDetails.value = PodcastDetailStatus(options = snapshot.shows.keys.associateWith { id ->

@@ -1,5 +1,6 @@
 package dev.veyra.downloads
 
+import dev.veyra.platform.BlockingIo
 import dev.veyra.model.AppFailure
 import dev.veyra.model.FailureCode
 import dev.veyra.model.OfflineAsset
@@ -7,7 +8,6 @@ import dev.veyra.model.OfflineAssetKind
 import dev.veyra.model.VeyraException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.IO
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
@@ -292,7 +292,7 @@ class DownloadFiles internal constructor(directory: String, val fileSystem: File
         fileSystem.atomicMove(from, destination)
     }
 
-    suspend fun sha256(path: Path): String = withContext(Dispatchers.IO) {
+    suspend fun sha256(path: Path): String = withContext(BlockingIo) {
         val safe = ownedPath(path.toString())
         val digest = storageOperation {
             // Platform-native SHA-256: the portable implementation made every offline play wait
@@ -317,7 +317,7 @@ class DownloadFiles internal constructor(directory: String, val fileSystem: File
         digest
     }
 
-    suspend fun verifiedFile(asset: OfflineAsset): Path = withContext(Dispatchers.IO) {
+    suspend fun verifiedFile(asset: OfflineAsset): Path = withContext(BlockingIo) {
         storageOperation {
             val path = ownedPath(asset.uri)
             val metadata = fileSystem.metadataOrNull(path)
@@ -328,7 +328,7 @@ class DownloadFiles internal constructor(directory: String, val fileSystem: File
         }
     }
 
-    suspend fun bytesUsed(): Long = withContext(Dispatchers.IO) {
+    suspend fun bytesUsed(): Long = withContext(BlockingIo) {
         storageOperation {
             checkRootAncestors()
             if (!fileSystem.exists(root)) 0L else fileSystem.listRecursively(root, followSymlinks = false)

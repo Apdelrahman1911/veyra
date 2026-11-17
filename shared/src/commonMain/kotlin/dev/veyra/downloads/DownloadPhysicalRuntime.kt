@@ -1,5 +1,6 @@
 package dev.veyra.downloads
 
+import dev.veyra.platform.BlockingIo
 import dev.veyra.acquisition.*
 import dev.veyra.data.*
 import dev.veyra.model.*
@@ -1475,7 +1476,7 @@ internal class DownloadPhysicalRuntime(
                         run.fence, prepared.representation.representationId, run.current.job.validatorGeneration,
                         run.current.job.etag, run.current.job.lastModified, clock.epochMs())) }
                     diagnosticStage = DownloadDiagnosticStage.STAGING
-                    val part = withContext(Dispatchers.IO) { files.prepareStagingPath(requireNotNull(run.current.job.stagingPath)) }
+                    val part = withContext(BlockingIo) { files.prepareStagingPath(requireNotNull(run.current.job.stagingPath)) }
                     var lastProgress: Long? = null
                     diagnosticStage = DownloadDiagnosticStage.SOURCE_TRANSFER
                     val result = prepared.transfer(part.toString()) { progress ->

@@ -41,6 +41,7 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import platform.AVFAudio.*
 import platform.AVFoundation.*
 import platform.CoreMedia.*
@@ -150,6 +151,8 @@ class IosAudioEngine internal constructor(private val retirementFault: IosNative
         val pendingInterruptions = mutableListOf<EngineEvent.Interruption>()
     }
 
+    private val samplerWake = Channel<Unit>(Channel.CONFLATED)
+
     init {
         check(NSThread.isMainThread) { "Create the iOS audio owner on Main." }
         installSessionObservers()
@@ -157,7 +160,9 @@ class IosAudioEngine internal constructor(private val retirementFault: IosNative
             while (isActive) {
                 active?.let(::sampleNativeState)
                 staged?.let(::sampleNativeState)
-                delay(250)
+                // A settled, paused (or empty) engine has nothing to observe; polling it four times
+                // a second only woke the CPU. Every command wakes the sampler at once.
+                withTimeoutOrNull(if (settled()) 2_000L else 250L) { samplerWake.receive() }
             }
         }
     }
@@ -1080,7 +1085,17 @@ class IosAudioEngine internal constructor(private val retirementFault: IosNative
     private fun milliseconds(seconds: Double): Long? = seconds.takeIf { it.isFinite() && it >= 0 && it < Long.MAX_VALUE / 1000.0 }?.let { (it * 1000).toLong() }
     private fun isPlaying(player: AVPlayer) = player.timeControlStatus == AVPlayerTimeControlStatusPlaying && player.rate > 0f
     private fun emit(event: EngineEvent) { controls.trySend(event) }
-    private suspend fun <T> onMain(block: suspend () -> T): T = withContext(Dispatchers.Main.immediate) { block() }
+    private suspend fun <T> onMain(block: suspend () -> T): T = withContext(Dispatchers.Main.immediate) {
+        try { block() } finally { samplerWake.trySend(Unit) }
+    }
+
+    /** Nothing in flight: no staged deck or fade, and the active deck (if any) ready, paused and not seeking. */
+    private fun settled(): Boolean {
+        if (staged != null || fade != null) return false
+        val deck = active ?: return true
+        return deck.ready && !deck.preparingInitialSeek && deck.pendingSeekSequence == null && !deck.failed &&
+            deck.player.timeControlStatus == AVPlayerTimeControlStatusPaused
+    }
     private fun baseGain(deck: Deck) = if (deck.source.controlsMode == PlaybackControlsMode.PODCAST) 1f else CrossfadeMix.MUSIC_GAIN
     private fun makePlayer() = AVPlayer().apply {
         automaticallyWaitsToMinimizeStalling = true
