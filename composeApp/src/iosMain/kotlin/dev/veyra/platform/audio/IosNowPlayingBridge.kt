@@ -14,6 +14,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import platform.Foundation.NSThread
@@ -30,11 +32,14 @@ class IosNowPlayingBridge(
     private val skipForwardSeconds: () -> Int = { 30 },
     /** A trusted app-owned LOCAL path only; must never perform an artwork network request. */
     private val cachedArtworkPath: suspend (String) -> String? = { null },
+    /** The cover is usually still downloading when a song starts; retry when the cache changes. */
+    private val artworkUpdates: Flow<Unit> = emptyFlow(),
 ) {
     private val commands = MPRemoteCommandCenter.sharedCommandCenter()
     private val nowPlaying = MPNowPlayingInfoCenter.defaultCenter()
     private val targets = mutableListOf<Pair<MPRemoteCommand, Any>>()
     private var observer: Job? = null
+    private var artworkObserver: Job? = null
     private var artworkJob: Job? = null
     private var artworkKey: Pair<String?, Long>? = null
     private var artwork: MPMediaItemArtwork? = null
@@ -91,24 +96,32 @@ class IosNowPlayingBridge(
                 if (key != artworkKey) {
                     artworkKey = key
                     artwork = null
-                    artworkJob?.cancel()
-                    state.currentItem?.id?.let { mediaId ->
-                        artworkJob = scope.launch {
-                            val image = try {
-                                withContext(Dispatchers.Default) {
-                                    val path = cachedArtworkPath(mediaId)
-                                    if (path != null && path.startsWith('/')) UIImage.imageWithContentsOfFile(path) else null
-                                }
-                            } catch (cancelled: CancellationException) { throw cancelled }
-                            catch (_: Exception) { null }
-                            if (!closed && artworkKey == key && image != null) {
-                                artwork = MPMediaItemArtwork(boundsSize = image.size, requestHandler = { image })
-                                publish(playback.value, force = true)
-                            }
-                        }
-                    }
+                    loadArtwork(state)
                     publish(state, force = true)
                 } else publish(state)
+            }
+        }
+        artworkObserver = scope.launch {
+            artworkUpdates.collect { if (!closed && artwork == null && artworkJob?.isActive != true) loadArtwork(playback.value) }
+        }
+    }
+
+    private fun loadArtwork(state: PlaybackState) {
+        val key = state.currentEntryId to state.generation
+        if (key != artworkKey) return
+        artworkJob?.cancel()
+        val mediaId = state.currentItem?.id ?: return
+        artworkJob = scope.launch {
+            val image = try {
+                withContext(Dispatchers.Default) {
+                    val path = cachedArtworkPath(mediaId)
+                    if (path != null && path.startsWith('/')) UIImage.imageWithContentsOfFile(path) else null
+                }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { null }
+            if (!closed && artworkKey == key && image != null) {
+                artwork = MPMediaItemArtwork(boundsSize = image.size, requestHandler = { image })
+                publish(playback.value, force = true)
             }
         }
     }
@@ -193,6 +206,7 @@ class IosNowPlayingBridge(
         if (closed) return
         closed = true
         observer?.cancel()
+        artworkObserver?.cancel()
         artworkJob?.cancel()
         targets.forEach { (command, target) -> command.removeTarget(target); command.enabled = false }
         targets.clear()

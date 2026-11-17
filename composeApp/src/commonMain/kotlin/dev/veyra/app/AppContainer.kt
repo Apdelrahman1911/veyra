@@ -403,6 +403,8 @@ class AppContainer(
     }
 
     fun cachedArtworkPath(mediaId: String): String? = artwork.cachedArtworkPath(mediaId)
+    /** Emits when the set of locally cached covers changes. */
+    val artworkUpdates: kotlinx.coroutines.flow.Flow<Unit> get() = artwork.cachedPaths.map { }
     fun dismissNotice(id: String) { mutableNotice.update { if (it?.id == id) null else it } }
 
     fun selectDestination(destination: AppDestination) {

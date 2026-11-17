@@ -78,10 +78,15 @@ internal object IosApplication {
                         skipForwardSeconds = { created.store.state.value.settings.skipForwardSeconds },
                         cachedArtworkPath = { id ->
                             created.cachedArtworkPath(id)?.takeIf { path ->
-                                val resolved = NSURL.fileURLWithPath(path).URLByResolvingSymlinksInPath?.path
-                                resolved != null && resolved.startsWith(directory.trimEnd('/') + "/")
+                                // Resolve both sides the same way: resolving symlinks rewrites
+                                // /private/var to /var, so a resolved file never matched the
+                                // unresolved app folder and no cover ever reached the lock screen.
+                                val resolved = resolvedPath(path)
+                                val root = resolvedPath(directory)
+                                resolved != null && root != null && resolved.startsWith(root.trimEnd('/') + "/")
                             }
-                        }
+                        },
+                        artworkUpdates = created.artworkUpdates,
                     )
                 }
             } catch (cancelled: CancellationException) {
@@ -206,6 +211,8 @@ private class IosPlatformServices(
 internal fun iosLanguage(): LanguagePreference =
     if ((NSLocale.preferredLanguages.firstOrNull() as? String)?.substringBefore('-') == "ar")
         LanguagePreference.ARABIC else LanguagePreference.ENGLISH
+
+private fun resolvedPath(path: String): String? = NSURL.fileURLWithPath(path).URLByResolvingSymlinksInPath?.path
 
 private fun applicationDirectory(): String {
     val base = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, true)

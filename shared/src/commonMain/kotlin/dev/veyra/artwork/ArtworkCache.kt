@@ -27,6 +27,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.selects.select
@@ -62,6 +63,8 @@ class ArtworkCache(
     private val pending = mutableMapOf<String, Deferred<String?>>()
     private val requestSlots = Semaphore(maximumConcurrentRequests.also { require(it in 1..4) })
     private val verifiedPaths = MutableStateFlow<Map<String, String>>(emptyMap())
+    /** Changes whenever a cover is verified or dropped; native surfaces re-read [cachedArtworkPath] on it. */
+    val cachedPaths: StateFlow<Map<String, String>> get() = verifiedPaths
     private val linkQueue = Mutex()
     private val linkWriter = Mutex()
     private val queuedLinks = mutableListOf<PendingLink>()
