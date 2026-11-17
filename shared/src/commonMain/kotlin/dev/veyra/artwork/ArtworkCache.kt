@@ -75,26 +75,37 @@ class ArtworkCache(
             val snapshot = store.initialize().getOrThrow()
             files.initialize()
             val validated = mutableMapOf<String, String>()
-            val rejected = mutableMapOf<String, String>()
-            val references = snapshot.media.values.map { mediaKey(it.id) to it.localArtworkPath } +
-                snapshot.shows.values.map { showKey(it.id) to it.localArtworkPath }
-            for ((key, path) in references) {
+            // key -> (path stored now, path to store instead; null clears it)
+            val repairs = mutableMapOf<String, Pair<String?, String?>>()
+            val references = snapshot.media.values.map { Triple(mediaKey(it.id), it.localArtworkPath, it.artworkUrl) } +
+                snapshot.shows.values.map { Triple(showKey(it.id), it.localArtworkPath, it.artworkUrl) }
+            val names by lazy { files.publishedNames() }
+            for ((key, path, rawUrl) in references) {
                 currentCoroutineContext().ensureActive()
-                if (path == null) continue
-                val valid = verified(key, path)
-                if (valid != null) validated[key] = valid.path else rejected[key] = path
+                val valid = path?.let { verified(key, it) }
+                if (valid != null) { validated[key] = valid.path; continue }
+                // The image may still be here under this install's folder: relink it locally,
+                // without any network, instead of losing every cover after an app update.
+                val url = rawUrl?.let { runCatching { PublicUrlPolicy.normalize(it) }.getOrNull() }
+                val found = if (path != null || url != null) relocated(key, path, url, names) else null
+                if (found != null) { validated[key] = found.path; repairs[key] = path to found.path }
+                else if (path != null) repairs[key] = path to null
             }
             // A missing, modified or external file must not remain a trusted UI/native path.
-            // Do not erase a newer concurrent cache publication while repairing stale metadata.
-            if (rejected.isNotEmpty()) store.update { current ->
+            // Do not overwrite a newer concurrent cache publication while repairing stale metadata.
+            if (repairs.isNotEmpty()) store.update { current ->
+                fun repaired(key: String, stored: String?): String? {
+                    val (seen, replacement) = repairs[key] ?: return stored
+                    return if (stored == seen) replacement else stored
+                }
                 current.copy(
                     media = current.media.mapValues { (_, item) ->
-                        if (item.localArtworkPath != null && rejected[mediaKey(item.id)] == item.localArtworkPath)
-                            item.copy(localArtworkPath = null) else item
+                        val next = repaired(mediaKey(item.id), item.localArtworkPath)
+                        if (next != item.localArtworkPath) item.copy(localArtworkPath = next) else item
                     },
                     shows = current.shows.mapValues { (_, show) ->
-                        if (show.localArtworkPath != null && rejected[showKey(show.id)] == show.localArtworkPath)
-                            show.copy(localArtworkPath = null) else show
+                        val next = repaired(showKey(show.id), show.localArtworkPath)
+                        if (next != show.localArtworkPath) show.copy(localArtworkPath = next) else show
                     },
                 )
             }.getOrThrow()
@@ -310,6 +321,14 @@ class ArtworkCache(
         } finally {
             withContext(NonCancellable) { offline.cancelAndJoin(); transfer.cancelAndJoin() }
         }
+    }
+
+    private fun relocated(key: String, path: String?, url: String?, names: Set<String>): VerifiedArtwork? = try {
+        files.relocate(key, path, url, names)
+    } catch (cancelled: CancellationException) { throw cancelled }
+    catch (failure: VeyraException) {
+        if (failure.failure.code in setOf(FailureCode.STORAGE_IO, FailureCode.STORAGE_FULL)) throw failure
+        null
     }
 
     private fun verified(key: String, path: String): VerifiedArtwork? = try {

@@ -85,6 +85,34 @@ class ArtworkFiles(directory: String, private val fileSystem: FileSystem = FileS
         VerifiedArtwork(path.toString(), name.groupValues[1], name.groupValues[2])
     }
 
+    /**
+     * Finds an owner's published image already in this store, by its own file name, after its
+     * stored path stopped resolving. iOS moves an app's data container on install and update, so
+     * an absolute path saved by an earlier install names a folder that no longer exists although
+     * the image is still here. [storedPath] keeps its exact file name; with no usable path, the
+     * owner's image for [sourceUrl] is looked up instead. Every candidate is fully re-verified.
+     */
+    internal fun relocate(owner: String, storedPath: String?, sourceUrl: String?, names: Set<String>): VerifiedArtwork? {
+        val ownerHash = digest(owner)
+        val byPath = storedPath?.substringAfterLast('/')?.substringAfterLast('\\')?.takeIf {
+            it in names && FINAL_NAME.matchEntire(it)?.groupValues?.get(1) == ownerHash
+        }
+        val byUrl = sourceUrl?.let { url ->
+            val prefix = "art-$ownerHash-${digest(url)}-"
+            names.filter { it.startsWith(prefix) }.sorted().firstOrNull()
+        }
+        for (name in listOfNotNull(byPath, byUrl).distinct()) {
+            val found = runCatching { verify((images / name).toString()) }.getOrNull()
+            if (found != null && matchesOwner(found, owner)) return found
+        }
+        return null
+    }
+
+    /** File names of every published image; empty when the store has none yet. */
+    internal fun publishedNames(): Set<String> = storage {
+        fileSystem.listOrNull(checked(images))?.mapTo(mutableSetOf()) { it.name }.orEmpty()
+    }
+
     internal fun matchesOwner(artwork: VerifiedArtwork, owner: String): Boolean = artwork.ownerHash == digest(owner)
     internal fun matchesUrl(artwork: VerifiedArtwork, url: String): Boolean = artwork.urlHash == digest(url)
 

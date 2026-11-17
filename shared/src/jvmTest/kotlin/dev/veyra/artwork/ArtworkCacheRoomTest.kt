@@ -323,6 +323,29 @@ class ArtworkCacheRoomTest {
         assertEquals(1, calls.get())
     }
 
+    @Test fun aPathFromAMovedAppContainerIsRelinkedToTheSameImageWithoutNetwork() = checkCase {
+        val path = assertNotNull(cache.cacheMedia(item))
+        // iOS moves the data container on install/update: the saved absolute folder is gone.
+        val moved = "/var/mobile/Containers/Data/Application/OLD-INSTALL/Library/Veyra/artwork/images/" + Path.of(path).fileName
+        store.update { it.copy(media = it.media + (item.id to it.media.getValue(item.id).copy(localArtworkPath = moved)),
+            settings = it.settings.copy(offlineOnly = true)) }.getOrThrow()
+        reopen()
+        assertEquals(path, store.state.value.media[item.id]?.localArtworkPath)
+        assertEquals(path, cache.cachedArtworkPath(item.id))
+        assertEquals(1, calls.get())
+        assertEquals(1, dnsHosts.size)
+    }
+
+    @Test fun aClearedLinkToAnImageStillOnDiskIsRestoredOnReopen() = checkCase {
+        val path = assertNotNull(cache.cacheShow(show))
+        store.update { it.copy(shows = it.shows + (show.id to it.shows.getValue(show.id).copy(localArtworkPath = null)),
+            settings = it.settings.copy(offlineOnly = true)) }.getOrThrow()
+        reopen()
+        assertEquals(path, store.state.value.shows[show.id]?.localArtworkPath)
+        assertEquals(path, cache.cachedShowArtworkPath(show.id))
+        assertEquals(1, calls.get())
+    }
+
     @Test fun externalMetadataPathIsNeverReadOrDeletedAsOwnedArtwork() = checkCase {
         val external = directory.resolve("not-in-image-store.png")
         Files.write(external, authoredArtworkPng())
