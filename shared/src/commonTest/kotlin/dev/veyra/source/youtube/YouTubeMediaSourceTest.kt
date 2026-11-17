@@ -112,6 +112,19 @@ class YouTubeMediaSourceTest {
         } finally { source.close() }
     }
 
+    @Test fun searchKeepsArtworkWhenTheThumbnailIsSignedOrMissing() = runTest {
+        // Real search responses give the widest thumbnail as a signed hq720 URL; it must not be
+        // persisted, nor dropped. A result with no thumbnail still gets that video's artwork.
+        val signed = """{"videoRenderer":{"videoId":"$videoId","title":{"simpleText":"Signed"},"ownerText":{"simpleText":"Uploader"},"thumbnail":{"thumbnails":[{"url":"https://i.ytimg.com/vi/$videoId/hqdefault.jpg?sqp=-oaymwEc&rs=AOn4CL","width":480},{"url":"https://i.ytimg.com/vi/$videoId/hq720.jpg?sqp=-oaymwEcCOgCEMoBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLAuthored","width":720}]}}}"""
+        val bare = """{"videoRenderer":{"videoId":"$secondId","title":{"simpleText":"Bare"},"ownerText":{"simpleText":"Uploader"}}}"""
+        val source = YouTubeMediaSource(YouTubeClient(ResearchTransport { ResearchResponse(it.url, 200, initial("$signed,$bare")) }))
+        try {
+            val artwork = source.search("authored").items.associate { it.id to it.artworkUrl }
+            assertEquals("https://i.ytimg.com/vi/$videoId/hqdefault.jpg", artwork["youtube:$videoId"])
+            assertEquals("https://i.ytimg.com/vi/$secondId/hqdefault.jpg", artwork["youtube:$secondId"])
+        } finally { source.close() }
+    }
+
     @Test fun playlistPaginationReturnsNewOccurrencesWithoutDeduplicatingRepeats() = runTest {
         var posts = 0
         val source = YouTubeMediaSource(YouTubeClient(ResearchTransport {

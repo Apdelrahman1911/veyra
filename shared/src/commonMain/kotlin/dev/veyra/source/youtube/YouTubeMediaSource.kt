@@ -279,13 +279,13 @@ class YouTubeMediaSource(
         }
         return MediaItem(
             id = mediaId(id), title = title, kind = MediaKind.MUSIC, source = sourceRef(id),
-            creator = subtitle.orEmpty(), artworkUrl = publicArtwork(thumbnailUrl), durationMs = durationText?.let(::parseDuration),
+            creator = subtitle.orEmpty(), artworkUrl = videoArtwork(id, thumbnailUrl), durationMs = durationText?.let(::parseDuration),
         )
     }
 
     private fun ExtractedMedia.toMediaItem() = MediaItem(
         id = mediaId(id), title = title, kind = MediaKind.MUSIC, source = sourceRef(id),
-        creator = artist.orEmpty(), artworkUrl = publicArtwork(thumbnailUrl), durationMs = durationMs?.takeIf { it > 0 },
+        creator = artist.orEmpty(), artworkUrl = videoArtwork(id, thumbnailUrl), durationMs = durationMs?.takeIf { it > 0 },
         // kmpYT's artist is the video author/uploader, not a declared musical artist.
     )
 
@@ -308,6 +308,21 @@ class YouTubeMediaSource(
         fun mediaId(videoId: String) = "youtube:$videoId"
         fun watchUrl(videoId: String) = "https://www.youtube.com/watch?v=$videoId"
         fun sourceRef(videoId: String) = SourceRef(SourceProvider.YOUTUBE, videoId, watchUrl(videoId))
+
+        val VIDEO_IMAGE_HOSTS = setOf("i.ytimg.com", "i1.ytimg.com", "i2.ytimg.com", "i3.ytimg.com", "i4.ytimg.com")
+
+        /**
+         * A video's artwork. Search and watch responses usually give the largest thumbnail as a
+         * signed `i.ytimg.com/vi/<id>/hq720.jpg?sqp=…&rs=…` URL. Veyra does not persist signed
+         * URLs, and rejecting them left every item without artwork, so any video-image URL (or
+         * none) becomes that video's unsigned, permanent `hqdefault.jpg`. Square artwork on the
+         * channel/music image hosts is kept when it passes [publicArtwork].
+         */
+        fun videoArtwork(videoId: String, value: String?): String {
+            val host = value?.let { runCatching { Url(it).host.lowercase() }.getOrNull() }
+            val kept = if (host == null || host in VIDEO_IMAGE_HOSTS) null else publicArtwork(value)
+            return kept ?: "https://i.ytimg.com/vi/$videoId/hqdefault.jpg"
+        }
 
         fun publicArtwork(value: String?): String? = value?.takeIf {
             val url = runCatching { Url(it) }.getOrNull() ?: return@takeIf false
