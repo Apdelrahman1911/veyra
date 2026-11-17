@@ -79,7 +79,7 @@ import kotlin.test.assertTrue
  */
 class SavedRecordingPlaybackTest {
     @Test
-    fun savedMusicR1PlaysOfflineWithoutFreshResolutionAndFreshR2StillFails() = runBlocking {
+    fun savedMusicR1PlaysOfflineAndPlainPlayReusesTheDownload() = runBlocking {
         withTimeout(180_000L) {
             val item = TypedDownloadPresentationSupport.youtubeItem("saved-music", "Saved complete music title")
             val fixture = SavedPlaybackFixture()
@@ -120,20 +120,33 @@ class SavedRecordingPlaybackTest {
                 assertEquals(firstLoads + 1, fixture.engine.loads.size)
                 assertEquals(before, fixture.gatewayCounts)
 
-                // Fresh online/offline Play still manufactures R2 and fails offline; it never
-                // borrows the saved R1 asset.
+                // A plain Play of a downloaded item reuses its saved R1 request (D014): it plays
+                // the verified file offline, with no new title search, transfer or stream.
                 val loads = fixture.engine.loads.size
                 val prepare = fixture.gateway.preparations.get()
                 val transfers = fixture.gateway.transfers.get()
                 fixture.app.onMusicAction(MusicUiAction.Play(item))
-                val failure = withTimeout(20_000L) {
-                    fixture.app.playback.state.first { it.failure != null }.failure
+                withTimeout(20_000L) { while (fixture.engine.loads.size <= loads) delay(20) }
+                val played = withTimeout(20_000L) {
+                    fixture.app.playback.state.first { it.isPlaying && it.currentSelection?.bindingId == binding }
                 }
-                assertNotNull(failure)
-                assertEquals(FailureCode.OFFLINE_POLICY, failure.code)
-                assertEquals(loads, fixture.engine.loads.size)
+                assertNull(played.failure)
+                assertEquals(dev.veyra.playback.AudioOrigin.DOWNLOADED_FILE, played.audioOrigin)
+                assertTrue(fixture.engine.loads.last().source.isLocal)
+                assertEquals(before, fixture.gatewayCounts, "Play of a downloaded item must not search or stream")
                 assertEquals(prepare, fixture.gateway.preparations.get())
                 assertEquals(transfers, fixture.gateway.transfers.get())
+
+                // A mixed collection admits the downloaded item through its saved request and the
+                // other through a fresh capture; starting on the downloaded one plays the file.
+                val other = TypedDownloadPresentationSupport.youtubeItem("not-downloaded", "Another complete music title")
+                fixture.store.upsertCatalog(listOf(other)).getOrThrow()
+                val mixedLoads = fixture.engine.loads.size
+                fixture.app.onMusicAction(MusicUiAction.PlayCollection(listOf(item, other), false))
+                withTimeout(20_000L) { while (fixture.engine.loads.size <= mixedLoads) delay(20) }
+                assertTrue(fixture.engine.loads.last().source.isLocal)
+                assertEquals(binding, fixture.app.playback.state.value.currentSelection?.bindingId)
+                assertEquals(before, fixture.gatewayCounts, "The downloaded collection member must not search or stream")
             } finally {
                 fixture.close()
             }
@@ -223,6 +236,11 @@ class SavedRecordingPlaybackTest {
                 withTimeout(20_000L) {
                     while (fixture.store.acquisitionView().acquisition.queues.getValue(QueueContext.MUSIC)
                             .currentOccurrenceId != nextOccurrence) delay(20)
+                }
+                // The enqueued copy reuses the saved request (D014) and loads the file itself; let
+                // that load settle so the counts below cover only the revoked activation.
+                withTimeout(20_000L) {
+                    fixture.app.playback.state.first { it.currentEntryId == nextOccurrence.value && (it.isPlaying || it.failure != null) }
                 }
                 val before = fixture.store.acquisitionView()
                 val queue = before.acquisition.queues.getValue(QueueContext.MUSIC)

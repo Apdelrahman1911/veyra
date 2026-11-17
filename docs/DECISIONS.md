@@ -2,6 +2,18 @@
 
 Only consequential choices belong here. Each final decision needs evidence, alternatives, and consequences; research detail lives in the linked reports.
 
+## D014 — Play uses a verified download before any online lookup (accepted; owner request 2026-11-17)
+
+Any catalogue Play/Enqueue (one item, play-all, shuffle, playlist, collection, episode) admits an
+item that has a currently verified download through that download's own accepted request, so the
+occurrence resolves to the saved binding and plays the validated file with no new title search,
+transfer or stream. Only items without a verified download get a fresh capture. This replaces the
+earlier "fresh Play always manufactures R2 and never borrows R1" contract. D005 is unchanged: the
+reused request is the original complete-title search whose first result was accepted; no later or
+substitute result is chosen. If the saved file fails validation at play time the failure is shown;
+the player never silently streams in its place. The player shows whether audio is the download or
+an online stream (`PlaybackState.audioOrigin`).
+
 ## D013 — Prefer source-original audio, not a configured language (accepted; owner clarification 2026-11-11)
 
 Automatic playback/download selection prefers a positively source-declared

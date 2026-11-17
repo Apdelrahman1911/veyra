@@ -93,7 +93,19 @@ class PlaybackController(
     private var intentRevision = 0L
     private var resumeToken: ResumeToken? = null
     private var durationDeadlineMs: Long? = null
-    private var resolvedLocal = false
+    private var resolvedLocalValue = false
+    /** Whether the current source is a validated downloaded file; mirrored as [PlaybackState.audioOrigin]. */
+    private var resolvedLocal: Boolean
+        get() = resolvedLocalValue
+        set(value) {
+            resolvedLocalValue = value
+            mutableState.update { it.copy(audioOrigin = if (value) AudioOrigin.DOWNLOADED_FILE else AudioOrigin.ONLINE_STREAM) }
+        }
+    /** A new selection has no source yet: neither downloaded nor streaming until it resolves. */
+    private fun forgetResolvedSource() {
+        resolvedLocalValue = false
+        mutableState.update { it.copy(audioOrigin = null) }
+    }
     private var lastSnapshotRevision = -1L
     private var lastOfflineOnly = false
     private var resolveJob: Job? = null
@@ -986,7 +998,7 @@ class PlaybackController(
         confirmedSeekSequence = 0
         pendingSeekSequence = null
         progressDirty = false
-        resolvedLocal = false
+        forgetResolvedSource()
         suppressedNext = null
         if (renewalDelayMs == null) {
             historyStartedMs = clock.epochMs()
@@ -1702,6 +1714,54 @@ class PlaybackController(
                 undoableQueueContexts = undo.keys.toSet())
         }
 
+        /**
+         * Catalogue items to admit. An item with a verified download reuses that download's own
+         * accepted request, so its occurrence resolves to the saved binding and plays the file;
+         * only items without one are captured afresh for a new kmpYT title search. Reusing the
+         * accepted request is not a new search: the first result it bound stays the identity.
+         */
+        private suspend fun catalogueAdmission(items: List<MediaItem>, mode: PlaybackControlsMode,
+            before: PlaybackAcquisitionView): PreparedAcquisitionAdmission {
+            val reused = mutableSetOf<AcquisitionRequestId>()
+            var anySaved = false
+            val requests = items.map { item ->
+                savedLocalRequest(item, before)?.takeIf { reused.add(it.id) }?.also { anySaved = true }
+                    ?: services.captures.media(item, before.snapshot)
+            }
+            // Older accepted requests keep their historical catalogue revision; the command still
+            // compares the current library revision at the Room boundary.
+            return if (anySaved) services.admissions.catalogLeavesPreservingCaptures(requests, mode, before.snapshot.revision)
+                else services.admissions.catalogLeaves(requests, mode, before.snapshot.revision)
+        }
+
+        /**
+         * The accepted request of the one typed catalogue binding for [item] whose download the
+         * resolver currently accepts as local authority. Two verified downloads of the same media
+         * prefer the newest completed file; none means the item has no playable download.
+         */
+        private suspend fun savedLocalRequest(item: MediaItem, before: PlaybackAcquisitionView): AcquisitionRequest? {
+            val state = before.acquisition
+            val candidates = state.assetUses.asSequence()
+                .filter { it.compatibilityPolicyVersion == 1 }
+                .map { it.requestedBindingId }.distinct()
+                .mapNotNull { bindingId ->
+                    val context = try { state.executionContext(bindingId) } catch (_: Exception) { return@mapNotNull null }
+                    val subject = context.subject as? ExecutableSubject.CatalogMedia
+                    val captured = (context.request.metadata as? MediaCapture)?.media
+                    context.takeIf { subject?.mediaId == item.id && captured?.id == item.id && captured.kind == item.kind }
+                }.toList()
+            if (candidates.isEmpty()) return null
+            val verified = candidates.filter { context ->
+                try { services.resolver.requireExactLocalAuthority(context.binding.id); true }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { false }
+            }
+            return verified.maxByOrNull { context ->
+                state.assetUses.filter { it.requestedBindingId == context.binding.id && it.compatibilityPolicyVersion == 1 }
+                    .mapNotNull { state.materializations[it.materializationAssetId]?.completedEpochMs }.maxOrNull() ?: 0L
+            }?.request
+        }
+
         private suspend fun read(): PlaybackAcquisitionView {
             val latest = services.repository.playbackView()
             reconcileExternalSelection(latest)
@@ -1776,8 +1836,7 @@ class PlaybackController(
                     require(!command.startFromBeginning || command.context == QueueContext.PODCAST)
                     val before = read()
                     val mode = PlaybackControlsMode.valueOf(command.context.name)
-                    val requests = command.items.map { services.captures.media(it, before.snapshot) }
-                    val prepared = services.admissions.catalogLeaves(requests, mode, before.snapshot.revision)
+                    val prepared = catalogueAdmission(command.items, mode, before)
                     admit(PlaybackCommand.AdmitAcquisition(prepared, command.context,
                         before.acquisition.queues.getValue(command.context).editRevision, QueueAdmissionOperation.REPLACE,
                         activate = true, startOccurrenceId = prepared.occurrences[command.startIndex].id,
@@ -1788,8 +1847,7 @@ class PlaybackController(
                     require(command.items.all { contextFor(it) == command.context })
                     if (command.items.isEmpty()) return true
                     val before = read()
-                    val prepared = services.admissions.catalogLeaves(command.items.map { services.captures.media(it, before.snapshot) },
-                        PlaybackControlsMode.valueOf(command.context.name), before.snapshot.revision)
+                    val prepared = catalogueAdmission(command.items, PlaybackControlsMode.valueOf(command.context.name), before)
                     admit(PlaybackCommand.AdmitAcquisition(prepared, command.context,
                         before.acquisition.queues.getValue(command.context).editRevision,
                         if (command.position == EnqueuePosition.NEXT) QueueAdmissionOperation.INSERT_NEXT else QueueAdmissionOperation.APPEND))
@@ -2050,7 +2108,7 @@ class PlaybackController(
             val requiredRepresentation = representationId.takeIf { renewalDelayMs != null }
             generation = reserveGeneration(); preparedGeneration = -1; terminalGeneration = -1
             seekSequence = 0; confirmedSeekSequence = 0; pendingSeekSequence = null
-            progressDirty = false; resolvedLocal = false; suppressedNext = null; materialization = null; hasNativePosition = false
+            progressDirty = false; forgetResolvedSource(); suppressedNext = null; materialization = null; hasNativePosition = false
             if (renewalDelayMs == null) {
                 historyStartedMs = clock.epochMs(); historyGeneration = generation; hasPlayedCurrent = false; sourceRenewals = 0
             }
