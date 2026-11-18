@@ -1,5 +1,7 @@
 package dev.veyra.ui.music
 
+import dev.veyra.ui.design.ActionButton
+import dev.veyra.ui.design.bottomChrome
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -68,6 +70,7 @@ fun CollectionDetailScreen(
                 entry.status == DownloadStatus.COMPLETE && !entry.ready
         } != false
     }
+    var audioDetails by rememberSaveable(collection.id) { mutableStateOf(false) }
     var query by rememberSaveable(collection.id) { mutableStateOf("") }
     // Capture the exact requested occurrences while the replacement confirmation is open.
     var replacement by remember(collection.id) { mutableStateOf<Pair<List<MediaItem>, Boolean>?>(null) }
@@ -77,26 +80,26 @@ fun CollectionDetailScreen(
         else onAction(MusicUiAction.PlayCollection(tracks, shuffle))
     }
     val matching = tracks.withIndex().filter { matchesMediaQuery(it.value, query) }
-    LazyColumn(modifier.fillMaxSize().testTag("collection-detail"), contentPadding = PaddingValues(bottom = 24.dp)) {
+    LazyColumn(modifier.fillMaxSize().testTag("collection-detail"), contentPadding = PaddingValues(bottom = bottomChrome(24.dp))) {
         item {
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                ActionIcon(VeyraIcons.Back, strings.text(TextKey.Back), { onAction(MusicUiAction.NavigateBack) })
                 Text(providerName(collection.source.provider), Modifier.weight(1f).padding(start = 8.dp), style = MaterialTheme.typography.titleMedium)
                 ActionIcon(VeyraIcons.Refresh, strings.text(TextKey.Refresh), { onAction(MusicUiAction.RefreshCollection) }, enabled = !state.loading && !snapshot.settings.offlineOnly)
             }
             Row(Modifier.fillMaxWidth().padding(20.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Artwork(collection.artworkUrl, collection.title, Modifier.size(88.dp), offlineOnly = snapshot.settings.offlineOnly)
+                Artwork(collection.artworkUrl, collection.title, Modifier.size(112.dp), offlineOnly = snapshot.settings.offlineOnly)
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     MetadataText(collection.title, Modifier.fillMaxWidth().semantics { heading() }, style = MaterialTheme.typography.headlineSmall)
                     if (collection.creator.isNotBlank()) MetadataText(collection.creator, Modifier.fillMaxWidth(), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
             if (state.loaded || tracks.isNotEmpty()) Text(strings.quantity(QuantityKey.Tracks, tracks.size), Modifier.padding(horizontal = 20.dp), style = MaterialTheme.typography.bodyMedium)
-            Text(strings.text(TextKey.SourceResolutionDescription), Modifier.padding(horizontal = 20.dp, vertical = 8.dp), style = MaterialTheme.typography.bodySmall)
+            TextButton({ audioDetails = !audioDetails }, Modifier.padding(horizontal = 16.dp).heightIn(min = 48.dp)) { Text(strings.text(TextKey.AudioDetails)) }
+            if (audioDetails) Text(strings.text(TextKey.SourceResolutionDescription), Modifier.padding(horizontal = 24.dp, vertical = 8.dp), style = MaterialTheme.typography.bodySmall)
             FlowRow(Modifier.padding(horizontal = 20.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Button({ play(false) }, enabled = complete && tracks.isNotEmpty(), modifier = Modifier.heightIn(min = 48.dp).testTag("collection-play")) { Text(strings.text(TextKey.PlayAll)) }
-                OutlinedButton({ play(true) }, enabled = complete && tracks.isNotEmpty(), modifier = Modifier.heightIn(min = 48.dp).testTag("collection-shuffle")) { Text(strings.text(TextKey.Shuffle)) }
-                OutlinedButton({ onAction(MusicUiAction.EnqueueCollection(tracks)) }, enabled = complete && tracks.isNotEmpty(), modifier = Modifier.heightIn(min = 48.dp).testTag("collection-enqueue")) { Text(strings.text(TextKey.AddAllToQueue)) }
+                ActionButton(strings.text(TextKey.PlayAll), "play.fill", true, { play(false) }, enabled = complete && tracks.isNotEmpty(), modifier = Modifier.heightIn(min = 48.dp).testTag("collection-play")) { Text(strings.text(TextKey.PlayAll)) }
+                ActionButton(strings.text(TextKey.Shuffle), "shuffle", false, { play(true) }, enabled = complete && tracks.isNotEmpty(), modifier = Modifier.heightIn(min = 48.dp).testTag("collection-shuffle")) { Text(strings.text(TextKey.Shuffle)) }
+                ActionButton(strings.text(TextKey.AddAllToQueue), "text.badge.plus", false, { onAction(MusicUiAction.EnqueueCollection(tracks)) }, enabled = complete && tracks.isNotEmpty(), modifier = Modifier.heightIn(min = 48.dp).testTag("collection-enqueue")) { Text(strings.text(TextKey.AddAllToQueue)) }
                 TextButton({ onAction(MusicUiAction.SetFavorites(tracks.distinctBy { it.id }, !allFavorite)) }, enabled = complete && tracks.isNotEmpty(), modifier = Modifier.heightIn(min = 48.dp).testTag("collection-favorite")) { Text(strings.text(if (allFavorite) TextKey.UnfavoriteAllTracks else TextKey.FavoriteAllTracks)) }
                 if (tracks.any { it.source.provider in options.downloadableProviders }) TextButton({ onAction(MusicUiAction.DownloadCollection(downloadable)) }, enabled = complete && downloadable.isNotEmpty(), modifier = Modifier.heightIn(min = 48.dp).testTag("collection-download")) { Text(strings.text(TextKey.DownloadAll)) }
                 if (QueueContext.MUSIC in options.undoableQueueContexts) TextButton({ onAction(MusicUiAction.UndoQueue(QueueContext.MUSIC)) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(strings.text(TextKey.UndoQueueEdit)) }
@@ -116,7 +119,7 @@ fun CollectionDetailScreen(
             MusicMediaRow(indexed.value, snapshot, onAction, options = options)
         }
         if (state.page.nextPageToken != null) item {
-            Button({ onAction(MusicUiAction.LoadMoreCollection) }, enabled = !state.loading && !snapshot.settings.offlineOnly, modifier = Modifier.fillMaxWidth().padding(20.dp).heightIn(min = 48.dp).testTag("collection-load-more")) { Text(strings.text(TextKey.LoadMore)) }
+            ActionButton(strings.text(TextKey.LoadMore), "arrow.down", false, { onAction(MusicUiAction.LoadMoreCollection) }, enabled = !state.loading && !snapshot.settings.offlineOnly, modifier = Modifier.fillMaxWidth().padding(20.dp).heightIn(min = 48.dp).testTag("collection-load-more")) { Text(strings.text(TextKey.LoadMore)) }
         }
     }
     replacement?.let { (items, shuffle) ->

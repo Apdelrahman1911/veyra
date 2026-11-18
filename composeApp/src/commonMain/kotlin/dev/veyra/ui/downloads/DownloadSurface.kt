@@ -187,6 +187,13 @@ private fun typedEntries(presentation: DownloadAcquisitionPresentation,
     return state.physicalDownloads.values.mapNotNull { canonical ->
         val producer = canonical.producer as? PhysicalDownloadProducer.Typed ?: return@mapNotNull null
         val projected = presentation.states[canonical.id] ?: canonical
+        // A deleted download keeps its durable job record, settled and empty. It is no longer one
+        // of the person's downloads: every claim was cancelled without keeping the file, the file
+        // is gone and nothing is left to clean up. A plain Cancel keeps its file claim and stays.
+        val claims = state.claims.values.filter { it.physicalJobId == canonical.id }
+        if (projected.status == DownloadStatus.CANCELLED && canonical.assetId == null && !projected.cleanupPending &&
+            claims.isNotEmpty() && claims.all { it.intent == DownloadBatchIntent.CANCELLED && !it.retainCompletedAsset })
+            return@mapNotNull null
         val asset = canonical.assetId?.let(state.materializations::get)
         val mediaId = (state.subjects[producer.subjectId] as? ExecutableSubject.CatalogMedia)?.mediaId
         val verified = verifiedByJob[canonical.id]

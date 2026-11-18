@@ -2,6 +2,8 @@
 
 package dev.veyra.ui.podcasts
 
+import dev.veyra.ui.design.ActionButton
+import dev.veyra.ui.design.NativeMenu
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -93,7 +95,7 @@ fun PodcastEpisodeRow(
                 Artwork(
                     url = state.episode.artworkUrl ?: state.show?.artworkUrl,
                     title = state.episode.title,
-                    modifier = Modifier.size(56.dp).clip(RoundedCornerShape(12.dp)),
+                    modifier = Modifier.size(64.dp).clip(RoundedCornerShape(18.dp)),
                     offlineOnly = state.offlineOnly,
                     localPath = state.episode.localArtworkPath?.takeIf(String::isNotBlank) ?: state.show?.localArtworkPath,
                 )
@@ -101,7 +103,7 @@ fun PodcastEpisodeRow(
                     MetadataText(
                         state.episode.title,
                         style = MaterialTheme.typography.titleMedium,
-                        maxLines = 3,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
                     if (showPublisher) {
@@ -118,7 +120,10 @@ fun PodcastEpisodeRow(
             // Full-width metadata and actions remain readable beside long titles at 200% text.
             PodcastEpisodeMetadata(state)
             PodcastEpisodeStatus(state)
-            if (state.binding != null) PodcastEpisodeProvenance(state, onAction, compact = true)
+            if (state.binding != null && state.binding.firstResultTitle != state.episode.title) {
+                Text(strings.format(TextKey.ResolvedTitleValue, state.binding.firstResultTitle), style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
             if (state.canResume) {
                 podcastProgressFraction(state.positionMs, state.progressDurationMs)?.let { fraction ->
                     val remaining = strings.format(TextKey.MediaRemaining,
@@ -266,78 +271,68 @@ fun PodcastEpisodeMenu(
             onClick = { expanded = true },
             modifier = Modifier.testTag("podcast-more-${state.episode.id}"),
         )
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            DropdownMenuItem(
-                text = { PodcastActionText(strings.text(TextKey.EpisodeDetails)) },
-                onClick = { dispatch(PodcastAction.OpenEpisode(state.episode.id)) },
-            )
+        NativeMenu(expanded = expanded, onDismiss = { expanded = false }, label = { PodcastActionText(it) }) {
+            item(strings.text(TextKey.EpisodeDetails), symbol = "info.circle") { dispatch(PodcastAction.OpenEpisode(state.episode.id)) }
             state.show?.let { show ->
-                DropdownMenuItem(text = { PodcastActionText(strings.text(TextKey.ShowDetails)) },
-                    onClick = { dispatch(PodcastAction.OpenShow(show.id)) })
+                item(strings.text(TextKey.ShowDetails), symbol = "square.stack") { dispatch(PodcastAction.OpenShow(show.id)) }
             }
-            HorizontalDivider()
-            DropdownMenuItem(
-                text = { PodcastActionText(strings.text(if (state.saved) TextKey.Unsave else TextKey.SaveForLater)) },
-                leadingIcon = { Icon(if (state.saved) VeyraIcons.Bookmark else VeyraIcons.BookmarkBorder, null) },
-                onClick = { dispatch(PodcastAction.SetSaved(state.episode.id, !state.saved)) },
-            )
-            DropdownMenuItem(
-                text = { PodcastActionText(strings.text(if (state.played) TextKey.MarkUnplayed else TextKey.MarkPlayed)) },
-                onClick = { dispatch(PodcastAction.SetPlayed(state.episode.id, !state.played)) },
-            )
+            divider()
+            item(strings.text(if (state.saved) TextKey.Unsave else TextKey.SaveForLater),
+                icon = if (state.saved) VeyraIcons.Bookmark else VeyraIcons.BookmarkBorder,
+                symbol = if (state.saved) "bookmark.slash" else "bookmark") {
+                dispatch(PodcastAction.SetSaved(state.episode.id, !state.saved))
+            }
+            item(strings.text(if (state.played) TextKey.MarkUnplayed else TextKey.MarkPlayed),
+                symbol = if (state.played) "circle" else "checkmark.circle") {
+                dispatch(PodcastAction.SetPlayed(state.episode.id, !state.played))
+            }
             if (state.historicalPositionMs > 0L || state.played) {
-                DropdownMenuItem(
-                    text = { PodcastActionText(strings.text(TextKey.StartOver)) },
-                    enabled = state.canPlay,
-                    onClick = { expanded = false; confirmStartOver = true },
-                )
+                item(strings.text(TextKey.StartOver), enabled = state.canPlay, symbol = "backward.end") {
+                    expanded = false; confirmStartOver = true
+                }
             }
-            HorizontalDivider()
+            divider()
             if (state.queued) {
-                DropdownMenuItem(text = { PodcastActionText(strings.text(TextKey.ShowQueue)) },
-                    onClick = { dispatch(PodcastAction.OpenQueue) })
+                item(strings.text(TextKey.ShowQueue), symbol = "list.bullet") { dispatch(PodcastAction.OpenQueue) }
             } else {
-                DropdownMenuItem(text = { PodcastActionText(strings.text(TextKey.PlayNext)) },
-                    onClick = { dispatch(PodcastAction.PlayNext(state.episode.id)) })
-                DropdownMenuItem(text = { PodcastActionText(strings.text(TextKey.AddToEnd)) },
-                    onClick = { dispatch(PodcastAction.AddToEnd(state.episode.id)) })
+                item(strings.text(TextKey.PlayNext), symbol = "text.line.first.and.arrowtriangle.forward") { dispatch(PodcastAction.PlayNext(state.episode.id)) }
+                item(strings.text(TextKey.AddToEnd), symbol = "text.line.last.and.arrowtriangle.forward") { dispatch(PodcastAction.AddToEnd(state.episode.id)) }
             }
-            HorizontalDivider()
+            divider()
             val downloadActions = podcastDownloadActions(state)
             downloadActions.forEachIndexed { index, action ->
-                DropdownMenuItem(
-                    text = {
-                        PodcastActionText(if (action.memberPosition != null) strings.format(action.label,
-                            strings.number(((action.memberOrdinal ?: (action.memberPosition ?: 0) + 1)).toLong()))
-                        else strings.text(action.label))
-                    },
+                val removal = action.memberPosition == null && index > 0
+                item(
+                    if (action.memberPosition != null) strings.format(action.label,
+                        strings.number(((action.memberOrdinal ?: (action.memberPosition ?: 0) + 1)).toLong()))
+                    else strings.text(action.label),
                     enabled = action.enabled,
-                    leadingIcon = { Icon(VeyraIcons.Download, null) },
-                    modifier = Modifier.testTag(when {
-                        action.memberPosition != null -> "podcast-menu-validate-member-${action.memberPosition}"
-                        index == 0 -> "podcast-menu-download"
-                        else -> "podcast-menu-remove-download"
-                    }),
-                    onClick = {
-                        expanded = false
-                        if (action.requiresRemovalConfirmation) confirmRemoveDownload = true
-                        else action.action?.let(onAction)
+                    icon = VeyraIcons.Download,
+                    symbol = when {
+                        action.memberPosition != null -> "checkmark.shield"
+                        action.requiresRemovalConfirmation -> "trash"
+                        else -> "arrow.down.circle"
                     },
-                )
+                    destructive = action.requiresRemovalConfirmation,
+                    tag = when {
+                        action.memberPosition != null -> "podcast-menu-validate-member-${action.memberPosition}"
+                        removal -> "podcast-menu-remove-download"
+                        else -> "podcast-menu-download"
+                    },
+                ) {
+                    expanded = false
+                    if (action.requiresRemovalConfirmation) confirmRemoveDownload = true
+                    else action.action?.let(onAction)
+                }
             }
             state.activeDownload?.takeIf(::podcastCanCancelDownload)?.let { download ->
                 if (podcastDownloadAction(state).action !is PodcastAction.CancelDownload) {
-                    DropdownMenuItem(text = { PodcastActionText(strings.text(TextKey.CancelDownload)) },
-                        onClick = { dispatch(PodcastAction.CancelDownload(download.id)) })
+                    item(strings.text(TextKey.CancelDownload), symbol = "xmark.circle") { dispatch(PodcastAction.CancelDownload(download.id)) }
                 }
             }
             podcastPublisherUrl(state)?.let { url ->
-                DropdownMenuItem(
-                    text = { PodcastActionText(strings.text(TextKey.OpenPublisher)) },
-                    leadingIcon = { Icon(VeyraIcons.OpenInNew, null) },
-                    enabled = !state.offlineOnly,
-                    onClick = { dispatch(PodcastAction.OpenPublisher(url)) },
-                )
+                item(strings.text(TextKey.OpenPublisher), icon = VeyraIcons.OpenInNew, enabled = !state.offlineOnly,
+                    symbol = "safari") { dispatch(PodcastAction.OpenPublisher(url)) }
             }
         }
     }
@@ -376,7 +371,7 @@ internal fun PodcastEpisodeControls(state: PodcastEpisodeUiState, onAction: (Pod
     }
     var confirmStartOver by remember(state.episode.id) { mutableStateOf(false) }
     FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Button(onClick = { onAction(play) }, enabled = state.canPlay,
+        ActionButton(podcastDisplayPlayLabel(state, strings), "play.fill", true, onClick = { onAction(play) }, enabled = state.canPlay,
             modifier = Modifier.podcastActionTarget().testTag("podcast-detail-play").semantics {
                 contentDescription = strings.format(TextKey.PlayItem, state.episode.title)
                 if (state.resumeActionable) stateDescription = strings.format(TextKey.ResumeAt, strings.spokenDuration(state.positionMs))
@@ -389,7 +384,7 @@ internal fun PodcastEpisodeControls(state: PodcastEpisodeUiState, onAction: (Pod
             PodcastActionText(podcastDisplayPlayLabel(state, strings))
         }
         PodcastDownloadButton(state, onAction)
-        OutlinedButton(onClick = { onAction(PodcastAction.SetSaved(state.episode.id, !state.saved)) },
+        ActionButton(strings.text(if (state.saved) TextKey.Unsave else TextKey.SaveForLater), if (state.saved) "bookmark.fill" else "bookmark", false, onClick = { onAction(PodcastAction.SetSaved(state.episode.id, !state.saved)) },
             modifier = Modifier.podcastActionTarget().testTag("podcast-detail-save")) {
             Icon(if (state.saved) VeyraIcons.Bookmark else VeyraIcons.BookmarkBorder, null,
                 modifier = Modifier.size(20.dp))
@@ -476,21 +471,30 @@ internal fun PodcastDownloadProgress(download: DownloadSurfaceEntry, modifier: M
 @Composable
 internal fun PodcastActionConfirmation(title: String, description: String, onDismiss: () -> Unit, onConfirm: () -> Unit) {
     val strings = LocalStrings.current
-    AlertDialog(
-        onDismissRequest = onDismiss,
+    // iOS: a native UIAlertController; elsewhere the Material dialog below.
+    com.mohamedrejeb.calf.ui.dialog.AdaptiveAlertDialog(
+        onConfirm = onConfirm,
+        onDismiss = onDismiss,
+        confirmText = strings.text(TextKey.Confirm),
+        dismissText = strings.text(TextKey.Cancel),
+        title = title,
+        text = description,
         modifier = Modifier.testTag("podcast-action-confirmation"),
-        title = { PodcastActionText(title) },
-        text = { PodcastActionText(description) },
-        confirmButton = {
+        materialTitle = { PodcastActionText(title) },
+        materialText = { PodcastActionText(description) },
+        materialConfirmButton = {
             TextButton(onClick = onConfirm, modifier = Modifier.podcastActionTarget().testTag("podcast-action-confirm")) {
                 PodcastActionText(strings.text(TextKey.Confirm))
             }
         },
-        dismissButton = {
+        materialDismissButton = {
             TextButton(onClick = onDismiss, modifier = Modifier.podcastActionTarget().testTag("podcast-action-dismiss")) {
                 PodcastActionText(strings.text(TextKey.Cancel))
             }
         },
+        iosConfirmButtonStyle = com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosActionStyle.Default,
+        iosDismissButtonStyle = com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosActionStyle.Cancel,
+        iosConfirmButtonIsPreferred = true,
     )
 }
 

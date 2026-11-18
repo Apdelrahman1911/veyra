@@ -62,6 +62,41 @@ class QueueAcquisitionCoordinator(
         } finally { prefetchMutex.unlock() }
     }
 
+    /**
+     * Readies the next music occurrence ahead of its turn: selects it if still pending (the same
+     * bounded, single-neighbour path as [resolveMusicPrefetch]) and runs one same-source
+     * inspection of its bound recording. The source keeps that inspection only in memory, for
+     * one later use, so a source-declared availability wait elapses while the current track
+     * plays. A next item with a saved local file is never inspected. Returns whether an
+     * inspection was performed; any failure is left for the real playback attempt to report.
+     */
+    suspend fun warmMusicNext(
+        context: QueueContext,
+        expectedQueueRevision: Long,
+        expectedCurrentOccurrenceId: ExecutionOccurrenceId,
+    ): Boolean {
+        fun nextOccurrence(): ExecutionOccurrence? {
+            val state = repository.state.value
+            val queue = queue(state, context, expectedQueueRevision, expectedCurrentOccurrenceId)
+            if (queue.repeat == RepeatMode.ONE) return null
+            val index = queue.displayedOrder.indexOf(expectedCurrentOccurrenceId)
+            val nextId = queue.displayedOrder.getOrNull(index + 1)
+                ?: if (queue.repeat == RepeatMode.ALL && queue.displayedOrder.size > 1) queue.displayedOrder.first() else null
+            return nextId?.takeUnless { it == expectedCurrentOccurrenceId }?.let { state.occurrences[it] }
+                ?.takeIf { it.controlsMode == PlaybackControlsMode.MUSIC }
+        }
+        var next = nextOccurrence() ?: return false
+        if (next.selectionState == OccurrenceSelectionState.PENDING) {
+            resolveMusicPrefetch(context, expectedQueueRevision, expectedCurrentOccurrenceId) ?: return false
+            next = nextOccurrence() ?: return false
+        }
+        if (next.selectionState != OccurrenceSelectionState.BOUND) return false
+        val binding = next.bindingId ?: return false
+        if (repository.state.value.assetUses.any { it.requestedBindingId == binding }) return false
+        acquisition.inspect(next.id, binding)
+        return true
+    }
+
     private suspend fun resolve(occurrence: ExecutionOccurrence, queue: ExecutionQueue): AcquisitionResolution {
         val requestId = occurrence.requestId ?: invalid("queue_legacy_selection_requires_explicit_action")
         return acquisition.resolve(requestId, listOf(OccurrenceAttachmentExpectation(

@@ -104,6 +104,7 @@ internal class RoomLibraryPersistence private constructor(
     }
 
     override fun changes(): Flow<Unit> = requireOpen().libraryDao().revisions().map { Unit }
+    override fun changedRevisions(): Flow<Long?> = requireOpen().libraryDao().revisions()
 
     override suspend fun backup() {
         val files = files ?: throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "File-backed store required"))

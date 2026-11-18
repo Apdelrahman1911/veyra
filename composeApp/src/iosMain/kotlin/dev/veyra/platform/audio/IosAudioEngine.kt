@@ -41,6 +41,7 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import platform.AVFAudio.*
 import platform.AVFoundation.*
 import platform.CoreMedia.*
@@ -150,6 +151,8 @@ class IosAudioEngine internal constructor(private val retirementFault: IosNative
         val pendingInterruptions = mutableListOf<EngineEvent.Interruption>()
     }
 
+    private val samplerWake = Channel<Unit>(Channel.CONFLATED)
+
     init {
         check(NSThread.isMainThread) { "Create the iOS audio owner on Main." }
         installSessionObservers()
@@ -157,7 +160,9 @@ class IosAudioEngine internal constructor(private val retirementFault: IosNative
             while (isActive) {
                 active?.let(::sampleNativeState)
                 staged?.let(::sampleNativeState)
-                delay(250)
+                // A settled, paused (or empty) engine has nothing to observe; polling it four times
+                // a second only woke the CPU. Every command wakes the sampler at once.
+                withTimeoutOrNull(if (settled()) 2_000L else 250L) { samplerWake.receive() }
             }
         }
     }
@@ -182,6 +187,7 @@ class IosAudioEngine internal constructor(private val retirementFault: IosNative
                 checkTransportSafety()
                 val revision = ++preparationRevision
                 val url = checkedUrl(source)
+                debugNativeSourcePreparation(source)
                 cancelStage(CrossfadeCancelReason.CANCELLED, smooth = true)?.join()
                 checkTransportSafety()
                 if (closed || generation < latestGeneration || revision != preparationRevision) return@onMain
@@ -215,6 +221,7 @@ class IosAudioEngine internal constructor(private val retirementFault: IosNative
     override suspend fun play(generation: Long): Unit = onMain {
         checkTransportSafety()
         val deck = current(generation) ?: return@onMain
+        if (deck.failed || stopForSourceFailure(deck)) return@onMain
         if (interrupted) {
             interruptionGeneration = generation
             emit(EngineEvent.Interruption(generation, InterruptionKind.TRANSIENT_BEGAN))
@@ -248,6 +255,7 @@ class IosAudioEngine internal constructor(private val retirementFault: IosNative
         val deck = current(generation) ?: return@onMain
         cancelStage(CrossfadeCancelReason.CANCELLED, smooth = true, reportOutgoingEnd = false)?.join()
         if (current(generation) !== deck) return@onMain
+        if (deck.failed || stopForSourceFailure(deck)) return@onMain
         if (!deck.ready || deck.item.seekableTimeRanges.isEmpty()) {
             emit(EngineEvent.SeekCompleted(generation, seekSequence, nativePositionMs(deck), false))
             return@onMain
@@ -256,8 +264,8 @@ class IosAudioEngine internal constructor(private val retirementFault: IosNative
         deck.pendingSeekSequence = seekSequence
         deck.ended = false
         deck.suppressNaturalEnd = true
-        deck.player.seekToTime(CMTimeMake(target, 1000), toleranceBefore = kCMTimeZero,
-            toleranceAfter = kCMTimeZero) { finished ->
+        deck.player.seekToTime(CMTimeMake(target, 1000), toleranceBefore = CMTimeMake(0, 1000),
+            toleranceAfter = CMTimeMake(0, 1000)) { finished ->
             // AVFoundation does not promise our coroutine/main confinement for completion handlers.
             scope.launch {
                 if (isCurrent(deck) && deck.pendingSeekSequence == seekSequence) {
@@ -541,6 +549,7 @@ class IosAudioEngine internal constructor(private val retirementFault: IosNative
         val asset = AVURLAsset.URLAssetWithURL(url, options = null)
         val item = AVPlayerItem.playerItemWithAsset(asset)
         item.audioTimePitchAlgorithm = AVAudioTimePitchAlgorithmTimeDomain
+        source.durationMs?.takeIf { it > 0 }?.let { item.forwardPlaybackEndTime = CMTimeMake(it, 1000) }
         val deck = Deck(generation, source, player, item, startPositionMs.coerceAtLeast(0))
         admission.constructedDeck = deck
         val center = NSNotificationCenter.defaultCenter
@@ -571,7 +580,10 @@ class IosAudioEngine internal constructor(private val retirementFault: IosNative
             }
             deck.observers += center.addObserverForName(AVPlayerItemFailedToPlayToEndTimeNotification,
                 `object` = item, queue = NSOperationQueue.mainQueue) {
-                if (managed(deck)) fail(deck, FailureCode.UNSUPPORTED_SOURCE, "native_audio_failed_to_end")
+                if (managed(deck)) {
+                    val failure = nativeFailure(deck)
+                    fail(deck, failure.code, requireNotNull(failure.detail))
+                }
             }
         } catch (error: Exception) {
             // The admission retains this partially constructed deck. Its finally retires every
@@ -583,9 +595,10 @@ class IosAudioEngine internal constructor(private val retirementFault: IosNative
 
     private fun sampleNativeState(deck: Deck) {
         if (!managed(deck) || fade?.pendingReset == true) return
+        if (deck.failed || stopForSourceFailure(deck)) return
         if (deck.item.status == AVPlayerItemStatusFailed) {
-            fail(deck, if (deck.source.isLocal) FailureCode.CORRUPT_MEDIA else FailureCode.UNSUPPORTED_SOURCE,
-                "native_audio_${deck.item.error?.code ?: 0}")
+            val failure = nativeFailure(deck)
+            fail(deck, failure.code, requireNotNull(failure.detail))
             return
         }
         if (!deck.failed && deck.item.status == AVPlayerItemStatusReadyToPlay && !deck.ready && !deck.preparingInitialSeek) {
@@ -593,8 +606,8 @@ class IosAudioEngine internal constructor(private val retirementFault: IosNative
                 deck.preparingInitialSeek = true
                 val target = nativeDurationMs(deck)?.let { deck.startPositionMs.coerceAtMost(it) } ?: deck.startPositionMs
                 deck.suppressNaturalEnd = nativeDurationMs(deck)?.let { target >= it - 1 } ?: false
-                deck.player.seekToTime(CMTimeMake(target, 1000), toleranceBefore = kCMTimeZero,
-                    toleranceAfter = kCMTimeZero) { finished ->
+                deck.player.seekToTime(CMTimeMake(target, 1000), toleranceBefore = CMTimeMake(0, 1000),
+                    toleranceAfter = CMTimeMake(0, 1000)) { finished ->
                     scope.launch {
                         if (managed(deck)) {
                             deck.preparingInitialSeek = false
@@ -1018,9 +1031,24 @@ class IosAudioEngine internal constructor(private val retirementFault: IosNative
         return NSURL.URLWithString(PublicUrlPolicy.normalize(source.uri))
             ?: throw VeyraException(AppFailure(FailureCode.UNSUPPORTED_SOURCE, "secure_media_url_required"))
     }
+    private fun stopForSourceFailure(deck: Deck): Boolean {
+        val failure = deck.source.resource?.failure ?: return false
+        fail(deck, failure.code, failure.detail ?: "source_stream_failed")
+        return true
+    }
+    private fun nativeFailure(deck: Deck): AppFailure {
+        deck.source.resource?.failure?.let { return it }
+        val status = deck.item.errorLog()?.events?.mapNotNull { event ->
+            (event as? AVPlayerItemErrorLogEvent)?.errorStatusCode?.toInt()?.takeIf { it in 100..599 }
+        }?.lastOrNull()
+        debugNativeSourceFailure(deck.source, status)
+        return classifyIosAudioFailure(deck.item.error, deck.source.isLocal, status)
+    }
+
     private fun fail(deck: Deck, code: FailureCode, detail: String) {
         if (!managed(deck) || deck.failed) return
         deck.failed = true
+        debugNativeAudioFailure(deck.item.error)
         deck.player.pause()
         if (deck === staged) {
             if (fade?.awaitingConfirmation == true) {
@@ -1044,15 +1072,59 @@ class IosAudioEngine internal constructor(private val retirementFault: IosNative
     private fun managed(deck: Deck) = !closed && !deck.resourceReleased && !transportSafetyFailed &&
         deck.player !in quarantinedNativePlayers && (deck === active || deck === staged) && deck.player.currentItem == deck.item
     private fun isCurrent(deck: Deck) = managed(deck) && deck === active
-    private fun nativeDurationMs(deck: Deck): Long? = milliseconds(CMTimeGetSeconds(deck.item.duration))?.takeIf { it > 0 }
+    private fun nativeDurationMs(deck: Deck): Long? {
+        val observed = milliseconds(CMTimeGetSeconds(deck.item.duration))?.takeIf { it > 0 }
+        val declared = deck.source.durationMs?.takeIf { it > 0 }
+        return when {
+            observed == null -> declared
+            declared == null -> observed
+            else -> minOf(observed, declared)
+        }
+    }
     private fun nativePositionMs(deck: Deck): Long = if (managed(deck)) milliseconds(CMTimeGetSeconds(deck.player.currentTime())) ?: 0 else 0
     private fun milliseconds(seconds: Double): Long? = seconds.takeIf { it.isFinite() && it >= 0 && it < Long.MAX_VALUE / 1000.0 }?.let { (it * 1000).toLong() }
     private fun isPlaying(player: AVPlayer) = player.timeControlStatus == AVPlayerTimeControlStatusPlaying && player.rate > 0f
     private fun emit(event: EngineEvent) { controls.trySend(event) }
-    private suspend fun <T> onMain(block: suspend () -> T): T = withContext(Dispatchers.Main.immediate) { block() }
+    private suspend fun <T> onMain(block: suspend () -> T): T = withContext(Dispatchers.Main.immediate) {
+        try { block() } finally { samplerWake.trySend(Unit) }
+    }
+
+    /** Nothing in flight: no staged deck or fade, and the active deck (if any) ready, paused and not seeking. */
+    private fun settled(): Boolean {
+        if (staged != null || fade != null) return false
+        val deck = active ?: return true
+        return deck.ready && !deck.preparingInitialSeek && deck.pendingSeekSequence == null && !deck.failed &&
+            deck.player.timeControlStatus == AVPlayerTimeControlStatusPaused
+    }
     private fun baseGain(deck: Deck) = if (deck.source.controlsMode == PlaybackControlsMode.PODCAST) 1f else CrossfadeMix.MUSIC_GAIN
     private fun makePlayer() = AVPlayer().apply {
         automaticallyWaitsToMinimizeStalling = true
         actionAtItemEnd = AVPlayerActionAtItemEndPause
     }
+}
+
+/** Bounded Debug-only error codes; NSError descriptions/userInfo may contain signed URLs. */
+@OptIn(kotlin.experimental.ExperimentalNativeApi::class)
+private fun debugNativeAudioFailure(error: platform.Foundation.NSError?) {
+    if (!kotlin.native.Platform.isDebugBinary) return
+    var current = error
+    repeat(3) {
+        val value = current ?: return
+        val domain = value.domain.takeIf { it in setOf("AVFoundationErrorDomain", "NSOSStatusErrorDomain", "NSURLErrorDomain") } ?: "other"
+        println("VEYRA_NATIVE_AUDIO_FAILURE domain=$domain code=${value.code}")
+        current = value.userInfo[platform.Foundation.NSUnderlyingErrorKey] as? platform.Foundation.NSError
+    }
+}
+
+@OptIn(kotlin.experimental.ExperimentalNativeApi::class)
+private fun debugNativeSourceFailure(source: NativePlaybackSource, status: Int?) {
+    if (!kotlin.native.Platform.isDebugBinary) return
+    println("VEYRA_NATIVE_SOURCE_FAILURE local=${source.isLocal} loopback=${source.ownedLoopbackUriOrNull() != null} httpStatus=$status")
+}
+
+@OptIn(kotlin.experimental.ExperimentalNativeApi::class)
+private fun debugNativeSourcePreparation(source: NativePlaybackSource) {
+    if (!kotlin.native.Platform.isDebugBinary) return
+    val format = if (source.mimeType?.substringBefore(';') == "audio/mp4" && source.codecs == "mp4a.40.2") "AAC_LC_MP4" else "OTHER"
+    println("VEYRA_NATIVE_SOURCE_PREPARE local=${source.isLocal} loopback=${source.ownedLoopbackUriOrNull() != null} format=$format uptimeMs=${(platform.Foundation.NSProcessInfo.processInfo.systemUptime * 1_000).toLong()}")
 }

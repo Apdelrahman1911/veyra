@@ -23,3 +23,7 @@ DerivedData/
 # Never publish resolved source credentials or locally downloaded media
 *.cookies
 *.pem
+
+# Third-party APKs supplied for local analysis only; never commit.
+*.apk
+!**/src/**/*.apk

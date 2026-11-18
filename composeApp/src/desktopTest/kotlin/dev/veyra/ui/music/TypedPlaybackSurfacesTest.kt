@@ -15,6 +15,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import dev.veyra.model.AcquisitionEntryKind
@@ -111,8 +112,10 @@ class TypedPlaybackSurfacesTest {
             }
         }
         ui.onNodeWithTag("player-title").assertTextEquals(currentMedia.title)
+        // A requested/resolved difference opens the source details by itself (D005 disclosure).
+        ui.onNodeWithTag("player-audio-details").performScrollTo()
         ui.onNode(hasText("Current executed C") and hasAnyAncestor(hasTestTag("playback-provenance")),
-            useUnmergedTree = true).assertIsDisplayed()
+            useUnmergedTree = true).performScrollTo().assertIsDisplayed()
         ui.onNodeWithTag("player-crossfade").performScrollTo().assertIsDisplayed()
         // The incoming disclosure comes from incomingSelection's executed receipt, never the
         // legacy incomingItem/decoy row.

@@ -52,6 +52,8 @@ data class PlaybackState(
     val sleepTimer: SleepTimerState? = null,
     val crossfade: CrossfadeState? = null,
     val executionBinding: PlaybackBinding? = null,
+    /** Where the current audio comes from once resolved: null while nothing is resolved yet. */
+    val audioOrigin: AudioOrigin? = null,
     val undoableQueueContexts: Set<QueueContext> = emptySet(),
     /** Canonical schema3 selections/order. Legacy queue/media projection is not their authority. */
     val currentSelection: PlaybackSelection? = null,
@@ -168,3 +170,6 @@ class SystemClock : Clock {
     override fun epochMs(): Long = kotlin.time.Clock.System.now().toEpochMilliseconds()
     override fun monotonicMs(): Long = start.elapsedNow().inWholeMilliseconds
 }
+
+/** A validated downloaded file on this device, or audio streamed online through kmpYT. */
+enum class AudioOrigin { DOWNLOADED_FILE, ONLINE_STREAM }

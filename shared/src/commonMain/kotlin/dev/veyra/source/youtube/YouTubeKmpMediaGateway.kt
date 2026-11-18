@@ -129,7 +129,8 @@ class YouTubeKmpMediaGateway(private val source: YouTubeMediaSource) :
     override suspend fun prepareDownload(binding: PlaybackBinding, capabilities: EngineCapabilities,
         requiredRepresentationId: String?): PreparedLegacyDownload = guardedDownload {
         val videoId = selectedVideo(binding)
-        val input = YouTubeAudioExecution.Input(videoId, inspect = { source.inspectSelected(videoId) })
+        val input = YouTubeAudioExecution.Input(videoId,
+            inspect = reuseFirstInspection(false) { fresh -> source.inspectSelected(videoId, fresh) })
         PreparedLegacy(this, binding, requiredRepresentationId, source.audioExecution.prepareDownload(input, capabilities, requiredRepresentationId))
     }
 

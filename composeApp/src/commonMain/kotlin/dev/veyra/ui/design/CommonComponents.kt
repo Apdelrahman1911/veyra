@@ -1,5 +1,8 @@
 package dev.veyra.ui.design
 
+import com.mohamedrejeb.calf.ui.button.AdaptiveIconButton
+import com.mohamedrejeb.calf.ui.progress.AdaptiveCircularProgressIndicator
+
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -40,6 +43,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -106,7 +110,7 @@ fun EmptyState(
             modifier = Modifier.widthIn(max = 520.dp),
         )
         if (actionLabel != null && onAction != null) {
-            Button(onClick = onAction, modifier = Modifier.heightIn(min = VeyraSpacing.TouchTarget)) {
+            ActionButton(actionLabel, null, true, onClick = onAction, modifier = Modifier.heightIn(min = VeyraSpacing.TouchTarget)) {
                 Text(actionLabel)
             }
         }
@@ -134,7 +138,7 @@ fun ErrorState(
             Icon(VeyraIcons.Warning, contentDescription = null, modifier = Modifier.size(24.dp))
             Text(message, style = MaterialTheme.typography.bodyMedium)
             if (onRetry != null) {
-                Button(onClick = onRetry, modifier = Modifier.heightIn(min = VeyraSpacing.TouchTarget)) {
+                ActionButton(strings.text(TextKey.Retry), "arrow.clockwise", true, onClick = onRetry, modifier = Modifier.heightIn(min = VeyraSpacing.TouchTarget)) {
                     Text(strings.text(TextKey.Retry))
                 }
             }
@@ -150,7 +154,7 @@ fun LoadingState(modifier: Modifier = Modifier, label: String? = null) {
         verticalArrangement = Arrangement.spacedBy(VeyraSpacing.Medium),
     ) {
         // One verbal status. The progress decoration is not separately announced.
-        CircularProgressIndicator(modifier = Modifier.size(28.dp).clearAndSetSemantics { })
+        AdaptiveCircularProgressIndicator(modifier = Modifier.size(28.dp).clearAndSetSemantics { })
         Text(label ?: LocalStrings.current.text(TextKey.Loading), modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
     }
 }
@@ -169,6 +173,9 @@ fun VeyraIconButton(
     enabled: Boolean = true,
     selected: Boolean? = null,
     stateLabel: String? = null,
+    containerColor: Color? = null,
+    contentColor: Color? = null,
+    iconSize: androidx.compose.ui.unit.Dp = 24.dp,
 ) {
     val interactions = remember { MutableInteractionSource() }
     val focused by interactions.collectIsFocusedAsState()
@@ -178,7 +185,7 @@ fun VeyraIconButton(
         tooltip = { PlainTooltip { Text(label) } },
         state = rememberTooltipState(),
     ) {
-        IconButton(
+        AdaptiveIconButton(
             onClick = onClick,
             enabled = enabled,
             interactionSource = interactions,
@@ -190,11 +197,11 @@ fun VeyraIconButton(
                     if (stateLabel != null) stateDescription = stateLabel
                 },
             colors = IconButtonDefaults.iconButtonColors(
-                containerColor = if (selected == true) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
-                contentColor = if (selected == true) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                containerColor = containerColor ?: if (selected == true) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                contentColor = contentColor ?: if (selected == true) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
             ),
         ) {
-            Icon(icon, contentDescription = label, modifier = Modifier.size(24.dp))
+            Icon(icon, contentDescription = label, modifier = Modifier.size(iconSize))
         }
     }
 }
@@ -305,12 +312,25 @@ fun Artwork(
                 model = model,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().then(letterboxZoom(url).let { zoom ->
+                    if (zoom == 1f) Modifier else Modifier.graphicsLayer(scaleX = zoom, scaleY = zoom)
+                }),
                 onSuccess = { loaded = true },
                 onError = { loaded = false },
             )
         }
     }
+}
+
+/**
+ * YouTube's hq/sd default thumbnails are always 4:3 frames with the 16:9 picture letterboxed
+ * between black bars. A square crop keeps those bars; zooming by 4/3 fills the frame with the
+ * picture alone. Every other image is shown as it is.
+ */
+internal fun letterboxZoom(url: String?): Float {
+    val value = url?.lowercase() ?: return 1f
+    val youtube = "ytimg.com/" in value || "youtube.com/" in value
+    return if (youtube && Regex("/(hq|sd)default(_live)?\\.(jpg|webp)").containsMatchIn(value)) 4f / 3f else 1f
 }
 
 /** Pure resolver so offline/no-network and private-file handling can be tested without an image loader. */

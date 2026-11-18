@@ -2,6 +2,7 @@
 
 package dev.veyra.platform.audio
 
+import dev.veyra.downloads.DownloadFiles
 import dev.veyra.model.AppFailure
 import dev.veyra.model.FailureCode
 import dev.veyra.model.OfflineAsset
@@ -25,6 +26,7 @@ import platform.CoreFoundation.*
 import platform.Foundation.*
 
 internal enum class IosValidationNativeStep { FILE_OWNED, FORMAT_READY, SEEK, READ, DISPOSE }
+private enum class IosValidationDiagnosticStep { PATH, OPEN, FORMAT, LENGTH, CLIENT_FORMAT, FIRST_SAMPLE, LAST_SAMPLE }
 internal fun interface IosValidationNativeFault {
     fun before(input: LocalMediaValidationInput, step: IosValidationNativeStep, nativeOwner: ExtAudioFileRef)
 
@@ -62,6 +64,7 @@ class IosAssetValidator internal constructor(
 
     private fun validateOnCurrentThread(input: LocalMediaValidationInput, context: CoroutineContext): AssetValidation {
         val reader = ValidationReader(input, nativeFault)
+        var diagnosticStep = IosValidationDiagnosticStep.PATH
         try {
             context.ensureActive()
             if (input.kind != OfflineAssetKind.FILE) return invalid(FailureCode.UNSUPPORTED_TRANSPORT)
@@ -73,7 +76,8 @@ class IosAssetValidator internal constructor(
             val path = if (input.uri.startsWith('/')) input.uri
                 else NSURL.URLWithString(input.uri)?.takeIf { it.scheme == "file" }?.path
             if (path == null || !path.startsWith('/')) return invalid(FailureCode.CORRUPT_MEDIA)
-            val url = NSURL.fileURLWithPath(path).URLByResolvingSymlinksInPath
+            val ownedPath = mediaRoot?.let { DownloadFiles(it).ownedPath(path).toString() } ?: path
+            val url = NSURL.fileURLWithPath(ownedPath).URLByResolvingSymlinksInPath
                 ?: return invalid(FailureCode.CORRUPT_MEDIA)
             val actualPath = url.path ?: return invalid(FailureCode.CORRUPT_MEDIA)
             if (mediaRoot != null) {
@@ -97,6 +101,7 @@ class IosAssetValidator internal constructor(
             return memScoped {
                 val output = alloc<ExtAudioFileRefVar>()
                 output.value = null
+                diagnosticStep = IosValidationDiagnosticStep.OPEN
                 val openStatus = ExtAudioFileOpenURL(nativeUrl, output.ptr)
                 val nativeFile = output.value
                 // A partially constructed NONNULL handle is owned BEFORE the status is checked,
@@ -105,12 +110,14 @@ class IosAssetValidator internal constructor(
                 requireNativeStatus(nativeFault.openStatus(input, nativeFile, openStatus))
                 val handle = nativeFile ?: return@memScoped invalid(FailureCode.CORRUPT_MEDIA)
                 context.ensureActive()
+                diagnosticStep = IosValidationDiagnosticStep.FORMAT
                 val fileFormat = alloc<AudioStreamBasicDescription>()
                 val propertySize = alloc<UIntVar>()
                 propertySize.value = sizeOf<AudioStreamBasicDescription>().toUInt()
                 requireNativeStatus(ExtAudioFileGetProperty(handle, kExtAudioFileProperty_FileDataFormat,
                     propertySize.ptr, fileFormat.ptr))
                 check(propertySize.value == sizeOf<AudioStreamBasicDescription>().toUInt())
+                diagnosticStep = IosValidationDiagnosticStep.LENGTH
                 val fileFrames = alloc<LongVar>() // kExtAudioFileProperty_FileLengthFrames is SInt64.
                 propertySize.value = sizeOf<LongVar>().toUInt()
                 requireNativeStatus(ExtAudioFileGetProperty(handle, kExtAudioFileProperty_FileLengthFrames,
@@ -134,6 +141,7 @@ class IosAssetValidator internal constructor(
                     mBitsPerChannel = 16u
                     mReserved = 0u
                 }
+                diagnosticStep = IosValidationDiagnosticStep.CLIENT_FORMAT
                 requireNativeStatus(ExtAudioFileSetProperty(handle, kExtAudioFileProperty_ClientDataFormat,
                     sizeOf<AudioStreamBasicDescription>().toUInt(), clientFormat.ptr))
                 nativeFault.before(input, IosValidationNativeStep.FORMAT_READY, handle)
@@ -157,8 +165,12 @@ class IosAssetValidator internal constructor(
                     check(buffers.mBuffers[0].mDataByteSize in (framesRead.value * frameBytes)..SAMPLE_BYTES.toUInt())
                     context.ensureActive()
                 }
+                diagnosticStep = IosValidationDiagnosticStep.FIRST_SAMPLE
                 decodeAt(0)
-                if (durationMs > 2_000.0) decodeAt((fileFrames.value - sampleRate.toLong()).coerceAtLeast(0))
+                if (durationMs > 2_000.0) {
+                    diagnosticStep = IosValidationDiagnosticStep.LAST_SAMPLE
+                    decodeAt((fileFrames.value - sampleRate.toLong()).coerceAtLeast(0))
+                }
                 context.ensureActive()
                 AssetValidation.Valid(durationMs.toLong())
             }
@@ -167,8 +179,14 @@ class IosAssetValidator internal constructor(
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (rejected: NativeValidationFailure) {
+            debugValidationRejection(diagnosticStep, rejected.status, "NATIVE")
             return invalid(rejected.code)
-        } catch (_: Exception) {
+        } catch (error: Exception) {
+            debugValidationRejection(diagnosticStep, null, when (error) {
+                is IllegalArgumentException -> "ARGUMENT_GUARD"
+                is IllegalStateException -> "STATE_GUARD"
+                else -> "OTHER"
+            })
             return invalid(FailureCode.CORRUPT_MEDIA)
         } finally {
             // No suspension/cancellation point and OUTSIDE Invalid/cancellation classification.
@@ -236,7 +254,7 @@ class IosAssetValidator internal constructor(
         private fun unacknowledged(): Nothing = throw LocalMediaValidationReaderUnacknowledged(input, this)
     }
 
-    private class NativeValidationFailure(val code: FailureCode) : Exception("local_audio_validation")
+    private class NativeValidationFailure(val code: FailureCode, val status: Int) : Exception("local_audio_validation")
 
     private fun requireNativeStatus(status: Int) {
         if (status == 0) return
@@ -245,7 +263,13 @@ class IosAssetValidator internal constructor(
             kExtAudioFileError_InvalidDataFormat -> FailureCode.UNSUPPORTED_CODEC
             else -> FailureCode.CORRUPT_MEDIA
         }
-        throw NativeValidationFailure(code)
+        throw NativeValidationFailure(code, status)
+    }
+
+    @OptIn(kotlin.experimental.ExperimentalNativeApi::class)
+    private fun debugValidationRejection(step: IosValidationDiagnosticStep, status: Int?, kind: String) {
+        if (kotlin.native.Platform.isDebugBinary)
+            println("VEYRA_LOCAL_VALIDATION step=$step status=$status kind=$kind")
     }
 
     private fun invalid(code: FailureCode) = AssetValidation.Invalid(AppFailure(code, "local_audio_validation"))

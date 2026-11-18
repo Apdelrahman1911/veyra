@@ -3,6 +3,9 @@
 package dev.veyra.app
 
 import dev.veyra.model.VeyraException
+import dev.veyra.downloads.DownloadFiles
+import okio.FileSystem
+import okio.Path.Companion.toPath
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -33,7 +36,8 @@ class IosDirectoriesTest {
         try {
             assertTrue(files.createSymbolicLinkAtPath(alias, withDestinationPath = base, error = null))
             val owned = iosApplicationDirectory(alias)
-            assertEquals(NSURL.fileURLWithPath(base).URLByResolvingSymlinksInPath?.path + "/Veyra", owned)
+            assertEquals(FileSystem.SYSTEM.canonicalize(base.toPath()).toString() + "/Veyra", owned)
+            DownloadFiles("$owned/media").initialize()
             assertTrue(files.removeItemAtPath(owned, error = null))
             assertTrue(files.createSymbolicLinkAtPath(owned, withDestinationPath = foreign, error = null))
             assertFailsWith<VeyraException> { iosApplicationDirectory(alias) }

@@ -1,5 +1,6 @@
 package dev.veyra.artwork
 
+import dev.veyra.platform.BlockingIo
 import dev.veyra.data.LibraryStore
 import dev.veyra.data.getOrThrow
 import dev.veyra.model.AppSnapshot
@@ -13,18 +14,20 @@ import dev.veyra.source.network.SafeHttpRequest
 import dev.veyra.source.network.requireHttpSuccess
 import io.ktor.utils.io.readAvailable
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.IO
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.selects.select
@@ -50,7 +53,7 @@ class ArtworkCache(
     private val store: LibraryStore,
     private val files: ArtworkFiles,
     private val http: SafeHttp,
-    private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val dispatcher: CoroutineDispatcher = BlockingIo,
     maximumConcurrentRequests: Int = 2,
 ) {
     private val lifetime = SupervisorJob()
@@ -60,6 +63,11 @@ class ArtworkCache(
     private val pending = mutableMapOf<String, Deferred<String?>>()
     private val requestSlots = Semaphore(maximumConcurrentRequests.also { require(it in 1..4) })
     private val verifiedPaths = MutableStateFlow<Map<String, String>>(emptyMap())
+    /** Changes whenever a cover is verified or dropped; native surfaces re-read [cachedArtworkPath] on it. */
+    val cachedPaths: StateFlow<Map<String, String>> get() = verifiedPaths
+    private val linkQueue = Mutex()
+    private val linkWriter = Mutex()
+    private val queuedLinks = mutableListOf<PendingLink>()
     private var initialized = false
 
     /** Local validation only, including after a process restart with all networking disabled. */
@@ -70,26 +78,37 @@ class ArtworkCache(
             val snapshot = store.initialize().getOrThrow()
             files.initialize()
             val validated = mutableMapOf<String, String>()
-            val rejected = mutableMapOf<String, String>()
-            val references = snapshot.media.values.map { mediaKey(it.id) to it.localArtworkPath } +
-                snapshot.shows.values.map { showKey(it.id) to it.localArtworkPath }
-            for ((key, path) in references) {
+            // key -> (path stored now, path to store instead; null clears it)
+            val repairs = mutableMapOf<String, Pair<String?, String?>>()
+            val references = snapshot.media.values.map { Triple(mediaKey(it.id), it.localArtworkPath, it.artworkUrl) } +
+                snapshot.shows.values.map { Triple(showKey(it.id), it.localArtworkPath, it.artworkUrl) }
+            val names by lazy { files.publishedNames() }
+            for ((key, path, rawUrl) in references) {
                 currentCoroutineContext().ensureActive()
-                if (path == null) continue
-                val valid = verified(key, path)
-                if (valid != null) validated[key] = valid.path else rejected[key] = path
+                val valid = path?.let { verified(key, it) }
+                if (valid != null) { validated[key] = valid.path; continue }
+                // The image may still be here under this install's folder: relink it locally,
+                // without any network, instead of losing every cover after an app update.
+                val url = rawUrl?.let { runCatching { PublicUrlPolicy.normalize(it) }.getOrNull() }
+                val found = if (path != null || url != null) relocated(key, path, url, names) else null
+                if (found != null) { validated[key] = found.path; repairs[key] = path to found.path }
+                else if (path != null) repairs[key] = path to null
             }
             // A missing, modified or external file must not remain a trusted UI/native path.
-            // Do not erase a newer concurrent cache publication while repairing stale metadata.
-            if (rejected.isNotEmpty()) store.update { current ->
+            // Do not overwrite a newer concurrent cache publication while repairing stale metadata.
+            if (repairs.isNotEmpty()) store.update { current ->
+                fun repaired(key: String, stored: String?): String? {
+                    val (seen, replacement) = repairs[key] ?: return stored
+                    return if (stored == seen) replacement else stored
+                }
                 current.copy(
                     media = current.media.mapValues { (_, item) ->
-                        if (item.localArtworkPath != null && rejected[mediaKey(item.id)] == item.localArtworkPath)
-                            item.copy(localArtworkPath = null) else item
+                        val next = repaired(mediaKey(item.id), item.localArtworkPath)
+                        if (next != item.localArtworkPath) item.copy(localArtworkPath = next) else item
                     },
                     shows = current.shows.mapValues { (_, show) ->
-                        if (show.localArtworkPath != null && rejected[showKey(show.id)] == show.localArtworkPath)
-                            show.copy(localArtworkPath = null) else show
+                        val next = repaired(showKey(show.id), show.localArtworkPath)
+                        if (next != show.localArtworkPath) show.copy(localArtworkPath = next) else show
                     },
                 )
             }.getOrThrow()
@@ -103,12 +122,17 @@ class ArtworkCache(
     suspend fun cacheMedia(item: MediaItem): String? {
         initialize()
         return coalesced(mediaKey(item.id)) {
-            val current = store.update { snapshot ->
-                val prior = snapshot.media[item.id]
-                if (prior != null && (prior.kind != item.kind || prior.source.provider != item.source.provider ||
-                        prior.source.canonicalId != item.source.canonicalId)) {
+            fun requireSameIdentity(prior: MediaItem) {
+                if (prior.kind != item.kind || prior.source.provider != item.source.provider ||
+                    prior.source.canonicalId != item.source.canonicalId) {
                     artworkFailure(FailureCode.INVALID_STATE, "artwork_media_identity_changed")
                 }
+            }
+            // An already persisted row needs no write; an empty transaction still costs a full
+            // library read and holds the single writer that playback admissions wait behind.
+            val current = store.state.value.media[item.id]?.also(::requireSameIdentity) ?: store.update { snapshot ->
+                val prior = snapshot.media[item.id]
+                prior?.let(::requireSameIdentity)
                 if (prior == null) snapshot.copy(media = snapshot.media + (item.id to item.copy(localArtworkPath = null))) else snapshot
             }.getOrThrow().media.getValue(item.id)
             cache(mediaKey(item.id), current.artworkUrl, current.localArtworkPath) { snapshot, path ->
@@ -123,7 +147,7 @@ class ArtworkCache(
     suspend fun cacheShow(show: PodcastShow): String? {
         initialize()
         return coalesced(showKey(show.id)) {
-            val current = store.update { snapshot ->
+            val current = store.state.value.shows[show.id] ?: store.update { snapshot ->
                 if (show.id !in snapshot.shows) snapshot.copy(shows = snapshot.shows + (show.id to show.copy(localArtworkPath = null))) else snapshot
             }.getOrThrow().shows.getValue(show.id)
             cache(showKey(show.id), current.artworkUrl, current.localArtworkPath) { snapshot, path ->
@@ -152,6 +176,53 @@ class ArtworkCache(
     suspend fun close() {
         lifetime.cancelAndJoin()
         verifiedPaths.value = emptyMap()
+    }
+
+    private class PendingLink(val transform: (AppSnapshot) -> AppSnapshot) {
+        val done = CompletableDeferred<Unit>()
+    }
+
+    /**
+     * Persists one published image's Room link, grouped with the links published around the same
+     * time into one transaction. A search page caches dozens of covers; one commit per cover kept
+     * the single library writer busy for ~20 s, and every playback/download admission compares
+     * the library revision those commits advance. Each caller still returns only after its own
+     * link is durable; a link whose transform rejects fails alone.
+     */
+    private suspend fun link(transform: (AppSnapshot) -> AppSnapshot) {
+        val pending = PendingLink(transform)
+        linkQueue.withLock { queuedLinks += pending }
+        linkWriter.withLock {
+            // The batch runs in the cache lifetime: a cancelled screen waiter must not strand the
+            // other links it collected.
+            if (!pending.done.isCompleted) scope.async {
+                delay(LINK_GATHER_MS)
+                commitLinks(linkQueue.withLock { queuedLinks.toList().also { queuedLinks.clear() } })
+            }.await()
+        }
+        pending.done.await()
+    }
+
+    private suspend fun commitLinks(batch: List<PendingLink>) {
+        if (batch.isEmpty()) return
+        val rejected = mutableMapOf<PendingLink, Exception>()
+        try {
+            store.update { snapshot ->
+                rejected.clear()
+                batch.fold(snapshot) { current, pending ->
+                    try { pending.transform(current) } catch (failure: VeyraException) { rejected[pending] = failure; current }
+                }
+            }.getOrThrow()
+        } catch (cancelled: CancellationException) {
+            batch.forEach { it.done.cancel(cancelled) }
+            throw cancelled
+        } catch (failure: Exception) {
+            // Never let one link's storage failure decide another's: retry them one by one.
+            if (batch.size > 1) batch.forEach { commitLinks(listOf(it)) }
+            else batch.single().done.completeExceptionally(failure)
+            return
+        }
+        batch.forEach { pending -> rejected[pending]?.let(pending.done::completeExceptionally) ?: pending.done.complete(Unit) }
     }
 
     private suspend fun coalesced(key: String, action: suspend () -> String?): String? {
@@ -230,7 +301,7 @@ class ArtworkCache(
                 val path = files.publish(stage, key, url, mime)
                 // Atomic file publication precedes the Room link. A failed/interrupted commit can
                 // leave a complete unreferenced image, never a persisted path to partial bytes.
-                store.update { snapshot -> update(snapshot, path) }.getOrThrow()
+                link { snapshot -> update(snapshot, path) }
                 verifiedPaths.update { it + (key to path) }
                 path
             } finally {
@@ -255,6 +326,14 @@ class ArtworkCache(
         }
     }
 
+    private fun relocated(key: String, path: String?, url: String?, names: Set<String>): VerifiedArtwork? = try {
+        files.relocate(key, path, url, names)
+    } catch (cancelled: CancellationException) { throw cancelled }
+    catch (failure: VeyraException) {
+        if (failure.failure.code in setOf(FailureCode.STORAGE_IO, FailureCode.STORAGE_FULL)) throw failure
+        null
+    }
+
     private fun verified(key: String, path: String): VerifiedArtwork? = try {
         files.verify(path).takeIf { files.matchesOwner(it, key) }
     } catch (cancelled: CancellationException) { throw cancelled }
@@ -275,3 +354,6 @@ class ArtworkCache(
     private fun mediaKey(id: String): String = "media:${id.length}:$id"
     private fun showKey(id: String): String = "show:${id.length}:$id"
 }
+
+/** Long enough to join the covers of one search page into a few commits, short for one image. */
+private const val LINK_GATHER_MS = 750L

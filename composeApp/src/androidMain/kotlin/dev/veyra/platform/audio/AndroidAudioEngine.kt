@@ -593,7 +593,7 @@ class AndroidAudioEngine internal constructor(
         val http = DefaultHttpDataSource.Factory().setUserAgent("Veyra/1.0")
             .setConnectTimeoutMs(15_000).setReadTimeoutMs(20_000).setAllowCrossProtocolRedirects(false)
             .setDefaultRequestProperties(deck.source.headers)
-        val dataSources = AndroidDeckDataSources(DefaultDataSource.Factory(context, http))
+        val dataSources = AndroidDeckDataSources(DefaultDataSource.Factory(context, http), deck.source.contentLength)
         deck.dataSources = dataSources
         deck.listener = listenerFor(deck)
         player.addListener(checkNotNull(deck.listener))

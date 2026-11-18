@@ -3,6 +3,8 @@
 package dev.veyra.platform.audio
 
 import dev.veyra.model.MediaItem
+import dev.veyra.model.AppFailure
+import dev.veyra.model.FailureCode
 import dev.veyra.model.MediaKind
 import dev.veyra.model.OfflineAsset
 import dev.veyra.model.SourceProvider
@@ -48,6 +50,82 @@ import platform.QuartzCore.CACurrentMediaTime
  * phone call, route removal, or physical audible output. Those remain separate hardware gates.
  */
 class IosAudioEngineTest {
+    @Test fun measuredSourceDurationBoundsNativeSeekingAndNaturalEnd() = nativeTest {
+        engine.prepare(source("bounded-timeline").copy(durationMs = 4_000), 0, 86)
+        val ready = await { it is EngineEvent.Ready && it.generation == 86L } as EngineEvent.Ready
+        assertEquals(4_000L, ready.durationMs)
+        engine.play(86)
+        engine.seek(7_000, 1, 86)
+        val atEnd = await { it is EngineEvent.SeekCompleted && it.generation == 86L && it.seekSequence == 1L } as EngineEvent.SeekCompleted
+        assertTrue(atEnd.success)
+        assertTrue(abs(atEnd.positionMs - 4_000) < 150)
+        assertFalse(engine.nativeDecksPlaying.any { it })
+        assertFalse(observed.any { it is EngineEvent.Ended && it.generation == 86L })
+        engine.seek(1_000, 2, 86)
+        await { it is EngineEvent.SeekCompleted && it.generation == 86L && it.seekSequence == 2L }
+        engine.play(86)
+        await { it is EngineEvent.Position && it.generation == 86L && it.seekSequence == 2L && it.positionMs >= 1_250 }
+        assertTrue(engine.nativeDeckVolumes.zip(engine.nativeDecksPlaying).any { (gain, playing) -> playing && gain > 0f })
+        engine.seek(3_500, 3, 86)
+        await { it is EngineEvent.SeekCompleted && it.generation == 86L && it.seekSequence == 3L }
+        await { it is EngineEvent.Ended && it.generation == 86L }
+        assertFalse(engine.nativeDecksPlaying.any { it })
+    }
+
+    @Test fun failedAcquisitionStopsTheNativeClockEvenWhenAvPlayerStillReportsPlaying() = nativeTest {
+        var sourceFailure: AppFailure? = null
+        var closes = 0
+        val resource = object : PlaybackResource {
+            override val failure: AppFailure? get() = sourceFailure
+            override suspend fun close() { closes++ }
+        }
+        engine.prepare(source("late-source-failure").copy(resource = resource), 0, 84)
+        await { it is EngineEvent.Ready && it.generation == 84L }
+        engine.play(84)
+        await { it is EngineEvent.Position && it.generation == 84L && it.positionMs >= 250 }
+        sourceFailure = AppFailure(FailureCode.PROVIDER_ACCESS_REQUIRED, "YOUTUBE_STREAM_ACCESS_REQUIRED")
+        val error = withTimeout(2_000) { await { it is EngineEvent.Error && it.generation == 84L } } as EngineEvent.Error
+        assertEquals(sourceFailure, error.failure)
+        assertFalse(engine.nativeDecksPlaying.any { it })
+        engine.seek(4_000, 1, 84)
+        engine.play(84)
+        delay(300)
+        assertFalse(engine.nativeDecksPlaying.any { it })
+        assertEquals(1, observed.filterIsInstance<EngineEvent.Error>().count { it.generation == 84L })
+        assertEquals(0, closes)
+        engine.stop(85)
+        assertEquals(1, closes)
+    }
+
+    @Test fun seekingWhilePlayingKeepsTheActiveDeckRunningAtAudibleGain() = nativeTest {
+        engine.prepare(source("seek-running"), 0, 81)
+        await { it is EngineEvent.Ready && it.generation == 81L }
+        engine.play(81)
+        await { it is EngineEvent.Position && it.generation == 81L && it.positionMs >= 250 }
+        for ((index, target) in listOf(4_000L, 1_000L, 5_000L).withIndex()) {
+            val sequence = index.toLong() + 1
+            engine.seek(target, sequence, 81)
+            val completed = await { it is EngineEvent.SeekCompleted && it.generation == 81L && it.seekSequence == sequence } as EngineEvent.SeekCompleted
+            assertTrue(completed.success)
+            await { it is EngineEvent.Position && it.generation == 81L && it.seekSequence == sequence && it.positionMs >= target + 250 }
+            assertTrue(engine.nativeDeckVolumes.zip(engine.nativeDecksPlaying).any { (gain, playing) -> playing && gain > 0f })
+        }
+        assertFalse(observed.any { it is EngineEvent.Ended && it.generation == 81L })
+    }
+
+    @Test fun seekDuringCrossfadeRestoresTheWinningDeckGainBeforeContinuing() = nativeTest {
+        preparePair(82, 83)
+        engine.beginCrossfade(2_000, 83, 82)
+        await { it is EngineEvent.CrossfadeProgress && it.fraction >= 0.25f }
+        engine.seek(1_000, 1, 82)
+        val completed = await { it is EngineEvent.SeekCompleted && it.generation == 82L && it.seekSequence == 1L } as EngineEvent.SeekCompleted
+        assertTrue(completed.success)
+        await { it is EngineEvent.Position && it.generation == 82L && it.seekSequence == 1L && it.positionMs >= 1_250 }
+        val liveGains = engine.nativeDeckVolumes.zip(engine.nativeDecksPlaying).filter { it.second }.map { it.first }
+        assertEquals(listOf(CrossfadeMix.MUSIC_GAIN), liveGains)
+        assertFalse(observed.any { it is EngineEvent.Ended && it.generation == 82L })
+    }
+
     @Test fun realLocalPlaybackPauseSeekAndNoNaturalEndFromScrubbing() = nativeTest {
         engine.prepare(source("tone"), 0, 1)
         await { it is EngineEvent.Ready && it.generation == 1L }

@@ -1,5 +1,15 @@
 # Veyra execution plan
 
+Current 2026-11-11 follow-up: v14 is installed in place on the owner's iPhone.
+The silent fragmented-AAC tail is bounded by measured source duration, seek
+completion preserves current playback intent, and late stream failures stop the
+native deck. Physical retained-file seeking and separate-host PCM checks pass;
+see `verification/ios-seek-audio-20261111.md`. Original-language selection remains
+language-independent (D013), and the earlier preparation improvements remain.
+The exact example's upstream SABR access refusal is not repaired. Fresh-online
+seek acceptance for that source, variable preparation latency, audible-output,
+the full redesign and all cross-platform/release gates remain open.
+
 Status: **implementation plan accepted after research and cross-review; revised for owner D005/D006/D008/D009 requirements, 2026-11-06**. Product name **Veyra / ڤيرا**. Repository **public**. No paid services, Veyra account, or app-store publication required.
 
 ## Required release scope

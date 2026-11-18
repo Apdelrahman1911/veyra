@@ -2,6 +2,18 @@
 
 package dev.veyra.ui.podcasts
 
+import dev.veyra.ui.design.ActionButton
+import dev.veyra.ui.design.bottomChrome
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
+import androidx.compose.runtime.rememberUpdatedState
+import com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosAction
+import com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosActionStyle
+import com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosProperties
+import com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosTextField
+import com.mohamedrejeb.calf.ui.uikit.IosKeyboardType
+import dev.veyra.nativecomponents.NativeAlert
+import dev.veyra.ui.design.NativeMenu
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -13,6 +25,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -52,6 +65,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.error
 import androidx.compose.ui.semantics.heading
@@ -71,6 +85,8 @@ import dev.veyra.ui.design.Artwork
 import dev.veyra.ui.design.EmptyState
 import dev.veyra.ui.design.ErrorState
 import dev.veyra.ui.design.LoadingState
+import dev.veyra.ui.design.AccentButton
+import dev.veyra.ui.design.ScreenIntro
 import dev.veyra.ui.design.LocalStrings
 import dev.veyra.ui.design.MetadataText
 import dev.veyra.ui.design.TextKey
@@ -97,22 +113,19 @@ fun PodcastsScreen(
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         LazyColumn(
             modifier = Modifier.widthIn(max = 1120.dp).fillMaxSize().testTag("podcasts-screen"),
-            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 24.dp),
+            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 24.dp, bottom = bottomChrome(24.dp)),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item(key = "heading") {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(strings.text(TextKey.Podcasts), style = MaterialTheme.typography.headlineLarge,
                         modifier = Modifier.semantics { heading() })
-                    Text(strings.text(TextKey.FollowLocalDescription), style = MaterialTheme.typography.bodyMedium,
+                    Text(strings.text(TextKey.PodcastsSubtitle), style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { onAction(PodcastAction.FindPodcasts) }, modifier = Modifier.testTag("podcasts-find")) {
-                            Icon(VeyraIcons.Search, null, modifier = Modifier.size(20.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text(strings.text(TextKey.FindPodcasts))
-                        }
-                        OutlinedButton(onClick = { onAction(PodcastAction.OpenAddFeed) }, enabled = !state.snapshot.settings.offlineOnly,
+                        AccentButton(strings.text(TextKey.FindPodcasts), { onAction(PodcastAction.FindPodcasts) },
+                            Modifier.testTag("podcasts-find"), icon = VeyraIcons.Search, symbol = "magnifyingglass")
+                        ActionButton(strings.text(TextKey.AddRssFeed), "plus", false, onClick = { onAction(PodcastAction.OpenAddFeed) }, enabled = !state.snapshot.settings.offlineOnly,
                             modifier = Modifier.testTag("podcasts-add-feed")) {
                             Icon(VeyraIcons.Add, null, modifier = Modifier.size(20.dp))
                             Spacer(Modifier.width(8.dp))
@@ -129,7 +142,7 @@ fun PodcastsScreen(
                     }
                 }
             }
-            item(key = "audio-policy") { PodcastAudioResolutionNotice() }
+
             if (state.snapshot.settings.offlineOnly) item(key = "offline") { PodcastOfflineNotice() }
             if (state.isLoading || state.isRefreshing) {
                 item(key = "loading") { PodcastLoadingIndicator() }
@@ -210,10 +223,9 @@ fun PodcastShowScreen(
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         LazyColumn(
             modifier = Modifier.widthIn(max = 1120.dp).fillMaxSize().testTag("podcast-show-screen"),
-            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp),
+            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 20.dp, bottom = bottomChrome(20.dp)),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            item(key = "back") { PodcastBackButton { onAction(PodcastAction.NavigateBack) } }
             if (show == null) {
                 item(key = "missing-show") {
                     if (state.isLoading || state.isRefreshing) PodcastLoadingIndicator() else ErrorState(
@@ -229,13 +241,13 @@ fun PodcastShowScreen(
                 item(key = "show-actions") {
                     val followed = show.id in state.snapshot.followedShowIds
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { onAction(PodcastAction.SetFollowed(show.id, !followed)) },
+                        ActionButton(strings.text(if (followed) TextKey.Unfollow else TextKey.Follow), if (followed) "checkmark" else "plus", true, onClick = { onAction(PodcastAction.SetFollowed(show.id, !followed)) },
                             modifier = Modifier.testTag("podcast-follow")) {
                             Icon(if (followed) VeyraIcons.Check else VeyraIcons.Add, null, modifier = Modifier.size(20.dp))
                             Spacer(Modifier.width(8.dp))
                             Text(strings.text(if (followed) TextKey.Unfollow else TextKey.Follow))
                         }
-                        OutlinedButton(onClick = { onAction(PodcastAction.RefreshShow(show.id)) },
+                        ActionButton(strings.text(TextKey.Refresh), "arrow.clockwise", false, onClick = { onAction(PodcastAction.RefreshShow(show.id)) },
                             enabled = !state.isRefreshing && !state.snapshot.settings.offlineOnly) {
                             Icon(VeyraIcons.Refresh, null, modifier = Modifier.size(20.dp))
                             Spacer(Modifier.width(8.dp))
@@ -251,7 +263,7 @@ fun PodcastShowScreen(
                         }
                     }
                 }
-                item(key = "audio-policy") { PodcastAudioResolutionNotice() }
+
                 if (state.snapshot.settings.offlineOnly) item(key = "offline") { PodcastOfflineNotice() }
                 if (state.isLoading || state.isRefreshing) item(key = "refreshing") { PodcastLoadingIndicator() }
                 state.failure?.let { failure ->
@@ -298,14 +310,14 @@ fun EpisodeDetailScreen(
     modifier: Modifier = Modifier,
 ) {
     val strings = LocalStrings.current
+    var audioDetails by rememberSaveable(state.mediaId) { mutableStateOf(false) }
     val episode = state.episode
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         LazyColumn(
             modifier = Modifier.widthIn(max = 1000.dp).fillMaxSize().testTag("podcast-episode-detail"),
-            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp),
+            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 20.dp, bottom = bottomChrome(20.dp)),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            item(key = "back") { PodcastBackButton { onAction(PodcastAction.NavigateBack) } }
             if (episode == null) {
                 item(key = "missing-episode") {
                     if (state.isLoading) PodcastLoadingIndicator() else ErrorState(
@@ -333,7 +345,13 @@ fun EpisodeDetailScreen(
                 item(key = "episode-metadata") { PodcastEpisodeMetadata(row) }
                 item(key = "episode-status") { PodcastEpisodeStatus(row) }
                 item(key = "audio-policy") {
-                    if (row.binding == null) PodcastAudioResolutionNotice() else PodcastEpisodeProvenance(row, onAction)
+                    Column {
+                        TextButton({ audioDetails = !audioDetails }, modifier = Modifier.heightIn(min = 48.dp)
+                            .testTag("podcast-audio-details").semantics { stateDescription = strings.text(if (audioDetails) TextKey.ShowLess else TextKey.ShowMore) }) { Text(strings.text(TextKey.AudioDetails)) }
+                        if (audioDetails) {
+                            if (row.binding == null) PodcastAudioResolutionNotice() else PodcastEpisodeProvenance(row, onAction)
+                        }
+                    }
                 }
                 if (row.resumeActionable) item(key = "episode-progress") {
                     Column(modifier = Modifier.testTag("podcast-progress-current"),
@@ -368,7 +386,7 @@ fun EpisodeDetailScreen(
                 }
                 if (episode.description.isNotBlank()) item(key = "episode-notes") {
                     PodcastExpandableText(episode.description, strings.text(TextKey.EpisodeNotes), episode.id,
-                        initialLines = 12, disclaimer = strings.text(TextKey.OriginalDescriptionNotice))
+                        initialLines = 4, disclaimer = strings.text(TextKey.OriginalDescriptionNotice))
                 }
                 if (episode.attribution != null || row.show?.attribution != null || row.show?.copyright != null ||
                     podcastPublisherUrl(row) != null) item(key = "episode-source") {
@@ -418,7 +436,7 @@ fun PodcastShowRow(
     ) {
         Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(14.dp),
             verticalAlignment = Alignment.Top) {
-            Artwork(show.artworkUrl, show.title, Modifier.size(64.dp).clip(RoundedCornerShape(14.dp)), offlineOnly,
+            Artwork(show.artworkUrl, show.title, Modifier.size(72.dp).clip(RoundedCornerShape(18.dp)), offlineOnly,
                 localPath = show.localArtworkPath)
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 MetadataText(show.title, style = MaterialTheme.typography.titleMedium,
@@ -464,16 +482,14 @@ private fun PodcastEpisodeFilters(state: PodcastShowUiState, onAction: (PodcastA
                     Spacer(Modifier.width(6.dp))
                     Text(strings.text(state.options.sort.textKey()))
                 }
-                DropdownMenu(expanded = sortExpanded, onDismissRequest = { sortExpanded = false }) {
+                NativeMenu(expanded = sortExpanded, onDismiss = { sortExpanded = false }) {
                     PodcastEpisodeSort.entries.forEach { sort ->
-                        DropdownMenuItem(
-                            text = { Text(strings.text(sort.textKey())) },
-                            leadingIcon = { if (state.options.sort == sort) Icon(VeyraIcons.Check, null) },
-                            onClick = {
-                                sortExpanded = false
-                                onAction(PodcastAction.SetShowListOptions(state.showId, state.options.copy(sort = sort)))
-                            },
-                        )
+                        val current = state.options.sort == sort
+                        item(strings.text(sort.textKey()), icon = if (current) VeyraIcons.Check else null,
+                            symbol = if (current) "checkmark" else null) {
+                            sortExpanded = false
+                            onAction(PodcastAction.SetShowListOptions(state.showId, state.options.copy(sort = sort)))
+                        }
                     }
                 }
             }
@@ -655,7 +671,31 @@ private fun AddPodcastFeedDialog(state: AddPodcastFeedUiState, offline: Boolean,
     val strings = LocalStrings.current
     val canSubmit = state.url.isNotBlank() && !state.isSubmitting && !offline
     val failureMessage = state.failure?.let(strings::errorFor)
-    AlertDialog(
+    // iOS: a native alert with a URL text field. UIKit closes an alert whenever one of its buttons is
+    // tapped, so after "Add" it stays closed while the feed is checked; a failure presents it again
+    // with the error, and success closes the flow from the owner.
+    val currentUrl by rememberUpdatedState(state.url)
+    var awaitingResult by remember { mutableStateOf(false) }
+    var attempt by remember { mutableStateOf(0) }
+    LaunchedEffect(state.isSubmitting, state.failure) {
+        if (awaitingResult && !state.isSubmitting && state.failure != null) { awaitingResult = false; attempt++ }
+    }
+    if (!awaitingResult) key(attempt) { NativeAlert(
+        ios = AlertDialogIosProperties(
+            title = strings.text(TextKey.AddRssFeed),
+            text = listOfNotNull(failureMessage, strings.text(TextKey.AddFeedDescription), strings.text(TextKey.FeedPrivateWarning),
+                strings.text(TextKey.OfflineDescription).takeIf { offline }).joinToString("\n\n"),
+            actions = listOf(
+                AlertDialogIosAction(strings.text(TextKey.Cancel), AlertDialogIosActionStyle.Cancel,
+                    onClick = { onAction(PodcastAction.DismissAddFeed) }),
+                AlertDialogIosAction(strings.text(TextKey.AddFeed), AlertDialogIosActionStyle.Default, isPreferred = true, enabled = canSubmit,
+                    onClick = { awaitingResult = true; onAction(PodcastAction.SubmitFeed(currentUrl.trim())) }),
+            ),
+            textFields = listOf(AlertDialogIosTextField(placeholder = strings.text(TextKey.FeedUrlHint), initialValue = state.url,
+                keyboardType = IosKeyboardType.URL, onValueChange = { onAction(PodcastAction.FeedUrlChanged(it)) })),
+        ),
+        onDismiss = { onAction(PodcastAction.DismissAddFeed) },
+    ) { AlertDialog(
         onDismissRequest = { onAction(PodcastAction.DismissAddFeed) },
         modifier = Modifier.testTag("podcast-add-feed-dialog"),
         title = { Text(strings.text(TextKey.AddRssFeed)) },
@@ -690,7 +730,7 @@ private fun AddPodcastFeedDialog(state: AddPodcastFeedUiState, offline: Boolean,
             TextButton(onClick = { onAction(PodcastAction.SubmitFeed(state.url.trim())) }, enabled = canSubmit,
                 modifier = Modifier.testTag("podcast-submit-feed")) {
                 if (state.isSubmitting) {
-                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    com.mohamedrejeb.calf.ui.progress.AdaptiveCircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                     Spacer(Modifier.width(8.dp))
                 }
                 Text(strings.text(if (state.isSubmitting) TextKey.Loading else TextKey.AddFeed))
@@ -699,7 +739,7 @@ private fun AddPodcastFeedDialog(state: AddPodcastFeedUiState, offline: Boolean,
         dismissButton = {
             TextButton(onClick = { onAction(PodcastAction.DismissAddFeed) }) { Text(strings.text(TextKey.Cancel)) }
         },
-    )
+    ) } }
 }
 
 private fun PodcastEpisodeFilter.textKey(): TextKey = when (this) {

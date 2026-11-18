@@ -20,6 +20,7 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsFocused
@@ -236,6 +237,82 @@ class MusicSurfacesTest {
         }
     }
 
+    @Test fun seekDraftSurvivesNativePositionSamplesAndCommitsOnlyOnRelease() {
+        val queue = QueueSnapshot(listOf(QueueEntry("now", music.id)), "now")
+        var playback by mutableStateOf(playing(music, queue).copy(generation = 17L))
+        val actions = mutableListOf<MusicUiAction>()
+        ui.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(1f, 1f)) {
+                VeyraTheme(false, LanguagePreference.ENGLISH) {
+                    FullPlayer(AppSnapshot(media = mapOf(music.id to music)), playback, { actions += it }, Modifier.size(1_000.dp, 700.dp))
+                }
+            }
+        }
+        val slider = ui.onNodeWithTag("player-seek").assertIsDisplayed()
+        slider.performTouchInput {
+            down(Offset(width * .25f, centerY))
+            moveTo(Offset(width * .7f, centerY))
+        }
+        ui.waitForIdle()
+        val draft = slider.fetchSemanticsNode().config[SemanticsProperties.ProgressBarRangeInfo].current
+        assertTrue(draft in .6f.. .8f, "Dragging previews the chosen position")
+        assertTrue(actions.isEmpty(), "Pointer movement must not seek the native player")
+        val draftSpeech = slider.fetchSemanticsNode().config[SemanticsProperties.StateDescription]
+        ui.runOnIdle { playback = playback.copy(positionMs = 90_000L) }
+        assertEquals(draft, slider.fetchSemanticsNode().config[SemanticsProperties.ProgressBarRangeInfo].current,
+            "An arriving native sample must not move the active thumb")
+        assertEquals(draftSpeech, slider.fetchSemanticsNode().config[SemanticsProperties.StateDescription])
+        assertTrue(actions.isEmpty())
+        slider.performTouchInput { up() }
+        ui.waitForIdle()
+        assertEquals(1, actions.size)
+        val seek = assertIs<MusicUiAction.Seek>(actions.single())
+        assertEquals("now", seek.expectedEntryId)
+        assertEquals(17L, seek.expectedGeneration)
+        assertEquals(seekPosition(draft, 600_000L), seek.positionMs)
+        assertEquals(strings.format(TextKey.ProgressValue, strings.spokenDuration(90_000L), strings.spokenDuration(600_000L)),
+            slider.fetchSemanticsNode().config[SemanticsProperties.StateDescription])
+    }
+
+    @Test fun changingTheEntryOrGenerationDuringADragCannotSeekTheNewOwner() {
+        fun state(entryId: String, generation: Long) = playing(music,
+            QueueSnapshot(listOf(QueueEntry(entryId, music.id)), entryId)).copy(generation = generation, positionMs = 60_000L)
+        var playback by mutableStateOf(state("now", 17L))
+        val actions = mutableListOf<MusicUiAction>()
+        ui.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(1f, 1f)) {
+                VeyraTheme(false, LanguagePreference.ARABIC) {
+                    FullPlayer(AppSnapshot(media = mapOf(music.id to music)), playback, { actions += it }, Modifier.size(1_000.dp, 700.dp))
+                }
+            }
+        }
+        listOf("next" to 18L, "now" to 18L).forEach { (nextEntry, nextGeneration) ->
+            ui.runOnIdle { playback = state("now", 17L); actions.clear() }
+            ui.onNodeWithTag("player-seek").performTouchInput {
+                down(Offset(width * .25f, centerY))
+                moveTo(Offset(width * .7f, centerY))
+            }
+            ui.waitForIdle()
+            assertTrue(actions.isEmpty())
+            ui.runOnIdle { playback = state(nextEntry, nextGeneration) }
+            val replacement = ui.onNodeWithTag("player-seek").assertIsDisplayed()
+            assertEquals(.1f, replacement.fetchSemanticsNode().config[SemanticsProperties.ProgressBarRangeInfo].current,
+                "A new owner must not inherit the previous draft")
+            replacement.performTouchInput {
+                moveTo(Offset(width * .85f, centerY))
+                up()
+            }
+            ui.waitForIdle()
+            assertTrue(actions.isEmpty(), "The previous gesture cannot seek owner $nextEntry/$nextGeneration")
+            replacement.performTouchInput { click(Offset(width * .5f, centerY)) }
+            ui.waitForIdle()
+            val seek = assertIs<MusicUiAction.Seek>(actions.single())
+            assertEquals(nextEntry, seek.expectedEntryId)
+            assertEquals(nextGeneration, seek.expectedGeneration)
+            assertTrue(seek.positionMs in 280_000L..320_000L)
+        }
+    }
+
     @Test fun compactMiniKeepsBothRecordingIdentitiesAndAllControlsWithACompleteDetailRoute() {
         val requested = music.copy(title = "Authored requested catalog recording — عنوان كامل ".repeat(3).trim())
         val receipt = PlaybackBinding("mini-binding", requested.id, requested.title, FirstResultKind.VIDEO,
@@ -278,6 +355,8 @@ class MusicSurfacesTest {
             .assertTextEquals(arabic.format(TextKey.ResolvedTitleValue, receipt.firstResultTitle))
         ui.onNodeWithTag("mini-open-player").performClick()
         ui.onNodeWithTag("full-player").assertIsDisplayed()
+        // A requested/resolved difference opens the source details by itself (D005 disclosure).
+        ui.onNodeWithTag("player-audio-details").performScrollTo()
         ui.onNodeWithText(arabic.text(TextKey.ShowMore)).performScrollTo().performClick()
         listOf(receipt.queryTitle, receipt.firstResultTitle).forEach { title ->
             ui.onNode(hasText(title) and hasAnyAncestor(hasTestTag("playback-provenance")), useUnmergedTree = true)
@@ -311,7 +390,7 @@ class MusicSurfacesTest {
         ui.onNodeWithTag("play-${music.id}").assertIsDisplayed()
     }
 
-    @Test fun repeatOneHasAnExplicitVisibleLabelAndCyclesBackToOff() {
+    @Test fun repeatOneHasAVisibleBadgeAndAccessibleModeAndCyclesBackToOff() {
         val initial = QueueSnapshot(listOf(QueueEntry("now", music.id)), "now", repeat = RepeatMode.ALL)
         var playback by mutableStateOf(playing(music, initial))
         val actions = mutableListOf<MusicUiAction>()
@@ -323,11 +402,45 @@ class MusicSurfacesTest {
                 }, Modifier.size(1_000.dp, 700.dp))
             }
         }
-        ui.onNodeWithTag("player-repeat").performScrollTo().performClick()
-        ui.onNodeWithText(strings.text(TextKey.RepeatOne)).assertIsDisplayed()
+        ui.onNodeWithTag("player-repeat").assertIsDisplayed().performClick()
+        ui.onNodeWithTag("player-repeat-one-badge").assertIsDisplayed()
+        ui.onNodeWithTag("player-repeat").assertContentDescriptionEquals(strings.text(TextKey.RepeatOne))
         assertEquals(MusicUiAction.SetRepeat(RepeatMode.ONE), actions.last())
         ui.onNodeWithTag("player-repeat").performClick()
-        ui.onNodeWithText(strings.text(TextKey.RepeatOff)).assertIsDisplayed()
+        ui.onNodeWithTag("player-repeat").assertContentDescriptionEquals(strings.text(TextKey.RepeatOff))
+    }
+
+    @Test fun searchExploreCardsOpenDiscoveryAndPodcasts() {
+        val actions = mutableListOf<MusicUiAction>()
+        ui.setContent { VeyraTheme(false, LanguagePreference.ENGLISH) { SearchScreen(AppSnapshot(), SearchUiState(), { actions += it }, Modifier.size(900.dp, 900.dp)) } }
+        ui.onNodeWithTag("search-explore-music").performClick()
+        assertEquals(MusicUiAction.ExploreMusic, actions.last())
+        ui.onNodeWithTag("search-explore-podcasts").performClick()
+        assertEquals(MusicUiAction.ExplorePodcasts, actions.last())
+    }
+
+    @Test fun exploreMusicScrollsHomeToDiscover() {
+        var discovery by mutableStateOf(CatalogUiState(loaded = true))
+        ui.setContent { VeyraTheme(false, LanguagePreference.ENGLISH) {
+            ListenScreen(AppSnapshot(), PlaybackState(), discovery, {}, Modifier.size(390.dp, 420.dp))
+        } }
+        ui.runOnIdle { discovery = discovery.copy(revealRequest = 1) }
+        ui.onNodeWithTag("discover-title", useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    @Test fun yourLibraryShowsEverythingAfterThePodcastsTab() {
+        val snapshot = AppSnapshot(media = mapOf(music.id to music))
+        val actions = mutableListOf<MusicUiAction>()
+        // The state the Podcasts tab leaves behind, then Your library selected on top of it.
+        val podcasts = SearchUiState(scope = SearchScope.EVERYWHERE, kind = SearchKind.PODCASTS, provider = SourceProvider.RSS)
+        var state by mutableStateOf(podcasts)
+        ui.setContent { VeyraTheme(false, LanguagePreference.ENGLISH) { SearchScreen(snapshot, state, { actions += it }, Modifier.size(900.dp, 700.dp)) } }
+        ui.onNodeWithTag("search-scope-library").performClick()
+        assertEquals(MusicUiAction.SearchChanged("", SearchScope.LIBRARY, SearchKind.ALL, SourceProvider.RSS), actions.last())
+        // Even a library scope that still carries the podcast kind lists the saved music.
+        ui.runOnIdle { state = podcasts.copy(scope = SearchScope.LIBRARY) }
+        ui.onNodeWithTag("play-${music.id}").assertIsDisplayed()
+        ui.onAllNodesWithText(strings.text(TextKey.NoResults)).assertCountEquals(0)
     }
 
     @Test fun sourceFailureDoesNotHideLocalSearchResultsOrEchoDiagnosticText() {
@@ -349,6 +462,8 @@ class MusicSurfacesTest {
         val incomingReceipt = PlaybackBinding("incoming-binding", next.id, next.title, FirstResultKind.VIDEO, "incoming-result", "Different incoming recording", selectedVideoId = "incoming-result")
         var playback by mutableStateOf(playing(requested, queue).copy(executionBinding = receipt, crossfade = CrossfadeState(CrossfadePhase.PREPARING, next, "next")))
         ui.setContent { VeyraTheme(false, LanguagePreference.ENGLISH) { FullPlayer(AppSnapshot(media = listOf(requested, next).associateBy { it.id }), playback, {}, Modifier.size(1_000.dp, 700.dp)) } }
+        // A requested/resolved difference opens the source details by itself (D005 disclosure).
+        ui.onNodeWithTag("player-audio-details").performScrollTo()
         ui.onNodeWithText(receipt.firstResultTitle).performScrollTo().assertIsDisplayed()
         ui.onNodeWithText(strings.text(TextKey.SourceMismatchDetected)).performScrollTo().assertIsDisplayed()
         ui.onNodeWithTag("player-crossfade").performScrollTo()

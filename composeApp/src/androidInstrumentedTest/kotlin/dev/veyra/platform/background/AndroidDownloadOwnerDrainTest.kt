@@ -3,6 +3,9 @@ package dev.veyra.platform.background
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import dev.veyra.acquisition.AcquisitionCaptureFactory
+import dev.veyra.acquisition.AcquisitionCoordinator
+import dev.veyra.acquisition.DownloadBatchCoordinator
 import dev.veyra.data.createAndroidLibraryStore
 import dev.veyra.data.getOrThrow
 import dev.veyra.downloads.DownloadActivation
@@ -11,26 +14,19 @@ import dev.veyra.downloads.DownloadExecutionGate
 import dev.veyra.downloads.DownloadExecutionLease
 import dev.veyra.downloads.DownloadFiles
 import dev.veyra.downloads.DownloadIdleDecision
-import dev.veyra.model.AppFailure
-import dev.veyra.model.DownloadStatus
-import dev.veyra.model.FailureCode
-import dev.veyra.model.FirstResultKind
-import dev.veyra.model.MediaItem
-import dev.veyra.model.MediaKind
-import dev.veyra.model.PlaybackBinding
-import dev.veyra.model.SourceProvider
-import dev.veyra.model.SourceRef
-import dev.veyra.model.VeyraException
+import dev.veyra.downloads.DownloadMaterializationEvidence
+import dev.veyra.model.*
+import dev.veyra.downloads.DownloadAcquisitionDependencies
+import dev.veyra.playback.LocalMediaValidator
+import dev.veyra.playback.SystemClock
+import dev.veyra.source.execution.*
+import dev.veyra.source.youtube.YouTubeTransferProgress
+import dev.veyra.source.youtube.YouTubeTransferResult
 import dev.veyra.playback.AssetValidator
 import dev.veyra.playback.EngineCapabilities
 import dev.veyra.playback.PlaybackResource
 import dev.veyra.playback.ResolvedPlayable
 import dev.veyra.source.ResolvePurpose
-import dev.veyra.source.execution.AppSourceResolver
-import dev.veyra.source.execution.KmpFirstResult
-import dev.veyra.source.execution.KmpMediaGateway
-import dev.veyra.source.youtube.YouTubeTransferProgress
-import dev.veyra.source.youtube.YouTubeTransferResult
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
@@ -53,7 +49,8 @@ import org.junit.runner.RunWith
 
 /**
  * Authored integration of the actual Android gate + shared coordinator + private real Room/files.
- * WorkManager/FGS ACKs, kmpYT and native resource close are deliberate fakes; bytes are authored
+ * Uses current typed acquisition and physical-download commands over the same Room owner.
+ * WorkManager/FGS ACKs, kmpYT and source-resource close are deliberate fakes; bytes are authored
  * NON-AUDIO. These tests do NOT prove OS scheduling, cold process/reboot, a real source or audio.
  */
 @RunWith(AndroidJUnit4::class)
@@ -71,7 +68,10 @@ class AndroidDownloadOwnerDrainTest {
             assertEquals(1, fixture.nativeGate.leaseCount.value)
             // A user pause remains admissible and joins the transfer. Its fake allowance consumes
             // the actual native lease, then throws before shared can certify dependent cleanup.
-            withTimeout(5_000) { fixture.coordinator.pause(id) }
+            val pauseFailure = withTimeout(5_000) {
+                runCatching { fixture.coordinator.pause(id) }.exceptionOrNull()
+            } as VeyraException
+            assertEquals(AppFailure(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed"), pauseFailure.failure)
             val failure = AppFailure(FailureCode.BACKGROUND_RESTRICTED, RESTART_REQUIRED)
             assertEquals(0, fixture.nativeGate.leaseCount.value)
             assertEquals(1, fixture.allowanceCloses.get())
@@ -79,7 +79,7 @@ class AndroidDownloadOwnerDrainTest {
                 fixture.coordinator.hasPendingCleanupOwners)
             assertEquals(failure, fixture.coordinator.lastFailure.value)
             assertEquals(failure, fixture.coordinator.schedulingPlan().blockedReason)
-            val held = fixture.library.flush().getOrThrow().downloads.getValue(id)
+            val held = fixture.record(id)
             assertEquals(DownloadStatus.PAUSED, held.status)
             assertNotNull("No dependent Room release before successful allowance return", held.leaseOwner)
             assertNotNull(held.activeAttemptId)
@@ -110,7 +110,7 @@ class AndroidDownloadOwnerDrainTest {
             assertFalse(fixture.coordinator.hasPendingCleanupOwners)
             assertTrue(fixture.coordinator.dependencyReleaseSafeAfterClose)
             assertEquals(2, fixture.allowanceCloses.get())
-            val released = fixture.library.flush().getOrThrow().downloads.getValue(id)
+            val released = fixture.record(id)
             assertEquals(DownloadStatus.PAUSED, released.status)
             assertNull(released.leaseOwner)
             assertNull(released.activeAttemptId)
@@ -143,7 +143,7 @@ class AndroidDownloadOwnerDrainTest {
                 assertFalse("Foreground resume must await both shared and native drain ACK", reentry.isCompleted)
                 assertFalse(fixture.drainReturned.isCompleted)
                 assertEquals(DownloadIdleDecision.OwnedWork, fixture.coordinator.idleDecision())
-                val during = fixture.library.flush().getOrThrow().downloads.getValue(id)
+                val during = fixture.record(id)
                 assertNotNull("Room ownership must remain until actual unwind", during.leaseOwner)
                 assertNotNull(during.activeAttemptId)
                 val rejected = runCatching { fixture.coordinator.resumePending() }.exceptionOrNull() as VeyraException
@@ -153,7 +153,7 @@ class AndroidDownloadOwnerDrainTest {
                 fixture.finishUnwind.complete(Unit)
                 withTimeout(5_000) { ended.join(); assertTrue(reentry.await()); fixture.drainReturned.await() }
 
-                val after = fixture.library.flush().getOrThrow().downloads.getValue(id)
+                val after = fixture.record(id)
                 assertNull(after.leaseOwner)
                 assertNull(after.activeAttemptId)
                 assertEquals(DownloadStatus.NEEDS_FOREGROUND, after.status)
@@ -177,7 +177,9 @@ class AndroidDownloadOwnerDrainTest {
 
     private class Fixture(private val point: UnwindPoint) {
         private val context = ApplicationProvider.getApplicationContext<Context>()
-        private val directory = File(context.cacheDir, "download-owner-drain-${UUID.randomUUID()}")
+        // Android may expose its trusted cache directory through /data/user/0.
+        // Resolve that OS alias before creating our owned fixture children, as production does.
+        private val directory = File(context.cacheDir.canonicalFile, "download-owner-drain-${UUID.randomUUID()}")
             .apply { check(mkdirs()) }
         private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val library = createAndroidLibraryStore(context, directory.absolutePath)
@@ -212,44 +214,89 @@ class AndroidDownloadOwnerDrainTest {
         }
         private val validator = AssetValidator { error("Cancelled authored NON-AUDIO fixture must never validate") }
         private val gateway = object : KmpMediaGateway {
-            override suspend fun firstResult(completeTitle: String) = KmpFirstResult(
-                completeTitle, FirstResultKind.VIDEO, VIDEO, "Authored resolved fixture",
-                "https://www.youtube.com/watch?v=$VIDEO",
-            )
-
+            override suspend fun firstResult(completeTitle: String): KmpFirstResult? =
+                error("Typed admission must not use the legacy selector")
             override suspend fun resolve(binding: PlaybackBinding, capabilities: EngineCapabilities,
-                purpose: ResolvePurpose): ResolvedPlayable {
-                check(purpose == ResolvePurpose.DOWNLOAD)
-                return ResolvedPlayable(binding.mediaId, "https://fixture.example.test/never-opened", mimeType = "audio/mpeg",
-                    codecs = "mp3", representationId = "authored-non-audio", executionBinding = binding,
-                    resource = object : PlaybackResource {
-                        override suspend fun close() {
-                            if (point == UnwindPoint.SOURCE_RESOURCE) stopUnwind()
-                        }
-                    })
-            }
-
+                purpose: ResolvePurpose): ResolvedPlayable = error("Typed download must not open a playback source")
             override suspend fun download(binding: PlaybackBinding, destinationPath: String, capabilities: EngineCapabilities,
-                representationId: String?, onProgress: suspend (YouTubeTransferProgress) -> Unit): YouTubeTransferResult {
-                transfers.incrementAndGet()
-                val bytes = "Veyra authored owner-unwind fixture. NOT AUDIO. ليست مادة صوتية.".encodeToByteArray()
-                File(destinationPath).writeBytes(bytes)
-                onProgress(YouTubeTransferProgress(bytes.size.toLong(), null))
-                transferStarted.complete(Unit)
-                awaitCancellation()
+                representationId: String?, onProgress: suspend (YouTubeTransferProgress) -> Unit): YouTubeTransferResult =
+                error("Typed download must not use a legacy transfer")
+        }
+        private val selector = object : AcquisitionGateway {
+            override suspend fun acquire(request: AcquisitionRequest): SourceAcquisitionResult {
+                val url = "https://www.youtube.com/watch?v=$VIDEO"
+                return restore(request, FirstResultObservation(request.id, request.completeTitle,
+                    SourceEntry(AcquisitionEntryKind.VIDEO, VIDEO, "Authored resolved fixture", url), url))
+            }
+            override fun restore(request: AcquisitionRequest, receipt: FirstResultObservation): SourceAcquisitionResult {
+                check(receipt.requestId == request.id && receipt.queryTitle == request.completeTitle && receipt.entry.ordinal == 0)
+                return SourceAcquisitionResult.Single(request.id, receipt, SourceDisplayItem(VIDEO,
+                    requireNotNull(receipt.entry.title), requireNotNull(receipt.canonicalUrl), AcquisitionEntryKind.VIDEO))
+            }
+            override suspend fun collection(request: AcquisitionRequest, selection: SourceAcquisitionResult.Collection,
+                limits: CollectionLimits): SourceCollectionPage = error("No collection in this authored fixture")
+            override suspend fun more(continuation: CollectionContinuation): SourceCollectionPage = error("No continuation")
+            override suspend fun inspect(request: AcquisitionRequest, selection: SourceAcquisitionResult.Single): AcquisitionInspection =
+                error("The download prepares its exact accepted recording without another selection")
+        }
+        private val typedGateway = object : AcquisitionExecutionGateway {
+            override suspend fun preparePlayback(context: AcquisitionExecutionContext, capabilities: EngineCapabilities,
+                requiredRepresentationId: String?, inspection: AcquisitionInspection?): AcquisitionPlaybackSource =
+                error("A download never opens a native playback source")
+            override suspend fun prepareDownload(context: AcquisitionExecutionContext, capabilities: EngineCapabilities,
+                requiredRepresentationId: String?, inspection: AcquisitionInspection?): PreparedAcquisitionDownload =
+                object : PreparedAcquisitionDownload {
+                    override val context = context
+                    override val requiredRepresentationId = requiredRepresentationId
+                    override val representation = AcquisitionRepresentation("authored-non-audio", "audio/mpeg", "mp3", "mp3")
+                }
+            override suspend fun download(prepared: PreparedAcquisitionDownload, destinationPath: String,
+                onProgress: suspend (AcquisitionTransferProgress) -> Unit): AcquisitionTransferResult {
+                val source = object : PlaybackResource {
+                    override suspend fun close() { if (point == UnwindPoint.SOURCE_RESOURCE) stopUnwind() }
+                }
+                try {
+                    transfers.incrementAndGet()
+                    val bytes = "Veyra authored owner-unwind fixture. NOT AUDIO. ليست مادة صوتية.".encodeToByteArray()
+                    File(destinationPath).writeBytes(bytes)
+                    onProgress(AcquisitionTransferProgress(bytes.size.toLong(), null))
+                    transferStarted.complete(Unit)
+                    awaitCancellation()
+                } finally { withContext(NonCancellable) { source.close() } }
             }
         }
+        private val clock = SystemClock()
+        private val acquisition = AcquisitionCoordinator(library.acquisition, selector, AcquisitionCaptureFactory(clock), clock,
+            offline = { library.state.value.settings.offlineOnly })
+        private val batches = DownloadBatchCoordinator(library.acquisition, acquisition, clock)
+        private val evidence = DownloadMaterializationEvidence(library.transactionOwner)
+        private val dependencies = DownloadAcquisitionDependencies(library.acquisition, typedGateway,
+            LocalMediaValidator { error("Cancelled authored NON-AUDIO fixture must never validate") },
+            {}, {}, {}, acquisition, batches, evidence)
+        val resolver = AppSourceResolver(library, files, validator, gateway, materializationEvidence = evidence)
         val coordinator: DownloadCoordinator = DownloadCoordinator(
-            library, files, AppSourceResolver(library, files, validator, gateway), gateway, validator,
+            library, files, resolver, gateway, validator,
             EngineCapabilities(), scope, executionGate, pollingMs = 100, leaseDurationMs = 30_000, heartbeatMs = 1_000,
+            acquisitionDependencies = dependencies,
         )
+
+        suspend fun record(id: String): PhysicalDownloadJob =
+            requireNotNull(library.acquisition.physicalDownload(id)).job
 
         suspend fun start(): String {
             check(nativeGate.foregroundStarted(OLD_WORKER))
             coordinator.start(DownloadActivation.DURABLE_WORK)
             val item = MediaItem("authored-owner-unwind", "Complete authored fixture — العنوان الكامل", MediaKind.MUSIC,
                 SourceRef(SourceProvider.COMMONS, "authored-owner-unwind"))
-            val id = coordinator.enqueue(item)
+            library.upsertCatalog(listOf(item)).getOrThrow()
+            val captured = acquisition.capture(MediaCapture(item))
+            val accepted = acquisition.resolve(captured.request.id).record
+            check(accepted.state == AcquisitionJobState.COMMITTED)
+            val binding = (accepted.outcome as AcquisitionOutcome.Single).bindingId
+            val id = coordinator.enqueueAccepted(captured.request.id, binding) {
+                check(library.acquisitionViews.value.acquisition.requests[captured.request.id]?.state ==
+                    AcquisitionJobState.COMMITTED)
+            }
             transferStarted.await()
             return id
         }

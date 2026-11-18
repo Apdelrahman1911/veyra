@@ -69,6 +69,7 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             implementation(project(":shared"))
+            implementation(project(":nativeComponents"))
             implementation(compose.runtime)
             implementation(compose.foundation)
             implementation(compose.material3)
@@ -120,6 +121,7 @@ kotlin {
             dependencies {
                 implementation(kotlin("test-junit"))
                 implementation(compose.desktop.uiTestJUnit4)
+                implementation(libs.navigationevent)
             }
         }
     }

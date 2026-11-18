@@ -34,6 +34,7 @@ class YouTubeAcquisitionExecutionGateway internal constructor(
                 durationMs = resolved.durationMs,
                 seekableHint = true,
                 resource = resolved.resource,
+                contentLength = resolved.contentLength,
             )
         }
     }
@@ -78,7 +79,8 @@ class YouTubeAcquisitionExecutionGateway internal constructor(
         val videoId = context.recording.canonicalId
         if (!VIDEO_ID.matches(videoId)) invalidContext()
         return YouTubeAudioExecution.Input(videoId,
-            inspect = { source.inspectSelected(videoId) }, initialReport = supplied?.report)
+            inspect = reuseFirstInspection(supplied != null) { fresh -> source.inspectSelected(videoId, fresh) },
+            initialReport = supplied?.report)
     }
 
     /** Structural validation of the detached context; not historical source-I/O attestation. */

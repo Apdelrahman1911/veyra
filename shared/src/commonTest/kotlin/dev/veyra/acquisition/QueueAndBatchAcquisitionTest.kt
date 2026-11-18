@@ -49,6 +49,31 @@ class QueueAndBatchAcquisitionTest {
         assertEquals(2, rig.gateway.acquisitions.size, "A pinned prefetched occurrence never gets another query")
     }
 
+    @Test fun warmingTheNextMusicItemSelectsItOnceAndInspectsOnlyThatNeighbour() = runTest {
+        val rig = Rig()
+        val queue = rig.admit()
+        val current = assertNotNull(queue.currentOccurrenceId)
+        rig.queue.resolveCurrent(queue.context, queue.editRevision, current)
+        assertTrue(rig.queue.warmMusicNext(queue.context, queue.editRevision, current))
+        assertEquals(2, rig.gateway.acquisitions.size)
+        assertEquals(1, rig.gateway.inspections.size)
+        val next = queue.displayedOrder[1]
+        assertEquals(rig.repository.state.value.occurrences.getValue(next).requestId, rig.gateway.inspections.single().first.id)
+        // A second warm reuses the pinned selection: no new query, one more bounded inspection.
+        assertTrue(rig.queue.warmMusicNext(queue.context, queue.editRevision, current))
+        assertEquals(2, rig.gateway.acquisitions.size)
+    }
+
+    @Test fun podcastControlsNeverWarmTheNextItem() = runTest {
+        val rig = Rig()
+        val prepared = rig.factory.collection(authoredSnapshot(), ObservedCollectionChoice.WholeObservedListing, PlaybackControlsMode.PODCAST)
+        val queue = rig.admit(prepared)
+        val current = assertNotNull(queue.currentOccurrenceId)
+        rig.queue.resolveCurrent(queue.context, queue.editRevision, current)
+        assertFalse(rig.queue.warmMusicNext(queue.context, queue.editRevision, current))
+        assertTrue(rig.gateway.inspections.isEmpty())
+    }
+
     @Test fun podcastControlsSuppressPrefetchEvenInTheMusicQueueAndWithoutAnEpisodeIdentity() = runTest {
         val rig = Rig()
         val prepared = rig.factory.collection(authoredSnapshot(), ObservedCollectionChoice.WholeObservedListing, PlaybackControlsMode.PODCAST)

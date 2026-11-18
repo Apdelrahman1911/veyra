@@ -77,6 +77,7 @@ class YouTubeMediaPurposeTest {
         override val endpoints = listOf(YouTubePlaybackEndpoint(TrackRole.AUDIO,
             "http://127.0.0.1:32123/${"a".repeat(64)}/audio", "audio/mp4", length))
         var closes = 0
+        override var failureCode: String? = null
         override suspend fun close() { closes++ }
     }
 
@@ -97,14 +98,31 @@ class YouTubeMediaPurposeTest {
         assertEquals(resolved.uri, resolved.ownedLoopbackUriOrNull())
         assertFalse(resolved.isLocal)
         assertEquals(StreamTransport.PROGRESSIVE, resolved.transport)
+        assertNull(resolved.contentLength, "A remuxed bridge must not inherit its source byte length")
         assertEquals("audio/mp4", resolved.mimeType)
         assertFalse(resolved.toString().contains("authored-secret"))
         assertFalse(owned.toString().contains("32123"))
+        assertNull(owned.failure)
+        native.failureCode = "SABR_PROTECTION_RETRY_LIMIT"
+        assertEquals(FailureCode.PROVIDER_ACCESS_REQUIRED, owned.failure?.code)
+        assertEquals("YOUTUBE_STREAM_ACCESS_REQUIRED", owned.failure?.detail)
         owned.close(); owned.close(); source.close()
         assertEquals(1, native.closes)
         assertEquals("YOUTUBE_SOURCE_CLOSED", assertFailsWith<VeyraException> {
             assertNotNull(policy).requireResource(assertNotNull(selected), endpoint)
         }.failure.detail)
+    }
+
+    @Test fun streamFailuresUseBoundedPublicDetailsInsteadOfRawProviderText() {
+        for (code in listOf("SABR_PROTECTION_RETRY_LIMIT", "SABR_PROTECTION_CONTEXT_UNAVAILABLE", "SABR_PROTECTION_REFRESH_FAILED")) {
+            assertEquals(FailureCode.PROVIDER_ACCESS_REQUIRED, youtubePlaybackFailure(code).code)
+        }
+        for (code in listOf("SABR_HTTP_REQUEST_FAILED", "SABR_PLAYBACK_BUFFER_TIMEOUT", "https://private.example/?sig=secret")) {
+            val failure = youtubePlaybackFailure(code)
+            assertEquals(FailureCode.NETWORK_UNAVAILABLE, failure.code)
+            assertFalse(failure.toString().contains("private.example"))
+            assertFalse(failure.toString().contains("secret"))
+        }
     }
 
     @Test fun explicitSabrAuthorizationRejectsChangedRequestsOriginAndPrivateDestinations() = runTest {
@@ -145,6 +163,7 @@ class YouTubeMediaPurposeTest {
         try {
             val prepared = source.resolve(item, engine, ResolvePurpose.DOWNLOAD)
             assertEquals(StreamTransport.SABR, prepared.transport); assertEquals("audio/mp4", prepared.mimeType)
+            assertNull(prepared.contentLength)
             assertNull(prepared.resource); assertNull(prepared.ownedLoopbackUriOrNull()); assertEquals(0, transfers)
             val result = source.download(item, "authored-stage.m4a", engine, prepared.representationId)
             assertEquals(32L, result.bytesWritten); assertEquals("m4a", result.extension); assertEquals(1, transfers)

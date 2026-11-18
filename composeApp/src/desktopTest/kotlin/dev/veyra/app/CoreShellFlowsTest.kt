@@ -42,6 +42,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.junit4.DesktopComposeTestRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
@@ -87,6 +88,11 @@ import org.junit.After
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TestName
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
+import androidx.navigationevent.NavigationEventDispatcher
+import androidx.navigationevent.NavigationEventInput
+import androidx.compose.ui.platform.findDefaultNavigationEventDispatcherOwner
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -102,6 +108,19 @@ class CoreShellFlowsTest {
     @get:Rule val testName = TestName()
     private val english = AppStrings(LanguagePreference.ENGLISH)
     private var fixture: CoreShellTestFixture? = null
+    /**
+     * A desktop window turns a key the scene leaves unconsumed into a back event (Escape on
+     * key-down) through `BackNavigationEventInput`; dialogs dismiss on that back event. The test
+     * scene has no window, so [deliverKey] performs the same final routing step.
+     */
+    private var backDispatcher: NavigationEventDispatcher? = null
+    private val backInput by lazy { EscapeBackInput().also { input -> requireNotNull(backDispatcher).addInput(input) } }
+
+    /** Mirrors Compose's desktop window input: an unconsumed Escape key-down completes "back". */
+    private class EscapeBackInput : NavigationEventInput() {
+        fun onKeyEvent(event: KeyEvent): Boolean =
+            if (event.type == KeyEventType.KeyDown && event.key == Key.Escape) { dispatchOnBackCompleted(); true } else false
+    }
     private var mounted by mutableStateOf(true)
     private var viewport by mutableStateOf(DpSize(960.dp, 720.dp))
     private val music = CoreShellTestFixture.music
@@ -200,7 +219,9 @@ class CoreShellFlowsTest {
         val paused = downloads.getValue("ui-fixture-paused-download")
         assertEquals(DownloadStatus.PAUSED, paused.status)
         assertTrue(paused.userPaused)
-        ui.onNodeWithContentDescription(english.format(TextKey.MoreActionsFor, music.title)).performClick()
+        // Songs follow the playlist actions on the Library home; reach the row first.
+        libraryScrollTo("play-${music.id}")
+        ui.onNodeWithContentDescription(english.format(TextKey.MoreActionsFor, music.title)).performScrollTo().performClick()
         ui.onNodeWithText(english.text(TextKey.Details)).performClick()
         await { app.container.navigation.value.detail == AppDetail(DetailKind.TRACK, music.id) }
         assertTrue(app.engine.loads.isEmpty())
@@ -217,13 +238,14 @@ class CoreShellFlowsTest {
         val duplicated = app.store.state.value.playlists.single()
         assertEquals(listOf("playlist-first", "playlist-copy"), duplicated.entries.take(2).map { it.id })
 
-        ui.onNodeWithTag("track-back").performClick()
+        ui.onNodeWithTag("header-back").performClick()
         await { app.container.navigation.value.detail == null }
         libraryScrollTo("library-PLAYLISTS")
         ui.onNodeWithTag("library-PLAYLISTS").performClick()
         await { app.container.navigation.value.librarySection == LibrarySection.PLAYLISTS }
         ui.onNodeWithText(playlist.name).performScrollTo().performClick()
         await { app.container.navigation.value.detail?.id == playlist.id }
+        ui.onNodeWithTag("playlist-edit").performClick()
         ui.onNodeWithTag("playlist-detail").performScrollToNode(hasTestTag("playlist-entry-playlist-copy"))
         ui.onNode(hasContentDescription(english.text(TextKey.RemoveFromPlaylist)) and
             hasAnyAncestor(hasTestTag("playlist-entry-playlist-copy"))).performScrollTo().performClick()
@@ -319,11 +341,16 @@ class CoreShellFlowsTest {
         assertTrue(app.engine.seeks.last().positionMs > position)
         assertEquals(generation, app.engine.seeks.last().generation)
         assertEquals("music-now", app.container.playback.state.value.currentEntryId)
+        // A seek may legitimately re-issue play to resume; count from after it settles.
+        ui.waitForIdle()
+        val playsAfterSeek = app.engine.plays.size
+        val pausesAfterSeek = app.engine.pauses.size
 
         ui.onNodeWithTag("player-toggle").assertIsDisplayed().focus().performKeyInput { pressKey(Key.Spacebar) }
         await { !app.container.playback.state.value.desiredPlaying && !app.container.playback.state.value.isPlaying }
-        assertEquals(pausesBefore + 1, app.engine.pauses.size)
-        assertEquals(playingBefore, app.engine.plays.size, "A control's Space must not also reach the global Play/Pause shortcut")
+        ui.waitForIdle()
+        assertEquals(pausesAfterSeek + 1, app.engine.pauses.size)
+        assertEquals(playsAfterSeek, app.engine.plays.size, "A control's Space must not also reach the global Play/Pause shortcut")
     }
 
     @Test fun escapeClosesADialogThenQueueThenPlayerWithoutChangingTheAudioOwner() {
@@ -646,7 +673,7 @@ class CoreShellFlowsTest {
     @Test fun compactNavigationKeepsEverySelectedLabelUnclippedAt200PercentInBothLanguages() {
         val app = show(CoreShellTestFixture.snapshot(settings = AppSettings(language = LanguagePreference.ENGLISH,
             theme = ThemeMode.DARK, textScale = 2f)), 320.dp, 760.dp)
-        val destinations = listOf(AppDestination.LISTEN to TextKey.Listen, AppDestination.SEARCH to TextKey.Search,
+        val destinations = listOf(AppDestination.LISTEN to TextKey.Home, AppDestination.SEARCH to TextKey.Search,
             AppDestination.PODCASTS to TextKey.Podcasts, AppDestination.LIBRARY to TextKey.Library)
         listOf(LanguagePreference.ENGLISH, LanguagePreference.ARABIC).forEach { language ->
             app.container.changeSettings { it.copy(language = language) }
@@ -863,12 +890,14 @@ class CoreShellFlowsTest {
         capture("fixture-shell-en-light-fresh-typed-queue")
     }
 
+    @OptIn(androidx.compose.runtime.InternalComposeApi::class)
     private fun show(initial: AppSnapshot = CoreShellTestFixture.snapshot(), width: Dp = 960.dp, height: Dp = 720.dp,
         typedTitles: CoreShellTypedTitles = CoreShellTypedTitles()): CoreShellTestFixture {
         val app = runBlocking { withTimeout(20_000L) { CoreShellTestFixture.create(initial, typedTitles) } }
         fixture = app
         viewport = DpSize(width, height)
         ui.setContent {
+            backDispatcher = findDefaultNavigationEventDispatcherOwner()?.navigationEventDispatcher
             CompositionLocalProvider(LocalDensity provides Density(1f, 1f)) {
                 Box(Modifier.size(viewport.width, viewport.height)) { if (mounted) VeyraApp(app.container) }
             }
@@ -941,16 +970,32 @@ class CoreShellFlowsTest {
     private fun queueScrollTo(tag: String) {
         ui.onNodeWithTag("queue-panel").performScrollToNode(hasTestTag(tag))
         ui.onNodeWithTag(tag).performScrollTo()
+        clearOfFloatingChrome("queue-panel", tag)
     }
 
     private fun libraryScrollTo(tag: String) {
         ui.onNodeWithTag("library-list").performScrollToNode(hasTestTag(tag))
         ui.onNodeWithTag(tag).performScrollTo()
+        clearOfFloatingChrome("library-list", tag)
     }
 
     private fun trackScrollTo(tag: String) {
         ui.onNodeWithTag("track-detail-content").performScrollToNode(hasTestTag(tag))
         ui.onNodeWithTag(tag).performScrollTo()
+        clearOfFloatingChrome("track-detail-content", tag)
+    }
+
+    /**
+     * Screens scroll beneath the floating mini player and tab bar, as a person sees them. A row
+     * scrolled only "into the viewport" can sit under that chrome, where a tap reaches the chrome;
+     * lift it above the chrome first, the way a person scrolls a little further before tapping.
+     */
+    private fun clearOfFloatingChrome(listTag: String, tag: String) {
+        val chrome = ui.onAllNodesWithTag("mini-player").fetchSemanticsNodes().firstOrNull()?.boundsInRoot?.top ?: return
+        val bottom = ui.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot.bottom
+        if (bottom <= chrome) return
+        ui.onNodeWithTag(listTag).performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, bottom - chrome + 8f) }
+        ui.waitForIdle()
     }
 
     private fun SemanticsNodeInteraction.focus(): SemanticsNodeInteraction =
@@ -969,7 +1014,7 @@ class CoreShellFlowsTest {
         ui.runOnUiThread {
             val scene = (ui as DesktopComposeTestRule).scene
             fun dispatch(event: KeyEvent, phase: String) {
-                val consumed = scene.sendKeyEvent(event)
+                val consumed = deliverKey(scene, event)
                 keyDispatches += "scene=${scene.javaClass.name}, key=$key, phase=$phase, ctrl=$ctrl, consumed=$consumed"
             }
             dispatch(KeyEvent(key, KeyEventType.KeyDown, isCtrlPressed = ctrl), "down")
@@ -990,13 +1035,18 @@ class CoreShellFlowsTest {
         ui.waitForIdle()
         val consumed = ui.runOnUiThread {
             val scene = (ui as DesktopComposeTestRule).scene
-            val handled = scene.sendKeyEvent(KeyEvent(key, type, isShiftPressed = shift))
+            val handled = deliverKey(scene, KeyEvent(key, type, isShiftPressed = shift))
             keyDispatches += "scene=${scene.javaClass.name}, key=$key, phase=$type, shift=$shift, consumed=$handled"
             handled
         }
         ui.waitForIdle()
         return consumed
     }
+
+    /** The scene first, then (as a desktop window does) the back-navigation input. */
+    @OptIn(InternalComposeUiApi::class)
+    private fun deliverKey(scene: androidx.compose.ui.scene.ComposeScene, event: KeyEvent): Boolean =
+        scene.sendKeyEvent(event) || backInput.onKeyEvent(event)
 
     private fun escape() = sendKey(Key.Escape)
 

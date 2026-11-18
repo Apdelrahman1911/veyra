@@ -85,7 +85,30 @@ class SettingsScreenTest {
         }
     }
 
+    private val expandedSections = mutableSetOf<TextKey>()
+
+    private fun expandSection(section: TextKey) {
+        if (expandedSections.add(section)) {
+            // Sections are always open; reaching the heading is enough.
+            val header = "settings-section-${section.name}"
+            compose.onNodeWithTag("settings-list").performScrollToNode(hasTestTag(header))
+        }
+    }
+
     private fun scrollTo(tag: String) {
+        val section = when {
+            tag.startsWith("settings-crossfade") -> TextKey.Playback
+            tag.startsWith("settings-podcast") || tag.startsWith("settings-Skip") -> TextKey.PodcastDefaults
+            tag.startsWith("settings-language") || tag.startsWith("settings-theme") ||
+                tag.startsWith("settings-text") || tag.startsWith("settings-smaller") ||
+                tag.startsWith("settings-larger") -> TextKey.Appearance
+            tag == "settings-offline" -> TextKey.Offline
+            tag.startsWith("settings-parallelism") || tag.startsWith("settings-storage") ||
+                tag == "settings-manage-storage" -> TextKey.Downloads
+            tag == "settings-licenses" -> TextKey.About
+            else -> error("Missing settings section for $tag")
+        }
+        expandSection(section)
         compose.onNodeWithTag("settings-list").performScrollToNode(hasTestTag(tag))
     }
 
@@ -94,6 +117,7 @@ class SettingsScreenTest {
         compose.setContent { Frame {
             SettingsScreen(AppSettings(), supported.copy(supportsCrossfade = false), null, actions::add, {}, {})
         } }
+        scrollTo("settings-crossfade")
         compose.onNodeWithTag("settings-crossfade").assertIsOff().assertIsNotEnabled()
         compose.onNodeWithTag("settings-crossfade-unavailable")
             .assertTextEquals(english.text(TextKey.CrossfadeUnsupported))
@@ -117,6 +141,7 @@ class SettingsScreenTest {
                 settings = action.applyTo(settings)
             }, {}, {})
         } }
+        scrollTo("settings-crossfade")
         compose.onNodeWithTag("settings-crossfade-unavailable")
             .assertTextEquals(english.text(TextKey.CrossfadeSavedUnsupported))
         compose.onNodeWithTag("settings-crossfade").assertIsOn().assertIsEnabled().performClick()
@@ -284,6 +309,20 @@ class SettingsScreenTest {
         compose.onNodeWithTag(tag).performSemanticsAction(SemanticsActions.RequestFocus) { it() }.assertIsFocused()
         compose.onNodeWithTag(tag).performKeyInput { keyDown(Key.Spacebar); keyUp(Key.Spacebar) }
         compose.runOnIdle { assertEquals(listOf<SettingsAction>(SettingsAction.SetCrossfadeDuration(4_000)), actions) }
+    }
+
+    @Test fun changingLanguageKeepsTheAppearanceSectionOpen() {
+        var settings by mutableStateOf(AppSettings(language = LanguagePreference.ENGLISH))
+        compose.setContent { Frame(language = settings.language) {
+            SettingsScreen(settings, supported, null, { settings = it.applyTo(settings) }, {}, {})
+        } }
+        scrollTo("settings-language-ARABIC")
+        compose.onNodeWithTag("settings-language-ARABIC").performClick().assertIsSelected()
+        // The section stays open after the language change; its controls remain reachable.
+        compose.onNodeWithTag("settings-list").performScrollToNode(hasTestTag("settings-language-ENGLISH"))
+        compose.onNodeWithTag("settings-language-ENGLISH").performClick().assertIsSelected()
+        compose.onNodeWithTag("settings-list").performScrollToNode(hasTestTag("settings-section-Appearance"))
+        compose.onNodeWithTag("settings-section-Appearance").assertIsDisplayed()
     }
 
     @Test fun arabicTwoHundredPercentControlsStayInsideANarrowScrollableFrame() {

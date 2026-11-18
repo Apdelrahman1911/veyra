@@ -192,6 +192,19 @@ class ArtworkCacheRoomTest {
         assertEquals(5, imageFiles().size)
     }
 
+    @Test fun aSearchPageOfCoversSharesFewLibraryCommitsInsteadOfOnePerCover() = checkCase {
+        // Every library commit advances the revision that playback and download admissions
+        // compare; one commit per cover kept a tap from ever winning after a search.
+        val page = List(12) { number -> item.copy(id = "page-$number", artworkUrl = "https://images.example.com/page-$number.png") }
+        store.upsertCatalog(page, emptyList()).getOrThrow()
+        val before = store.state.value.revision
+        coroutineScope { page.map { async { cache.cacheMedia(it) } }.awaitAll() }.forEach { assertNotNull(it) }
+        val commits = store.state.value.revision - before
+        assertTrue(commits in 1..6, "expected grouped link commits, got $commits for ${page.size} covers")
+        page.forEach { assertEquals(cache.cachedArtworkPath(it.id), store.state.value.media.getValue(it.id).localArtworkPath) }
+        assertEquals(page.size, imageFiles().size)
+    }
+
     @Test fun mimeAudioAndMislabeledBytesNeverPublishAnArtworkPath() = checkCase {
         for ((body, mime) in listOf(authoredArtworkPng() to "audio/mpeg", "ID3-not-image".encodeToByteArray() to "image/png")) {
             reply = { respond(body, headers = headersOf("Content-Type", mime)) }
@@ -307,6 +320,29 @@ class ArtworkCacheRoomTest {
         assertNull(cache.cachedShowArtworkPath(show.id))
         assertNull(store.state.value.shows[show.id]?.localArtworkPath)
         assertEquals(show.title, store.state.value.shows[show.id]?.title)
+        assertEquals(1, calls.get())
+    }
+
+    @Test fun aPathFromAMovedAppContainerIsRelinkedToTheSameImageWithoutNetwork() = checkCase {
+        val path = assertNotNull(cache.cacheMedia(item))
+        // iOS moves the data container on install/update: the saved absolute folder is gone.
+        val moved = "/var/mobile/Containers/Data/Application/OLD-INSTALL/Library/Veyra/artwork/images/" + Path.of(path).fileName
+        store.update { it.copy(media = it.media + (item.id to it.media.getValue(item.id).copy(localArtworkPath = moved)),
+            settings = it.settings.copy(offlineOnly = true)) }.getOrThrow()
+        reopen()
+        assertEquals(path, store.state.value.media[item.id]?.localArtworkPath)
+        assertEquals(path, cache.cachedArtworkPath(item.id))
+        assertEquals(1, calls.get())
+        assertEquals(1, dnsHosts.size)
+    }
+
+    @Test fun aClearedLinkToAnImageStillOnDiskIsRestoredOnReopen() = checkCase {
+        val path = assertNotNull(cache.cacheShow(show))
+        store.update { it.copy(shows = it.shows + (show.id to it.shows.getValue(show.id).copy(localArtworkPath = null)),
+            settings = it.settings.copy(offlineOnly = true)) }.getOrThrow()
+        reopen()
+        assertEquals(path, store.state.value.shows[show.id]?.localArtworkPath)
+        assertEquals(path, cache.cachedShowArtworkPath(show.id))
         assertEquals(1, calls.get())
     }
 

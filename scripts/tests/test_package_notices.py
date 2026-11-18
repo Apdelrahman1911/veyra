@@ -73,6 +73,13 @@ class PackageNoticeTests(unittest.TestCase):
             subprocess.run(command + list(arguments), check=True, env=environment, capture_output=True)
         cls.pin = subprocess.check_output(command + ["rev-parse", "HEAD"], env=environment, text=True).strip()
         write(cls.seed / "gradle/kmpyt.commit", (cls.pin + "\n").encode())
+        kit = cls.seed / "third_party/nativeCmpkit"
+        write(kit / "LICENSE", (ROOT / "third_party/nativeCmpkit/LICENSE").read_bytes())
+        kit_command = [part if part != str(upstream) else str(kit) for part in command]
+        for arguments in (("init", "--quiet", "--object-format=sha1"), ("add", "."), ("commit", "--quiet", "-m", "Authored notice fixture")):
+            subprocess.run(kit_command + list(arguments), check=True, env=environment, capture_output=True)
+        cls.kit_pin = subprocess.check_output(kit_command + ["rev-parse", "HEAD"], env=environment, text=True).strip()
+        write(cls.seed / "gradle/nativecmpkit.commit", (cls.kit_pin + "\n").encode())
 
     @classmethod
     def tearDownClass(cls):
@@ -224,7 +231,8 @@ class PackageNoticeTests(unittest.TestCase):
         files, report = self.generated()
         for output, source in (("LICENSE", "LICENSE"), ("NOTICE.md", "NOTICE.md"),
                                ("kmpYT-LICENSE", "third_party/kmpYT/LICENSE"),
-                               ("kmpYT-THIRD_PARTY_NOTICES.md", "third_party/kmpYT/THIRD_PARTY_NOTICES.md")):
+                               ("kmpYT-THIRD_PARTY_NOTICES.md", "third_party/kmpYT/THIRD_PARTY_NOTICES.md"),
+                               ("nativeCmpkit-LICENSE", "third_party/nativeCmpkit/LICENSE")):
             self.assertEqual(files[output], (self.root / source).read_bytes())
         self.assertFalse(report["noticeCoverageComplete"])
         self.assertFalse(report["binaryRedistributionReady"])
@@ -242,6 +250,14 @@ class PackageNoticeTests(unittest.TestCase):
     def test_actual_checkout_must_match_the_pin(self):
         write(self.root / "gradle/kmpyt.commit", b"a" * 40 + b"\n")
         with self.assertRaisesRegex(NOTICES.NoticeError, "checkout differs"): self.generated()
+
+    def test_native_component_checkout_must_match_its_pin_and_keep_the_full_grant(self):
+        write(self.root / "gradle/nativecmpkit.commit", b"b" * 40 + b"\n")
+        with self.assertRaisesRegex(NOTICES.NoticeError, "nativeCmpkit checkout differs"): self.generated()
+        write(self.root / "gradle/nativecmpkit.commit", (self.kit_pin + "\n").encode())
+        license_path = self.root / "third_party/nativeCmpkit/LICENSE"
+        license_path.write_bytes(license_path.read_bytes()[:200])
+        with self.assertRaisesRegex(NOTICES.NoticeError, "Apache-2.0"): self.generated()
 
     def test_modified_uncommitted_upstream_notice_is_rejected(self):
         write(self.root / "third_party/kmpYT/THIRD_PARTY_NOTICES.md", b"Locally modified fixture.\n")

@@ -3,6 +3,7 @@
 package dev.veyra.app
 
 import dev.veyra.data.createPlatformLibraryStore
+import dev.veyra.downloads.DownloadDiagnosticFailure
 import dev.veyra.model.AppFailure
 import dev.veyra.model.FailureCode
 import dev.veyra.model.LanguagePreference
@@ -27,6 +28,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import okio.FileSystem
+import okio.Path.Companion.toPath
 import platform.Foundation.*
 import platform.UIKit.*
 
@@ -65,7 +68,9 @@ internal object IosApplication {
         scope.launch {
             val created = try {
                 val directory = withContext(Dispatchers.Default) { applicationDirectory() }
+                debugIosStartup("directory_ready")
                 val platform = IosPlatformServices(directory, gate)
+                debugIosStartup("platform_ready")
                 AppContainer(platform, scope).also { created ->
                     container = created
                     nowPlaying = IosNowPlayingBridge(scope, playback, ::dispatch,
@@ -73,15 +78,21 @@ internal object IosApplication {
                         skipForwardSeconds = { created.store.state.value.settings.skipForwardSeconds },
                         cachedArtworkPath = { id ->
                             created.cachedArtworkPath(id)?.takeIf { path ->
-                                val resolved = NSURL.fileURLWithPath(path).URLByResolvingSymlinksInPath?.path
-                                resolved != null && resolved.startsWith(directory.trimEnd('/') + "/")
+                                // Resolve both sides the same way: resolving symlinks rewrites
+                                // /private/var to /var, so a resolved file never matched the
+                                // unresolved app folder and no cover ever reached the lock screen.
+                                val resolved = resolvedPath(path)
+                                val root = resolvedPath(directory)
+                                resolved != null && root != null && resolved.startsWith(root.trimEnd('/') + "/")
                             }
-                        }
+                        },
+                        artworkUpdates = created.artworkUpdates,
                     )
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
+                debugIosStartup("bootstrap_failed", error)
                 val failure = (error as? VeyraException)?.failure
                     ?: AppFailure(FailureCode.RECOVERY_REQUIRED, "application_initialization")
                 mutableBootstrap.value = IosBootstrap.Failed(failure)
@@ -89,15 +100,29 @@ internal object IosApplication {
             }
             // The common UI must remain mounted on Failed so explicit backup recovery is usable.
             mutableBootstrap.value = IosBootstrap.Available(created)
-            launch { created.playback.state.collect { playback.value = it } }
+            observeIosDownloadDiagnostics(scope, created)
+            launch {
+                var previousFailure: AppFailure? = null
+                created.playback.state.collect {
+                    playback.value = it
+                    if (it.failure != previousFailure) {
+                        previousFailure = it.failure
+                        it.failure?.let(::debugIosPlaybackFailure)
+                    }
+                }
+            }
             launch {
                 created.initialization.collect { state ->
                     if (state is AppInitialization.Ready) resumeDownloadsWhenActive()
                 }
             }
-            try { created.initialize() }
+            try {
+                debugIosStartup("library_initializing")
+                created.initialize()
+                debugIosStartup("library_ready")
+            }
             catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { /* Shared startup state presents the typed failure/recovery. */ }
+            catch (error: Exception) { debugIosStartup("library_failed", error) }
         }
     }
 
@@ -164,10 +189,10 @@ private class IosPlatformServices(
 ) : PlatformServices {
     override val store = createPlatformLibraryStore(dataDirectory)
     override val engine = IosAudioEngine()
-    override val validator = IosAssetValidator(dataDirectory)
+    override val validator = IosAssetValidator("$dataDirectory/media")
     override val youtube = createIosYouTubeSource()
     override val systemLanguage: LanguagePreference get() = iosLanguage()
-    override val systemDarkTheme: Boolean get() = UITraitCollection.currentTraitCollection.userInterfaceStyle == UIUserInterfaceStyleDark
+    override val systemDarkTheme: Boolean get() = UITraitCollection.currentTraitCollection.userInterfaceStyle == UIUserInterfaceStyle.UIUserInterfaceStyleDark
     // Local import is intentionally unavailable until central kmpYT registration is verified.
     override val supportsFileImport = false
 
@@ -187,6 +212,8 @@ internal fun iosLanguage(): LanguagePreference =
     if ((NSLocale.preferredLanguages.firstOrNull() as? String)?.substringBefore('-') == "ar")
         LanguagePreference.ARABIC else LanguagePreference.ENGLISH
 
+private fun resolvedPath(path: String): String? = NSURL.fileURLWithPath(path).URLByResolvingSymlinksInPath?.path
+
 private fun applicationDirectory(): String {
     val base = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, true)
         .firstOrNull() as? String ?: throw VeyraException(AppFailure(FailureCode.STORAGE_IO, "application_directory"))
@@ -195,17 +222,25 @@ private fun applicationDirectory(): String {
 
 /** Resolve the OS-provided base (/var may alias /private/var), never app-owned child symlinks. */
 internal fun iosApplicationDirectory(applicationSupportDirectory: String): String {
-    val base = NSURL.fileURLWithPath(applicationSupportDirectory).URLByResolvingSymlinksInPath?.path
-        ?: throw VeyraException(AppFailure(FailureCode.STORAGE_IO, "application_directory"))
-    val path = "${base.trimEnd('/')}/Veyra"
     val files = NSFileManager.defaultManager
+    // The OS owns this base. Foundation can retain /var even after resolving the URL;
+    // use the same filesystem canonicalization as the media ownership checks.
+    if (!files.createDirectoryAtPath(applicationSupportDirectory, withIntermediateDirectories = true,
+            attributes = null, error = null)) {
+        throw VeyraException(AppFailure(FailureCode.STORAGE_IO, "application_directory"))
+    }
+    val fileSystem = FileSystem.SYSTEM
+    val base = try { fileSystem.canonicalize(applicationSupportDirectory.toPath()).toString() }
+    catch (_: Exception) { throw VeyraException(AppFailure(FailureCode.STORAGE_IO, "application_directory")) }
+    debugIosStartup("directory_os_alias_resolved_${base != applicationSupportDirectory}")
+    val path = "${base.trimEnd('/')}/Veyra"
     fun requireOwnedPath(value: String) {
-        if (NSURL.fileURLWithPath(value).URLByResolvingSymlinksInPath?.path != value) {
+        if (fileSystem.metadataOrNull(value.toPath())?.symlinkTarget != null) {
             throw VeyraException(AppFailure(FailureCode.STORAGE_IO, "application_directory_symlink"))
         }
     }
     requireOwnedPath(path)
-    val protection = mapOf(NSFileProtectionKey to NSFileProtectionCompleteUntilFirstUserAuthentication)
+    val protection = mapOf<Any?, Any?>(NSFileProtectionKey to NSFileProtectionCompleteUntilFirstUserAuthentication)
     if (!files.createDirectoryAtPath(path, withIntermediateDirectories = true, attributes = protection, error = null) ||
         !files.setAttributes(protection, ofItemAtPath = path, error = null)) {
         throw VeyraException(AppFailure(FailureCode.STORAGE_IO, "application_directory"))
@@ -221,4 +256,55 @@ internal fun iosApplicationDirectory(applicationSupportDirectory: String): Strin
         requireOwnedPath(cache)
     }
     return path
+}
+
+/** Local Debug diagnostics contain only stages, typed codes and stack frames, never messages. */
+@OptIn(kotlin.experimental.ExperimentalNativeApi::class)
+private fun debugIosStartup(stage: String, error: Exception? = null) {
+    if (!kotlin.native.Platform.isDebugBinary) return
+    val failure = (error as? VeyraException)?.failure
+    val detail = failure?.detail?.takeIf { it.matches(Regex("[A-Za-z_]{1,80}")) }
+    println("VEYRA_STARTUP stage=$stage type=${error?.let { it::class.simpleName }} code=${failure?.code} detail=$detail")
+    error?.stackTraceToString()?.lineSequence()
+        ?.filter { it.trimStart().startsWith("at ") }
+        ?.take(16)?.forEach(::println)
+}
+
+@OptIn(kotlin.experimental.ExperimentalNativeApi::class)
+private fun debugIosPlaybackFailure(failure: AppFailure) {
+    if (!kotlin.native.Platform.isDebugBinary) return
+    val detail = failure.detail?.takeIf {
+        it.matches(Regex("(?:YOUTUBE_[A-Z_]+|native_audio_-?[0-9]+|request_headers|secure_media_url_required|playback_rate|initial_seek_failed)")) ||
+            it in setOf("acquisition_outcome_unknown", "acquisition_collection_action_required",
+                "schema2_selection_requires_explicit_new_request", "acquisition_selection_not_attached",
+                "acquisition_selection_unplayable", "acquisition_unsent_claim_not_released")
+    }
+    println("VEYRA_PLAYBACK_FAILURE code=${failure.code} detail=$detail")
+}
+
+@OptIn(kotlin.experimental.ExperimentalNativeApi::class)
+private fun observeIosDownloadDiagnostics(scope: CoroutineScope, container: AppContainer) {
+    if (!kotlin.native.Platform.isDebugBinary) return
+    scope.launch {
+        var previousSequence = 0L
+        container.downloads.diagnosticEvents.collect { entries ->
+            val pending = entries.filter { it.sequence > previousSequence }
+            pending.firstOrNull()?.let { first ->
+                if (first.sequence > previousSequence + 1) {
+                    println("VEYRA_DOWNLOAD_DIAGNOSTIC dropped=${first.sequence - previousSequence - 1}")
+                }
+            }
+            pending.forEach { entry ->
+                println("VEYRA_DOWNLOAD_DIAGNOSTIC $entry")
+                previousSequence = entry.sequence
+            }
+        }
+    }
+    scope.launch {
+        container.notice.collect { notice ->
+            notice?.failure?.let { failure ->
+                println("VEYRA_APP_FAILURE ${DownloadDiagnosticFailure.from(failure)}")
+            }
+        }
+    }
 }

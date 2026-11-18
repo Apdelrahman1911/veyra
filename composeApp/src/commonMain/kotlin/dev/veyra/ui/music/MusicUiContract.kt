@@ -12,7 +12,7 @@ import dev.veyra.ui.downloads.DownloadSurface
 
 enum class SearchScope { EVERYWHERE, LIBRARY }
 enum class SearchKind { ALL, MUSIC, PODCASTS }
-enum class LibrarySection { FAVORITES, PLAYLISTS, DOWNLOADS, LOCAL_FILES }
+enum class LibrarySection { OVERVIEW, FAVORITES, PLAYLISTS, DOWNLOADS, LOCAL_FILES }
 
 data class CatalogUiState(
     val provider: SourceProvider = SourceProvider.YOUTUBE,
@@ -20,6 +20,8 @@ data class CatalogUiState(
     val loading: Boolean = false,
     val loaded: Boolean = false,
     val failure: AppFailure? = null,
+    /** Bumped by Explore music so Home scrolls its Discover section into view. */
+    val revealRequest: Int = 0,
 )
 
 data class SearchUiState(
@@ -71,6 +73,10 @@ sealed interface MusicUiAction {
     data class Discover(val provider: SourceProvider) : MusicUiAction
     data object LoadMoreDiscovery : MusicUiAction
     data class OpenSearch(val kind: SearchKind = SearchKind.MUSIC) : MusicUiAction
+    /** Home's music discovery, loaded if it has not been yet. */
+    data object ExploreMusic : MusicUiAction
+    /** The Podcasts destination, where shows are followed and browsed. */
+    data object ExplorePodcasts : MusicUiAction
     data class OpenLibrary(val section: LibrarySection) : MusicUiAction
     data class OpenPlaylist(val playlistId: String) : MusicUiAction
     data class OpenCollection(val collection: MediaCollection) : MusicUiAction
@@ -97,10 +103,13 @@ sealed interface MusicUiAction {
     data class SetFavorites(val items: List<MediaItem>, val favorite: Boolean) : MusicUiAction
     data class ToggleFavorite(val item: MediaItem) : MusicUiAction
     data class Enqueue(val item: MediaItem, val playNext: Boolean) : MusicUiAction
-    data class CreatePlaylist(val name: String, val initialItem: MediaItem? = null) : MusicUiAction
+    /** [openAfter] opens the new playlist so the user can add songs straight away. */
+    data class CreatePlaylist(val name: String, val initialItem: MediaItem? = null, val openAfter: Boolean = false) : MusicUiAction
     data class RenamePlaylist(val playlistId: String, val name: String) : MusicUiAction
     data class DeletePlaylist(val playlistId: String) : MusicUiAction
     data class AddToPlaylist(val playlistId: String, val item: MediaItem, val allowDuplicate: Boolean = false) : MusicUiAction
+    /** Adds several tracks in one library edit; tracks already in the playlist are skipped. */
+    data class AddAllToPlaylist(val playlistId: String, val items: List<MediaItem>) : MusicUiAction
     data class RemovePlaylistEntry(val playlistId: String, val entryId: String) : MusicUiAction
     data class MovePlaylistEntry(val playlistId: String, val entryId: String, val toIndex: Int) : MusicUiAction
     data object UndoLibrary : MusicUiAction

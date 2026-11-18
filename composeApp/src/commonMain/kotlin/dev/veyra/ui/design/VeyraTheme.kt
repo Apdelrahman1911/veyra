@@ -58,22 +58,22 @@ data class VeyraColorTokens(
 
 object VeyraPalette {
     val Light = VeyraColorTokens(
-        canvas = Color(0xFFF6F8F8),
+        canvas = Color(0xFFF8F5FA),
         surface = Color(0xFFFFFFFF),
-        surfaceContainer = Color(0xFFEDF2F3),
-        surfaceContainerHighest = Color(0xFFE0EAED),
-        onSurface = Color(0xFF15252D),
-        onSurfaceVariant = Color(0xFF465F6B),
-        outline = Color(0xFF647D89),
-        outlineSubtle = Color(0xFFCDDADF),
-        primary = Color(0xFF00696A),
+        surfaceContainer = Color(0xFFF0EAF4),
+        surfaceContainerHighest = Color(0xFFE8E0EF),
+        onSurface = Color(0xFF201925),
+        onSurfaceVariant = Color(0xFF63556E),
+        outline = Color(0xFF89758F),
+        outlineSubtle = Color(0xFFDED4E5),
+        primary = Color(0xFF70419A),
         onPrimary = Color(0xFFFFFFFF),
-        primaryContainer = Color(0xFFBDEDEB),
-        onPrimaryContainer = Color(0xFF003736),
-        secondary = Color(0xFF855223),
+        primaryContainer = Color(0xFFEEDDF9),
+        onPrimaryContainer = Color(0xFF38124E),
+        secondary = Color(0xFF8E451E),
         onSecondary = Color(0xFFFFFFFF),
-        secondaryContainer = Color(0xFFF9DFC3),
-        onSecondaryContainer = Color(0xFF3B2209),
+        secondaryContainer = Color(0xFFFCE2D0),
+        onSecondaryContainer = Color(0xFF4A220E),
         error = Color(0xFFAD292F),
         onError = Color(0xFFFFFFFF),
         errorContainer = Color(0xFFFFE2E1),
@@ -83,22 +83,22 @@ object VeyraPalette {
     )
 
     val Dark = VeyraColorTokens(
-        canvas = Color(0xFF0D161B),
-        surface = Color(0xFF14232A),
-        surfaceContainer = Color(0xFF1C2E37),
-        surfaceContainerHighest = Color(0xFF253D47),
-        onSurface = Color(0xFFE8F0F3),
-        onSurfaceVariant = Color(0xFFAFC2CC),
-        outline = Color(0xFF819AA5),
-        outlineSubtle = Color(0xFF314852),
-        primary = Color(0xFF76D7D4),
-        onPrimary = Color(0xFF003735),
-        primaryContainer = Color(0xFF164E50),
-        onPrimaryContainer = Color(0xFFBDEDEB),
-        secondary = Color(0xFFE5B88A),
-        onSecondary = Color(0xFF442B11),
-        secondaryContainer = Color(0xFF604322),
-        onSecondaryContainer = Color(0xFFF9DFC3),
+        canvas = Color(0xFF08070B),
+        surface = Color(0xFF141217),
+        surfaceContainer = Color(0xFF1D1922),
+        surfaceContainerHighest = Color(0xFF29232F),
+        onSurface = Color(0xFFFAF6FF),
+        onSurfaceVariant = Color(0xFFBEB1C9),
+        outline = Color(0xFF9D8BAA),
+        outlineSubtle = Color(0xFF39303F),
+        primary = Color(0xFFD0A2F6),
+        onPrimary = Color(0xFF30123E),
+        primaryContainer = Color(0xFF321F40),
+        onPrimaryContainer = Color(0xFFEEDDF9),
+        secondary = Color(0xFFF0AC82),
+        onSecondary = Color(0xFF3E1E0C),
+        secondaryContainer = Color(0xFF492A1C),
+        onSecondaryContainer = Color(0xFFFCE2D0),
         error = Color(0xFFFFB3B5),
         onError = Color(0xFF680A13),
         errorContainer = Color(0xFF552025),
@@ -127,8 +127,8 @@ object VeyraSpacing {
 
 object VeyraRadii {
     val Small = 8.dp
-    val Artwork = 12.dp
-    val Card = 20.dp
+    val Artwork = 18.dp
+    val Card = 24.dp
 }
 
 object VeyraBreakpoints {
@@ -204,7 +204,9 @@ fun VeyraTheme(
     val regular = Font(Res.font.ibm_plex_sans_arabic_regular, FontWeight.Normal)
     val medium = Font(Res.font.ibm_plex_sans_arabic_medium, FontWeight.Medium)
     val semibold = Font(Res.font.ibm_plex_sans_arabic_semibold, FontWeight.SemiBold)
-    val family = remember(regular, medium, semibold) { FontFamily(regular, medium, semibold) }
+    val family = remember(regular, medium, semibold, strings.isRtl) {
+        if (strings.isRtl) FontFamily(regular, medium, semibold) else FontFamily.SansSerif
+    }
     val typography = remember(family, strings.language) {
         val locale = LocaleList(Locale(if (strings.isRtl) "ar" else "en"))
         fun style(size: Int, line: Int, weight: FontWeight) = TextStyle(
@@ -217,21 +219,21 @@ fun VeyraTheme(
             localeList = locale,
         )
         Typography(
-            displayLarge = style(36, 48, FontWeight.SemiBold),
-            displayMedium = style(32, 44, FontWeight.SemiBold),
-            displaySmall = style(28, 40, FontWeight.SemiBold),
-            headlineLarge = style(28, 40, FontWeight.SemiBold),
-            headlineMedium = style(24, 36, FontWeight.SemiBold),
-            headlineSmall = style(22, 34, FontWeight.SemiBold),
-            titleLarge = style(22, 34, FontWeight.SemiBold),
-            titleMedium = style(17, 28, FontWeight.Medium),
-            titleSmall = style(16, 26, FontWeight.Medium),
-            bodyLarge = style(17, 28, FontWeight.Normal),
-            bodyMedium = style(16, 26, FontWeight.Normal),
-            bodySmall = style(14, 22, FontWeight.Normal),
-            labelLarge = style(15, 24, FontWeight.SemiBold),
-            labelMedium = style(14, 22, FontWeight.Medium),
-            labelSmall = style(14, 22, FontWeight.Medium),
+            displayLarge = style(38, 46, FontWeight.SemiBold),
+            displayMedium = style(34, 42, FontWeight.SemiBold),
+            displaySmall = style(30, 38, FontWeight.SemiBold),
+            headlineLarge = style(30, 38, FontWeight.SemiBold),
+            headlineMedium = style(26, 34, FontWeight.SemiBold),
+            headlineSmall = style(23, 31, FontWeight.SemiBold),
+            titleLarge = style(22, 30, FontWeight.SemiBold),
+            titleMedium = style(16, 23, FontWeight.Medium),
+            titleSmall = style(15, 22, FontWeight.Medium),
+            bodyLarge = style(16, 25, FontWeight.Normal),
+            bodyMedium = style(14, 22, FontWeight.Normal),
+            bodySmall = style(12, 19, FontWeight.Normal),
+            labelLarge = style(14, 21, FontWeight.SemiBold),
+            labelMedium = style(12, 19, FontWeight.Medium),
+            labelSmall = style(11, 17, FontWeight.Medium),
         )
     }
     CompositionLocalProvider(

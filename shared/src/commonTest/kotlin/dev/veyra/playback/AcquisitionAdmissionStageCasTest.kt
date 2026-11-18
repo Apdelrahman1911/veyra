@@ -47,6 +47,46 @@ class AcquisitionAdmissionStageCasTest {
         } finally { rig.close() }
     }
 
+    @Test fun anUnrelatedLibraryWriteDuringPlayRebuildsTheAdmissionInsteadOfFailingTheTap() = runTest {
+        // Search results cache artwork right after they appear; that write must not fail a tap.
+        val rig = Fixture(this)
+        try {
+            rig.controller.initialize().getOrThrow()
+            runCurrent()
+            var raced = false
+            rig.beforeAdmit = {
+                if (!raced) {
+                    raced = true
+                    rig.store.update { it.copy(settings = it.settings.copy(theme = ThemeMode.DARK)) }.getOrThrow()
+                }
+            }
+            val accepted = rig.controller.dispatch(PlaybackCommand.Enqueue(QueueContext.MUSIC, listOf(testTrack("raced"))))
+            runCurrent()
+
+            assertIs<PlaybackResult.Accepted>(accepted)
+            assertEquals(2, rig.attemptedAdmissions.size)
+            assertEquals(1, rig.acknowledgedAdmissions.size)
+            assertEquals(1, rig.queue(QueueContext.MUSIC).displayedOrder.size)
+        } finally { rig.close() }
+    }
+
+    @Test fun aLibraryThatKeepsChangingStillFailsPlayClosedAfterBoundedAttempts() = runTest {
+        val rig = Fixture(this)
+        try {
+            rig.controller.initialize().getOrThrow()
+            runCurrent()
+            rig.beforeAdmit = { rig.store.update { it.copy(settings = it.settings.copy(theme = if (it.settings.theme == ThemeMode.DARK) ThemeMode.LIGHT else ThemeMode.DARK)) }.getOrThrow() }
+            val failed = assertIs<PlaybackResult.Failure>(
+                rig.controller.dispatch(PlaybackCommand.Enqueue(QueueContext.MUSIC, listOf(testTrack("churn")))))
+            runCurrent()
+
+            assertEquals("acquisition_stale_library_revision", failed.failure.detail)
+            assertEquals(STALE_CATALOGUE_ATTEMPTS, rig.attemptedAdmissions.size)
+            assertEquals(0, rig.acknowledgedAdmissions.size)
+            assertTrue(rig.queue(QueueContext.MUSIC).displayedOrder.isEmpty())
+        } finally { rig.close() }
+    }
+
     @Test fun staleDisplayedQueueRevisionDoesNotCancelTheStageOrAttemptAnAdmission() = runTest {
         val rig = Fixture(this)
         try {

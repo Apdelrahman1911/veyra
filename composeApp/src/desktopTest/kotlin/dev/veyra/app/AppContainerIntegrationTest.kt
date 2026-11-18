@@ -2824,6 +2824,26 @@ class AppContainerIntegrationTest {
         } finally { permitConsumption.complete(Unit) }
     }
 
+    @Test fun aNewPlaylistOpensAndAddsSeveralTracksOnceEach() = checkCase {
+        val fixture = newFixture()
+        val first = item(SourceProvider.COMMONS, id = "bulk-first")
+        val second = item(SourceProvider.COMMONS, id = "bulk-second")
+        fixture.store.upsertCatalog(listOf(first, second)).getOrThrow()
+        fixture.app.onMusicAction(MusicUiAction.CreatePlaylist("Bulk playlist", openAfter = true))
+        val created = withTimeout(5_000) { fixture.store.state.first { snapshot -> snapshot.playlists.any { it.name == "Bulk playlist" } } }
+        val playlist = created.playlists.single { it.name == "Bulk playlist" }
+        withTimeout(5_000) { fixture.app.navigation.first { it.detail?.kind == DetailKind.PLAYLIST && it.detail?.id == playlist.id } }
+        fixture.app.onMusicAction(MusicUiAction.AddAllToPlaylist(playlist.id, listOf(first, second, first)))
+        val filled = withTimeout(5_000) { fixture.store.state.first { snapshot -> snapshot.playlists.single { it.id == playlist.id }.entries.size == 2 } }
+        assertEquals(listOf(first.id, second.id), filled.playlists.single { it.id == playlist.id }.entries.map { it.mediaId })
+        // Already-present tracks are skipped rather than duplicated.
+        fixture.app.onMusicAction(MusicUiAction.AddAllToPlaylist(playlist.id, listOf(second)))
+        fixture.app.onMusicAction(MusicUiAction.RenamePlaylist(playlist.id, "Bulk playlist renamed"))
+        val renamed = withTimeout(5_000) { fixture.store.state.first { snapshot -> snapshot.playlists.any { it.name == "Bulk playlist renamed" } } }
+        assertEquals(2, renamed.playlists.single { it.id == playlist.id }.entries.size)
+        fixture.assertNoNetwork()
+    }
+
     @Test fun catalogueRootActionsUseCommittedSavedFramesAndUndoSurvivesUnrelatedScalarCommit() = checkCase {
         val fixture = newFixture()
         val track = item(SourceProvider.COMMONS, id = "catalog-action")

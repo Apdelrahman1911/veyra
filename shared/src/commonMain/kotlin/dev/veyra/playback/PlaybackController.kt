@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.sync.Mutex
@@ -29,6 +30,9 @@ private const val GRACEFUL_SHUTDOWN_TIMEOUT_MS = 5_000L
 class PlaybackTestHooks {
     @Volatile var beforeActivate: (suspend () -> Unit)? = null
 }
+
+/** Tick period while nothing plays: policy and sleep-timer checks only. */
+private const val PAUSED_TICK_MS = 2_000L
 
 /**
  * Single application-lifetime owner of two saved queue contexts and one native transport.
@@ -93,7 +97,19 @@ class PlaybackController(
     private var intentRevision = 0L
     private var resumeToken: ResumeToken? = null
     private var durationDeadlineMs: Long? = null
-    private var resolvedLocal = false
+    private var resolvedLocalValue = false
+    /** Whether the current source is a validated downloaded file; mirrored as [PlaybackState.audioOrigin]. */
+    private var resolvedLocal: Boolean
+        get() = resolvedLocalValue
+        set(value) {
+            resolvedLocalValue = value
+            mutableState.update { it.copy(audioOrigin = if (value) AudioOrigin.DOWNLOADED_FILE else AudioOrigin.ONLINE_STREAM) }
+        }
+    /** A new selection has no source yet: neither downloaded nor streaming until it resolves. */
+    private fun forgetResolvedSource() {
+        resolvedLocalValue = false
+        mutableState.update { it.copy(audioOrigin = null) }
+    }
     private var lastSnapshotRevision = -1L
     private var lastOfflineOnly = false
     private var resolveJob: Job? = null
@@ -229,7 +245,11 @@ class PlaybackController(
         ownerScope.launch { store.state.collect { messages.send(Message.SnapshotChanged(it)) } }
         ownerScope.launch {
             while (isActive) {
-                delay(250)
+                // Playback moves the position, crossfade and checkpoints four times a second. While
+                // paused the tick only re-checks policy and the sleep timer, so it slows down and
+                // resumes its full rate the moment playback starts.
+                if (mutableState.value.isPlaying) delay(250)
+                else withTimeoutOrNull(PAUSED_TICK_MS) { mutableState.first { it.isPlaying } }
                 messages.trySend(Message.Tick)
             }
         }
@@ -986,7 +1006,7 @@ class PlaybackController(
         confirmedSeekSequence = 0
         pendingSeekSequence = null
         progressDirty = false
-        resolvedLocal = false
+        forgetResolvedSource()
         suppressedNext = null
         if (renewalDelayMs == null) {
             historyStartedMs = clock.epochMs()
@@ -1142,6 +1162,16 @@ class PlaybackController(
                     typed?.observedNativePosition()
                     progressDirty = true
                     checkpoint(force = true)
+                    val completedSequence = event.seekSequence
+                    sendEngine { token ->
+                        val current = mutableState.value
+                        if (preparedGeneration == token && terminalGeneration != token &&
+                            pendingSeekSequence == null && confirmedSeekSequence == completedSequence &&
+                            current.desiredPlaying &&
+                            (current.durationMs == null || current.positionMs < current.durationMs - 1)) {
+                            engine.play(token)
+                        }
+                    }
                 } else mutableState.value = mutableState.value.copy(pendingSeekMs = null, failure = AppFailure(FailureCode.UNEXPECTED, "Seek was not completed"))
             }
             is EngineEvent.Ended -> {
@@ -1692,6 +1722,54 @@ class PlaybackController(
                 undoableQueueContexts = undo.keys.toSet())
         }
 
+        /**
+         * Catalogue items to admit. An item with a verified download reuses that download's own
+         * accepted request, so its occurrence resolves to the saved binding and plays the file;
+         * only items without one are captured afresh for a new kmpYT title search. Reusing the
+         * accepted request is not a new search: the first result it bound stays the identity.
+         */
+        private suspend fun catalogueAdmission(items: List<MediaItem>, mode: PlaybackControlsMode,
+            before: PlaybackAcquisitionView): PreparedAcquisitionAdmission {
+            val reused = mutableSetOf<AcquisitionRequestId>()
+            var anySaved = false
+            val requests = items.map { item ->
+                savedLocalRequest(item, before)?.takeIf { reused.add(it.id) }?.also { anySaved = true }
+                    ?: services.captures.media(item, before.snapshot)
+            }
+            // Older accepted requests keep their historical catalogue revision; the command still
+            // compares the current library revision at the Room boundary.
+            return if (anySaved) services.admissions.catalogLeavesPreservingCaptures(requests, mode, before.snapshot.revision)
+                else services.admissions.catalogLeaves(requests, mode, before.snapshot.revision)
+        }
+
+        /**
+         * The accepted request of the one typed catalogue binding for [item] whose download the
+         * resolver currently accepts as local authority. Two verified downloads of the same media
+         * prefer the newest completed file; none means the item has no playable download.
+         */
+        private suspend fun savedLocalRequest(item: MediaItem, before: PlaybackAcquisitionView): AcquisitionRequest? {
+            val state = before.acquisition
+            val candidates = state.assetUses.asSequence()
+                .filter { it.compatibilityPolicyVersion == 1 }
+                .map { it.requestedBindingId }.distinct()
+                .mapNotNull { bindingId ->
+                    val context = try { state.executionContext(bindingId) } catch (_: Exception) { return@mapNotNull null }
+                    val subject = context.subject as? ExecutableSubject.CatalogMedia
+                    val captured = (context.request.metadata as? MediaCapture)?.media
+                    context.takeIf { subject?.mediaId == item.id && captured?.id == item.id && captured.kind == item.kind }
+                }.toList()
+            if (candidates.isEmpty()) return null
+            val verified = candidates.filter { context ->
+                try { services.resolver.requireExactLocalAuthority(context.binding.id); true }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { false }
+            }
+            return verified.maxByOrNull { context ->
+                state.assetUses.filter { it.requestedBindingId == context.binding.id && it.compatibilityPolicyVersion == 1 }
+                    .mapNotNull { state.materializations[it.materializationAssetId]?.completedEpochMs }.maxOrNull() ?: 0L
+            }?.request
+        }
+
         private suspend fun read(): PlaybackAcquisitionView {
             val latest = services.repository.playbackView()
             reconcileExternalSelection(latest)
@@ -1764,25 +1842,27 @@ class PlaybackController(
                     require(command.items.isNotEmpty() && command.startIndex in command.items.indices &&
                         command.items.all { contextFor(it) == command.context })
                     require(!command.startFromBeginning || command.context == QueueContext.PODCAST)
-                    val before = read()
                     val mode = PlaybackControlsMode.valueOf(command.context.name)
-                    val requests = command.items.map { services.captures.media(it, before.snapshot) }
-                    val prepared = services.admissions.catalogLeaves(requests, mode, before.snapshot.revision)
-                    admit(PlaybackCommand.AdmitAcquisition(prepared, command.context,
-                        before.acquisition.queues.getValue(command.context).editRevision, QueueAdmissionOperation.REPLACE,
-                        activate = true, startOccurrenceId = prepared.occurrences[command.startIndex].id,
-                        startFromBeginning = command.startFromBeginning),
-                        command.shuffle ?: before.acquisition.queues.getValue(command.context).shuffle)
+                    retryingStaleCatalogue {
+                        val before = read()
+                        val prepared = catalogueAdmission(command.items, mode, before)
+                        admit(PlaybackCommand.AdmitAcquisition(prepared, command.context,
+                            before.acquisition.queues.getValue(command.context).editRevision, QueueAdmissionOperation.REPLACE,
+                            activate = true, startOccurrenceId = prepared.occurrences[command.startIndex].id,
+                            startFromBeginning = command.startFromBeginning),
+                            command.shuffle ?: before.acquisition.queues.getValue(command.context).shuffle)
+                    }
                 }
                 is PlaybackCommand.Enqueue -> {
                     require(command.items.all { contextFor(it) == command.context })
                     if (command.items.isEmpty()) return true
-                    val before = read()
-                    val prepared = services.admissions.catalogLeaves(command.items.map { services.captures.media(it, before.snapshot) },
-                        PlaybackControlsMode.valueOf(command.context.name), before.snapshot.revision)
-                    admit(PlaybackCommand.AdmitAcquisition(prepared, command.context,
-                        before.acquisition.queues.getValue(command.context).editRevision,
-                        if (command.position == EnqueuePosition.NEXT) QueueAdmissionOperation.INSERT_NEXT else QueueAdmissionOperation.APPEND))
+                    retryingStaleCatalogue {
+                        val before = read()
+                        val prepared = catalogueAdmission(command.items, PlaybackControlsMode.valueOf(command.context.name), before)
+                        admit(PlaybackCommand.AdmitAcquisition(prepared, command.context,
+                            before.acquisition.queues.getValue(command.context).editRevision,
+                            if (command.position == EnqueuePosition.NEXT) QueueAdmissionOperation.INSERT_NEXT else QueueAdmissionOperation.APPEND))
+                    }
                 }
                 is PlaybackCommand.PlayEntry -> {
                     val before = read()
@@ -2040,7 +2120,7 @@ class PlaybackController(
             val requiredRepresentation = representationId.takeIf { renewalDelayMs != null }
             generation = reserveGeneration(); preparedGeneration = -1; terminalGeneration = -1
             seekSequence = 0; confirmedSeekSequence = 0; pendingSeekSequence = null
-            progressDirty = false; resolvedLocal = false; suppressedNext = null; materialization = null; hasNativePosition = false
+            progressDirty = false; forgetResolvedSource(); suppressedNext = null; materialization = null; hasNativePosition = false
             if (renewalDelayMs == null) {
                 historyStartedMs = clock.epochMs(); historyGeneration = generation; hasPlayedCurrent = false; sourceRenewals = 0
             }
@@ -2444,7 +2524,40 @@ class PlaybackController(
                 queue.displayedOrder.first() else null)?.takeUnless { it == queue.currentOccurrenceId }
         }
 
+        private var warmedGeneration = -1L
+        private var warmJob: Job? = null
+
+        /**
+         * Once per playing music track, near its end, ready the next queue item's source so its
+         * declared availability wait and inspection overlap the current track (P4). Bounded to a
+         * single in-flight request; offline mode, podcasts and saved local files never inspect.
+         */
+        private fun checkWarmNext() {
+            if (warmedGeneration == generation || warmJob?.isActive == true) return
+            val current = mutableState.value
+            if (current.controlsMode != PlaybackControlsMode.MUSIC || !current.isPlaying || !current.desiredPlaying ||
+                preparedGeneration != generation || resolvedLocal ||
+                current.currentSelection?.selectionState != OccurrenceSelectionState.BOUND) return
+            val settings = store.state.value.settings
+            if (settings.offlineOnly || next != null) return
+            // Crossfade staging already selects and prepares the neighbour; never compete with it
+            // for the single prefetch slot.
+            if (engine is CrossfadeAudioEngine && engine.capabilities.supportsCrossfade && settings.crossfadeEnabled) return
+            val duration = current.durationMs?.takeIf { it > 0 } ?: return
+            if (duration - current.positionMs > WARM_NEXT_LEAD_MS) return
+            val queue = currentQueue()
+            val currentId = queue.currentOccurrenceId ?: return
+            if (neighbour(queue) == null) return
+            warmedGeneration = generation
+            warmJob = ownerScope.launch {
+                try { services.queues.warmMusicNext(queue.context, queue.editRevision, currentId) }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { } // The real transition reports any failure.
+            }
+        }
+
         suspend fun checkCrossfade() {
+            checkWarmNext()
             val transport = engine as? CrossfadeAudioEngine ?: return
             val current = mutableState.value; val settings = store.state.value.settings
             val queue = store.acquisitionViews.value.acquisition.queues[current.activeContext] ?: return
@@ -2637,3 +2750,6 @@ class PlaybackController(
         data object Tick : Message
     }
 }
+
+/** How long before a music track ends its successor is readied (P4). */
+internal const val WARM_NEXT_LEAD_MS = 40_000L

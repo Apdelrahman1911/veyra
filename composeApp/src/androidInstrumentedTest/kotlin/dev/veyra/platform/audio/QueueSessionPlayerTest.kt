@@ -31,6 +31,40 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class QueueSessionPlayerTest {
+    @Test fun resolutionWithoutCurrentMediaDoesNotPublishAnInvalidLoadingState() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+        val item = MediaItem("authored", "Authored test", MediaKind.MUSIC, SourceRef(SourceProvider.LOCAL, "tone"))
+        val queue = QueueSnapshot(entries = listOf(QueueEntry("occurrence", item.id)), currentEntryId = "occurrence")
+        withContext(Dispatchers.Main.immediate) {
+            val facade = QueueSessionPlayer(scope, { error("Publishing state must not dispatch playback") })
+            try {
+                // Exercise every phase before queue admission, during item resolution,
+                // and after the selected item is available to the native session.
+                for (phase in PlaybackPhase.entries) {
+                    for (stage in 0..2) {
+                        facade.publish(PlaybackState(
+                            initialized = true,
+                            queues = if (stage == 0) emptyMap() else mapOf(QueueContext.MUSIC to queue),
+                            currentEntryId = if (stage == 0) null else "occurrence",
+                            currentItem = if (stage == 2) item else null,
+                            phase = phase,
+                            desiredPlaying = true,
+                        ))
+                        val buffering = phase in setOf(PlaybackPhase.RESOLVING, PlaybackPhase.PREPARING, PlaybackPhase.BUFFERING)
+                        val expected = when {
+                            stage < 2 || phase in setOf(PlaybackPhase.IDLE, PlaybackPhase.ERROR) -> Player.STATE_IDLE
+                            phase == PlaybackPhase.ENDED -> Player.STATE_ENDED
+                            buffering -> Player.STATE_BUFFERING
+                            else -> Player.STATE_READY
+                        }
+                        assertEquals("phase=$phase stage=$stage", expected, facade.playbackState)
+                        assertEquals("phase=$phase stage=$stage", expected == Player.STATE_BUFFERING, facade.isLoading)
+                    }
+                }
+            } finally { facade.release(); scope.cancel() }
+        }
+    }
+
     @Test fun occurrenceQueueIsReadOnlyAndEveryTransportDispatchesToSharedOwner() = runBlocking {
         val commands = Channel<PlaybackCommand>(Channel.UNLIMITED)
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)

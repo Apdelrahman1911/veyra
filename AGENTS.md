@@ -14,8 +14,8 @@
 - Never commit credentials, cookies, signed source URLs, private captures, user listening data, or downloaded copyrighted audio. Tests use authored redistributable fixtures or explicit, separately labeled live checks.
 
 ## Team and quality
-- The user requests all useful parallel capacity. Subagents must be explicitly configured `model: gpt-6-astra`, `reasoning_effort: max` with a non-full context fork when setting overrides. Record accepted configuration and any runtime-attestation limitation honestly.
-- Give each agent exclusive file ownership. Cross-review consequential decisions; the lead resolves disagreements with evidence or experiments.
+- Work directly. Do not use subagents or delegated workers unless the user explicitly requests them. This user instruction supersedes historical parallel-agent and OpenCode-worker preferences.
+- Review consequential changes against actual source, diffs and executed checks; resolve uncertain behavior with evidence or experiments.
 - Research must precede implementation. Native playback, real source access, downloads and offline restart verification are release gates, not mockable UI milestones.
 - Use only free existing resources. Veyra's GitHub repository must be public. Use standard free public-repository GitHub Actions runners only; no purchases or billable features.
 

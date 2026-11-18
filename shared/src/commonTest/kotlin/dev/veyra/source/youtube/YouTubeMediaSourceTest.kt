@@ -79,6 +79,18 @@ class YouTubeMediaSourceTest {
     private fun continuation(contents: String) = """{"onResponseReceivedActions":[{"appendContinuationItemsAction":{"continuationItems":[$contents]}}]}"""
     private val config = """<script>ytcfg.set({"INNERTUBE_CONTEXT":{"client":{"clientName":"WEB","clientVersion":"2.authored"}},"INNERTUBE_CONTEXT_CLIENT_NAME":1,"INNERTUBE_API_KEY":"authored-key","INNERTUBE_CLIENT_VERSION":"2.authored"});</script>"""
 
+    @Test fun prewarmSendsNoRequestAndIsHarmlessWithoutAStoreOrAfterClose() = runTest {
+        var requests = 0
+        val source = YouTubeMediaSource(YouTubeClient(ResearchTransport {
+            requests++
+            ResearchResponse(it.url, 500, "")
+        }))
+        assertFalse(source.prewarm())
+        source.close()
+        assertFalse(source.prewarm())
+        assertEquals(0, requests)
+    }
+
     @Test fun searchMapsCanonicalIdentityAndDoesNotInventMusicalArtistSemantics() = runTest {
         val channel = """{"channelRenderer":{"channelId":"$channelId","title":{"simpleText":"Authored channel"}}}"""
         val playlist = """{"playlistRenderer":{"playlistId":"$playlistId","title":{"simpleText":"Authored playlist"}}}"""
@@ -97,6 +109,19 @@ class YouTubeMediaSourceTest {
             assertNull(result.album)
             assertEquals(listOf(BrowseKind.CHANNEL, BrowseKind.PLAYLIST), page.collections.map { it.kind })
             assertEquals("YouTube", page.attribution)
+        } finally { source.close() }
+    }
+
+    @Test fun searchKeepsArtworkWhenTheThumbnailIsSignedOrMissing() = runTest {
+        // Real search responses give the widest thumbnail as a signed hq720 URL; it must not be
+        // persisted, nor dropped. A result with no thumbnail still gets that video's artwork.
+        val signed = """{"videoRenderer":{"videoId":"$videoId","title":{"simpleText":"Signed"},"ownerText":{"simpleText":"Uploader"},"thumbnail":{"thumbnails":[{"url":"https://i.ytimg.com/vi/$videoId/hqdefault.jpg?sqp=-oaymwEc&rs=AOn4CL","width":480},{"url":"https://i.ytimg.com/vi/$videoId/hq720.jpg?sqp=-oaymwEcCOgCEMoBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLAuthored","width":720}]}}}"""
+        val bare = """{"videoRenderer":{"videoId":"$secondId","title":{"simpleText":"Bare"},"ownerText":{"simpleText":"Uploader"}}}"""
+        val source = YouTubeMediaSource(YouTubeClient(ResearchTransport { ResearchResponse(it.url, 200, initial("$signed,$bare")) }))
+        try {
+            val artwork = source.search("authored").items.associate { it.id to it.artworkUrl }
+            assertEquals("https://i.ytimg.com/vi/$videoId/hqdefault.jpg", artwork["youtube:$videoId"])
+            assertEquals("https://i.ytimg.com/vi/$secondId/hqdefault.jpg", artwork["youtube:$secondId"])
         } finally { source.close() }
     }
 
@@ -193,6 +218,15 @@ class YouTubeMediaSourceTest {
         } finally { source.close() }
     }
 
+    @Test fun absentSourceByteLengthDoesNotBecomeAnInventedPlaybackBound() = runTest {
+        val unknownLength = JsonObject(format().filterKeys { it != "contentLength" })
+        val source = YouTubeMediaSource(YouTubeClient(ResearchTransport {
+            ResearchResponse(it.url, 200, watch(listOf(unknownLength)))
+        }))
+        try { assertNull(source.resolve(item, EngineCapabilities()).contentLength) }
+        finally { source.close() }
+    }
+
     @Test fun realParserResolvesOfferedAudioAndNeverPersistsSignedUrls() = runTest {
         var requests = 0
         val source = YouTubeMediaSource(YouTubeClient(ResearchTransport {
@@ -204,6 +238,7 @@ class YouTubeMediaSourceTest {
             val resolved = source.resolve(item, EngineCapabilities(mimeTypes = setOf("audio/mp4", "audio/webm"), codecs = setOf("aac", "opus")))
             assertEquals("audio/mp4", resolved.mimeType)
             assertEquals("mp4a.40.2", resolved.codecs)
+            assertEquals(32L, resolved.contentLength)
             assertTrue(resolved.uri.contains("authored-first"))
             assertNull(resolved.expiresAtEpochMs)
             assertTrue(assertNotNull(resolved.representationId).startsWith("yt-audio-v1:"))

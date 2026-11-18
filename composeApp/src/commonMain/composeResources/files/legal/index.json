@@ -43,12 +43,13 @@
     }
   ],
   "fileHashes": {
-    "INDEX.txt": "495980b17aa15d615e53ecee830e010349f21ae13143319e0dba886dc7af8ebd",
+    "INDEX.txt": "dcca648d650ec67ea7bf18001fc53f57ec724253ad5db09cb1e15dae8d786021",
     "LICENSE": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
-    "NOTICE.md": "7ca2f79a699cbb9821efe4bb244638b1b7e2d3bf971fb026e2ee1e1ef01774b3",
+    "NOTICE.md": "5479834d5fbcc15f5b2b9b76f2aaebe8229a9a18361defa3be8bdb81dafff278",
     "THIRD_PARTY_NOTICES.txt": "bbd4fdff5cb423ae29a8731b173cc52e84db48d22308f995645ee6223d19d025",
     "kmpYT-LICENSE": "2b48ffd17a0263667e7df9b64b277520776571b1ce73365134b7e92a6d114bcb",
     "kmpYT-THIRD_PARTY_NOTICES.md": "08b4452d51cb19117fe6ec956d98c2eaf4fa6e0fe4a6ea21eeb90e3bae8c34a0",
+    "nativeCmpkit-LICENSE": "188187b988999fc9f6ecdae6ba6e49e4f53f0488ec5af68acbfff3b2cf0c8722",
     "notices/3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04.txt": "3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04",
     "notices/7b43872589cd962d8c7f6578a7b37b81040a4cddd00b815bfdd595001d0e3777.txt": "7b43872589cd962d8c7f6578a7b37b81040a4cddd00b815bfdd595001d0e3777",
     "notices/7e6b2818edbd8f6a01ae80641cc8f16a51080d08fb4e532be3a0b6f74adb07da.txt": "7e6b2818edbd8f6a01ae80641cc8f16a51080d08fb4e532be3a0b6f74adb07da"
@@ -61,6 +62,7 @@
     "index.json",
     "kmpYT-LICENSE",
     "kmpYT-THIRD_PARTY_NOTICES.md",
+    "nativeCmpkit-LICENSE",
     "notices/3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04.txt",
     "notices/7b43872589cd962d8c7f6578a7b37b81040a4cddd00b815bfdd595001d0e3777.txt",
     "notices/7e6b2818edbd8f6a01ae80641cc8f16a51080d08fb4e532be3a0b6f74adb07da.txt"
@@ -70,9 +72,10 @@
   "platforms": [],
   "schemaVersion": 1,
   "source": {
-    "kmpytNoticeRevision": "6805d4db8077650992d342e5395b1f0d7c80e984",
-    "kmpytPin": "6805d4db8077650992d342e5395b1f0d7c80e984",
+    "kmpytNoticeRevision": "ea6b249ca679a8083324e618fbba3b6fa12d60a3",
+    "kmpytPin": "ea6b249ca679a8083324e618fbba3b6fa12d60a3",
     "mode": "actual-pinned-checkout",
+    "nativecmpkitPin": "4e700e589119c19a9dbefdde28c02a99854627a0",
     "publicationVerified": false
   },
   "sourceProjectArtifacts": [],

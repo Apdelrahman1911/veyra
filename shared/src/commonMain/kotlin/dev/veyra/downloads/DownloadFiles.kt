@@ -1,5 +1,6 @@
 package dev.veyra.downloads
 
+import dev.veyra.platform.BlockingIo
 import dev.veyra.model.AppFailure
 import dev.veyra.model.FailureCode
 import dev.veyra.model.OfflineAsset
@@ -7,14 +8,13 @@ import dev.veyra.model.OfflineAssetKind
 import dev.veyra.model.VeyraException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.IO
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import okio.Buffer
 import okio.ByteString.Companion.encodeUtf8
 import okio.FileSystem
-import okio.HashingSource
+import okio.buffer
 import okio.Path
 import okio.Path.Companion.toPath
 import okio.use
@@ -36,6 +36,14 @@ internal interface DownloadFileLease { fun close() }
 
 /** Nonblocking OS advisory locks; contention is null, an actual I/O error is not contention. */
 internal expect fun tryAcquireDownloadFileLease(path: String): DownloadFileLease?
+
+/** Streaming SHA-256 backed by the platform's native implementation. */
+internal expect class FileSha256() {
+    fun update(bytes: ByteArray, offset: Int, count: Int)
+    /** Lowercase hex digest; finishes and releases the hash. */
+    fun hex(): String
+    fun close()
+}
 
 /** Internal seam for decorating real leases in fault tests; production always uses the OS port. */
 internal fun interface DownloadFileLeaseFactory { fun acquire(path: String): DownloadFileLease? }
@@ -115,7 +123,7 @@ class DownloadFiles internal constructor(directory: String, val fileSystem: File
     fun ownedPath(uri: String): Path = storageOperation {
         checkRootAncestors()
         if (uri.startsWith("file:", ignoreCase = true) || uri.startsWith("\\\\") || uri.startsWith("//")) corrupt()
-        val path = uri.toPath(normalize = true)
+        val path = relocateContainerPath(uri)
         val relative = runCatching { path.relativeTo(root) }.getOrNull()
         if (!path.isAbsolute || relative == null || ".." in relative.segments || relative.segments.isEmpty()) corrupt()
         var current: Path? = path
@@ -126,6 +134,18 @@ class DownloadFiles internal constructor(directory: String, val fileSystem: File
         }
         if (current != root) corrupt()
         path
+    }
+
+    private fun relocateContainerPath(value: String): Path {
+        val path = value.toPath(normalize = true)
+        val current = IOS_MEDIA_DIRECTORY.matchEntire(root.toString()) ?: return path
+        if (current.groupValues[2].isNotEmpty()) return path
+        val previous = IOS_MEDIA_DIRECTORY.matchEntire(path.toString()) ?: return path
+        fun containerNamespace(prefix: String): String =
+            if (prefix.startsWith("/private/var/")) prefix.removePrefix("/private") else prefix
+        if (containerNamespace(current.groupValues[1]) != containerNamespace(previous.groupValues[1])) return path
+        if (".." in value.toPath().segments) corrupt()
+        return root / previous.groupValues[2]
     }
 
     private fun checkRootAncestors() {
@@ -272,17 +292,24 @@ class DownloadFiles internal constructor(directory: String, val fileSystem: File
         fileSystem.atomicMove(from, destination)
     }
 
-    suspend fun sha256(path: Path): String = withContext(Dispatchers.IO) {
+    suspend fun sha256(path: Path): String = withContext(BlockingIo) {
         val safe = ownedPath(path.toString())
         val digest = storageOperation {
-            HashingSource.sha256(fileSystem.source(safe)).use { hashing ->
-                val buffer = Buffer()
-                while (hashing.read(buffer, 64L * 1024) != -1L) {
-                    currentCoroutineContext().ensureActive()
-                    buffer.clear()
+            // Platform-native SHA-256: the portable implementation made every offline play wait
+            // on two full-file hashes on iOS. Same bytes, same digest, same integrity guarantee.
+            val hasher = FileSha256()
+            try {
+                fileSystem.source(safe).buffer().use { source ->
+                    val chunk = ByteArray(256 * 1024)
+                    while (true) {
+                        val count = source.read(chunk, 0, chunk.size)
+                        if (count < 0) break
+                        hasher.update(chunk, 0, count)
+                        currentCoroutineContext().ensureActive()
+                    }
                 }
-                hashing.hash.hex()
-            }
+                hasher.hex()
+            } finally { hasher.close() }
         }
         // EOF and Source.close can themselves block. A same-IO withContext return does not
         // replace this check: never hand a cancelled hash to the native validation stage.
@@ -290,7 +317,7 @@ class DownloadFiles internal constructor(directory: String, val fileSystem: File
         digest
     }
 
-    suspend fun verifiedFile(asset: OfflineAsset): Path = withContext(Dispatchers.IO) {
+    suspend fun verifiedFile(asset: OfflineAsset): Path = withContext(BlockingIo) {
         storageOperation {
             val path = ownedPath(asset.uri)
             val metadata = fileSystem.metadataOrNull(path)
@@ -301,7 +328,7 @@ class DownloadFiles internal constructor(directory: String, val fileSystem: File
         }
     }
 
-    suspend fun bytesUsed(): Long = withContext(Dispatchers.IO) {
+    suspend fun bytesUsed(): Long = withContext(BlockingIo) {
         storageOperation {
             checkRootAncestors()
             if (!fileSystem.exists(root)) 0L else fileSystem.listRecursively(root, followSymlinks = false)
@@ -330,6 +357,7 @@ class DownloadFiles internal constructor(directory: String, val fileSystem: File
     private fun corrupt(): Nothing = throw VeyraException(AppFailure(FailureCode.CORRUPT_MEDIA, "owned_file_integrity"))
 
     private companion object {
+        val IOS_MEDIA_DIRECTORY = Regex("^(.*/Containers/Data/Application/)[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/Library/Application Support/Veyra/media(?:/(.*))?$")
         val MEDIA_DIRECTORY = Regex("media-[0-9a-f]{64}")
         val GENERATION_DIRECTORY = Regex("generation-[0-9a-f]{64}")
     }

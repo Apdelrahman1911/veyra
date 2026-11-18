@@ -13,6 +13,7 @@
     <key>CFBundleVersion</key><string>$(CURRENT_PROJECT_VERSION)</string>
     <key>CFBundleLocalizations</key><array><string>en</string><string>ar</string></array>
     <key>LSRequiresIPhoneOS</key><true/>
+    <key>CADisableMinimumFrameDurationOnPhone</key><true/>
     <key>UIApplicationSupportsIndirectInputEvents</key><true/>
     <key>UIApplicationSceneManifest</key>
     <dict><key>UIApplicationSupportsMultipleScenes</key><false/></dict>

@@ -1,5 +1,6 @@
 package dev.veyra.app
 
+import dev.veyra.platform.BlockingIo
 import dev.veyra.acquisition.AcquisitionCaptureFactory
 import dev.veyra.acquisition.AcquisitionResolution
 import dev.veyra.acquisition.AcquisitionCoordinator
@@ -53,6 +54,9 @@ data class PodcastDetailStatus(
     val failures: Map<String, AppFailure> = emptyMap(),
     val options: Map<String, PodcastListOptions> = emptyMap(),
 )
+
+/** Lets the first frames and Room bootstrap settle before native runtime preparation. */
+private const val PLAYER_PROGRAM_PREWARM_DELAY_MS = 1_500L
 
 /**
  * One app-lifetime composition root. Screens emit intents; they never construct clients, players,
@@ -120,6 +124,9 @@ class AppContainer(
     val resolver = AppSourceResolver(store, files, platform.validator, executionGateway, clock,
         materializationEvidence = acquisitionOwner.materializationEvidence)
     val playback = PlaybackController(store, platform.engine, resolver, scope, clock,
+        // Each periodic save is a full transactional library read, write and readback (the D006
+        // integrity guard). Pause, seek, stop and backgrounding still save at once.
+        checkpointIntervalMs = 15_000,
         acquisition = acquisitionOwner.playbackServices, testHooks = playbackTestHooks)
     private val acquisition = acquisitionOwner.acquisition
     private val downloadBatches = acquisitionOwner.batches
@@ -130,6 +137,12 @@ class AppContainer(
     )
     val downloads = DownloadCoordinator(store, files, resolver, executionGateway, platform.validator,
         platform.engine.capabilities, scope, platform.downloadExecution, clock,
+        // Work, network and settings changes wake the scheduler at once; this poll is only the
+        // fallback for timed retries and foreign lease expiry. Each pass reads the whole library,
+        // so a one-second poll kept the CPU busy (and the phone warm) with nothing to do.
+        pollingMs = 15_000,
+        // With no download work pending or timed, nothing is due until a change signals the loops.
+        idlePollingMs = 600_000,
         beforePhysicalDelete = { asset -> playback.releaseForAssetRemoval(asset.mediaId).getOrThrow() },
         networkState = platform.downloadNetworkState,
         acquisitionDependencies = acquisitionDependencies)
@@ -167,6 +180,8 @@ class AppContainer(
     private val undoLibrary = MutableStateFlow<CatalogLibraryUndo?>(null)
     private val mutableStorageBytes = MutableStateFlow<Long?>(null)
     val storageBytes = mutableStorageBytes.asStateFlow()
+    /** The availability wait the current online playback preparation honors, for the countdown. */
+    val playbackWait: StateFlow<dev.veyra.source.youtube.SourcePlaybackWait?> get() = platform.youtube.playbackWait
     val musicOptions: StateFlow<MusicUiOptions> = combine(store.state, playback.state, undoLibrary,
         store.catalogLibraryUndoAvailability) { _, player, undo, availability ->
         MusicUiOptions(
@@ -283,7 +298,7 @@ class AppContainer(
         try {
             val snapshot = store.initialize().getOrThrow()
             acquisitionOwner.initialize()
-            withContext(Dispatchers.IO) { files.initialize() }
+            withContext(BlockingIo) { files.initialize() }
             artwork.initialize()
             mutableNavigation.value = AppNavigation.restore(snapshot)
             mutablePodcastDetails.value = PodcastDetailStatus(options = snapshot.shows.keys.associateWith { id ->
@@ -331,6 +346,12 @@ class AppContainer(
                 }
             }
             mutableInitialization.value = AppInitialization.Ready
+            effects.launch {
+                // Offline-only readiness: prepares the stored player program after the first
+                // frames so the first online play/download skips that cold work. No request is sent.
+                delay(PLAYER_PROGRAM_PREWARM_DELAY_MS)
+                platform.youtube.prewarm()
+            }
             mutableNavigation.value.details.mapNotNull { it.collection }.distinctBy { it.id }.forEach { collection ->
                 if (snapshot.settings.offlineOnly) mutableCollections.update { it + (collection.id to CollectionUiState(
                     collection, failure = AppFailure(FailureCode.OFFLINE_POLICY))) }
@@ -382,10 +403,12 @@ class AppContainer(
     }
 
     fun cachedArtworkPath(mediaId: String): String? = artwork.cachedArtworkPath(mediaId)
+    /** Emits when the set of locally cached covers changes. */
+    val artworkUpdates: kotlinx.coroutines.flow.Flow<Unit> get() = artwork.cachedPaths.map { }
     fun dismissNotice(id: String) { mutableNotice.update { if (it?.id == id) null else it } }
 
     fun selectDestination(destination: AppDestination) {
-        mutableNavigation.update { it.copy(destination = destination, details = emptyList(), playerOpen = false, queueOpen = false) }
+        mutableNavigation.update { it.copy(destination = destination, librarySection = if (destination == AppDestination.LIBRARY) LibrarySection.OVERVIEW else it.librarySection, details = emptyList(), playerOpen = false, queueOpen = false) }
         navigationWrites.trySend(Unit)
         if (destination == AppDestination.SETTINGS) refreshStorage()
     }
@@ -406,6 +429,8 @@ class AppContainer(
         if (action is MusicUiAction.Download || action is MusicUiAction.DownloadCollection ||
             action is MusicUiAction.ResumeDownload) {
             if (rejectUncoveredDownloadIntent()) return
+            // Resolving the first result takes a network round trip; acknowledge the tap at once.
+            if (action is MusicUiAction.Download) inform(TextKey.DownloadPreparing)
         }
         submit { handleMusic(action) }
     }
@@ -413,6 +438,7 @@ class AppContainer(
     fun onPodcastAction(action: PodcastAction) {
         if (action is PodcastAction.Download || action is PodcastAction.ResumeDownload) {
             if (rejectUncoveredDownloadIntent()) return
+            if (action is PodcastAction.Download) inform(TextKey.DownloadPreparing)
         }
         submit { handlePodcast(action) }
     }
@@ -631,6 +657,28 @@ class AppContainer(
      * still be ready. A fresh Play/R2 is never substituted; stale readiness fails closed.
      */
     private suspend fun playSaved(item: MediaItem, bindingIdValue: String) {
+        // The saved view is a snapshot; an unrelated library write (artwork caching, for example)
+        // between reading it and the admission CAS makes it stale without making the request
+        // wrong. A refused admission writes nothing, so wait for the next consistent view and
+        // revalidate everything from it, a bounded number of times.
+        repeat(STALE_CATALOGUE_ATTEMPTS - 1) {
+            val seen = downloads.acquisitionPresentation.value.view.snapshot.revision
+            try {
+                return playSavedOnce(item, bindingIdValue)
+            } catch (failure: VeyraException) {
+                if (!failure.isStaleCatalogue() && failure.failure.detail != "saved_recording_view_stale") throw failure
+                withTimeoutOrNull(2_000) {
+                    downloads.acquisitionPresentation.first { presentation ->
+                        presentation.view.snapshot.revision != seen &&
+                            presentation.view.snapshot.revision == presentation.view.acquisition.libraryRevision
+                    }
+                }
+            }
+        }
+        playSavedOnce(item, bindingIdValue)
+    }
+
+    private suspend fun playSavedOnce(item: MediaItem, bindingIdValue: String) {
         val media = store.state.value.media[item.id]
             ?: throw VeyraException(AppFailure(FailureCode.NOT_FOUND))
         val bindingId = ExecutionBindingId(bindingIdValue)
@@ -719,18 +767,22 @@ class AppContainer(
     }
 
     private suspend fun selectExistingMedia(item: MediaItem): Pair<AcquisitionRequestId, ExecutionBindingId> {
-        val view = store.acquisitionView()
-        val current = view.snapshot.media[item.id]
-            ?: throw VeyraException(AppFailure(FailureCode.RECOVERY_REQUIRED, "download_acquisition_selection_required"))
-        if (current.kind != item.kind || current.source.provider != item.source.provider ||
-            current.source.canonicalId != item.source.canonicalId) {
-            throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "download_catalog_identity_changed"))
+        // An unrelated library write (artwork caching) between the read and the capture CAS only
+        // makes the read stale; the refused capture wrote nothing, so re-read and revalidate.
+        val captured = retryingStaleCatalogue {
+            val view = store.acquisitionView()
+            val current = view.snapshot.media[item.id]
+                ?: throw VeyraException(AppFailure(FailureCode.RECOVERY_REQUIRED, "download_acquisition_selection_required"))
+            if (current.kind != item.kind || current.source.provider != item.source.provider ||
+                current.source.canonicalId != item.source.canonicalId) {
+                throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "download_catalog_identity_changed"))
+            }
+            // Freeze the displayed immutable metadata itself, not the newer catalogue row. The
+            // expected-revision admission is the same-owner transaction check; the complete-title
+            // query is exactly what the user tapped even if an unrelated metadata edit landed.
+            acquisition.capture(acquisitionOwner.captures.media(item, view.snapshot).metadata,
+                expectedCatalogRevision = view.snapshot.revision)
         }
-        // Freeze the displayed immutable metadata itself, not the newer catalogue row. The
-        // expected-revision admission is the same-owner transaction check; the complete-title
-        // query is exactly what the user tapped even if an unrelated metadata edit landed.
-        val captured = acquisition.capture(acquisitionOwner.captures.media(item, view.snapshot).metadata,
-            expectedCatalogRevision = view.snapshot.revision)
         if (captured.request.completeTitle != item.title ||
             (captured.request.metadata as? MediaCapture)?.media?.id != item.id) {
             throw VeyraException(AppFailure(FailureCode.INVALID_STATE, "download_catalog_capture_required"))
@@ -801,6 +853,14 @@ class AppContainer(
             MusicUiAction.RunSearch -> runSearch(false)
             MusicUiAction.LoadMoreSearch -> runSearch(true)
             is MusicUiAction.Discover -> discover(action.provider, false)
+            MusicUiAction.ExploreMusic -> {
+                navigate { it.copy(destination = AppDestination.LISTEN, details = emptyList(), playerOpen = false, queueOpen = false) }
+                val discovery = mutableDiscovery.value
+                if (!discovery.loaded && !discovery.loading && !store.state.value.settings.offlineOnly) discover(discovery.provider, false)
+                mutableDiscovery.update { it.copy(revealRequest = discovery.revealRequest + 1) }
+            }
+            MusicUiAction.ExplorePodcasts ->
+                navigate { it.copy(destination = AppDestination.PODCASTS, details = emptyList(), playerOpen = false, queueOpen = false) }
             MusicUiAction.LoadMoreDiscovery -> discover(mutableDiscovery.value.provider, true)
             is MusicUiAction.OpenSearch -> {
                 navigate { it.copy(destination = AppDestination.SEARCH, details = emptyList(), playerOpen = false, queueOpen = false) }
@@ -868,6 +928,18 @@ class AppContainer(
                         playlists = old.playlists + Playlist(id, action.name.trim(),
                             item?.let { listOf(PlaylistEntry(newEntityId(), it.id)) }.orEmpty(), clock.epochMs(), clock.epochMs()))
                 }
+                if (action.openAfter) navigate { it.open(AppDetail(DetailKind.PLAYLIST, id)) }
+            }
+            is MusicUiAction.AddAllToPlaylist -> editLibrary { old ->
+                require(old.playlists.any { it.id == action.playlistId })
+                val items = action.items.filter { it.kind == MediaKind.MUSIC }.distinctBy { it.id }
+                old.copy(media = mergeMedia(old.media, items), playlists = old.playlists.map { playlist ->
+                    if (playlist.id != action.playlistId) playlist else {
+                        val present = playlist.entries.mapTo(mutableSetOf()) { it.mediaId }
+                        val added = items.filter { it.id !in present }.map { PlaylistEntry(newEntityId(), it.id) }
+                        if (added.isEmpty()) playlist else playlist.copy(entries = playlist.entries + added, updatedEpochMs = clock.epochMs())
+                    }
+                })
             }
             is MusicUiAction.RenamePlaylist -> editLibrary { old ->
                 require(action.name.isNotBlank() && action.name.length <= 500)
@@ -901,7 +973,9 @@ class AppContainer(
                 store.undoCatalogLibrary(undo)
                 undoLibrary.value = null
             }
-            is MusicUiAction.Download -> download(action.item)
+            is MusicUiAction.Download -> download(action.item).let { started ->
+                effects.launch { if (started.await()) inform(TextKey.DownloadStarted) }
+            }
             is MusicUiAction.DownloadCollection -> {
                 val pending = action.items.distinctBy { it.id }.map(::download)
                 effects.launch { if (pending.isNotEmpty() && pending.awaitAll().all { it }) inform(TextKey.DownloadsQueued) }
@@ -1011,7 +1085,9 @@ class AppContainer(
             is PodcastAction.PlayNext -> command(PlaybackCommand.Enqueue(QueueContext.PODCAST, listOf(episode(action.mediaId)), EnqueuePosition.NEXT))
             is PodcastAction.AddToEnd -> command(PlaybackCommand.Enqueue(QueueContext.PODCAST, listOf(episode(action.mediaId))))
             PodcastAction.OpenQueue -> navigate { it.copy(queueOpen = true, viewedQueue = QueueContext.PODCAST) }
-            is PodcastAction.Download -> download(episode(action.mediaId))
+            is PodcastAction.Download -> download(episode(action.mediaId)).let { started ->
+                effects.launch { if (started.await()) inform(TextKey.DownloadStarted) }
+            }
             is PodcastAction.PauseDownload -> downloadEffect { downloads.pause(action.downloadId) }
             is PodcastAction.ResumeDownload -> downloadEffect(requiresCoverage = true) { resumeDownload(action.downloadId) }
             is PodcastAction.CancelDownload -> downloadEffect { downloads.cancel(action.downloadId) }

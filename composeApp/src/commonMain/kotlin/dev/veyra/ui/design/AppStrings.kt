@@ -15,6 +15,34 @@ import dev.veyra.model.ThemeMode
  * Arabic copy is intentionally kept central for subsequent native-language review.
  */
 enum class TextKey(internal val english: String, internal val arabic: String) {
+    Home("Home", "الرئيسية"),
+    HomeGreeting("Good to see you.", "سعداء بعودتك."),
+    HomeHeadline("Listen to what\nmoves you", "استمع لما\nيلامسك"),
+    HomeSubtitle("Your music. Your flow.", "موسيقاك، على مزاجك."),
+    JumpBackIn("Jump back in", "استكمل الاستماع"),
+    MadeForYourLibrary("Your next favorite is waiting.", "أغنيتك المفضلة القادمة بانتظارك."),
+    NoRecommendations("No recommendations yet. Search for something you love.", "لا توجد اقتراحات حاليًا. ابحث عمّا تحب."),
+    ExploreSounds("Find your next sound", "اكتشف صوتك القادم"),
+    LibrarySubtitle("Everything you love, in one place.", "كل ما تحبه، في مكان واحد."),
+    YourCollection("Your collection", "مجموعتك"),
+    AllLibrary("Overview", "نظرة عامة"),
+    SearchSubtitle("Find something that feels like you.", "اعثر على ما يشبهك."),
+    SearchOptions("Search options", "خيارات البحث"),
+    ExploreMusic("Explore music", "اكتشف الموسيقى"),
+    PodcastsSubtitle("Stories worth listening to.", "قصص تستحق الاستماع."),
+    AudioDetails("About this audio", "حول هذا الصوت"),
+    SettingsSubtitle("Make Veyra yours.", "اجعل ڤيرا على ذوقك."),
+    PlaybackSettings("Sound & playback", "الصوت والتشغيل"),
+    AppearanceSettings("Look & feel", "المظهر واللغة"),
+    DownloadSettings("Downloads & storage", "التنزيلات والتخزين"),
+    PodcastSettings("Podcast preferences", "تفضيلات البودكاست"),
+    OfflineSettings("Offline listening", "الاستماع دون اتصال"),
+    AboutSettings("About & privacy", "حول التطبيق والخصوصية"),
+    BrowseLibrary("Browse your library", "تصفح مكتبتك"),
+    SaveForLaterHint("Keep favorites and downloads close.", "احتفظ بمفضلاتك وتنزيلاتك بالقرب منك."),
+    EmptyLibraryTitle("Your collection starts here", "مجموعتك تبدأ هنا"),
+    EmptyLibraryBody("Find a song you love, then tap the heart or save it for offline listening.", "اعثر على أغنية تحبها، ثم اضغط القلب أو نزّلها للاستماع دون اتصال."),
+
     AppName("Veyra", "ڤيرا"),
     Tagline("Your listening room", "مساحتك للاستماع"),
     Listen("Listen", "استمع"),
@@ -116,6 +144,21 @@ enum class TextKey(internal val english: String, internal val arabic: String) {
     EmptyFavoritesDescription("Add music to favorites to find it here.", "أضف الموسيقى إلى المفضلة لتجدها هنا."),
     AddMusic("Add music", "إضافة موسيقى"),
     NewPlaylist("New playlist", "قائمة تشغيل جديدة"),
+    DefaultPlaylistName("Playlist {0}", "قائمة تشغيل {0}"),
+    AddSongs("Add songs", "إضافة أغانٍ"),
+    AddSelectedSongs("Add {0} songs", "إضافة {0} أغانٍ"),
+    AlreadyInPlaylist("In playlist", "في القائمة"),
+    NoSongsToAdd("No songs in your library yet. Find music in Search, then add it here.", "لا توجد أغانٍ في مكتبتك بعد. ابحث عن موسيقى ثم أضفها هنا."),
+    FindMusic("Find music", "ابحث عن موسيقى"),
+    EditPlaylist("Edit", "تعديل"),
+    DoneEditing("Done", "تم"),
+    YourPlaylists("Your playlists", "قوائم التشغيل"),
+    LibrarySongs("Songs", "الأغاني"),
+    SeeAll("See all", "عرض الكل"),
+    CreateFirstPlaylist("Create your first playlist", "أنشئ أول قائمة تشغيل"),
+    NewPlaylistNameHint("New playlist name", "اسم قائمة جديدة"),
+    Create("Create", "إنشاء"),
+    PlaylistOptions("Playlist options", "خيارات القائمة"),
     PlaylistName("Playlist name", "اسم قائمة التشغيل"),
     CreatePlaylist("Create playlist", "إنشاء قائمة تشغيل"),
     RenamePlaylist("Rename playlist", "إعادة تسمية قائمة التشغيل"),
@@ -163,6 +206,7 @@ enum class TextKey(internal val english: String, internal val arabic: String) {
     SkipForwardSeconds("Forward {0} seconds", "تقديم {0} ثانية"),
     NextEpisode("Next episode", "الحلقة التالية"),
     PreparingAudio("Preparing audio…", "جارٍ تجهيز الصوت…"),
+    StartingIn("Starting in {0} s…", "يبدأ التشغيل خلال {0} ث…"),
     Buffering("Buffering…", "جارٍ التخزين المؤقت…"),
     Playing("Playing", "قيد التشغيل"),
     Paused("Paused", "متوقف مؤقتًا"),
@@ -321,6 +365,8 @@ enum class TextKey(internal val english: String, internal val arabic: String) {
     CrossfadePreparing("Preparing next track…", "جارٍ تجهيز المقطع التالي…"),
     CrossfadeReady("Next track ready for crossfade", "المقطع التالي جاهز للتداخل"),
     CrossfadeActive("Crossfading", "جارٍ تداخل المقاطع"),
+    PlayingFromDownload("Playing your download", "يُشغَّل من التنزيل"),
+    PlayingOnline("Streaming online", "بث عبر الإنترنت"),
     CrossfadeNextTrack("Incoming track: {0}", "المقطع القادم: {0}"),
     CrossfadeProgress("Crossfade progress: {0}%", "تقدّم التداخل: {0}%"),
     CrossfadeUnavailable("Crossfade is unavailable for this transition.", "تداخل المقاطع غير متاح لهذا الانتقال."),
@@ -329,6 +375,8 @@ enum class TextKey(internal val english: String, internal val arabic: String) {
     Download("Download", "تنزيل"),
     NotDownloaded("Not downloaded", "غير منزّل"),
     DownloadQueued("Queued for download", "في انتظار التنزيل"),
+    DownloadPreparing("Preparing download…", "جارٍ تجهيز التنزيل…"),
+    DownloadStarted("Download started. Follow it in Library › Downloads.", "بدأ التنزيل. تابعه في المكتبة › التنزيلات."),
     DownloadsQueued("Downloads queued", "التنزيلات في قائمة الانتظار"),
     DownloadResolving("Preparing download…", "جارٍ تجهيز التنزيل…"),
     Downloading("Downloading…", "جارٍ التنزيل…"),
@@ -356,8 +404,10 @@ enum class TextKey(internal val english: String, internal val arabic: String) {
     PauseDownload("Pause download", "إيقاف التنزيل مؤقتًا"),
     ResumeDownload("Resume download", "متابعة التنزيل"),
     CancelDownload("Cancel download", "إلغاء التنزيل"),
-    RemoveDownload("Remove download", "إزالة التنزيل"),
-    ConfirmRemoveDownload("Remove the downloaded file for {0}? Saved items and listening progress will stay.", "هل تريد إزالة الملف المنزّل لـ {0}؟ ستبقى العناصر المحفوظة وتقدّم الاستماع."),
+    RemoveDownload("Delete download", "حذف التنزيل"),
+    ConfirmRemoveDownload("Delete the download of {0}? The file is removed from this device and the item leaves your downloads. Saved items and listening progress stay.", "هل تريد حذف تنزيل {0}؟ سيُحذف الملف من هذا الجهاز ويختفي العنصر من التنزيلات. ستبقى العناصر المحفوظة وتقدّم الاستماع."),
+    DownloadsReadyCount("{0} ready offline", "{0} جاهزة دون اتصال"),
+    DownloadsActiveCount("{0} in progress", "{0} قيد التنزيل"),
     RemoveDownloadConfirm("Remove this downloaded file? Saved items and listening progress will stay.", "هل تريد إزالة هذا الملف المنزّل؟ ستبقى العناصر المحفوظة وتقدّم الاستماع."),
     RemoveAllDownloads("Remove all downloads", "إزالة كل التنزيلات"),
     ConfirmRemoveAllDownloads("Remove all downloaded audio? You will need a connection to download it again.", "هل تريد إزالة كل الملفات الصوتية المنزّلة؟ ستحتاج إلى اتصال لتنزيلها مجددًا."),
@@ -419,6 +469,7 @@ enum class TextKey(internal val english: String, internal val arabic: String) {
     OpenSourcePage("Open source page", "فتح صفحة المصدر"),
     SourceRestricted("This source requires access that is not available here. Metadata may still be shown; playback is unavailable.", "يتطلب هذا المصدر صلاحية وصول غير متاحة هنا. قد تظهر المعلومات، لكن التشغيل غير متاح."),
     SourceUnavailable("This source is currently unavailable. Other sources and local files are unaffected.", "هذا المصدر غير متاح حاليًا. لا تتأثر المصادر الأخرى والملفات المحلية."),
+    SourceLinkExpired("This media link expired or was rejected. Retry to request a fresh link.", "انتهت صلاحية رابط الوسائط أو رُفض. أعد المحاولة لطلب رابط جديد."),
     SourceMetadataOnly("Metadata only — audio unavailable", "معلومات فقط — الصوت غير متاح"),
     SourceRightsRequired("Downloading is not available for this source or recording.", "التنزيل غير متاح لهذا المصدر أو التسجيل."),
     Offline("Offline", "دون اتصال"),
@@ -440,6 +491,10 @@ enum class TextKey(internal val english: String, internal val arabic: String) {
     CorruptMedia("This file is incomplete or damaged. Download or import it again.", "هذا الملف غير مكتمل أو تالف. نزّله أو استورده مجددًا."),
     ParseFailure("The source returned unreadable data. Your saved information is kept.", "أرجع المصدر بيانات يتعذّر قراءتها. ستبقى معلوماتك المحفوظة."),
     RecoveryRequired("Saved data needs recovery. Keep your files and restore a valid backup before continuing.", "تحتاج البيانات المحفوظة إلى استعادة. احتفظ بملفاتك واستعد نسخة احتياطية سليمة قبل المتابعة."),
+    FirstResultNotPlayable("YouTube's first result for this title isn't a playable video, so it can't be played.", "النتيجة الأولى على يوتيوب لهذا العنوان ليست مقطعًا قابلًا للتشغيل، لذا لا يمكن تشغيله."),
+    FirstResultCollection("YouTube's first result for this title is a collection. Open it to choose an item.", "النتيجة الأولى على يوتيوب لهذا العنوان مجموعة. افتحها لاختيار عنصر."),
+    PlaybackTryAgain("This item couldn't be prepared. Try playing it again.", "تعذّر تجهيز هذا العنصر. حاول تشغيله مرة أخرى."),
+    PlaybackRestartRequired("Audio playback needs Veyra to be restarted.", "يحتاج تشغيل الصوت إلى إعادة تشغيل ڤيرا."),
     RecoveryBackupPrompt("Restore the last valid backup? Your library will return to that backup, so later changes may be missing. Veyra keeps the damaged files and does not reset your library.", "هل تريد الاستعادة من آخر نسخة احتياطية سليمة؟ ستعود مكتبتك إلى حالة تلك النسخة، وقد لا تظهر التغييرات اللاحقة. سيحتفظ ڤيرا بالملفات التالفة ولن يعِد ضبط مكتبتك."),
     RecoveryRestoreBackup("Restore last valid backup", "استعادة آخر نسخة احتياطية سليمة"),
     FutureSchema("This library was saved by a newer Veyra version. Update the app; do not reset the library.", "حُفظت هذه المكتبة بإصدار أحدث من ڤيرا. حدّث التطبيق ولا تعِد ضبط المكتبة."),
@@ -535,7 +590,9 @@ fun arabicPluralCategory(count: Long): ArabicPluralCategory {
     }
 }
 
-private val placeholderPattern = Regex("\\{([0-9]+)}")
+// Android's ICU regex rejects a bare closing brace even when the opening brace is
+// escaped. The desktop JVM accepts it, so only physical Android startup exposed this.
+private val placeholderPattern = Regex("\\{([0-9]+)\\}")
 private const val FSI = '\u2068'
 private const val LRI = '\u2066'
 private const val PDI = '\u2069'
@@ -717,7 +774,18 @@ class AppStrings(
         FailureCode.STORAGE_IO -> TextKey.StorageError
         FailureCode.CORRUPT_MEDIA -> TextKey.CorruptMedia
         FailureCode.PARSE_FAILURE -> TextKey.ParseFailure
-        FailureCode.RECOVERY_REQUIRED -> TextKey.RecoveryRequired
+        // Only data/download integrity problems ask for recovery; playback selection problems
+        // must not tell the user their saved data is damaged.
+        FailureCode.RECOVERY_REQUIRED -> when (failure.detail) {
+            "YOUTUBE_SOURCE_EXPIRED", "kmpyt_source_expired" -> TextKey.SourceLinkExpired
+            "acquisition_selection_unplayable" -> TextKey.FirstResultNotPlayable
+            "acquisition_collection_action_required" -> TextKey.FirstResultCollection
+            "acquisition_outcome_unknown", "acquisition_selection_not_attached", "acquisition_stale_library_revision",
+            "YOUTUBE_RUNTIME_UNAVAILABLE", "YOUTUBE_SELECTED_TRACK_CHANGED" -> TextKey.PlaybackTryAgain
+            "native_audio_owner_closed", "native_audio_cleanup", "native_reader_release_unacknowledged",
+            "playback_resource_cleanup" -> TextKey.PlaybackRestartRequired
+            else -> TextKey.RecoveryRequired
+        }
         FailureCode.FUTURE_SCHEMA -> TextKey.FutureSchema
         FailureCode.INVALID_STATE -> TextKey.InvalidState
         FailureCode.CANCELLED -> TextKey.Cancelled

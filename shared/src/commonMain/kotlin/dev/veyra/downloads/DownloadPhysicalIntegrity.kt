@@ -1,5 +1,6 @@
 package dev.veyra.downloads
 
+import dev.veyra.platform.BlockingIo
 import dev.veyra.model.AppFailure
 import dev.veyra.model.FailureCode
 import dev.veyra.model.MaterializationAsset
@@ -9,7 +10,6 @@ import dev.veyra.playback.AssetValidation
 import dev.veyra.playback.LocalMediaValidationInput
 import dev.veyra.playback.LocalMediaValidator
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.IO
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
@@ -32,7 +32,7 @@ internal suspend fun DownloadFiles.verifiedFile(
     input: LocalMediaValidationInput,
     phase: DownloadMaterializationCheckPhase = DownloadMaterializationCheckPhase.PRE_NATIVE,
     onRejected: (DownloadMaterializationNegative) -> Unit = {},
-): Path = withContext(Dispatchers.IO) {
+): Path = withContext(BlockingIo) {
     storageOperation {
         val path = ownedPath(input.uri)
         val metadata = fileSystem.metadataOrNull(path)

@@ -1,5 +1,6 @@
 package dev.veyra.downloads
 
+import dev.veyra.platform.BlockingIo
 import dev.veyra.acquisition.*
 import dev.veyra.data.*
 import dev.veyra.model.*
@@ -75,6 +76,7 @@ internal class DownloadPhysicalHost(
     val failCheckpointAdmission: () -> Unit,
     /** Exact active-map/generation guard, then latch and cancel ALL jobs; never join inline. */
     val allowanceExpired: suspend (DownloadPhysicalRun) -> Unit,
+    val diagnostics: DownloadDiagnosticRecorder = DownloadDiagnosticRecorder(),
 )
 
 internal class DownloadPhysicalRun(
@@ -85,6 +87,7 @@ internal class DownloadPhysicalRun(
     val kind: PhysicalDownloadMaintenanceKind?,
     val pathLease: DownloadFileLease,
     val slot: DownloadTransferSlot?,
+    val diagnosticSequence: Long,
 ) {
     private val currentState = MutableStateFlow(current)
     var current: PhysicalDownloadJoin
@@ -287,7 +290,9 @@ internal class DownloadPhysicalRuntime(
                 job.cleanupPending || job.livePhysicalLease(clock.epochMs()) } == true }
     }
 
-    override suspend fun admitMember(command: AdmitAcquisitionDownload): AcquisitionDownloadAdmission = host.commands.withLock {
+    override suspend fun admitMember(
+        command: AdmitAcquisitionDownload,
+    ): AcquisitionDownloadAdmission = diagnosedCommand(DownloadDiagnosticStage.MEMBER_ADMISSION) {
         currentCoroutineContext().ensureActive()
         dependencies.requireOwnerAdmission()
         if (host.state().closed) fail(FailureCode.INVALID_STATE, "download_executor_closed")
@@ -858,6 +863,7 @@ internal class DownloadPhysicalRuntime(
             }
             catch (error: Exception) {
                 failure.update { it ?: classify(error) }
+                recordDiagnostic(DownloadDiagnosticStage.MAINTENANCE_OPERATION, checkNotNull(failure.value), error, run)
                 if (failure.value?.code == FailureCode.BACKGROUND_RESTRICTED) run?.let { expire(it) }
                 // A real cancellation may arrive while the action is classifying a native
                 // negative (or while cleanup masks it). The cancelled scope is authoritative:
@@ -1075,7 +1081,7 @@ internal class DownloadPhysicalRuntime(
                     fail(FailureCode.RECOVERY_REQUIRED, "download_cleanup_reservation_changed")
             }
             return DownloadPhysicalRun(epoch, claimed.value.fence, claimed.value.physical, state.generation,
-                kind, requireNotNull(lease), null).also { handedOff = true }
+                kind, requireNotNull(lease), null, host.diagnostics.nextRunSequence()).also { handedOff = true }
         } finally {
             if (!handedOff) withContext(NonCancellable) {
                 rollback(epoch, partial, listOfNotNull(lease), acceptedDurableOwner) {
@@ -1318,6 +1324,7 @@ internal class DownloadPhysicalRuntime(
         var acceptedDurableOwner = false
         val proposedFence = PhysicalDownloadFence(id, record.producer, record.ownershipGeneration + 1, owner,
             attemptId, record.attemptCount + 1)
+        var diagnosticJoin = before
         try {
             slot = files.tryTransferSlot(state.parallelism, partial) ?: return null
             var path = record.stagingPath.takeIf { !record.representationId.isNullOrBlank() }
@@ -1332,9 +1339,14 @@ internal class DownloadPhysicalRuntime(
                 repository.claimPhysicalDownloadAttempt(ClaimPhysicalDownloadAttempt(id, record.producer,
                     record.ownershipGeneration, attemptId, owner, clock.epochMs(), leaseDurationMs, requireNotNull(path)))
             }
-            if (result !is PhysicalDownloadCommit.Committed) return null
+            if (result !is PhysicalDownloadCommit.Committed) {
+                recordDiagnostic(DownloadDiagnosticStage.EXECUTION_CLAIM, outcome = DownloadDiagnosticOutcome.STALE,
+                    fence = proposedFence, current = diagnosticJoin)
+                return null
+            }
             acceptedDurableOwner = true
             val claimed = result.value
+            diagnosticJoin = claimed.physical
             requireClaim(claimed, proposedFence)
             if (claimed.physical.job.stagingPath != path || claimed.physical.activeAttempt?.stagingPath != path)
                 fail(FailureCode.RECOVERY_REQUIRED, "download_claim_path_changed")
@@ -1342,11 +1354,16 @@ internal class DownloadPhysicalRuntime(
                 claimed.physical.job.etag != null || claimed.physical.job.lastModified != null))
                 fail(FailureCode.RECOVERY_REQUIRED, "download_new_path_checkpoint_not_reset")
             return DownloadPhysicalRun(epoch, claimed.fence, claimed.physical, state.generation, null,
-                requireNotNull(pathLease), slot).also {
+                requireNotNull(pathLease), slot, host.diagnostics.nextRunSequence()).also {
                 runs.update { current -> current + (id to it) }
                 clearClaimDeferrals(id, DownloadClaimKind.ACQUISITION)
                 handedOff = true
             }
+        } catch (error: CancellationException) { throw error }
+        catch (error: Exception) {
+            recordDiagnostic(DownloadDiagnosticStage.EXECUTION_CLAIM, classify(error), error,
+                fence = proposedFence, current = diagnosticJoin)
+            throw error
         } finally {
             if (!handedOff) withContext(NonCancellable) {
                 rollback(epoch, partial, listOfNotNull(pathLease, slot), acceptedDurableOwner) {
@@ -1429,6 +1446,7 @@ internal class DownloadPhysicalRuntime(
         val failure = MutableStateFlow<AppFailure?>(null)
         var cancelled = false
         val partial = DownloadLeaseCleanupScope(host.cleanupRegistry)
+        var diagnosticStage = DownloadDiagnosticStage.INITIAL_CHECKPOINT
         try {
             coroutineScope {
                 val task = currentCoroutineContext().job
@@ -1448,38 +1466,55 @@ internal class DownloadPhysicalRuntime(
                 }
                 try {
                     checkpoint(run)
+                    diagnosticStage = DownloadDiagnosticStage.EXECUTION_ALLOWANCE
                     withContext(NonCancellable) { allowance = gate.acquire { expire(run) } }
                     ensureRun(run, network = true)
+                    diagnosticStage = DownloadDiagnosticStage.SOURCE_PREPARATION
                     val prepared = prepare(run)
+                    diagnosticStage = DownloadDiagnosticStage.REPRESENTATION_COMMIT
                     mutate(run) { repository.selectPhysicalDownloadRepresentation(SelectPhysicalDownloadRepresentation(
                         run.fence, prepared.representation.representationId, run.current.job.validatorGeneration,
                         run.current.job.etag, run.current.job.lastModified, clock.epochMs())) }
-                    val part = withContext(Dispatchers.IO) { files.prepareStagingPath(requireNotNull(run.current.job.stagingPath)) }
+                    diagnosticStage = DownloadDiagnosticStage.STAGING
+                    val part = withContext(BlockingIo) { files.prepareStagingPath(requireNotNull(run.current.job.stagingPath)) }
                     var lastProgress: Long? = null
+                    diagnosticStage = DownloadDiagnosticStage.SOURCE_TRANSFER
                     val result = prepared.transfer(part.toString()) { progress ->
-                        ensureRun(run, network = true)
+                        val now = clock.monotonicMs()
+                        // A restarted transport (fewer bytes than saved) is recorded at once.
+                        val due = lastProgress == null || now - lastProgress!! >= PROGRESS_CHECKPOINT_MS ||
+                            progress.bytesDownloaded == progress.totalBytes || progress.bytesDownloaded < run.current.job.bytesDownloaded
+                        // Sources report every received buffer (a few KiB). The full check reads the
+                        // whole library for the global parallelism limit, so it runs with each
+                        // checkpoint; per buffer only the in-memory ownership gates run. Reading the
+                        // database per buffer held transfers to one buffer per read and kept a core busy.
+                        if (due) ensureRun(run, network = true) else ensureRunOwnership(run, network = true)
                         if (progress.bytesDownloaded < 0 || progress.totalBytes?.let { it < progress.bytesDownloaded } == true)
                             fail(FailureCode.CORRUPT_MEDIA, "invalid_transfer_count")
-                        val now = clock.monotonicMs()
-                        if (lastProgress == null || now - lastProgress!! >= 500 || progress.bytesDownloaded == progress.totalBytes) {
+                        if (due) {
                             checkpoint(run, progress.bytesDownloaded, progress.totalBytes)
                             lastProgress = now
                         }
                     }
                     ensureRun(run, network = true)
+                    diagnosticStage = DownloadDiagnosticStage.TRANSFER_INTEGRITY
                     if (result.bytesWritten <= 0 || result.representation != prepared.representation)
                         fail(FailureCode.CORRUPT_MEDIA, "transfer_identity_changed")
                     requireNativeRepresentation(result.representation)
                     checkpoint(run, result.bytesWritten, result.bytesWritten)
+                    diagnosticStage = DownloadDiagnosticStage.VALIDATION_COMMIT
                     mutate(run) { repository.beginPhysicalDownloadValidation(BeginPhysicalDownloadValidation(run.fence, clock.epochMs())) }
+                    diagnosticStage = DownloadDiagnosticStage.FILE_INTEGRITY
                     if (storageOperation { files.fileSystem.metadata(part).size } != result.bytesWritten)
                         fail(FailureCode.CORRUPT_MEDIA, "transfer_size_changed")
                     val hash = files.sha256(part)
                     val local = LocalMediaValidationInput(part.toString(), OfflineAssetKind.FILE, result.bytesWritten,
                         result.representation.mimeType, result.representation.codecs, hash,
                         result.representation.representationId, run.current.job.validatorGeneration)
+                    diagnosticStage = DownloadDiagnosticStage.NATIVE_VALIDATION
                     val duration = validate(run, local)
                     ensureRun(run, network = true)
+                    diagnosticStage = DownloadDiagnosticStage.FINALIZATION_PREPARE
                     val intent = PhysicalDownloadFinalization(run.fence.downloadId, run.fence.producer, part.toString(),
                         files.finalPath(run.fence.producer.subjectId.value, local.validatorGeneration, local.mimeType,
                             requireNotNull(run.fence.attemptId)).toString(), hash, result.bytesWritten,
@@ -1491,13 +1526,17 @@ internal class DownloadPhysicalRuntime(
                     ensureRun(run, network = true)
                     // A losing cancellation can leave only this reserved generation's file.
                     // Publication still needs exact intent/owner CAS; recovery never reselects.
+                    diagnosticStage = DownloadDiagnosticStage.FILE_PUBLICATION
                     files.atomicPublish(intent.stagingPath, intent.finalPath)
+                    diagnosticStage = DownloadDiagnosticStage.FINALIZATION_PUBLISH
                     publish(run, intent)
+                    recordDiagnostic(diagnosticStage, run = run, outcome = DownloadDiagnosticOutcome.SETTLED)
                 } finally { withContext(NonCancellable) { heartbeat.cancelAndJoin() } }
             }
         } catch (error: CancellationException) { cancelled = failure.value == null; throw error }
         catch (error: Exception) {
             failure.update { it ?: classify(error) }
+            recordDiagnostic(diagnosticStage, checkNotNull(failure.value), error, run)
             if (failure.value?.code == FailureCode.BACKGROUND_RESTRICTED) expire(run)
             else host.publishFailure(checkNotNull(failure.value))
         } finally {
@@ -1561,9 +1600,20 @@ internal class DownloadPhysicalRuntime(
         }
     }
 
-    private suspend fun checkpoint(run: DownloadPhysicalRun, bytes: Long? = null, total: Long? = null) = mutate(run) {
-        repository.heartbeatPhysicalDownload(HeartbeatPhysicalDownload(run.fence, clock.epochMs(), leaseDurationMs,
-            bytes ?: run.current.job.bytesDownloaded, if (bytes == null) run.current.job.totalBytes else total))
+    private suspend fun checkpoint(run: DownloadPhysicalRun, bytes: Long? = null, total: Long? = null) = try {
+        mutate(run) {
+            // Compute inside the mutation lock so a lease-only heartbeat cannot race
+            // the source's latest progress or turn a stale sample into a reset.
+            val previous = run.current.job
+            repository.heartbeatPhysicalDownload(HeartbeatPhysicalDownload(run.fence, clock.epochMs(), leaseDurationMs,
+                bytes ?: previous.bytesDownloaded, if (bytes == null) previous.totalBytes else total,
+                allowProgressReset = bytes != null && bytes < previous.bytesDownloaded))
+        }
+    } catch (error: CancellationException) { throw error }
+    catch (error: Exception) {
+        recordDiagnostic(if (bytes == null) DownloadDiagnosticStage.LEASE_HEARTBEAT else DownloadDiagnosticStage.PROGRESS_CHECKPOINT,
+            classify(error), error, run)
+        throw error
     }
 
     private suspend fun mutate(run: DownloadPhysicalRun,
@@ -1581,13 +1631,17 @@ internal class DownloadPhysicalRuntime(
                         committed(result)
                         result
                     }
-                    PhysicalDownloadCommit.Stale -> throw CancellationException("Download ownership changed")
+                    PhysicalDownloadCommit.Stale -> {
+                        recordDiagnostic(DownloadDiagnosticStage.OWNERSHIP_COMPARE_AND_SET, run = run,
+                            outcome = DownloadDiagnosticOutcome.STALE)
+                        throw CancellationException("Download ownership changed")
+                    }
                 }
             }
         }
 
     private suspend fun publish(run: DownloadPhysicalRun, intent: PhysicalDownloadFinalization) {
-        val asset = materialized(intent)
+        var asset = materialized(intent)
         files.verifiedFile(asset.validationInput())
         mutate(run, committed = { result ->
             val joined = result.value
@@ -1601,7 +1655,9 @@ internal class DownloadPhysicalRuntime(
             materializationEvidence.recordPhysicalSuccess(run.fence.downloadId, asset)
             epochs.recordDurable(run.epoch, AcquisitionDownloadDurableSettlement.Confirmed(result.libraryRevision))
         }) {
-            repository.publishPhysicalDownloadFinalization(PublishPhysicalDownloadFinalization(run.fence, intent, asset, clock.epochMs()))
+            val now = clock.epochMs()
+            asset = asset.copy(completedEpochMs = now)
+            repository.publishPhysicalDownloadFinalization(PublishPhysicalDownloadFinalization(run.fence, intent, asset, now))
         }
     }
 
@@ -1621,11 +1677,20 @@ internal class DownloadPhysicalRuntime(
             cancelled || state.closed -> DownloadStatus.QUEUED
             else -> DownloadStatus.FAILED
         }
-        return settle { repository.finishPhysicalDownloadAttempt(FinishPhysicalDownloadAttempt(run.fence, target,
+        val settlement = try { settle { repository.finishPhysicalDownloadAttempt(FinishPhysicalDownloadAttempt(run.fence, target,
             if (cancelled) DownloadAttemptStatus.PAUSED else DownloadAttemptStatus.FAILED,
             if (target == DownloadStatus.NEEDS_FOREGROUND) AppFailure(FailureCode.BACKGROUND_RESTRICTED) else failure,
             if (retry) deadline(DownloadCoordinator.retryDelayMs(before.automaticRetryCount, failure?.retryAfterMs)) else before.nextRetryEpochMs,
-            before.automaticRetryCount + if (retry) 1 else 0, clock.epochMs())) }
+            before.automaticRetryCount + if (retry) 1 else 0, clock.epochMs())) } }
+        catch (error: CancellationException) { throw error }
+        catch (error: Exception) {
+            recordDiagnostic(DownloadDiagnosticStage.ATTEMPT_SETTLEMENT, classify(error), error, run)
+            throw error
+        }
+        recordDiagnostic(DownloadDiagnosticStage.ATTEMPT_SETTLEMENT, failure, run = run,
+            outcome = if (settlement == AcquisitionDownloadDurableSettlement.Stale) DownloadDiagnosticOutcome.STALE
+                else DownloadDiagnosticOutcome.SETTLED)
+        return settlement
     }
 
     private fun materialized(intent: PhysicalDownloadFinalization): MaterializationAsset {
@@ -1799,6 +1864,13 @@ internal class DownloadPhysicalRuntime(
             throw CancellationException("Download transfer slot retired by parallelism policy")
     }
 
+    /** [ensureRun] without its database read: cancellation, host state and ownership epoch only. */
+    private suspend fun ensureRunOwnership(run: DownloadPhysicalRun, network: Boolean) {
+        currentCoroutineContext().ensureActive()
+        ensureHost(run.hostGeneration, network)
+        if (epochs.isRevoked(run.epoch)) throw CancellationException("Download physical ownership revoked")
+    }
+
     private fun ensureHost(generation: Long, network: Boolean) {
         val state = host.state()
         state.failure?.let { throw VeyraException(it) }
@@ -1904,6 +1976,38 @@ internal class DownloadPhysicalRuntime(
     }
 
     private fun deadline(delay: Long) = clock.epochMs().coerceIn(0, Long.MAX_VALUE - delay) + delay
+    internal fun recordDiagnostic(stage: DownloadDiagnosticStage, failure: AppFailure? = null, error: Throwable? = null,
+        run: DownloadPhysicalRun? = null, outcome: DownloadDiagnosticOutcome = DownloadDiagnosticOutcome.FAILURE,
+        fence: PhysicalDownloadFence? = run?.fence, current: PhysicalDownloadJoin? = run?.current) {
+        val cached = repository.state.value
+        val observed = fence?.let { cached.physicalDownloads[it.downloadId] }
+        val observedFinalization = observed?.let { cached.physicalFinalizations[it.id] }
+        val observedAttemptId = if (observed?.maintenanceKind == PhysicalDownloadMaintenanceKind.RECOVER_FINALIZATION)
+            observedFinalization?.attemptId else observed?.activeAttemptId
+        val now = clock.epochMs()
+        val state = host.state()
+        host.diagnostics.record(stage, failure, error, outcome, fence?.ownershipGeneration, fence?.attemptNumber,
+            run?.diagnosticSequence,
+            if (current != null && fence != null) physicalDownloadDiagnosticState(current.job,
+                current.attempts.singleOrNull { it.id == (if (current.job.maintenanceKind == PhysicalDownloadMaintenanceKind.RECOVER_FINALIZATION)
+                    current.finalization?.attemptId else current.job.activeAttemptId) }, current.finalization, fence, now,
+                current.job.representationId, diagnosticDownloadClaimDemand(current.job.id, current.claims)) else null,
+            if (observed != null) physicalDownloadDiagnosticState(observed,
+                observedAttemptId?.let { cached.physicalAttempts[it] }, observedFinalization, fence, now,
+                current?.job?.representationId, diagnosticDownloadClaimDemand(observed.id,
+                    cached.claims.values.filter { it.physicalJobId == observed.id })) else null,
+            state.diagnosticState(run?.hostGeneration))
+    }
+
+    internal suspend fun <T> diagnosedCommand(stage: DownloadDiagnosticStage, action: suspend () -> T): T = try {
+        host.commands.withLock { action() }
+    }
+    catch (error: CancellationException) { throw error }
+    catch (error: Exception) {
+        recordDiagnostic(stage, classify(error), error)
+        throw error
+    }
+
     private fun classify(error: Throwable): AppFailure = when (error) {
         is LocalMediaValidationReaderUnacknowledged -> AppFailure(FailureCode.BACKGROUND_RESTRICTED, "local_validation_reader_unacknowledged")
         is VeyraException -> error.failure
@@ -1913,6 +2017,8 @@ internal class DownloadPhysicalRuntime(
     private fun fail(code: FailureCode, detail: String): Nothing = throw VeyraException(AppFailure(code, detail))
     private companion object {
         const val LOCAL_RECHECK_MS = 5_000L
+        /** Each progress checkpoint is a whole-library Room transaction; keep it well under the lease. */
+        const val PROGRESS_CHECKPOINT_MS = 1_500L
         /** Bounded real handoff allowance for a scheduler-owned removal; never an unbounded wait. */
         const val REMOVAL_OWNER_GRACE_MS = 5_000L
         val RETRYABLE = setOf(FailureCode.NETWORK_UNAVAILABLE, FailureCode.RATE_LIMITED)

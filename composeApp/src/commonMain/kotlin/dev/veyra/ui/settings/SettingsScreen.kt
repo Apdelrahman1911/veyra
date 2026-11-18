@@ -1,6 +1,16 @@
 package dev.veyra.ui.settings
 
-import androidx.compose.foundation.BorderStroke
+import dev.veyra.ui.design.bottomChrome
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.draw.clip
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.indication
+import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -24,15 +34,21 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Slider
+import com.mohamedrejeb.calf.ui.slider.AdaptiveSlider
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
+import com.mohamedrejeb.calf.ui.toggle.AdaptiveSwitch
+import androidx.compose.material3.Icon
+import androidx.compose.material3.TextButton
+import dev.veyra.ui.design.VeyraIcons
+import dev.veyra.ui.design.ScreenIntro
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import dev.veyra.nativecomponents.LocalNativeControlAccessibility
+import dev.veyra.nativecomponents.NativeControlAccessibility
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -79,15 +95,15 @@ fun SettingsScreen(
     Box(modifier.fillMaxSize().testTag("settings-screen"), contentAlignment = Alignment.TopCenter) {
         LazyColumn(
             modifier = Modifier.widthIn(max = 880.dp).fillMaxSize().testTag("settings-list"),
-            contentPadding = PaddingValues(horizontal = VeyraSpacing.Large, vertical = VeyraSpacing.Section),
-            verticalArrangement = Arrangement.spacedBy(VeyraSpacing.Section),
+            contentPadding = PaddingValues(start = VeyraSpacing.Large, end = VeyraSpacing.Large, top = VeyraSpacing.Section,
+                bottom = bottomChrome(VeyraSpacing.Section)),
+            verticalArrangement = Arrangement.spacedBy(VeyraSpacing.Large),
         ) {
             item("title") {
-                Text(strings.text(TextKey.Settings), style = MaterialTheme.typography.headlineLarge,
-                    modifier = Modifier.semantics { heading() })
+                ScreenIntro(strings.text(TextKey.Settings), strings.text(TextKey.SettingsSubtitle))
             }
             item("playback") {
-                SettingsSection(strings.text(TextKey.Playback)) {
+                SettingsSection(TextKey.Playback, VeyraIcons.Music) {
                     ToggleSetting(
                         title = strings.text(TextKey.Crossfade), description = strings.text(TextKey.CrossfadeDescription),
                         checked = settings.crossfadeEnabled,
@@ -111,13 +127,14 @@ fun SettingsScreen(
                         }
                     }
                     CrossfadeDurationInput(settings.crossfadeDurationMs, capabilities.supportsCrossfade, onSettingsChange)
+                    SettingsDivider()
                     Text(strings.text(TextKey.CrossfadeHeadroom), style = MaterialTheme.typography.titleSmall)
-                    Text(strings.text(TextKey.CrossfadeHeadroomDescription), style = MaterialTheme.typography.bodyMedium)
+                    SettingsNote(strings.text(TextKey.CrossfadeHeadroomDescription))
                 }
             }
             item("podcasts") {
-                SettingsSection(strings.text(TextKey.PodcastDefaults)) {
-                    Text(strings.text(TextKey.DefaultPodcastSpeedDescription), style = MaterialTheme.typography.bodyMedium)
+                SettingsSection(TextKey.PodcastDefaults, VeyraIcons.Podcasts) {
+                    SettingsNote(strings.text(TextKey.DefaultPodcastSpeedDescription))
                     val speeds = supportedPodcastSpeeds(capabilities, settings.speed)
                     if (settings.speed !in speeds) {
                         Text(strings.text(TextKey.SpeedPreferenceUnavailable), color = LocalVeyraColors.current.warning)
@@ -139,7 +156,7 @@ fun SettingsScreen(
                 }
             }
             item("appearance") {
-                SettingsSection(strings.text(TextKey.Appearance)) {
+                SettingsSection(TextKey.Appearance, VeyraIcons.Settings) {
                     ChoiceGroup(strings.text(TextKey.Language)) {
                         LanguagePreference.entries.forEach { language ->
                             SettingsButton(strings.languageName(language), selected = settings.language == language,
@@ -158,7 +175,7 @@ fun SettingsScreen(
                 }
             }
             item("offline") {
-                SettingsSection(strings.text(TextKey.Offline)) {
+                SettingsSection(TextKey.Offline, VeyraIcons.Library) {
                     ToggleSetting(strings.text(TextKey.OfflineMode), strings.text(TextKey.OfflineModeDescription),
                         checked = settings.offlineOnly,
                         modifier = Modifier.testTag("settings-offline"),
@@ -166,8 +183,8 @@ fun SettingsScreen(
                 }
             }
             item("downloads") {
-                SettingsSection(strings.text(TextKey.Downloads)) {
-                    Text(strings.text(TextKey.ParallelDownloadsDescription), style = MaterialTheme.typography.bodyMedium)
+                SettingsSection(TextKey.Downloads, VeyraIcons.Download) {
+                    SettingsNote(strings.text(TextKey.ParallelDownloadsDescription))
                     ChoiceGroup(strings.text(TextKey.ParallelDownloads)) {
                         (1..4).forEach { count ->
                             SettingsButton(strings.number(count.toLong()), selected = settings.downloadParallelism == count,
@@ -175,29 +192,32 @@ fun SettingsScreen(
                                 onClick = { onSettingsChange(SettingsAction.SetDownloadParallelism(count)) })
                         }
                     }
-                    Text(strings.text(TextKey.DownloadExecutionNotice), style = MaterialTheme.typography.bodyMedium)
+                    SettingsNote(strings.text(TextKey.DownloadExecutionNotice))
+                    SettingsDivider()
                     Text(storageBytes?.takeIf { it >= 0 }?.let { strings.format(TextKey.StorageUsed, strings.byteSize(it)) }
-                        ?: strings.text(TextKey.StorageUsageUnavailable), style = MaterialTheme.typography.bodyMedium,
+                        ?: strings.text(TextKey.StorageUsageUnavailable), style = MaterialTheme.typography.titleSmall,
                         modifier = Modifier.testTag("settings-storage-value"))
-                    SettingsButton(strings.text(TextKey.ManageStorage), onClick = onManageStorage,
-                        modifier = Modifier.testTag("settings-manage-storage"))
+                    SettingsLinkRow(strings.text(TextKey.ManageStorage), VeyraIcons.Download, onManageStorage,
+                        Modifier.testTag("settings-manage-storage"))
                 }
             }
             item("about") {
-                SettingsSection(strings.text(TextKey.About)) {
-                    Text(strings.text(TextKey.LocalDataNotice), style = MaterialTheme.typography.bodyMedium)
+                SettingsSection(TextKey.About, VeyraIcons.Info) {
+                    SettingsLinkRow(strings.text(TextKey.Licenses), VeyraIcons.OpenInNew, onOpenLicenses,
+                        Modifier.testTag("settings-licenses"))
+                    SettingsDivider()
+                    SettingsNote(strings.text(TextKey.LocalDataNotice))
                     Text(strings.text(TextKey.Privacy), style = MaterialTheme.typography.titleSmall,
                         modifier = Modifier.semantics { heading() })
-                    Text(strings.text(TextKey.PublisherNetworkNotice), style = MaterialTheme.typography.bodyMedium)
-                    Text(strings.text(TextKey.CompleteTitlePrivacyNotice), style = MaterialTheme.typography.bodyMedium)
-                    SettingsButton(strings.text(TextKey.Licenses), onClick = onOpenLicenses,
-                        modifier = Modifier.testTag("settings-licenses"))
+                    SettingsNote(strings.text(TextKey.PublisherNetworkNotice))
+                    SettingsNote(strings.text(TextKey.CompleteTitlePrivacyNotice))
+                    SettingsDivider()
                     Text(strings.text(TextKey.KeyboardShortcuts), style = MaterialTheme.typography.titleSmall,
                         modifier = Modifier.semantics { heading() })
-                    Text(strings.text(TextKey.ShortcutSearch), style = MaterialTheme.typography.bodyMedium)
-                    Text(strings.text(TextKey.ShortcutClose), style = MaterialTheme.typography.bodyMedium)
-                    Text(strings.text(TextKey.ShortcutPlayback), style = MaterialTheme.typography.bodyMedium)
-                    Text(strings.text(TextKey.KeyboardHelp), style = MaterialTheme.typography.bodyMedium)
+                    SettingsNote(strings.text(TextKey.ShortcutSearch))
+                    SettingsNote(strings.text(TextKey.ShortcutClose))
+                    SettingsNote(strings.text(TextKey.ShortcutPlayback))
+                    SettingsNote(strings.text(TextKey.KeyboardHelp))
                 }
             }
         }
@@ -205,51 +225,109 @@ fun SettingsScreen(
 }
 
 @Composable
-private fun SettingsSection(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Surface(modifier = Modifier.fillMaxWidth(), color = LocalVeyraColors.current.surface,
-        shape = RoundedCornerShape(VeyraRadii.Card)) {
-        Column(Modifier.padding(VeyraSpacing.Large), verticalArrangement = Arrangement.spacedBy(VeyraSpacing.Large)) {
-            Text(title, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.semantics { heading() })
-            content()
+private fun SettingsSection(titleKey: TextKey, icon: ImageVector, content: @Composable ColumnScope.() -> Unit) {
+    val strings = LocalStrings.current
+    val title = strings.text(titleKey)
+    // A grouped list: a small tinted heading above one quiet card of compact rows.
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Icon(icon, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+            Text(title, Modifier.weight(1f).testTag("settings-section-${titleKey.name}").semantics { heading() },
+                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                color = MaterialTheme.colorScheme.primary)
         }
+        Surface(modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(18.dp)) {
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                content()
+            }
+        }
+    }
+}
+
+/** Secondary explanation under a setting: smaller and quieter than the setting itself. */
+@Composable
+private fun SettingsNote(text: String) {
+    Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+}
+
+@Composable
+private fun SettingsDivider() {
+    HorizontalDivider(color = LocalVeyraColors.current.outlineSubtle.copy(alpha = .5f))
+}
+
+/** A row that opens another screen: icon, title, optional detail and a trailing chevron. */
+@Composable
+private fun SettingsLinkRow(title: String, icon: ImageVector, onClick: () -> Unit, modifier: Modifier = Modifier,
+    detail: (@Composable () -> Unit)? = null) {
+    val interactions = remember { MutableInteractionSource() }
+    val focused by interactions.collectIsFocusedAsState()
+    val shape = RoundedCornerShape(VeyraRadii.Small)
+    Row(
+        modifier.fillMaxWidth().sizeIn(minHeight = VeyraSpacing.TouchTarget)
+            .then(if (focused) Modifier.border(2.dp, LocalVeyraColors.current.primary, shape) else Modifier)
+            .clip(shape)
+            .clickable(interactionSource = interactions, indication = LocalIndication.current, role = Role.Button, onClick = onClick)
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Icon(icon, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            detail?.invoke()
+        }
+        Icon(VeyraIcons.ChevronForward, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ChoiceGroup(title: String, content: @Composable () -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(VeyraSpacing.Small)) {
-        Text(title, style = MaterialTheme.typography.titleSmall, modifier = Modifier.semantics { heading() })
+    Column {
+        Text(title, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.semantics { heading() })
+        // The chips draw 34dp tall inside full 48dp touch targets, so rows stay tight.
         FlowRow(modifier = Modifier.fillMaxWidth().selectableGroup(),
-            horizontalArrangement = Arrangement.spacedBy(VeyraSpacing.Small),
-            verticalArrangement = Arrangement.spacedBy(VeyraSpacing.Small)) { content() }
+            horizontalArrangement = Arrangement.spacedBy(6.dp)) { content() }
     }
 }
 
-/** Wrapping, minimum-48dp buttons with a high-contrast border for keyboard focus. */
+/**
+ * A compact chip: it draws 34dp tall but takes taps across a full 48dp target. The chosen one is
+ * filled and checked; keyboard focus adds a ring.
+ */
 @Composable
 private fun SettingsButton(label: String, onClick: () -> Unit, selected: Boolean? = null, enabled: Boolean = true,
     modifier: Modifier = Modifier) {
     val interactions = remember { MutableInteractionSource() }
     val focused by interactions.collectIsFocusedAsState()
     val colors = LocalVeyraColors.current
-    val shape = RoundedCornerShape(VeyraRadii.Small)
-    OutlinedButton(
-        onClick = onClick, enabled = enabled, interactionSource = interactions,
-        // Reserve space for a separate focus ring so focusing an already-selected choice is
-        // distinguishable, without moving controls or reducing the inner 48dp target.
-        modifier = modifier.then(if (focused) Modifier.border(2.dp, colors.primary, shape) else Modifier)
-            .padding(VeyraSpacing.Tiny)
-            .sizeIn(minWidth = VeyraSpacing.TouchTarget, minHeight = VeyraSpacing.TouchTarget)
+    val chosen = selected == true
+    val shape = CircleShape
+    Box(
+        modifier.sizeIn(minWidth = VeyraSpacing.TouchTarget, minHeight = VeyraSpacing.TouchTarget)
+            .clickable(interactionSource = interactions, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
             .semantics { if (selected != null) this.selected = selected },
-        border = BorderStroke(if (selected == true) 2.dp else 1.dp,
-            if (selected == true) colors.primary else colors.outline),
-        shape = shape,
-        colors = ButtonDefaults.outlinedButtonColors(
-            containerColor = if (selected == true) colors.primaryContainer else colors.surface,
-            contentColor = if (selected == true) colors.onPrimaryContainer else colors.onSurface,
-        ),
-    ) { Text(label) }
+        contentAlignment = Alignment.Center,
+    ) {
+        Row(
+            Modifier.sizeIn(minHeight = 34.dp)
+                .then(if (focused) Modifier.border(2.dp, colors.primary, shape) else Modifier)
+                .clip(shape)
+                .background(if (chosen) colors.primary else MaterialTheme.colorScheme.surfaceContainerLow)
+                .then(if (chosen) Modifier else Modifier.border(1.dp, colors.outlineSubtle, shape))
+                .indication(interactions, LocalIndication.current)
+                .alpha(if (enabled) 1f else .38f)
+                .padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (chosen) Icon(VeyraIcons.Check, null, Modifier.padding(end = 4.dp).size(14.dp),
+                tint = MaterialTheme.colorScheme.onPrimary)
+            Text(label, style = MaterialTheme.typography.labelLarge,
+                color = if (chosen) MaterialTheme.colorScheme.onPrimary else colors.onSurface)
+        }
+    }
 }
 
 @Composable
@@ -265,14 +343,16 @@ private fun ToggleSetting(title: String, description: String, checked: Boolean, 
             .toggleable(value = checked, enabled = enabled, role = Role.Switch, interactionSource = interactions,
                 indication = LocalIndication.current, onValueChange = onChange)
             .semantics(mergeDescendants = true) { stateDescription = strings.text(if (checked) TextKey.SettingOn else TextKey.SettingOff) }
-            .padding(VeyraSpacing.Small),
+            .padding(vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(VeyraSpacing.Medium), verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(VeyraSpacing.Tiny)) {
-            Text(title, style = MaterialTheme.typography.titleSmall)
-            Text(description, style = MaterialTheme.typography.bodyMedium)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Switch(checked = checked, onCheckedChange = null, enabled = enabled,
+        // On iOS the switch is a native UISwitch drawn above Compose that takes its own taps, so it
+        // must report them itself; the row stays toggleable for the rest of its area.
+        AdaptiveSwitch(checked = checked, onCheckedChange = if (enabled) onChange else null, enabled = enabled,
             modifier = Modifier.sizeIn(minWidth = VeyraSpacing.TouchTarget, minHeight = VeyraSpacing.TouchTarget).clearAndSetSemantics { })
     }
 }
@@ -324,13 +404,19 @@ private fun TextSizeSetting(value: Float, onAction: (SettingsAction) -> Unit) {
     val title = strings.text(TextKey.TextSize)
     Column(verticalArrangement = Arrangement.spacedBy(VeyraSpacing.Small)) {
         Text(label, style = MaterialTheme.typography.titleSmall)
-        Text(strings.text(TextKey.TextSizeDescription), style = MaterialTheme.typography.bodyMedium)
-        Slider(value = draft, onValueChange = { draft = it }, valueRange = .75f..2f, steps = 24,
-            interactionSource = interactions,
-            onValueChangeFinished = { onAction(SettingsAction.SetTextScale((draft * 20).roundToInt() / 20f)) },
-            modifier = Modifier.fillMaxWidth().sizeIn(minHeight = VeyraSpacing.TouchTarget).testTag("settings-text-scale")
-                .then(if (focused) Modifier.border(2.dp, LocalVeyraColors.current.primary, RoundedCornerShape(VeyraRadii.Small)) else Modifier)
-                .semantics { contentDescription = title; stateDescription = label })
+        SettingsNote(strings.text(TextKey.TextSizeDescription))
+        CompositionLocalProvider(LocalNativeControlAccessibility provides NativeControlAccessibility(
+            label = title,
+            value = strings.format(TextKey.PercentValue, strings.number((draft * 100).roundToInt().toLong())),
+            languageTag = if (strings.isRtl) "ar" else "en",
+        )) {
+            AdaptiveSlider(value = draft, onValueChange = { draft = it }, valueRange = .75f..2f, steps = 24,
+                interactionSource = interactions,
+                onValueChangeFinished = { onAction(SettingsAction.SetTextScale((draft * 20).roundToInt() / 20f)) },
+                modifier = Modifier.fillMaxWidth().sizeIn(minHeight = VeyraSpacing.TouchTarget).testTag("settings-text-scale")
+                    .then(if (focused) Modifier.border(2.dp, LocalVeyraColors.current.primary, RoundedCornerShape(VeyraRadii.Small)) else Modifier)
+                    .semantics { contentDescription = title; stateDescription = label })
+        }
         ChoiceGroup(title) {
             // Non-drag alternatives apply relative to the CURRENT Room value, including rapid clicks.
             SettingsButton(strings.text(TextKey.SmallerText), enabled = value > .75f,

@@ -132,6 +132,8 @@ class TypedDownloadSurfacesTest {
         ui.onNodeWithTag("track-download-remove").assertIsDisplayed()
 
         ui.runOnIdle { surface = DownloadSurface(listOf(readyTyped())) }
+        ui.onNodeWithTag("track-detail-content").performScrollToNode(hasTestTag("track-audio-details"))
+        ui.onNodeWithTag("track-audio-details").performClick()
         ui.onNodeWithTag("track-detail-content").performScrollToNode(hasTestTag("track-downloaded-audio"))
         ui.onNodeWithText(english.format(TextKey.DownloadedAudioDuration, english.mediaTime(12_345))).assertIsDisplayed()
         ui.onNode(hasText(english.text(TextKey.Downloaded)) and hasAnyAncestor(hasTestTag("track-downloaded-audio")))

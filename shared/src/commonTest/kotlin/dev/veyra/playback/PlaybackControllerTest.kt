@@ -8,6 +8,86 @@ import kotlin.test.*
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class PlaybackControllerTest {
+    @Test fun successfulSeekReassertsPlayIntentBeforeDelayedNativePauseObservation() = runTest {
+        val fixture = PlaybackFixture(this)
+        try {
+            fixture.play()
+            fixture.engine.autoSeek = false
+            fixture.command(PlaybackCommand.Seek(20_000, fixture.state.currentEntryId, fixture.state.generation))
+            val seek = fixture.engine.seeks.single()
+            assertTrue(fixture.state.isPlaying)
+            fixture.engine.plays.clear()
+            fixture.event(EngineEvent.SeekCompleted(fixture.state.generation, seek.sequence, 20_000))
+            assertEquals(listOf(fixture.state.generation), fixture.engine.plays)
+            assertTrue(fixture.state.desiredPlaying)
+        } finally { fixture.close() }
+    }
+
+    @Test fun successfulSeekRestoresPlayIntentWhenNativePlaybackHasPaused() = runTest {
+        val fixture = PlaybackFixture(this)
+        try {
+            fixture.play()
+            fixture.engine.autoSeek = false
+            fixture.command(PlaybackCommand.Seek(20_000, fixture.state.currentEntryId, fixture.state.generation))
+            val seek = fixture.engine.seeks.single()
+            fixture.event(EngineEvent.StateChanged(fixture.state.generation, EnginePhase.PAUSED, false))
+            assertTrue(fixture.state.desiredPlaying)
+            fixture.engine.plays.clear()
+            fixture.event(EngineEvent.SeekCompleted(fixture.state.generation, seek.sequence, 20_000))
+            assertEquals(listOf(fixture.state.generation), fixture.engine.plays)
+            assertTrue(fixture.state.isPlaying)
+        } finally { fixture.close() }
+    }
+
+    @Test fun pauseDuringSeekIsNotOverriddenByItsCompletion() = runTest {
+        val fixture = PlaybackFixture(this)
+        try {
+            fixture.play()
+            fixture.engine.autoSeek = false
+            fixture.command(PlaybackCommand.Seek(20_000, fixture.state.currentEntryId, fixture.state.generation))
+            val seek = fixture.engine.seeks.single()
+            fixture.command(PlaybackCommand.Pause)
+            fixture.engine.plays.clear()
+            fixture.event(EngineEvent.SeekCompleted(fixture.state.generation, seek.sequence, 20_000))
+            assertTrue(fixture.engine.plays.isEmpty())
+            assertFalse(fixture.state.desiredPlaying)
+        } finally { fixture.close() }
+    }
+
+    @Test fun seekToEndNeverRestartsPlayback() = runTest {
+        val fixture = PlaybackFixture(this)
+        try {
+            fixture.play()
+            fixture.engine.autoSeek = false
+            fixture.command(PlaybackCommand.Seek(100_000, fixture.state.currentEntryId, fixture.state.generation))
+            val seek = fixture.engine.seeks.single()
+            fixture.event(EngineEvent.StateChanged(fixture.state.generation, EnginePhase.PAUSED, false))
+            fixture.engine.plays.clear()
+            fixture.event(EngineEvent.SeekCompleted(fixture.state.generation, seek.sequence, 100_000))
+            assertTrue(fixture.engine.plays.isEmpty())
+        } finally { fixture.close() }
+    }
+
+    @Test fun staleAndDuplicateSeekCompletionsCannotResumePlayback() = runTest {
+        val fixture = PlaybackFixture(this)
+        try {
+            fixture.play()
+            fixture.engine.autoSeek = false
+            val generation = fixture.state.generation
+            fixture.command(PlaybackCommand.Seek(20_000, fixture.state.currentEntryId, generation))
+            fixture.command(PlaybackCommand.Seek(30_000, fixture.state.currentEntryId, generation))
+            val first = fixture.engine.seeks.first()
+            val latest = fixture.engine.seeks.last()
+            fixture.event(EngineEvent.StateChanged(generation, EnginePhase.PAUSED, false))
+            fixture.engine.plays.clear()
+            fixture.event(EngineEvent.SeekCompleted(generation, first.sequence, 20_000))
+            assertTrue(fixture.engine.plays.isEmpty())
+            fixture.event(EngineEvent.SeekCompleted(generation, latest.sequence, 30_000))
+            fixture.event(EngineEvent.SeekCompleted(generation, latest.sequence, 30_000))
+            assertEquals(listOf(generation), fixture.engine.plays)
+        } finally { fixture.close() }
+    }
+
     @Test fun restoresBothQueuesPausedWithoutSourceOrNativePreparation() = runTest {
         val track = testTrack()
         val episode = testTrack("episode", MediaKind.EPISODE)

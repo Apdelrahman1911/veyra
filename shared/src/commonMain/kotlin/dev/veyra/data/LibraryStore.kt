@@ -1,5 +1,6 @@
 package dev.veyra.data
 
+import dev.veyra.platform.BlockingIo
 import dev.veyra.data.room.*
 import dev.veyra.model.*
 import kotlinx.coroutines.*
@@ -31,12 +32,12 @@ fun StoreResult.getOrThrow(): AppSnapshot = when (this) {
  */
 class LibraryStore internal constructor(
     private val persistence: LibraryPersistence,
-    private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val dispatcher: CoroutineDispatcher = BlockingIo,
 ) : LibraryTransactionOwned {
     override val transactionOwner = LibraryTransactionOwner()
     private val catalogLibraryUndoOwner = CatalogLibraryUndoOwner()
 
-    constructor(database: VeyraDatabase, dispatcher: CoroutineDispatcher = Dispatchers.IO) :
+    constructor(database: VeyraDatabase, dispatcher: CoroutineDispatcher = BlockingIo) :
         this(RoomLibraryPersistence(database), dispatcher)
 
     private val mutex = Mutex()
@@ -387,9 +388,12 @@ class LibraryStore internal constructor(
             observing = true
             observerScope.launch {
                 try {
-                    persistence.changes().collect {
+                    persistence.changedRevisions().collect { revision ->
                         mutex.withLock {
                             if (mutableStatus.value !is StoreStatus.Ready) return@withLock
+                            // This store's own commits are already published; re-reading the whole
+                            // library for them doubled the cost of every write.
+                            if (revision != null && revision == mutableState.value.revision) return@withLock
                             readLatest()
                         }
                     }
