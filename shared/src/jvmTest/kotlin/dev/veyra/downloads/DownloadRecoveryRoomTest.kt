@@ -173,8 +173,15 @@ class DownloadRecoveryRoomTest {
             closing.release()
             a.coordinator.close()
             assertTrue(a.coordinator.dependencyReleaseSafeAfterClose)
-            advance(5_000) // Actual ownership contention backoff, not an intent-only success.
-            bDeleting.entered.await()
+            advance(5_000)
+            // An already-refused lock can record its backoff after the clock advance.
+            // Keep virtual time moving until the real cleanup reaches the deletion barrier.
+            awaitCondition {
+                if (bDeleting.entered.isCompleted) true else {
+                    advance(100)
+                    false
+                }
+            }
             assertFalse(removing.isCompleted, "remove must wait for the actual deletion, not cleanupPending")
             assertTrue(join(b, id).job.cleanupPending)
             assertContentEquals(authoredBytes, Files.readAllBytes(Path.of(asset.uri)))
