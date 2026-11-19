@@ -38,15 +38,15 @@ if [ "$1" = --version ]; then
         exit 19
     fi
     if [ "$count" -le "$AUTHORED_TRANSIENT_FAILURES" ]; then
-        printf '%s\\n' 'java.io.IOException: Server returned HTTP response code: 504 for URL: https://github.com/gradle/gradle-distributions/releases/download/v8.13.0/gradle-8.13-bin.zip' >&2
+        printf '%s\\n' 'java.io.IOException: Server returned HTTP response code: 504 for URL: https://github.com/gradle/gradle-distributions/releases/download/v9.7.1/gradle-9.7.1-bin.zip' >&2
         exit 18
     fi
-    printf '%s\\n' 'Gradle 8.13'
+    printf '%s\\n' 'Gradle 9.7.1'
     exit 0
 fi
 printf '%s\\n' "$@" >> .work/build-arguments
 if [ "$AUTHORED_BUILD_FAILURE" = 1 ]; then
-    printf '%s\\n' 'Server returned HTTP response code: 504 for URL: https://github.com/gradle/gradle-distributions/releases/download/v8.13.0/gradle-8.13-bin.zip' >&2
+    printf '%s\\n' 'Server returned HTTP response code: 504 for URL: https://github.com/gradle/gradle-distributions/releases/download/v9.7.1/gradle-9.7.1-bin.zip' >&2
     exit 17
 fi
 exit 0

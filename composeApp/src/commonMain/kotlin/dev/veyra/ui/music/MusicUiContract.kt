@@ -33,6 +33,7 @@ data class SearchUiState(
     val loading: Boolean = false,
     val searched: Boolean = false,
     val failure: AppFailure? = null,
+    internal val requestGeneration: Long = 0,
 )
 
 /** Real source collection metadata/results; the root owns fetching and pagination. */

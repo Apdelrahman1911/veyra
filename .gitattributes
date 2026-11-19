@@ -13,8 +13,12 @@ gradlew.bat -text whitespace=cr-at-eol
 composeApp/src/commonMain/composeResources/files/licenses/ibm_plex_sans_arabic_ofl.txt -text whitespace=-blank-at-eol,-blank-at-eof,cr-at-eol
 # The legal bundle contains verbatim upstream notices, not whitespace-normalized copies.
 composeApp/src/commonMain/composeResources/files/legal/THIRD_PARTY_NOTICES.txt -text whitespace=-blank-at-eol,-blank-at-eof,cr-at-eol
+composeApp/src/commonMain/composeResources/files/legal/kmpYT-* -text whitespace=-blank-at-eol,-blank-at-eof,cr-at-eol
+composeApp/src/commonMain/composeResources/files/legal/nativeCmpkit-* -text whitespace=-blank-at-eol,-blank-at-eof,cr-at-eol
 composeApp/src/commonMain/composeResources/files/legal/notices/*.txt -text whitespace=-blank-at-eol,-blank-at-eof,cr-at-eol
 third_party/notices/texts/*.txt -text whitespace=-blank-at-eol,-blank-at-eof,cr-at-eol
 *.ttf binary
 *.jar binary
+*.m4a binary
 *.mp3 binary
+*.mp4 binary

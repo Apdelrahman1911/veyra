@@ -13,7 +13,6 @@ kotlin {
     jvm { compilerOptions { jvmTarget.set(JvmTarget.JVM_17) } }
     iosArm64()
     iosSimulatorArm64()
-    iosX64()
     applyDefaultHierarchyTemplate()
 
     sourceSets {
@@ -24,7 +23,7 @@ kotlin {
             api(libs.okio)
             api(libs.room.runtime)
             implementation(libs.sqlite.bundled)
-            api("io.github.apdelrahman1911.kmpyt:kmpyt:0.1.0")
+            api(libs.kmpyt)
         }
         commonTest.dependencies {
             implementation(kotlin("test"))
@@ -47,14 +46,13 @@ dependencies {
     add("kspJvm", libs.room.compiler)
     add("kspIosArm64", libs.room.compiler)
     add("kspIosSimulatorArm64", libs.room.compiler)
-    add("kspIosX64", libs.room.compiler)
 }
 
 room { schemaDirectory("$projectDir/schemas") }
 
 android {
     namespace = "dev.veyra.shared"
-    compileSdk = 36
+    compileSdk = 37
     defaultConfig { minSdk = 23 }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

@@ -7,7 +7,6 @@ import copy
 import importlib.util
 import io
 import json
-import os
 from pathlib import Path
 import shutil
 import stat
@@ -51,7 +50,6 @@ class PackageNoticeTests(unittest.TestCase):
     def setUpClass(cls):
         cls.seed_directory = tempfile.TemporaryDirectory(prefix="notice-seed-", dir=ROOT / ".work/tmp")
         cls.seed = Path(cls.seed_directory.name)
-        cls.mit = (ROOT / "third_party/kmpYT/LICENSE").read_bytes()
         write(cls.seed / "LICENSE", (ROOT / "LICENSE").read_bytes())
         write(cls.seed / "NOTICE.md", b"Authored source-notice fixture. No application verification claim.\n")
         for name in NOTICES.REQUIRED_BUILD_INPUTS:
@@ -59,27 +57,22 @@ class PackageNoticeTests(unittest.TestCase):
         for name in ("composeApp/src/commonMain/composeResources/files/licenses/ibm_plex_sans_arabic_ofl.txt",
                      "native/licenses/Mozilla-Public-License-2.0.txt", "native/licenses/ca-bundle-provenance.md"):
             write(cls.seed / name, (ROOT / name).read_bytes())
-        upstream = cls.seed / "third_party/kmpYT"
-        write(upstream / "LICENSE", cls.mit)
-        write(upstream / "THIRD_PARTY_NOTICES.md", b"Authored committed upstream notice fixture.\n")
-        home = cls.seed / ".work/home"; home.mkdir(parents=True)
-        environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
-        environment.update(HOME=str(home), USERPROFILE=str(home), GIT_CONFIG_NOSYSTEM="1",
-                           GIT_CONFIG_GLOBAL=str(home / "gitconfig"), GIT_TERMINAL_PROMPT="0")
-        command = ["git", "-C", str(upstream), "-c", "user.name=Authored Fixture",
-                   "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false",
-                   "-c", "core.hooksPath=" + str(home / "no-hooks")]
-        for arguments in (("init", "--quiet", "--object-format=sha1"), ("add", "."), ("commit", "--quiet", "-m", "Authored notice fixture")):
-            subprocess.run(command + list(arguments), check=True, env=environment, capture_output=True)
-        cls.pin = subprocess.check_output(command + ["rev-parse", "HEAD"], env=environment, text=True).strip()
-        write(cls.seed / "gradle/kmpyt.commit", (cls.pin + "\n").encode())
-        kit = cls.seed / "third_party/nativeCmpkit"
-        write(kit / "LICENSE", (ROOT / "third_party/nativeCmpkit/LICENSE").read_bytes())
-        kit_command = [part if part != str(upstream) else str(kit) for part in command]
-        for arguments in (("init", "--quiet", "--object-format=sha1"), ("add", "."), ("commit", "--quiet", "-m", "Authored notice fixture")):
-            subprocess.run(kit_command + list(arguments), check=True, env=environment, capture_output=True)
-        cls.kit_pin = subprocess.check_output(kit_command + ["rev-parse", "HEAD"], env=environment, text=True).strip()
-        write(cls.seed / "gradle/nativecmpkit.commit", (cls.kit_pin + "\n").encode())
+        for name in (Path("gradle/libs.versions.toml"), Path("gradle/kmpyt.commit"),
+                     Path("gradle/nativecmpkit.commit"), NOTICES.PUBLISHED_NOTICES):
+            write(cls.seed / name, (ROOT / name).read_bytes())
+        cls.pin = (cls.seed / "gradle/kmpyt.commit").read_text().strip()
+        cls.kit_pin = (cls.seed / "gradle/nativecmpkit.commit").read_text().strip()
+        cls.releases = json.loads((cls.seed / NOTICES.PUBLISHED_NOTICES).read_bytes())
+        for release in cls.releases.values():
+            for checksum in release["documents"].values():
+                name = NOTICES.PUBLISHED_NOTICES.parent / "texts" / f"{checksum}.txt"
+                write(cls.seed / name, (ROOT / name).read_bytes())
+        cls.mit = cls.published_text(cls.seed, "kmpyt", "META-INF/kmpyt/LICENSE").read_bytes()
+
+    @classmethod
+    def published_text(cls, root, key, entry):
+        checksum = cls.releases[key]["documents"][entry]
+        return root / NOTICES.PUBLISHED_NOTICES.parent / "texts" / f"{checksum}.txt"
 
     @classmethod
     def tearDownClass(cls):
@@ -227,41 +220,41 @@ class PackageNoticeTests(unittest.TestCase):
             item["installedFiles"].update(selection=manifest["selection"], entriesSha256=NOTICES.helper_entries_sha256(manifest["entries"]))
         self.save(path, value)
 
-    def test_actual_source_grants_are_byte_exact_and_source_only_coverage_stays_open(self):
+    def test_published_grants_are_byte_exact_and_source_only_coverage_stays_open(self):
         files, report = self.generated()
-        for output, source in (("LICENSE", "LICENSE"), ("NOTICE.md", "NOTICE.md"),
-                               ("kmpYT-LICENSE", "third_party/kmpYT/LICENSE"),
-                               ("kmpYT-THIRD_PARTY_NOTICES.md", "third_party/kmpYT/THIRD_PARTY_NOTICES.md"),
-                               ("nativeCmpkit-LICENSE", "third_party/nativeCmpkit/LICENSE")):
-            self.assertEqual(files[output], (self.root / source).read_bytes())
+        self.assertEqual(files["LICENSE"], (self.root / "LICENSE").read_bytes())
+        self.assertEqual(files["NOTICE.md"], (self.root / "NOTICE.md").read_bytes())
+        for key, (_, resources) in NOTICES.PUBLISHED_RESOURCES.items():
+            for entry, resource in resources.items():
+                with self.subTest(entry=entry):
+                    source = self.published_text(self.root, key, entry)
+                    name = resource or f"notices/{source.name}"
+                    self.assertEqual(files[name], source.read_bytes())
         self.assertFalse(report["noticeCoverageComplete"])
         self.assertFalse(report["binaryRedistributionReady"])
         self.assertEqual(len(report["coverageIssues"]), 1)
-        self.assertEqual(len(report["documents"]), 3)
 
-    def test_truncated_source_gpl_and_mit_are_rejected(self):
-        for name in ("LICENSE", "third_party/kmpYT/LICENSE"):
-            with self.subTest(name=name):
-                path = self.root / name; original = path.read_bytes()
+    def test_truncated_gpl_and_published_mit_are_rejected(self):
+        for path in (self.root / "LICENSE", self.published_text(self.root, "kmpyt", "META-INF/kmpyt/LICENSE")):
+            with self.subTest(path=path):
+                original = path.read_bytes()
                 path.write_bytes(original[:120])
                 with self.assertRaises(NOTICES.NoticeError): self.generated()
                 path.write_bytes(original)
 
-    def test_actual_checkout_must_match_the_pin(self):
-        write(self.root / "gradle/kmpyt.commit", b"a" * 40 + b"\n")
-        with self.assertRaisesRegex(NOTICES.NoticeError, "checkout differs"): self.generated()
+    def test_releases_must_match_their_source_revisions(self):
+        for key in ("kmpyt", "nativecmpkit"):
+            path = self.root / f"gradle/{key}.commit"
+            original = path.read_bytes()
+            write(path, b"a" * 40 + b"\n")
+            with self.subTest(key=key), self.assertRaisesRegex(NOTICES.NoticeError, "provenance differs"):
+                self.generated()
+            write(path, original)
 
-    def test_native_component_checkout_must_match_its_pin_and_keep_the_full_grant(self):
-        write(self.root / "gradle/nativecmpkit.commit", b"b" * 40 + b"\n")
-        with self.assertRaisesRegex(NOTICES.NoticeError, "nativeCmpkit checkout differs"): self.generated()
-        write(self.root / "gradle/nativecmpkit.commit", (self.kit_pin + "\n").encode())
-        license_path = self.root / "third_party/nativeCmpkit/LICENSE"
-        license_path.write_bytes(license_path.read_bytes()[:200])
-        with self.assertRaisesRegex(NOTICES.NoticeError, "Apache-2.0"): self.generated()
-
-    def test_modified_uncommitted_upstream_notice_is_rejected(self):
-        write(self.root / "third_party/kmpYT/THIRD_PARTY_NOTICES.md", b"Locally modified fixture.\n")
-        with self.assertRaisesRegex(NOTICES.NoticeError, "exact committed"): self.generated()
+    def test_modified_published_notice_is_rejected(self):
+        path = self.published_text(self.root, "kmpyt", "META-INF/kmpyt/THIRD_PARTY_NOTICES.md")
+        write(path, b"Locally modified fixture.\n")
+        with self.assertRaisesRegex(NOTICES.NoticeError, "differs from its published bytes"): self.generated()
 
     def test_full_pin_required(self):
         for value in (b"main", b"1234abcd", b"A" * 40, b"a" * 140):
@@ -463,7 +456,7 @@ class PackageNoticeTests(unittest.TestCase):
         project = {"id": "project::shared", "kind": "project", "projectPath": ":shared"}
         path, _ = self.inventory(component=project, entries=[("composeResources/files/legal/LICENSE", self.mit)])
         _, report = NOTICES.generate(self.root, [path])
-        self.assertEqual(len(report["documents"]), 3)
+        self.assertEqual(report["documents"], self.generated()[1]["documents"])
         self.assertEqual(report["sourceProjectArtifacts"][0]["sourceGrantResource"], "LICENSE")
 
     def test_nonregular_and_oversized_reads_are_rejected_before_open(self):
@@ -536,12 +529,11 @@ class PackageNoticeTests(unittest.TestCase):
         except OSError as error: self.skipTest(str(error))
         with self.assertRaises(NOTICES.NoticeError): NOTICES.sync_output(self.root, output, files, False)
 
-    def test_test_worktree_override_cannot_populate_production_or_satisfy_completeness(self):
-        for arguments in (("--test-license-worktree", str(self.root / "third_party/kmpYT")),
-                          ("--test-license-worktree", str(self.root / "third_party/kmpYT"), "--output", str(self.root / ".work/test"), "--require-notices-complete")):
-            with patch.object(NOTICES, "ROOT", self.root), patch.object(sys, "argv", ["package-notices.py", *arguments]):
-                with self.assertRaisesRegex(NOTICES.NoticeError, "override cannot"): NOTICES.main()
-        self.assertFalse((self.root / NOTICES.LEGAL).exists())
+    def test_upgraded_dependency_requires_matching_published_notices(self):
+        catalog = self.root / "gradle/libs.versions.toml"
+        version = self.releases["kmpyt"]["coordinate"].rsplit(":", 1)[1]
+        catalog.write_text(catalog.read_text().replace(f'kmpyt = "{version}"', 'kmpyt = "99.0.0"'))
+        with self.assertRaisesRegex(NOTICES.NoticeError, "provenance differs"): self.generated()
 
     def test_source_only_completeness_gate_returns_failure_not_synthetic_success(self):
         with patch.object(NOTICES, "ROOT", self.root), patch.object(sys, "argv", ["package-notices.py", "--require-notices-complete"]), contextlib.redirect_stdout(io.StringIO()):
@@ -921,11 +913,10 @@ class PackageNoticeTests(unittest.TestCase):
         path, _ = self.helper_inventory()
         with patch.object(NOTICES, "file_digest", side_effect=AssertionError("No helper archive hashing")), \
                 patch.object(NOTICES.zipfile, "ZipFile", side_effect=AssertionError("No helper archive reading")), \
-                patch.object(NOTICES.subprocess, "run", wraps=subprocess.run) as run:
+                patch.object(subprocess, "run") as run:
             _, report = NOTICES.generate(self.root, [], helper_inventories=[path])
         self.assertTrue(report["helperNoticeCoverageComplete"])
-        self.assertTrue(run.call_args_list)
-        self.assertTrue(all(call.args[0][0] == "git" for call in run.call_args_list), "Only existing local source-grant Git reads run")
+        run.assert_not_called()
 
     def test_helper_cli_complete_gate_check_and_unreviewed_gap_use_same_explicit_inventory(self):
         inventory, _ = self.inventory()

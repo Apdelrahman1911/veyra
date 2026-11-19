@@ -11,6 +11,16 @@ enum class EnqueuePosition { NEXT, END }
 enum class SleepTimerMode { DURATION, END_OF_EPISODE }
 enum class CrossfadePhase { PREPARING, READY, OVERLAPPING }
 
+/** Elapsed monotonic time since activation, through native playback observation. */
+data class PlaybackStartupTiming(
+    val generation: Long,
+    val selectionMs: Long? = null,
+    val sourceReadyMs: Long? = null,
+    val engineReadyMs: Long? = null,
+    val playingMs: Long? = null,
+    val failure: FailureCode? = null,
+)
+
 data class CrossfadeState(
     val phase: CrossfadePhase,
     /** Catalogue compatibility only. Neutral recordings deliberately have no MediaItem. */

@@ -3,8 +3,9 @@ Veyra offline legal documents
 LICENSE — complete Veyra GPL3 text; Veyra's own code is GPL-3.0-or-later.
 NOTICE.md — unmodified root software/source notice.
 kmpYT-LICENSE — complete reviewed MIT text from the recorded upstream revision.
-kmpYT-THIRD_PARTY_NOTICES.md — unmodified pinned upstream audit/fixture notice.
-nativeCmpkit-LICENSE — complete Apache-2.0 text from the pinned nativeCmpkit revision.
+kmpYT-THIRD_PARTY_NOTICES.md — unmodified publisher audit and fixture notice.
+nativeCmpkit-LICENSE — complete Apache-2.0 text from the NativeCmpKit release.
+nativeCmpkit-NOTICE — NativeCmpKit upstream copyright and attribution.
 THIRD_PARTY_NOTICES.txt — retained asset/dependency texts and explicit open coverage issues.
 index.json — exact hashes, production coordinates, provenance and nonclaims.
 

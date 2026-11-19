@@ -67,12 +67,17 @@ class IosNowPlayingBridge(
         register(commands.stopCommand) { state, _ -> if (state.currentItem != null) PlaybackCommand.Stop else null }
         register(commands.nextTrackCommand) { state, _ -> if (state.activeContext == QueueContext.MUSIC && canNext(state)) PlaybackCommand.Next else null }
         register(commands.previousTrackCommand) { state, _ -> if (state.activeContext == QueueContext.MUSIC && canPrevious(state)) PlaybackCommand.Previous else null }
-        register(commands.skipBackwardCommand) { state, _ -> if (state.seekable) PlaybackCommand.SkipBack else null }
-        register(commands.skipForwardCommand) { state, _ -> if (state.seekable) PlaybackCommand.SkipForward else null }
+        register(commands.skipBackwardCommand) { state, _ -> state.currentEntryId?.takeIf { state.seekable }?.let {
+            PlaybackCommand.SkipConfigured(false, it, state.generation)
+        } }
+        register(commands.skipForwardCommand) { state, _ -> state.currentEntryId?.takeIf { state.seekable }?.let {
+            PlaybackCommand.SkipConfigured(true, it, state.generation)
+        } }
         register(commands.changePlaybackPositionCommand) { state, event ->
             val seconds = (event as? MPChangePlaybackPositionCommandEvent)?.positionTime
-            if (state.seekable && seconds != null && seconds.isFinite() && seconds >= 0 && seconds < Long.MAX_VALUE / 1000.0)
-                PlaybackCommand.Seek((seconds * 1000).toLong()) else null
+            val entryId = state.currentEntryId
+            if (entryId != null && state.seekable && seconds != null && seconds.isFinite() && seconds >= 0 && seconds < Long.MAX_VALUE / 1000.0)
+                PlaybackCommand.Seek((seconds * 1000).toLong(), entryId, state.generation) else null
         }
         commands.changePlaybackRateCommand.supportedPlaybackRates = listOf(0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0)
         register(commands.changePlaybackRateCommand) { state, event ->

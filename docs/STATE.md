@@ -1,5 +1,40 @@
 # Veyra — resumable state
 
+## Download and playback hardening — 2026-11-19
+
+- A Download tap now renews a cancelled standalone claim in Room and waits for its identified
+  row to reach the Downloads projection before confirming. Concurrent repeat taps reuse the
+  active claim. Room retains attempt history and generation-specific file paths.
+- Transfer completion and file finalization have distinct UI states. Local validation has a
+  cooperative timeout and reports a retryable recovery failure. Cancellation still retains
+  the exact file and native ownership until their cleanup is acknowledged. Orderly shutdown
+  leaves unfinished local finalization eligible when the app next opens offline.
+- Playback startup timing distinguishes selection, source preparation, native readiness and
+  playing. Android and iOS debug logs record the timings without media IDs or stream URLs.
+  A stalled startup reports an error after a bounded active wait. Native lock-screen seek
+  and skip commands carry the occurrence and generation they were issued for.
+- Search retires superseded requests and can return a successful provider when the other
+  fails. Action failures remain visible in order even when later actions finish.
+- Installable release signing, real-source startup timings for this revision, and physical
+  Android/iOS background audio, headset controls and interruptions remain open.
+
+## Maven library integration — 2026-11-19
+
+- `:shared` uses kmpYT `0.1.2`, and `:nativeComponents` uses NativeCmpKit Kira UI
+  `0.1.0-preview.1` with Kira Core resolved transitively. Gradle resolves both from Maven Central.
+  The app checkout and CI build use the catalog, Maven artifacts and retained notices.
+  [Versions](../gradle/libs.versions.toml) · [Notice provenance](../third_party/notices/published-libraries.json)
+- The published Kira UI needs Kotlin 2.4.20, Compose 1.12.0 and Android SDK 37.0.
+  Coil 3.6.3 uses the same Skiko version as Compose. The iOS targets are arm64 for devices
+  and Apple Silicon simulators because Kira UI and Compose publish those Apple variants.
+- Veyra’s slider, switch and icon styles live in its own adapters. The normal build
+  and packaging steps use repository-owned notices and the CC0 local remux test inputs.
+- Local verification passed for all 1,276 shared JVM tests and 162 Android unit tests.
+  The signed debug APK contains both compiled libraries and their original notice bytes.
+  The desktop run passed 500 of 503 tests on its first pass. Both license screen cases
+  passed with the new notice expectations, and the native seek case passed on rerun.
+  Both iOS Kotlin targets compiled. Xcode linking and physical-device runs are open.
+
 ## Player, tabs, search scope and downloaded playback — 2026-11-17
 
 Owner requests after the native-components pass below.

@@ -96,6 +96,8 @@ data class DownloadSurfaceEntry(
         require(origin != DownloadSurfaceOrigin.TYPED_SOURCE || mediaId == null)
     }
     val isActive: Boolean get() = status !in setOf(DownloadStatus.COMPLETE, DownloadStatus.FAILED, DownloadStatus.CANCELLED)
+    val isFinishing: Boolean get() = status == DownloadStatus.VERIFYING ||
+        status == DownloadStatus.RUNNING && totalBytes?.let { it > 0 && bytesDownloaded >= it } == true
     val needsAttention: Boolean get() = status in setOf(DownloadStatus.FAILED, DownloadStatus.NEEDS_FOREGROUND) ||
         status == DownloadStatus.COMPLETE && !hasOwnedBytes
 }

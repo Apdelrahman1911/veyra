@@ -14,6 +14,50 @@ import kotlin.test.*
  * `DownloadFixture` snapshot seeding is deliberately not used: typed history is immutable.
  */
 class DownloadIntegrityRoomTest {
+    @Test fun completedTransferWithStalledValidationFailsWithoutPublishingAnAsset() = executorSchema3Case {
+        val owner = owner(validationTimeoutMs = 1_000)
+        val stopped = CompletableDeferred<Unit>()
+        owner.validation = {
+            try { awaitCancellation() } finally { stopped.complete(Unit) }
+        }
+        val (id, _) = enqueue(owner)
+        owner.coordinator.start(DownloadActivation.USER_SESSION)
+        val failed = awaitJob(owner, id) { it.job.status == DownloadStatus.FAILED && it.job.leaseOwner == null }
+        assertTrue(stopped.isCompleted)
+        assertEquals(AppFailure(FailureCode.RECOVERY_REQUIRED, "download_validation_timed_out"), failed.job.failure)
+        assertNull(failed.asset)
+        assertNull(failed.finalization)
+    }
+
+    @Test fun concurrentRedownloadAfterDeletionRenewsOneClaimAndSurvivesReopen() = executorSchema3Case {
+        val first = owner()
+        val (id, selection) = enqueue(first)
+        first.coordinator.start(DownloadActivation.USER_SESSION)
+        complete(first, id)
+        first.coordinator.remove(id)
+        val removed = join(first, id).claims.single()
+        assertEquals(DownloadBatchIntent.CANCELLED, removed.intent)
+        first.coordinator.close()
+        closeStore(first.store)
+
+        val second = owner()
+        val ids = coroutineScope {
+            List(3) { async { enqueue(second, selection) } }.awaitAll()
+        }
+        assertEquals(List(3) { id }, ids)
+        second.coordinator.close()
+        closeStore(second.store)
+
+        val third = owner()
+        val reopened = join(third, id)
+        assertEquals(DownloadStatus.QUEUED, reopened.job.status)
+        val renewed = reopened.claims.single()
+        assertEquals(removed.id, renewed.id)
+        assertEquals(removed.generation + 1, renewed.generation)
+        assertEquals(DownloadBatchIntent.ACTIVE, renewed.intent)
+        assertNull(reopened.asset)
+    }
+
     @Test fun missingCompletedFileIsNeverReadyAndExplicitRetryRetainsItsRecording() =
         damagedCompletedFile(CompletedFileDamage.MISSING)
 

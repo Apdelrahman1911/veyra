@@ -36,9 +36,11 @@ class DownloadAcquisitionDependencies(
     /** Shared synchronously with BOTH local resolvers; no independently defaulted registry. */
     val materializationEvidence: DownloadMaterializationEvidence,
     val compatibilityPolicyVersion: Int = 1,
+    internal val validationTimeoutMs: Long = 120_000,
 ) {
     init {
         require(compatibilityPolicyVersion >= 1)
+        require(validationTimeoutMs > 0)
         require(acquisition.transactionOwner === repository.transactionOwner && batches.transactionOwner === repository.transactionOwner &&
             materializationEvidence.transactionOwner === repository.transactionOwner) {
             "Download acquisition, batches and materialization evidence require the same Room transaction owner"
@@ -1557,10 +1559,17 @@ internal class DownloadPhysicalRuntime(
     private suspend fun validate(run: DownloadPhysicalRun, input: LocalMediaValidationInput,
         attempt: DownloadMaterializationValidationAttempt? = null,
         onRejection: (DownloadMaterializationRejection) -> Unit = {},
-    ): Long? = run.validationReaders.validate {
-        files.validateMaterialization(input, dependencies.validator) { negative ->
-            attempt?.let { materializationEvidence.reject(it, negative) }?.let(onRejection)
-        }
+    ): Long? {
+        val validated = withTimeoutOrNull(dependencies.validationTimeoutMs) {
+            run.validationReaders.validate {
+                AssetValidation.Valid(files.validateMaterialization(input, dependencies.validator) { negative ->
+                    attempt?.let { materializationEvidence.reject(it, negative) }?.let(onRejection)
+                })
+            }
+        } ?: fail(FailureCode.RECOVERY_REQUIRED, "download_validation_timed_out")
+        // A native cleanup failure raised while cancellation was unwinding still owns the path.
+        run.validationReaders.requireReleased()
+        return validated.durationMs
     }
 
     private class Prepared(
@@ -1873,8 +1882,11 @@ internal class DownloadPhysicalRuntime(
 
     private fun ensureHost(generation: Long, network: Boolean) {
         val state = host.state()
+        // A clean process shutdown can become visible before the owner Job is cancelled.
+        // Finalizers must leave local recovery eligible when the next process opens Room.
+        if (state.closed) throw CancellationException("Download host closed")
         state.failure?.let { throw VeyraException(it) }
-        if (!state.started || state.closed || state.suspended || state.drainsInFlight != 0 || state.generation != generation)
+        if (!state.started || state.suspended || state.drainsInFlight != 0 || state.generation != generation)
             fail(FailureCode.BACKGROUND_RESTRICTED, "download_host_not_active")
         // A connection is a NEW admission gate. An in-flight owner reports its actual source
         // outcome rather than being relabeled/cancelled merely by a connectivity observation.

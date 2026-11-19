@@ -14,6 +14,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import struct
 import subprocess
@@ -197,6 +198,14 @@ class ResourceFixtureTests(unittest.TestCase):
         self.assertIn(old, source)
         self.theme_path.write_text(source.replace(old, new, 1), encoding="utf-8")
 
+    def replace_light_color(self, token: str, color: str) -> None:
+        source = self.theme_path.read_text(encoding="utf-8")
+        light = source.split("val Light = VeyraColorTokens(", 1)[1].split("\n    )", 1)[0]
+        pattern = rf"\b{re.escape(token)} = Color\(0x[0-9A-Fa-f]{{8}}\)"
+        match = re.search(pattern, light)
+        self.assertIsNotNone(match)
+        self.replace_theme(match.group(0), f"{token} = Color(0x{color})")
+
     def audit_fonts(self) -> None:
         with redirect_stdout(io.StringIO()):
             AUDIT.audit_fonts(self.root, self.entries)
@@ -253,17 +262,17 @@ class ResourceFixtureTests(unittest.TestCase):
         self.assertIn("PASS dark contrast: 37 text pairs", output.getvalue())
 
     def test_low_text_contrast_is_rejected(self) -> None:
-        self.replace_theme("onSurface = Color(0xFF15252D)", "onSurface = Color(0xFFF6F8F8)")
+        self.replace_light_color("onSurface", "FFF8F5FA")
         with self.assertRaisesRegex(AUDIT.AuditError, "Light onSurface/canvas"):
             AUDIT.audit_contrast(self.root)
 
     def test_low_essential_contrast_is_rejected(self) -> None:
-        self.replace_theme("outline = Color(0xFF647D89)", "outline = Color(0xFFF6F8F8)")
+        self.replace_light_color("outline", "FFF8F5FA")
         with self.assertRaisesRegex(AUDIT.AuditError, "Light outline/canvas"):
             AUDIT.audit_contrast(self.root)
 
     def test_alpha_is_rejected_even_on_decorative_token(self) -> None:
-        self.replace_theme("outlineSubtle = Color(0xFFCDDADF)", "outlineSubtle = Color(0x80CDDADF)")
+        self.replace_light_color("outlineSubtle", "80FFFFFF")
         with self.assertRaisesRegex(AUDIT.AuditError, "opaque sRGB"):
             AUDIT.audit_contrast(self.root)
 
@@ -413,7 +422,7 @@ class ResourceFixtureTests(unittest.TestCase):
 
     def test_cli_aggregates_section_failures_and_returns_one(self) -> None:
         self.catalogue_path.write_text(catalogue(entry("Bad", "{0}", "اسم")), encoding="utf-8")
-        self.replace_theme("onSurface = Color(0xFF15252D)", "onSurface = Color(0xFFF6F8F8)")
+        self.replace_light_color("onSurface", "FFF8F5FA")
         self.manifest["source_revision"] = "main"
         self.save_manifest()
         result = self.run_cli()

@@ -8,6 +8,75 @@ import kotlin.test.*
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class PlaybackControllerTest {
+    @Test fun stalledNativePreparationReportsFailureAndDiscardsLateReady() = runTest {
+        val fixture = PlaybackFixture(this)
+        try {
+            fixture.engine.autoReady = false
+            fixture.play()
+            val stalled = fixture.state.generation
+            assertEquals(PlaybackPhase.PREPARING, fixture.state.phase)
+            advanceTimeBy(100_000)
+            runCurrent()
+            assertEquals(AppFailure(FailureCode.NETWORK_UNAVAILABLE, "playback_startup_timed_out"), fixture.state.failure)
+            val timing = assertNotNull(fixture.controller.startupTiming.value)
+            assertNotNull(timing.sourceReadyMs)
+            assertNull(timing.playingMs)
+            fixture.event(EngineEvent.Ready(stalled, 100_000L, true))
+            assertEquals(PlaybackPhase.ERROR, fixture.state.phase)
+            assertFalse(fixture.state.desiredPlaying)
+        } finally { fixture.close() }
+    }
+
+    @Test fun startupTimingSeparatesSourceReadyAndNativePlayback() = runTest {
+        val fixture = PlaybackFixture(this)
+        try {
+            fixture.engine.autoReady = false
+            fixture.play()
+            advanceTimeBy(450)
+            fixture.event(EngineEvent.Ready(fixture.state.generation, 100_000L, true))
+            val timing = assertNotNull(fixture.controller.startupTiming.value)
+            assertEquals(0L, timing.sourceReadyMs)
+            assertEquals(450L, timing.engineReadyMs)
+            assertEquals(450L, timing.playingMs)
+            assertNull(timing.failure)
+        } finally { fixture.close() }
+    }
+
+    @Test fun sourceDeadlineReportsAnErrorImmediatelyAndAllowsPlaybackRetry() = runTest {
+        val fixture = PlaybackFixture(this)
+        try {
+            fixture.resolver.behavior = { _, _ -> withTimeout(500) { awaitCancellation() } }
+            fixture.play()
+            advanceTimeBy(500)
+            runCurrent()
+            assertEquals(PlaybackPhase.ERROR, fixture.state.phase)
+            assertEquals("playback_startup_timed_out", fixture.state.failure?.detail)
+            assertNull(fixture.controller.startupTiming.value?.sourceReadyMs)
+
+            fixture.resolver.behavior = null
+            fixture.command(PlaybackCommand.PlayPause)
+            assertTrue(fixture.state.isPlaying)
+        } finally { fixture.close() }
+    }
+
+    @Test fun nativePreparationDeadlineLeavesTheEngineWorkerAvailableForRetry() = runTest {
+        val fixture = PlaybackFixture(this)
+        try {
+            fixture.resolver.local = true
+            fixture.engine.beforePrepare = { withTimeout(500) { awaitCancellation() } }
+            fixture.play()
+            advanceTimeBy(500)
+            runCurrent()
+            assertEquals(PlaybackPhase.ERROR, fixture.state.phase)
+            assertEquals("playback_startup_timed_out", fixture.state.failure?.detail)
+            assertNotNull(fixture.controller.startupTiming.value?.sourceReadyMs)
+
+            fixture.engine.beforePrepare = null
+            fixture.command(PlaybackCommand.PlayPause)
+            assertTrue(fixture.state.isPlaying)
+        } finally { fixture.close() }
+    }
+
     @Test fun successfulSeekReassertsPlayIntentBeforeDelayedNativePauseObservation() = runTest {
         val fixture = PlaybackFixture(this)
         try {

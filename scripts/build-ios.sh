@@ -5,15 +5,15 @@ SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 source "$SCRIPT_DIR/env.sh"
 cd "$VEYRA_PROJECT_ROOT"
 [ "$(uname -s)" = Darwin ] || { printf '%s\n' 'iOS host compilation requires existing macOS/Xcode.' >&2; exit 1; }
-export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode_26.0.1.app/Contents/Developer}"
+export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode_26.4.1.app/Contents/Developer}"
 [ -d "$DEVELOPER_DIR" ] || { printf '%s\n' 'Pinned Xcode unavailable; no install or xcode-select change attempted.' >&2; exit 1; }
 platform="${1:-simulator}"
 [ "$#" -le 1 ] || exit 2
 case "$platform" in
     simulator)
         sdk=iphonesimulator; destination='generic/platform=iOS Simulator'
-        architecture="$(uname -m)"
-        case "$architecture" in arm64|x86_64) ;; *) printf '%s\n' 'Unsupported simulator host architecture.' >&2; exit 1 ;; esac
+        [ "$(uname -m)" = arm64 ] || { printf '%s\n' 'The iOS simulator target requires Apple Silicon.' >&2; exit 1; }
+        architecture=arm64
         ;;
     device) sdk=iphoneos; destination='generic/platform=iOS'; architecture=arm64 ;;
     *) printf '%s\n' 'Usage: scripts/build-ios.sh simulator|device' >&2; exit 2 ;;

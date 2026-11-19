@@ -3,10 +3,13 @@ package dev.veyra.app
 import android.app.Application
 import android.app.PendingIntent
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
+import android.util.Log
 import dev.veyra.data.createAndroidLibraryStore
+import dev.veyra.downloads.DownloadDiagnosticFailure
 import dev.veyra.downloads.DownloadNetworkState
 import dev.veyra.model.AppFailure
 import dev.veyra.model.FailureCode
@@ -122,6 +125,18 @@ class VeyraApplication : Application() {
             mutableBootstrap.value = AndroidBootstrap.Available(created)
             constructed.complete(created)
             launch { created.playback.state.collect { mutablePlayback.value = it } }
+            if ((applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+                launch {
+                    created.playback.startupTiming.collect { timing ->
+                        timing?.let { Log.d("Veyra", "playback_startup $it") }
+                    }
+                }
+                launch {
+                    created.notice.collect { notice ->
+                        notice?.failure?.let { Log.d("Veyra", "action_failure ${DownloadDiagnosticFailure.from(it)}") }
+                    }
+                }
+            }
             launch { created.store.state.map { it.settings.language }.distinctUntilChanged().collect { refreshNativeLanguage() } }
             launch {
                 created.initialization.collect { state ->

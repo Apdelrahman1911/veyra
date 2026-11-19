@@ -57,7 +57,7 @@ val prepareDesktopNativeResources by tasks.registering(Exec::class) {
 kotlin {
     androidTarget { compilerOptions { jvmTarget.set(JvmTarget.JVM_17) } }
     jvm("desktop") { compilerOptions { jvmTarget.set(JvmTarget.JVM_17) } }
-    listOf(iosArm64(), iosSimulatorArm64(), iosX64()).forEach { target ->
+    listOf(iosArm64(), iosSimulatorArm64()).forEach { target ->
         target.binaries.framework {
             baseName = "Veyra"
             isStatic = true
@@ -72,7 +72,7 @@ kotlin {
             implementation(project(":nativeComponents"))
             implementation(compose.runtime)
             implementation(compose.foundation)
-            implementation(compose.material3)
+            implementation(libs.compose.material3)
             implementation(compose.ui)
             implementation(compose.components.resources)
             implementation(libs.coroutines.core)
@@ -121,7 +121,7 @@ kotlin {
             dependencies {
                 implementation(kotlin("test-junit"))
                 implementation(compose.desktop.uiTestJUnit4)
-                implementation(libs.navigationevent)
+                implementation(libs.navigationevent.compose)
             }
         }
     }
@@ -183,7 +183,7 @@ tasks.withType<Test>().configureEach {
 
 android {
     namespace = "dev.veyra.app"
-    compileSdk = 36
+    compileSdk = 37
     defaultConfig {
         applicationId = "dev.veyra.app"
         minSdk = 23

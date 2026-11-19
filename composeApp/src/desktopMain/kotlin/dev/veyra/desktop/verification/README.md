@@ -25,7 +25,7 @@ execution slot is available.
 
 ## Authorization and bounds
 
-- The pinned `third_party/kmpYT/ci/approved-channel.json` authorizes only
+- The owner-approved proof scope permits only
   `https://www.youtube.com/@oPiiLz`, at most two distinct video candidates, and
   67,108,864 media bytes per acquisition. Tests compare these pinned constants.
 - Discover one video from that channel's `/videos` metadata. Verify its exact

@@ -298,7 +298,8 @@ class RecoveryAndRuntimeUiTest {
         await { app.container.navigation.value.detail?.kind == DetailKind.LICENSES }
         await { ui.onAllNodes(hasTestTag("legal-document-NOTICE.md")).fetchSemanticsNodes().isNotEmpty() }
         val excerpts = listOf("Software and source notices", "GNU GENERAL PUBLIC LICENSE", "MIT License",
-            "Licensing and source provenance", "Apache License", "does NOT certify a binary release", "SIL Open Font License, Version 1.1")
+            "Licensing and source provenance", "Apache License", "NativeCmpKit contributors",
+            "does NOT certify a binary release", "SIL Open Font License, Version 1.1")
         LEGAL_NAMES.forEachIndexed { index, name ->
             legalDocument(index, name)
             ui.onNodeWithTag("legal-unavailable-$name").assertDoesNotExist()
@@ -493,7 +494,7 @@ class RecoveryAndRuntimeUiTest {
         }
 
         fun legalDocument(index: Int, name: String) {
-            // Known heading + original-language notice precede the six independently loaded
+            // The heading and original-language notice precede the independently loaded
             // documents. Jump by index instead of scrolling through a complete GPL text.
             ui.onNodeWithTag("licenses-screen").performScrollToIndex(index + 2)
             ui.onNodeWithTag("legal-document-$name").assertExists()
@@ -527,7 +528,7 @@ class RecoveryAndRuntimeUiTest {
         const val DIAGNOSTIC_SENTINEL = "authored-internal-diagnostic-must-not-be-rendered"
         val DAMAGED_PRIMARY = "Authored damaged database; explicit recovery only.".encodeToByteArray()
         val LEGAL_NAMES = listOf("NOTICE.md", "LICENSE", "kmpYT-LICENSE", "kmpYT-THIRD_PARTY_NOTICES.md",
-            "nativeCmpkit-LICENSE", "THIRD_PARTY_NOTICES.txt", "ibm_plex_sans_arabic_ofl.txt")
+            "nativeCmpkit-LICENSE", "nativeCmpkit-NOTICE", "THIRD_PARTY_NOTICES.txt", "ibm_plex_sans_arabic_ofl.txt")
         fun authoredNotice(name: String) = "Authored local legal fixture for $name. Original-language text stays available."
     }
 }

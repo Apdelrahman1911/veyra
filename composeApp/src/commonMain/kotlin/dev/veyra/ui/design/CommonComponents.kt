@@ -1,7 +1,7 @@
 package dev.veyra.ui.design
 
-import com.mohamedrejeb.calf.ui.button.AdaptiveIconButton
-import com.mohamedrejeb.calf.ui.progress.AdaptiveCircularProgressIndicator
+import dev.veyra.nativecomponents.NativeIconButton
+import io.github.apdelrahman1911.kira.ui.progress.AdaptiveCircularProgressIndicator
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -185,7 +185,7 @@ fun VeyraIconButton(
         tooltip = { PlainTooltip { Text(label) } },
         state = rememberTooltipState(),
     ) {
-        AdaptiveIconButton(
+        NativeIconButton(
             onClick = onClick,
             enabled = enabled,
             interactionSource = interactions,

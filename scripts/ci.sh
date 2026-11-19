@@ -72,22 +72,18 @@ case "$mode" in
         ;;
     android)
         sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
-        [ -n "$sdk" ] && [ -f "$sdk/platforms/android-36/android.jar" ] && [ -d "$sdk/build-tools/35.0.0" ] \
-            || { printf '%s\n' 'Required read-only Android platform 36/build-tools 35.0.0 unavailable; no SDK install attempted.' >&2; exit 1; }
+        [ -n "$sdk" ] && [ -f "$sdk/platforms/android-37.0/android.jar" ] && [ -d "$sdk/build-tools/36.0.0" ] \
+            || { printf '%s\n' 'Required Android platform 37.0 and build-tools 36.0.0 are unavailable.' >&2; exit 1; }
         "$SCRIPT_DIR/gradle.sh" :shared:testDebugUnitTest :composeApp:testDebugUnitTest :composeApp:assembleDebug :composeApp:lintDebug
         python3 -B scripts/verification-summary.py --phase android --require-tests shared composeApp
         ;;
     ios)
         [ "$(uname -s)" = Darwin ] || { printf '%s\n' 'iOS requires an existing macOS/Xcode host.' >&2; exit 1; }
-        export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode_26.0.1.app/Contents/Developer}"
-        [ -d "$DEVELOPER_DIR" ] || { printf '%s\n' 'Pinned Xcode 26.0.1 is unavailable; no installation or xcode-select change attempted.' >&2; exit 1; }
+        [ "$(uname -m)" = arm64 ] || { printf '%s\n' 'iOS CI requires an Apple Silicon host for the simulator target.' >&2; exit 1; }
+        export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode_26.4.1.app/Contents/Developer}"
+        [ -d "$DEVELOPER_DIR" ] || { printf '%s\n' 'Pinned Xcode 26.4.1 is unavailable.' >&2; exit 1; }
         # Compile native tests without claiming execution in CoreSimulator.
-        if [ "$(uname -m)" = arm64 ]; then
-            simulator=IosSimulatorArm64
-        else
-            simulator=IosX64
-        fi
-        "$SCRIPT_DIR/gradle.sh" ":shared:compileTestKotlin$simulator" ":composeApp:compileTestKotlin$simulator" :composeApp:linkDebugFrameworkIosArm64
+        "$SCRIPT_DIR/gradle.sh" :shared:compileTestKotlinIosSimulatorArm64 :composeApp:compileTestKotlinIosSimulatorArm64 :composeApp:linkDebugFrameworkIosArm64
         "$SCRIPT_DIR/build-ios.sh" simulator
         "$SCRIPT_DIR/build-ios.sh" device
         python3 -B scripts/verification-summary.py --phase ios

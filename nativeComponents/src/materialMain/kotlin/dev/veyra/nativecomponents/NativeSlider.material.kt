@@ -1,4 +1,4 @@
-package com.mohamedrejeb.calf.ui.slider
+package dev.veyra.nativecomponents
 
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.height
@@ -11,10 +11,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
-/** Consumer compatibility actual: the real input/progress node must be at least 48 dp. */
+/** The real input and progress node must be at least 48 dp. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-actual fun AdaptiveSlider(
+actual fun NativeSlider(
     value: Float,
     onValueChange: (Float) -> Unit,
     modifier: Modifier,

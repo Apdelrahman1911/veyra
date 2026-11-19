@@ -1,12 +1,12 @@
 package dev.veyra.ui.music
 
-import com.mohamedrejeb.calf.ui.gesture.adaptiveClickable
+import io.github.apdelrahman1911.kira.ui.gesture.adaptiveClickable
 import dev.veyra.ui.design.ActionButton
 import androidx.compose.foundation.layout.ColumnScope
-import com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosAction
-import com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosActionStyle
-import com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosProperties
-import com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosTextField
+import io.github.apdelrahman1911.kira.ui.dialog.uikit.AlertDialogIosAction
+import io.github.apdelrahman1911.kira.ui.dialog.uikit.AlertDialogIosActionStyle
+import io.github.apdelrahman1911.kira.ui.dialog.uikit.AlertDialogIosProperties
+import io.github.apdelrahman1911.kira.ui.dialog.uikit.AlertDialogIosTextField
 import dev.veyra.nativecomponents.NativeAlert
 import dev.veyra.nativecomponents.NativeSheet
 
@@ -245,6 +245,6 @@ internal fun PlaylistShelf(snapshot: AppSnapshot, onAction: (MusicUiAction) -> U
         }
     }
     if (create) PlaylistNameDialog(onDismiss = { create = false },
-        suggestedName = defaultPlaylistName(snapshot.playlists) { strings.text(TextKey.DefaultPlaylistName).replace("{0}", it) },
+        suggestedName = defaultPlaylistName(snapshot.playlists, strings::editablePlaylistName),
         onSave = { onAction(MusicUiAction.CreatePlaylist(it, openAfter = true)); create = false })
 }

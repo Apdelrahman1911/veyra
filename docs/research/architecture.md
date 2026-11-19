@@ -8,7 +8,7 @@ Updated **2026-11-06**. D005/D006/D008/D009 in `docs/DECISIONS.md` are authorita
 - Room **2.8.5**, bundled SQLite **2.6.2**, KSP **2.2.21-2.0.4**. Android, JVM desktop and iOS use the same normalized schema and migrations, with platform file/lease factories.
 - `shared` owns domain, library, source/download contracts and the authoritative playback coordinator. `composeApp` owns UI, native engines, sessions and OS orchestration; `iosApp` supplies the native host.
 - `LibraryStore` and `PlaybackController` have application lifetime. Screens observe immutable projections and dispatch commands; neither navigation nor native players own a second authoritative queue.
-- Upstream execution is pinned by **`gradle/kmpyt.commit` and the staged Git submodule**, not a floating branch. A local development pin is not evidence of upstream publication or review.
+- The Gradle catalog pins the kmpYT Maven release. `gradle/kmpyt.commit` records its publisher-declared source revision for inventory and package provenance.
 
 ## Complete normalized Room persistence
 

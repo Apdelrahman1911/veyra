@@ -264,7 +264,9 @@ private fun TrackDownloadSection(item: MediaItem, record: DownloadSurfaceEntry?,
             )
             if (record.status !in setOf(DownloadStatus.COMPLETE, DownloadStatus.CANCELLED)) {
                 val total = record.totalBytes?.takeIf { it > 0L }
-                if (total != null) {
+                if (record.isFinishing) {
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                } else if (total != null) {
                     LinearProgressIndicator(progress = { (record.bytesDownloaded.toDouble() / total.toDouble()).toFloat().coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
                     Text(strings.format(TextKey.DownloadProgress, strings.byteSize(record.bytesDownloaded), strings.byteSize(total)), style = MaterialTheme.typography.bodySmall)
                 } else {

@@ -1,7 +1,7 @@
 package dev.veyra.ui.design
 
 import androidx.compose.ui.semantics.Role
-import com.mohamedrejeb.calf.ui.gesture.adaptiveClickable
+import io.github.apdelrahman1911.kira.ui.gesture.adaptiveClickable
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*

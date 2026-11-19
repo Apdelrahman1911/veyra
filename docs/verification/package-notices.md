@@ -1,10 +1,11 @@
 # Offline notices and production inventories
 
-`scripts/package-notices.py` is an offline, bounded collector/checker. It reads
-the actual `gradle/kmpyt.commit` checkout, complete reviewed GPL/MIT bytes, the
-committed upstream notice, retained asset terms, and **only explicitly supplied
-production inventories**. It neither invokes Gradle nor searches global caches
-or downloads license text.
+`scripts/package-notices.py` checks the retained publication notices against
+the Gradle catalog, recorded upstream source revisions and original text hashes.
+The checksum record identifies the kmpYT Maven JAR and NativeCmpKit UI notices
+archive the texts came from. The collector also reads Veyra’s grant, retained
+asset terms and explicitly supplied production inventories. All inputs are
+available offline in the app checkout. [Publication notice record](../../third_party/notices/published-libraries.json)
 
 ## Source-only check (current CI)
 
@@ -16,7 +17,7 @@ scripts/dev.sh python3 -B scripts/package-notices.py --check
 
 Regenerate only between builds: Compose packages these generated resources.
 The output is `composeApp/src/commonMain/composeResources/files/legal/`, including
-the five existing UI document names, an index, and SHA256-addressed original
+the in-app notices and grants, an index, and SHA256-addressed original
 texts. Generation is deterministic, uses staged replacement, and preserves
 unchanged file timestamps. Manually edited, unmanaged or symlinked output is
 rejected rather than silently overwritten. `--check` never writes that output.
@@ -48,14 +49,14 @@ Platforms/configurations are allowlisted:
 | --- | --- |
 | `desktop-linux-x64`, `desktop-windows-x64`, `desktop-macos-x64`, `desktop-macos-arm64` | `desktopRuntimeClasspath` on that host |
 | `android-release`, `android-debug` | `releaseRuntimeClasspath`, `debugRuntimeClasspath` |
-| `ios-arm64`, `ios-simulator-arm64`, `ios-simulator-x64` | Corresponding main `CompileKlibraries` on macOS |
+| `ios-arm64`, `ios-simulator-arm64` | Corresponding main `CompileKlibraries` on macOS |
 
 iOS inventories are main native link inputs, **not a final linked binary SBOM**.
 An Android debug inventory does not establish release coverage. Supply multiple
 `--inventory` arguments explicitly for a combined notice set. Inputs, outputs,
 Maven POMs and all resolved artifacts must be within the repository. Inventories
-record exact coordinates, variants, byte sizes, SHA256s, the immutable source pin
-and all critical Gradle/pin inputs. Changed inputs require re-export. POM parent
+record exact coordinates, variants, byte sizes, SHA256s, and the Gradle and
+publication provenance input hashes. Changed inputs require re-export. POM parent
 traversal is bounded and only follows parents of actually selected components.
 No test configuration or opaque/file dependency is accepted as production.
 

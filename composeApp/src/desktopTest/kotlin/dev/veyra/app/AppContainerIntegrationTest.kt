@@ -1,5 +1,7 @@
 package dev.veyra.app
 
+import dev.veyra.ui.design.TextKey
+
 import androidx.sqlite.SQLiteDriver
 import androidx.sqlite.execSQL
 import dev.kmpyt.YouTubeClient
@@ -1736,6 +1738,36 @@ class AppContainerIntegrationTest {
         assertTrue(fixture.platform.engine.preparations.isEmpty())
     }
 
+    @Test fun mixedSearchStartsBothSourcesBeforeEitherReturnsAndPreservesPartialResults() = checkCase {
+        val fixture = newFixture()
+        val musicStarted = CompletableDeferred<Unit>()
+        val podcastsStarted = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        fixture.http.reply = { request ->
+            when (request.url.host) {
+                "commons.wikimedia.org" -> {
+                    musicStarted.complete(Unit)
+                    release.await()
+                    respond("unavailable", HttpStatusCode.ServiceUnavailable)
+                }
+                "itunes.apple.com" -> {
+                    podcastsStarted.complete(Unit)
+                    release.await()
+                    respond("""{"results":[{"collectionName":"Authored podcast","feedUrl":"https://example.org/feed"}]}""")
+                }
+                else -> error("Unexpected fixture host")
+            }
+        }
+        fixture.app.onMusicAction(MusicUiAction.SearchChanged("authored", SearchScope.EVERYWHERE, SearchKind.ALL, SourceProvider.COMMONS))
+        fixture.app.onMusicAction(MusicUiAction.RunSearch)
+        withTimeout(5_000) { musicStarted.await(); podcastsStarted.await() }
+        release.complete(Unit)
+        val result = withTimeout(5_000) { fixture.app.search.first { it.searched && !it.loading } }
+        assertEquals("Authored podcast", result.page.shows.single().title)
+        assertNotNull(result.page.notice)
+        assertNull(result.failure)
+    }
+
     @Test fun uiLibraryDoesNotAdvertiseRestartedRoomCompleteAsReadyBeforeThisProcessValidatesIt() = checkCase {
         val seed = newFixture(initialize = false)
         val original = item()
@@ -2893,11 +2925,19 @@ class AppContainerIntegrationTest {
         val track = item(SourceProvider.COMMONS, id = "fresh-download")
         fixture.store.upsertCatalog(listOf(track)).getOrThrow()
         val firstTitle = "Actual raw ordinal-zero recording"
+        val selectionStarted = CompletableDeferred<Unit>()
+        val allowSelection = CompletableDeferred<Unit>()
         fixture.gateway.onFirst = { title ->
+            selectionStarted.complete(Unit)
+            allowSelection.await()
             KmpFirstResult(title, FirstResultKind.VIDEO, FIRST, firstTitle, "https://www.youtube.com/watch?v=$FIRST")
         }
         fixture.gateway.onDownload = { transfer -> writeFakeTransfer(transfer) }
         fixture.app.onMusicAction(MusicUiAction.Download(track))
+        withTimeout(5_000) { selectionStarted.await() }
+        assertEquals(TextKey.DownloadPreparing, fixture.app.notice.value?.text)
+        assertTrue(fixture.store.acquisitionView().acquisition.physicalDownloads.isEmpty())
+        allowSelection.complete(Unit)
         val view = try {
             withTimeout(15_000) {
                 fixture.store.acquisitionViews.first { view ->
@@ -2911,6 +2951,8 @@ class AppContainerIntegrationTest {
         }
         val state = view.acquisition
         val physical = state.physicalDownloads.values.single { it.status == DownloadStatus.COMPLETE }
+        withTimeout(5_000) { fixture.app.notice.first { it?.text == TextKey.DownloadStarted } }
+        assertTrue(fixture.app.downloads.acquisitionPresentation.value.view.acquisition.physicalDownloads.containsKey(physical.id))
         val accepted = state.requests.values.single { it.state == AcquisitionJobState.COMMITTED }
         val single = assertIs<AcquisitionOutcome.Single>(accepted.outcome)
         assertEquals(track.title, accepted.request.completeTitle)
@@ -2934,6 +2976,19 @@ class AppContainerIntegrationTest {
         }
         assertFalse(Files.exists(Path.of(asset.uri)))
         assertFalse(view.snapshot.settings.offlineOnly)
+    }
+
+    @Test fun separateActionFailuresStayAvailableUntilDismissed() = checkCase {
+        val fixture = newFixture()
+        fixture.app.onMusicAction(MusicUiAction.ImportAudio)
+        val first = withTimeout(5_000) { fixture.app.failureNotices.first { it.size == 1 }.single() }
+        fixture.app.onMusicAction(MusicUiAction.RenamePlaylist("missing-playlist", "New name"))
+        val pending = withTimeout(5_000) { fixture.app.failureNotices.first { it.size == 2 } }
+        assertEquals(first, pending.first())
+        assertEquals(FailureCode.UNSUPPORTED_SOURCE, first.failure?.code)
+        assertEquals(FailureCode.INVALID_STATE, pending.last().failure?.code)
+        fixture.app.dismissNotice(first.id)
+        assertEquals(listOf(pending.last()), fixture.app.failureNotices.value)
     }
 
     @Test fun downloadTapFreezesTheDisplayedCompleteTitleAcrossAHeldAdmissionAndMetadataNavigationChanges() = checkCase {

@@ -62,6 +62,7 @@ import dev.veyra.ui.downloads.DownloadSurfaceOrigin
 import dev.veyra.ui.downloads.toDownloadSurfaceEntry
 import dev.veyra.ui.music.PlaybackProvenanceCard
 import dev.veyra.ui.music.PlaybackProvenanceContext
+import dev.veyra.ui.music.statusText
 
 /** A listening record, not another player. All actions route to the app's one coordinator. */
 @Composable
@@ -231,7 +232,7 @@ internal fun PodcastEpisodeStatus(state: PodcastEpisodeUiState, modifier: Modifi
         // A newer typed job can be active while an older schema2 asset remains Ready for the
         // same catalogue item. Never make the active job invisible behind the Ready badge.
         state.activeDownload?.takeIf { !it.ready && it.status != DownloadStatus.COMPLETE && it.status != DownloadStatus.CANCELLED }?.let {
-            PodcastStatusLabel(strings.downloadStatus(it.status))
+            PodcastStatusLabel(it.statusText(strings))
         }
         if (state.noLongerInFeed) PodcastStatusLabel(strings.text(TextKey.NoLongerInFeed))
     }
@@ -459,10 +460,12 @@ internal fun PodcastDownloadProgress(download: DownloadSurfaceEntry, modifier: M
     else strings.format(TextKey.DownloadProgressUnknown, strings.byteSize(downloadedBytes))
     Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        if (total != null) {
+        if (download.isFinishing) {
+            LinearProgressIndicator(Modifier.fillMaxWidth().semantics { contentDescription = download.statusText(strings) })
+        } else if (total != null) {
             LinearProgressIndicator(
                 progress = { (downloadedBytes.toDouble() / total.toDouble()).toFloat().coerceIn(0f, 1f) },
-                modifier = Modifier.fillMaxWidth().semantics { contentDescription = strings.downloadStatus(download.status) },
+                modifier = Modifier.fillMaxWidth().semantics { contentDescription = download.statusText(strings) },
             )
         }
     }
@@ -472,7 +475,7 @@ internal fun PodcastDownloadProgress(download: DownloadSurfaceEntry, modifier: M
 internal fun PodcastActionConfirmation(title: String, description: String, onDismiss: () -> Unit, onConfirm: () -> Unit) {
     val strings = LocalStrings.current
     // iOS: a native UIAlertController; elsewhere the Material dialog below.
-    com.mohamedrejeb.calf.ui.dialog.AdaptiveAlertDialog(
+    io.github.apdelrahman1911.kira.ui.dialog.AdaptiveAlertDialog(
         onConfirm = onConfirm,
         onDismiss = onDismiss,
         confirmText = strings.text(TextKey.Confirm),
@@ -492,8 +495,8 @@ internal fun PodcastActionConfirmation(title: String, description: String, onDis
                 PodcastActionText(strings.text(TextKey.Cancel))
             }
         },
-        iosConfirmButtonStyle = com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosActionStyle.Default,
-        iosDismissButtonStyle = com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosActionStyle.Cancel,
+        iosConfirmButtonStyle = io.github.apdelrahman1911.kira.ui.dialog.uikit.AlertDialogIosActionStyle.Default,
+        iosDismissButtonStyle = io.github.apdelrahman1911.kira.ui.dialog.uikit.AlertDialogIosActionStyle.Cancel,
         iosConfirmButtonIsPreferred = true,
     )
 }

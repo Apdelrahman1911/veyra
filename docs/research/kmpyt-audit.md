@@ -5,6 +5,9 @@
 design-only-resume and unresolved-license statements**. Sections 1–10 are historical observations
 at `533562f`, not descriptions of the latest local patch stack or a release-verification claim.
 
+Veyra now consumes the published Maven release. This audit records the earlier
+source-based integration. [Current build instructions](../../README.md#checkout-and-build)
+
 ## Current implementation checkpoint
 
 ### Revisions and ownership

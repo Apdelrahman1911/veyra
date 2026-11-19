@@ -116,11 +116,10 @@ class CentralListeningProofTest {
         return authorization to wrapped
     }
 
-    @Test fun approvedScopeAndNativeCacheCapMatchThePinnedRepositoryAuthorization() {
-        val scope = Json.parseToJsonElement(Files.readString(repository().resolve("third_party/kmpYT/ci/approved-channel.json"))).jsonObject
-        assertEquals(scope.getValue("channelUrl").jsonPrimitive.content, CentralProofPolicy.CHANNEL_URL)
-        assertEquals(scope.getValue("maximumVideosPerRun").jsonPrimitive.int, CentralProofPolicy.MAX_VIDEOS)
-        assertEquals(scope.getValue("maximumDownloadBytesPerVideo").jsonPrimitive.long, CentralProofPolicy.MAX_BYTES)
+    @Test fun approvedScopeAndNativeCacheCapMatchTheOwnerAuthorizedLimits() {
+        assertEquals("https://www.youtube.com/@oPiiLz", CentralProofPolicy.CHANNEL_URL)
+        assertEquals(2, CentralProofPolicy.MAX_VIDEOS)
+        assertEquals(64L * 1024 * 1024, CentralProofPolicy.MAX_BYTES)
         CentralListeningProof(silentAudio = true).use { proof ->
             assertEquals(CentralProofPolicy.MAX_BYTES, proof.executionPolicy().nativePlaybackLimits.maxCacheBytes)
         }

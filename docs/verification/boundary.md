@@ -75,7 +75,7 @@ passed; that requires its own rerun and rendered review.
   pidfd teardown, and tracee exit-kill. Its Python/tracer regressions are not an
   Android-tool or guest execution: the native preflight still requires lead
   review and separate approval, and `--run` remains exit78.
-- Actions checkout is pinned to a reviewed version with `set-safe-directory: false`, `persist-credentials: false`, and its submodule credential helper disabled. Public submodule initialization happens separately in a scoped process. Newer checkout versions that write credential config under the host `RUNNER_TEMP` need another containment review before upgrade.
+- Actions checkout is pinned to a reviewed version with `set-safe-directory: false` and `persist-credentials: false`. Gradle fetches the pinned library publications using project-owned caches. Newer checkout versions that write credential config under the host `RUNNER_TEMP` need another containment review before upgrade.
 - Xcode build/derived/result/module-cache paths are owned; CoreSimulator's host-managed service state is a separate unresolved audit and simulator execution is not assumed safe solely because its device set has a custom path.
 - Packaged native audio extraction/decoder tests must use the app's included JRE/native libraries and owned storage. A read-only installed host library is not permission to install a missing one.
 - Actions-managed reporting/control files (job summary/step outputs) are the explicit workflow reporting channel; no application caches, private data, or signing credentials belong there.

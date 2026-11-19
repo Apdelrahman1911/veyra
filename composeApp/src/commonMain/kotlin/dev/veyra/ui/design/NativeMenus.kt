@@ -10,11 +10,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
-import com.mohamedrejeb.calf.ui.ExperimentalCalfUiApi
-import com.mohamedrejeb.calf.ui.dropdown.AdaptiveDropDown
-import com.mohamedrejeb.calf.ui.dropdown.AdaptiveDropDownItem
-import com.mohamedrejeb.calf.ui.dropdown.AdaptiveDropDownSection
-import com.mohamedrejeb.calf.ui.uikit.UIKitImage
+import io.github.apdelrahman1911.kira.ui.ExperimentalKiraUiApi
+import io.github.apdelrahman1911.kira.ui.dropdown.AdaptiveDropDown
+import io.github.apdelrahman1911.kira.ui.dropdown.AdaptiveDropDownItem
+import io.github.apdelrahman1911.kira.ui.dropdown.AdaptiveDropDownSection
+import io.github.apdelrahman1911.kira.ui.uikit.UIKitImage
 
 /**
  * One menu command. [symbol] is the SF Symbol shown by the native iOS menu; [icon] is the
@@ -57,7 +57,7 @@ class MenuBuilder internal constructor() {
  * same entries, tags and enabled states. Entries are rebuilt on every composition, so labels and
  * availability always reflect current state.
  */
-@OptIn(ExperimentalCalfUiApi::class)
+@OptIn(ExperimentalKiraUiApi::class)
 @Composable
 fun BoxScope.NativeMenu(
     expanded: Boolean,

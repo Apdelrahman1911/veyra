@@ -7,13 +7,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
-import com.mohamedrejeb.calf.ui.ExperimentalCalfUiApi
-import com.mohamedrejeb.calf.ui.navigation.AdaptiveNavigationBar
-import com.mohamedrejeb.calf.ui.navigation.UIKitTabBarConfiguration
-import com.mohamedrejeb.calf.ui.navigation.UIKitUITabBarItem
-import com.mohamedrejeb.calf.ui.uikit.UIKitImage
+import io.github.apdelrahman1911.kira.ui.ExperimentalKiraUiApi
+import io.github.apdelrahman1911.kira.ui.navigation.AdaptiveNavigationBar
+import io.github.apdelrahman1911.kira.ui.navigation.UIKitTabBarConfiguration
+import io.github.apdelrahman1911.kira.ui.navigation.UIKitUITabBarItem
+import io.github.apdelrahman1911.kira.ui.uikit.UIKitImage
 
-@OptIn(ExperimentalCalfUiApi::class)
+@OptIn(ExperimentalKiraUiApi::class)
 @Composable
 actual fun NativeTabBar(
     tabs: List<NativeTab>,

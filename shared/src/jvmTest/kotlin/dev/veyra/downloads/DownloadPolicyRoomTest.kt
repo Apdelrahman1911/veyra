@@ -246,8 +246,7 @@ class DownloadPolicyRoomTest {
         assertEquals(original.attempts, tombstone.attempts)
         assertEquals(original.job.producer, tombstone.job.producer)
         assertEquals(id, enqueue(owner, selected))
-        assertEquals(DownloadBatchIntent.CANCELLED, join(owner, id).claims.single().intent)
-        owner.coordinator.resume(id) // Re-enqueue never silently changes the preserved claim intent.
+        assertEquals(DownloadBatchIntent.ACTIVE, join(owner, id).claims.single().intent)
         val fresh = assertNotNull(complete(owner, id).asset)
         assertEquals(epoch, clock.epochMs())
         assertEquals(old.validatorGeneration, fresh.validatorGeneration)

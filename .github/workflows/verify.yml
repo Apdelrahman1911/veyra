@@ -108,9 +108,9 @@ jobs:
           persist-credentials: false
           set-safe-directory: false
           submodules: false
-      - name: Initialize the pinned public source dependency in an owned environment
+      - name: Verify checkout, wrapper and pinned publication notices
         id: bootstrap
-        run: scripts/checkout-submodule.sh
+        run: scripts/verify-checkout.sh
       - name: Run bounded desktop tests
         id: desktop_tests
         if: ${{ inputs.scope != 'installers' }}
@@ -257,9 +257,9 @@ jobs:
           persist-credentials: false
           set-safe-directory: false
           submodules: false
-      - name: Initialize the pinned public source dependency in an owned environment
+      - name: Verify checkout, wrapper and pinned publication notices
         id: bootstrap
-        run: scripts/checkout-submodule.sh
+        run: scripts/verify-checkout.sh
       - name: Build APK and execute JVM Android tests (not instrumentation)
         id: android_tests
         if: ${{ inputs.scope != 'installers' }}
@@ -340,22 +340,15 @@ jobs:
 
   ios:
     if: ${{ github.event.repository.private == false && inputs.retention_canary != true && (inputs.scope == 'all' || inputs.scope == 'ios') }}
-    name: iOS full Swift host compile (${{ matrix.arch }})
-    runs-on: ${{ matrix.runner }}
+    name: iOS full Swift host compile (arm64)
+    runs-on: macos-26
     timeout-minutes: 150
     permissions:
       contents: write
-    strategy:
-      fail-fast: false
-      max-parallel: 1
-      matrix:
-        include:
-          - {runner: macos-15, arch: arm64, simulator_platform: ios-simulator-arm64, retain_device: true}
-          - {runner: macos-15-intel, arch: x64, simulator_platform: ios-simulator-x64, retain_device: false}
     env:
-      DEVELOPER_DIR: /Applications/Xcode_26.0.1.app/Contents/Developer
+      DEVELOPER_DIR: /Applications/Xcode_26.4.1.app/Contents/Developer
       VEYRA_EXPECTED_OS: Darwin
-      VEYRA_EXPECTED_ARCH: ${{ matrix.arch }}
+      VEYRA_EXPECTED_ARCH: arm64
     steps:
       - name: Checkout without global Git configuration or retained credentials
         id: checkout
@@ -364,9 +357,9 @@ jobs:
           persist-credentials: false
           set-safe-directory: false
           submodules: false
-      - name: Initialize the pinned public source dependency in an owned environment
+      - name: Verify checkout, wrapper and pinned publication notices
         id: bootstrap
-        run: scripts/checkout-submodule.sh
+        run: scripts/verify-checkout.sh
       - name: Compile native tests and full unsigned simulator/device applications
         id: ios_tests
         timeout-minutes: 45
@@ -379,7 +372,7 @@ jobs:
         continue-on-error: true
         run: |
           scripts/build-ios.sh simulator
-          if [ "${{ matrix.retain_device }}" = true ]; then scripts/build-ios.sh device; fi
+          scripts/build-ios.sh device
       - name: Generate iOS inventory and inventory-backed legal copy
         id: ios_inventory
         if: ${{ always() && inputs.retain_builds == true && steps.bootstrap.outcome == 'success' }}
@@ -388,17 +381,15 @@ jobs:
         run: |
           scripts/gradle.sh -I scripts/runtime-inventory.init.gradle \
             :composeApp:exportProductionInventory \
-            -Pveyra.inventory.platform="${{ matrix.simulator_platform }}"
+            -Pveyra.inventory.platform="ios-simulator-arm64"
           python3 -B scripts/package-notices.py \
-            --inventory ".work/verification/runtime-inventory/${{ matrix.simulator_platform }}.json" \
-            --output ".work/verification/legal-inventory/${{ matrix.simulator_platform }}"
-          if [ "${{ matrix.retain_device }}" = true ]; then
-            scripts/gradle.sh -I scripts/runtime-inventory.init.gradle \
-              :composeApp:exportProductionInventory -Pveyra.inventory.platform=ios-arm64
-            python3 -B scripts/package-notices.py \
-              --inventory .work/verification/runtime-inventory/ios-arm64.json \
-              --output .work/verification/legal-inventory/ios-arm64
-          fi
+            --inventory ".work/verification/runtime-inventory/ios-simulator-arm64.json" \
+            --output ".work/verification/legal-inventory/ios-simulator-arm64"
+          scripts/gradle.sh -I scripts/runtime-inventory.init.gradle \
+            :composeApp:exportProductionInventory -Pveyra.inventory.platform=ios-arm64
+          python3 -B scripts/package-notices.py \
+            --inventory .work/verification/runtime-inventory/ios-arm64.json \
+            --output .work/verification/legal-inventory/ios-arm64
       - name: Retain iOS simulator lane in a draft prerelease
         id: retain_simulator
         if: ${{ always() && inputs.retain_builds == true && steps.bootstrap.outcome == 'success' }}
@@ -407,13 +398,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          platform="${{ matrix.simulator_platform }}"
-          app="$(find .work/xcode -type d -path "*DerivedData-simulator-${{ matrix.arch }}/Build/Products/*-iphonesimulator/Veyra.app" -print -quit 2>/dev/null || true)"
-          if [ "${{ matrix.arch }}" = arm64 ]; then
-            framework=shared/build/bin/iosSimulatorArm64/debugFramework/Veyra.framework
-          else
-            framework=shared/build/bin/iosX64/debugFramework/Veyra.framework
-          fi
+          platform="ios-simulator-arm64"
+          app="$(find .work/xcode -type d -path "*DerivedData-simulator-arm64/Build/Products/*-iphonesimulator/Veyra.app" -print -quit 2>/dev/null || true)"
+          framework=composeApp/build/bin/iosSimulatorArm64/debugFramework/Veyra.framework
           outcome=success
           if [ "${{ steps.ios_tests.outcome }}" != success ] || [ "${{ steps.ios_build.outcome }}" != success ] || \
              [ "${{ steps.ios_inventory.outcome }}" != success ] || [ -z "$app" ]; then outcome=failed; fi
@@ -432,7 +419,7 @@ jobs:
           scripts/build-retention.sh "${args[@]}"
       - name: Retain iOS device arm64 lane in a draft prerelease
         id: retain_device
-        if: ${{ always() && inputs.retain_builds == true && matrix.retain_device == true && steps.bootstrap.outcome == 'success' }}
+        if: ${{ always() && inputs.retain_builds == true && steps.bootstrap.outcome == 'success' }}
         timeout-minutes: 20
         env:
           GH_TOKEN: ${{ github.token }}
@@ -440,7 +427,7 @@ jobs:
           set -euo pipefail
           platform=ios-device-arm64
           app="$(find .work/xcode -type d -path "*DerivedData-device-arm64/Build/Products/*-iphoneos/Veyra.app" -print -quit 2>/dev/null || true)"
-          framework=shared/build/bin/iosArm64/debugFramework/Veyra.framework
+          framework=composeApp/build/bin/iosArm64/debugFramework/Veyra.framework
           outcome=success
           if [ "${{ steps.ios_tests.outcome }}" != success ] || [ "${{ steps.ios_build.outcome }}" != success ] || \
              [ "${{ steps.ios_inventory.outcome }}" != success ] || [ -z "$app" ]; then outcome=failed; fi
@@ -461,10 +448,8 @@ jobs:
           if [ "${{ inputs.retain_builds }}" = true ]; then
             test "${{ steps.ios_build.outcome }}" = success
             test "${{ steps.ios_inventory.outcome }}" = success
-            find .work/xcode -type d -path "*DerivedData-simulator-${{ matrix.arch }}/Build/Products/*-iphonesimulator/Veyra.app" -print -quit | grep -q .
-            if [ "${{ matrix.retain_device }}" = true ]; then
-              find .work/xcode -type d -path "*DerivedData-device-arm64/Build/Products/*-iphoneos/Veyra.app" -print -quit | grep -q .
-            fi
+            find .work/xcode -type d -path "*DerivedData-simulator-arm64/Build/Products/*-iphonesimulator/Veyra.app" -print -quit | grep -q .
+            find .work/xcode -type d -path "*DerivedData-device-arm64/Build/Products/*-iphoneos/Veyra.app" -print -quit | grep -q .
           fi
       - name: Report compile-only native status (no simulator or physical run)
         if: ${{ always() && steps.checkout.outcome == 'success' }}
@@ -502,7 +487,7 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git status --porcelain=v1)"
-          test "$(cat gradle/kmpyt.commit)" = "6805d4db8077650992d342e5395b1f0d7c80e984"
+          python3 -B scripts/package-notices.py --check
           test "$(sha256sum shared/schemas/dev.veyra.data.room.VeyraDatabase/3.json | cut -d' ' -f1)" \
             = "aab30e43a35a431a25a7ecbb7ebccefd849811f688957054304b02d3caf6d367"
           python3 -B scripts/tests/test_retention_packet.py
@@ -656,7 +641,7 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git status --porcelain=v1)"
-          test "$(cat gradle/kmpyt.commit)" = "6805d4db8077650992d342e5395b1f0d7c80e984"
+          python3 -B scripts/package-notices.py --check
           test "$(sha256sum shared/schemas/dev.veyra.data.room.VeyraDatabase/3.json | cut -d' ' -f1)" \
             = "aab30e43a35a431a25a7ecbb7ebccefd849811f688957054304b02d3caf6d367"
       - name: Download the draft assets independently
@@ -780,7 +765,7 @@ jobs:
           if scope in ("all", "android", "android-desktop", "android-linux-windows", "installers"):
               platforms += ["android"]
           if scope in ("all", "ios"):
-              platforms += ["ios-simulator-arm64", "ios-simulator-x64", "ios-device-arm64"]
+              platforms += ["ios-simulator-arm64", "ios-device-arm64"]
           if not platforms:
               raise SystemExit("retain_builds requested but no eligible lanes")
           value = json.dumps(platforms, separators=(",", ":"))
@@ -814,7 +799,7 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git status --porcelain=v1)"
-          test "$(cat gradle/kmpyt.commit)" = "6805d4db8077650992d342e5395b1f0d7c80e984"
+          python3 -B scripts/package-notices.py --check
           test "$(sha256sum shared/schemas/dev.veyra.data.room.VeyraDatabase/3.json | cut -d' ' -f1)" \
             = "aab30e43a35a431a25a7ecbb7ebccefd849811f688957054304b02d3caf6d367"
       - name: Independently download and verify every lane draft release

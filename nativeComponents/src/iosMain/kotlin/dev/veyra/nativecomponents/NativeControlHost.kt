@@ -2,7 +2,9 @@
 
 package dev.veyra.nativecomponents
 
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.UIKitInteropProperties
 import kotlinx.cinterop.useContents
@@ -49,3 +51,15 @@ fun nativeControlContainer(control: UIView, fill: Boolean): UIView {
 /** The size UIKit draws [control] at, in points (1 pt = 1 dp in Compose on iOS). */
 fun intrinsicControlSize(control: UIView): DpSize =
     control.sizeThatFits(CGSizeMake(0.0, 0.0)).useContents { DpSize(width.dp, height.dp) }
+
+internal fun UIView.applyControlAppearance(layoutDirection: LayoutDirection, background: Color) {
+    semanticContentAttribute = when (layoutDirection) {
+        LayoutDirection.Rtl -> UISemanticContentAttributeForceRightToLeft
+        LayoutDirection.Ltr -> UISemanticContentAttributeForceLeftToRight
+    }
+    val luminance = 0.299 * background.red + 0.587 * background.green + 0.114 * background.blue
+    val style = if (luminance <= 128.0 / 255) UIUserInterfaceStyle.UIUserInterfaceStyleDark
+        else UIUserInterfaceStyle.UIUserInterfaceStyleLight
+    overrideUserInterfaceStyle = style
+    superview?.overrideUserInterfaceStyle = style
+}

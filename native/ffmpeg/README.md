@@ -67,7 +67,9 @@ deliberately detached descendants on non-Linux POSIX hosts.
 
 The recipe verifies reported version/license/protocol closure and executes the
 **actual local stream-copy command** against redistributable authored upstream
-H.264/AAC fixtures. This alone is not full decoding, live source, packaged start,
+H.264/AAC fixtures. `fixtures/` holds the CC0 test inputs and license from kmpYT
+revision `cf1856a425045e6269f65ab5ab6b5d698586e307`. The inputs are used by the
+build verification step. This alone is not full decoding, live source, packaged start,
 offline restart, or physical-output evidence. It writes `releaseReady:false`;
 matching-host build, dependency inspection, packaged native decoding and complete
 application redistribution closure remain separate gates. macOS code signing

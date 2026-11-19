@@ -9,7 +9,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Surface
 import androidx.compose.ui.semantics.Role
-import com.mohamedrejeb.calf.ui.gesture.adaptiveClickable
+import io.github.apdelrahman1911.kira.ui.gesture.adaptiveClickable
 import dev.veyra.ui.design.ActionButton
 import dev.veyra.ui.design.NativeMenu
 import androidx.compose.foundation.background
@@ -191,7 +191,7 @@ fun LibraryScreen(
         }
     }
     if (create) PlaylistNameDialog(onDismiss = { create = false },
-        suggestedName = defaultPlaylistName(snapshot.playlists) { strings.text(TextKey.DefaultPlaylistName).replace("{0}", it) },
+        suggestedName = defaultPlaylistName(snapshot.playlists, strings::editablePlaylistName),
         onSave = { onAction(MusicUiAction.CreatePlaylist(it, openAfter = true)); create = false })
 }
 
@@ -387,7 +387,13 @@ private fun DownloadsContent(snapshot: AppSnapshot, onAction: (MusicUiAction) ->
                 filter, { filter = it }, Modifier.padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 8.dp).testTag("downloads-filter"))
         }
         if (downloads.isEmpty()) item {
-            EmptyState(strings.text(TextKey.EmptyDownloads), strings.text(TextKey.EmptyDownloadsDescription), strings.text(TextKey.SearchMusic), { onAction(MusicUiAction.OpenSearch()) }, Modifier.padding(20.dp))
+            if (all.isEmpty()) {
+                EmptyState(strings.text(TextKey.EmptyDownloads), strings.text(TextKey.EmptyDownloadsDescription),
+                    strings.text(TextKey.SearchMusic), { onAction(MusicUiAction.OpenSearch()) }, Modifier.padding(20.dp))
+            } else {
+                EmptyState(strings.text(TextKey.NoResults), strings.text(TextKey.DownloadFilterEmpty),
+                    strings.text(TextKey.ShowAllDownloads), { filter = 0 }, Modifier.padding(20.dp))
+            }
         }
         items(downloads, key = { it.id }) { entry -> DownloadRow(entry, snapshot, onAction, options) }
     }
@@ -499,7 +505,9 @@ private fun DownloadRow(entry: DownloadSurfaceEntry, snapshot: AppSnapshot, onAc
             if (entry.status != DownloadStatus.COMPLETE && entry.status != DownloadStatus.CANCELLED) {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     val bar = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape)
-                    if (total != null && total > 0) {
+                    if (entry.isFinishing) {
+                        LinearProgressIndicator(bar, trackColor = MaterialTheme.colorScheme.surfaceContainerHighest, gapSize = 0.dp)
+                    } else if (total != null && total > 0) {
                         LinearProgressIndicator(progress = { (entry.bytesDownloaded.toDouble() / total.toDouble()).toFloat().coerceIn(0f, 1f) }, modifier = bar,
                             trackColor = MaterialTheme.colorScheme.surfaceContainerHighest, gapSize = 0.dp, drawStopIndicator = {})
                         Text(strings.format(TextKey.DownloadProgress, strings.byteSize(entry.bytesDownloaded), strings.byteSize(total)), style = MaterialTheme.typography.bodySmall,

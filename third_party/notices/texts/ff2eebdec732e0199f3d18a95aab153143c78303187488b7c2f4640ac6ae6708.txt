@@ -1,0 +1,16 @@
+NativeCmpKit
+Copyright 2026 NativeCmpKit contributors
+
+Derived from Calf (Compose Adaptive Look & Feel)
+Copyright 2023 Mohamed Rejeb
+Original project: https://github.com/MohamedRejeb/Calf
+Original baseline: af388bd3ad0325b2afdd8c0149cb7ff6f24c5da6
+
+Calf authorship, copyright notices, Apache License 2.0, and accessible Git history
+are retained. This independently maintained project is not an official Calf
+release and does not imply endorsement by the original authors.
+
+Migration modifications are documented in docs/migration/MODIFICATIONS.md.
+Additional upstream credits include compose-cupertino and AndroidLiquidGlass;
+retain their source-file notices. Bundled third-party assets have additional
+terms: see THIRD_PARTY_NOTICES.md and licenses/.

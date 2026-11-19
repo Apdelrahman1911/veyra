@@ -3,7 +3,7 @@ package dev.veyra.nativecomponents
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
-import com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosProperties
+import io.github.apdelrahman1911.kira.ui.dialog.uikit.AlertDialogIosProperties
 
 /**
  * An alert or action sheet. iOS presents a native UIAlertController built from [ios] (including

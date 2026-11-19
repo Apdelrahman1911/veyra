@@ -1,4 +1,4 @@
-package com.mohamedrejeb.calf.ui.slider
+package dev.veyra.nativecomponents
 
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.material3.MaterialTheme
@@ -6,30 +6,23 @@ import androidx.compose.material3.SliderColors
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalLayoutDirection
-import com.mohamedrejeb.calf.ui.utils.applyLayoutDirection
-import com.mohamedrejeb.calf.ui.utils.applyTheme
-import com.mohamedrejeb.calf.ui.utils.isDark
-import com.mohamedrejeb.calf.ui.utils.toUIColor
+import io.github.apdelrahman1911.kira.ui.utils.toUIColor
 import androidx.compose.ui.viewinterop.UIKitView
-import dev.veyra.nativecomponents.LocalNativeControlAccessibility
 import kotlinx.cinterop.BetaInteropApi
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.ObjCAction
 import platform.Foundation.NSSelectorFromString
 import platform.UIKit.*
-import dev.veyra.nativecomponents.nativeControlContainer
-import dev.veyra.nativecomponents.nativeControlProperties
-import dev.veyra.nativecomponents.LocalNativeControlsCovered
 import platform.darwin.NSObject
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalForeignApi::class)
 @Composable
-actual fun AdaptiveSlider(value: Float, onValueChange: (Float) -> Unit, modifier: Modifier,
+actual fun NativeSlider(value: Float, onValueChange: (Float) -> Unit, modifier: Modifier,
     enabled: Boolean, valueRange: ClosedFloatingPointRange<Float>, steps: Int,
     onValueChangeFinished: (() -> Unit)?, colors: SliderColors, interactionSource: MutableInteractionSource) {
     val layoutDirection = LocalLayoutDirection.current
-    val dark = isDark(MaterialTheme.colorScheme.background)
+    val background = MaterialTheme.colorScheme.background
     val covered = LocalNativeControlsCovered.current
     val accessibility = LocalNativeControlAccessibility.current
     val callback = rememberUpdatedState(onValueChange)
@@ -56,8 +49,7 @@ actual fun AdaptiveSlider(value: Float, onValueChange: (Float) -> Unit, modifier
             val it = container.subviews.first() as UISlider
             if (!it.tracking) it.value = ((value - valueRange.start) / (valueRange.endInclusive - valueRange.start)).coerceIn(0f, 1f)
             it.enabled = enabled
-            it.applyLayoutDirection(layoutDirection)
-            it.applyTheme(dark)
+            it.applyControlAppearance(layoutDirection, background)
             // The filled part follows the app's theme colour rather than the system blue.
             it.minimumTrackTintColor = colors.activeTrackColor.toUIColor()
             it.accessibilityLabel = accessibility?.label

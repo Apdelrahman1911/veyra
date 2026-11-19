@@ -258,7 +258,7 @@ class RetentionWorkflowTest(unittest.TestCase):
         self.assertIn("desktop-macos-x64", WORKFLOW)
         self.assertIn("android-debug", WORKFLOW)
         self.assertIn("ios-simulator-arm64", WORKFLOW)
-        self.assertIn("ios-simulator-x64", WORKFLOW)
+        self.assertNotIn("ios-simulator-x64", WORKFLOW)
         self.assertIn("ios-device-arm64", WORKFLOW)
 
     def test_production_build_and_retention_steps_are_separate(self):
@@ -330,7 +330,7 @@ class RetentionWorkflowTest(unittest.TestCase):
         self.assertIn('-f sha="$GITHUB_SHA"', WORKFLOW)
         self.assertIn('test "$(gh api "repos/$REPO/git/ref/tags/$TAG" --jq .object.sha)" = "$GITHUB_SHA"', WORKFLOW)
         self.assertIn("test \"$(git rev-parse HEAD)\" = \"$GITHUB_SHA\"", WORKFLOW)
-        self.assertIn("6805d4db8077650992d342e5395b1f0d7c80e984", WORKFLOW)
+        self.assertIn("python3 -B scripts/package-notices.py --check", WORKFLOW)
         self.assertIn("aab30e43a35a431a25a7ecbb7ebccefd849811f688957054304b02d3caf6d367", WORKFLOW)
 
     def test_release_is_draft_prerelease_and_not_clobbered(self):

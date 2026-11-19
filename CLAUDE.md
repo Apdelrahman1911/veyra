@@ -12,7 +12,7 @@ Before changing anything, read `docs/STATE.md` (newest entry on top, historical 
 
 ## Commands
 
-Always go through `scripts/gradle.sh`, never bare `./gradlew`. It sources `scripts/env.sh`, which keeps every tool home, cache and temp dir under `.work/`. It also runs `scripts/bootstrap.sh` (validates the pinned submodules) and disables SDK/JDK auto-download. It runs with `--no-daemon` and one worker by default; set `VEYRA_GRADLE_WORKERS` to change that. Requires an existing JDK 21; Android needs SDK platform 36 and build-tools 35.0.0.
+Use `scripts/gradle.sh`. It keeps tool homes, caches and temporary files under `.work/`, validates the pinned Gradle wrapper, and disables SDK and JDK auto-download. It runs with `--no-daemon` and one worker by default. Use an existing JDK 21 and Python 3.11+. Android builds need SDK platform 37.0 and Build Tools 36.0.0.
 
 ```sh
 scripts/gradle.sh :shared:jvmTest                     # shared logic, Room, coordinators
@@ -21,7 +21,7 @@ scripts/gradle.sh :shared:jvmTest --tests 'dev.veyra.playback.SomeTest'   # sing
 scripts/gradle.sh :composeApp:run                     # desktop app
 scripts/gradle.sh :composeApp:assembleDebug           # Android APK
 scripts/gradle.sh :shared:testDebugUnitTest :composeApp:testDebugUnitTest :composeApp:lintDebug
-scripts/build-ios.sh simulator|device                 # compile Swift host (pinned Xcode 26.0.1 via DEVELOPER_DIR); no signing/install
+scripts/build-ios.sh simulator|device                 # compile unsigned Swift host (Xcode 26.4.1, arm64 simulator or device)
 scripts/ci.sh desktop|android|ios [--package]         # what CI runs: Python tooling tests + Gradle suites + verification summary
 scripts/package.sh                                    # current-OS installer only (deb/dmg/exe)
 scripts/dev.sh <cmd>                                  # run any other tool with the scoped environment
@@ -36,12 +36,12 @@ Workflows are in `.github/workflows/` (`verify.yml`, `installers.yml`), on stand
 Gradle modules (`settings.gradle.kts`):
 - **`:shared`**: KMP business logic (Android, JVM, iOS), package `dev.veyra`. Key areas: `source/` (kmpYT adapter, podcast/release metadata, network), `acquisition/` (typed request → kmpYT first-result resolution → collection traversal → download batches), `downloads/` (leased, Room-persisted download engine with physical validation and atomic finalization), `playback/` (`PlaybackController` coordinator, `AudioEngine` abstraction, crossfade math), `data/` + `data/room/` (normalized Room schema, DAOs, transactions), `model/`.
 - **`:composeApp`**: Compose UI and platform glue. `app/AppContainer.kt` is the app-lifetime composition root that wires stores, coordinators and platform services. `app/AppNavigation.kt` + `ui/*` hold the four destinations (Listen, Search, Podcasts, Library) plus Settings. Native audio is in `androidMain/.../platform/audio` (Media3 + MediaSession), `iosMain/.../platform/audio` (AVPlayer) and `desktopMain/.../desktop/audio` (JNA → pinned libmpv).
-- **`:nativeComponents`**: compiles selected UI sources from the `third_party/nativeCmpkit` submodule, plus Veyra-owned compatibility actuals (native UISwitch/UISlider on iOS). Leave the pinned library sources unmodified; see `nativeComponents/README.md`.
+- **`:nativeComponents`** consumes the published Kira UI module and owns Veyra’s platform adapters, including iOS UISwitch and UISlider. See [native UI integration](nativeComponents/README.md).
 - **`iosApp/`**: the Xcode Swift host for the Compose framework. **`native/`**: desktop runtime bundling (libmpv/ffmpeg, Windows toolchain) with Python tests.
 
 Invariants from the decision record that span many files:
 - **All playable content resolves through kmpYT** (D005). Discovery sources (podcast RSS, release metadata) supply metadata only. The *complete title* goes to kmpYT search and the *first ordered result* is accepted. Never truncate the title, pick a later result, or fall back to direct RSS/HTTP playback or downloads. Keep both the requested and the resolved identity.
-- kmpYT is the pinned composite build at `third_party/kmpYT`, substituted for `io.github.apdelrahman1911.kmpyt:kmpyt`. Its commit is recorded in `gradle/kmpyt.commit` (`gradle/nativecmpkit.commit` for nativeCmpkit). Upstream work happens in the `.work/kmpYT` checkout, which has its own instructions. General-purpose changes go upstream, get reviewed and are re-pinned; never MavenLocal or a floating branch.
+- `gradle/libs.versions.toml` pins the kmpYT and NativeCmpKit Kira UI Maven Central releases. `gradle/kmpyt.commit` and `gradle/nativecmpkit.commit` record their publisher-declared source revisions. General-purpose library changes go upstream and reach Veyra in a pinned release.
 - **Room is the only persistence** (D006): normalized schema, foreign keys, versioned exported schemas in `shared/schemas/`, explicit migrations tested with `MigrationTestHelper`, no destructive fallback. Schema changes require a new export plus a migration and its test. `AppSnapshot` is only an in-memory UI projection.
 - **One playback coordinator, two persistent queue contexts** (Music, Podcast) (D004). Browsing never switches audio, and state restores paused. Native callbacks carry generation/seek tokens so stale events can be rejected. Music-only equal-power crossfade uses managed native decks (D009).
 - Downloads (D008) are executed by kmpYT and orchestrated, validated and reconciled by Veyra. "Ready" requires validated lengths, decoded media and hashes. On iOS the app reports NeedsForeground/Paused instead of promising background execution.

@@ -100,7 +100,7 @@ internal object IosApplication {
             }
             // The common UI must remain mounted on Failed so explicit backup recovery is usable.
             mutableBootstrap.value = IosBootstrap.Available(created)
-            observeIosDownloadDiagnostics(scope, created)
+            observeIosDiagnostics(scope, created)
             launch {
                 var previousFailure: AppFailure? = null
                 created.playback.state.collect {
@@ -283,8 +283,13 @@ private fun debugIosPlaybackFailure(failure: AppFailure) {
 }
 
 @OptIn(kotlin.experimental.ExperimentalNativeApi::class)
-private fun observeIosDownloadDiagnostics(scope: CoroutineScope, container: AppContainer) {
+private fun observeIosDiagnostics(scope: CoroutineScope, container: AppContainer) {
     if (!kotlin.native.Platform.isDebugBinary) return
+    scope.launch {
+        container.playback.startupTiming.collect { timing ->
+            timing?.let { println("VEYRA_PLAYBACK_STARTUP $it") }
+        }
+    }
     scope.launch {
         var previousSequence = 0L
         container.downloads.diagnosticEvents.collect { entries ->

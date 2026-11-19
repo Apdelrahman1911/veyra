@@ -156,7 +156,8 @@ class DesktopCrossfadeTest {
             events.next { it is EngineEvent.Ready }
             engine.seek(2_000, 1, 20); engine.seek(4_000, 2, 20); engine.seek(8_000, 3, 20)
             val seek = assertIs<EngineEvent.SeekCompleted>(events.next { it is EngineEvent.SeekCompleted && it.seekSequence == 3L })
-            assertTrue(seek.success && abs(seek.positionMs - 8_000) < 1_000)
+            assertTrue(seek.success && abs(seek.positionMs - 8_000) < 1_000,
+                "Final seek reported success=${seek.success}, positionMs=${seek.positionMs}")
             engine.prepare(source(config, "new"), 0, 21)
             events.next { it is EngineEvent.Ready && it.generation == 21L }
             assertTrue(old.closed.get())

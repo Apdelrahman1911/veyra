@@ -7,11 +7,11 @@ import dev.veyra.ui.design.bottomChrome
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.key
 import androidx.compose.runtime.rememberUpdatedState
-import com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosAction
-import com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosActionStyle
-import com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosProperties
-import com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosTextField
-import com.mohamedrejeb.calf.ui.uikit.IosKeyboardType
+import io.github.apdelrahman1911.kira.ui.dialog.uikit.AlertDialogIosAction
+import io.github.apdelrahman1911.kira.ui.dialog.uikit.AlertDialogIosActionStyle
+import io.github.apdelrahman1911.kira.ui.dialog.uikit.AlertDialogIosProperties
+import io.github.apdelrahman1911.kira.ui.dialog.uikit.AlertDialogIosTextField
+import io.github.apdelrahman1911.kira.ui.uikit.IosKeyboardType
 import dev.veyra.nativecomponents.NativeAlert
 import dev.veyra.ui.design.NativeMenu
 import androidx.compose.foundation.layout.Arrangement
@@ -730,7 +730,7 @@ private fun AddPodcastFeedDialog(state: AddPodcastFeedUiState, offline: Boolean,
             TextButton(onClick = { onAction(PodcastAction.SubmitFeed(state.url.trim())) }, enabled = canSubmit,
                 modifier = Modifier.testTag("podcast-submit-feed")) {
                 if (state.isSubmitting) {
-                    com.mohamedrejeb.calf.ui.progress.AdaptiveCircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    io.github.apdelrahman1911.kira.ui.progress.AdaptiveCircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                     Spacer(Modifier.width(8.dp))
                 }
                 Text(strings.text(if (state.isSubmitting) TextKey.Loading else TextKey.AddFeed))

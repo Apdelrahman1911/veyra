@@ -3,7 +3,7 @@ package dev.veyra.ui.music
 import androidx.compose.foundation.lazy.rememberLazyListState
 import dev.veyra.ui.design.bottomChrome
 import androidx.compose.ui.semantics.Role
-import com.mohamedrejeb.calf.ui.gesture.adaptiveClickable
+import io.github.apdelrahman1911.kira.ui.gesture.adaptiveClickable
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable

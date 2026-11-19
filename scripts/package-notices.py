@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate/check offline notices from the actual pin and exact runtime inputs.
+"""Generate/check offline notices from pinned releases and exact runtime inputs.
 
 No network, Gradle invocation, global cache sweep, license inference, or claim of
 binary redistribution readiness. A POM license URL is NOT complete license text.
@@ -16,9 +16,9 @@ from pathlib import Path, PurePosixPath
 import re
 import shutil
 import stat
-import subprocess
 import sys
 import tempfile
+import tomllib
 from urllib.parse import quote, urlsplit
 import xml.etree.ElementTree as ET
 import zipfile
@@ -27,8 +27,22 @@ ROOT = Path(__file__).resolve().parents[1]
 LEGAL = Path("composeApp/src/commonMain/composeResources/files/legal")
 GPL_SHA256 = "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
 MIT_SHA256 = "2b48ffd17a0263667e7df9b64b277520776571b1ce73365134b7e92a6d114bcb"
-# Complete Apache-2.0 text retained by the pinned nativeCmpkit (Calf successor) checkout.
+# Complete Apache-2.0 text in the published NativeCmpKit notices archive.
 APACHE_SHA256 = "188187b988999fc9f6ecdae6ba6e49e4f53f0488ec5af68acbfff3b2cf0c8722"
+PUBLISHED_NOTICES = Path("third_party/notices/published-libraries.json")
+PUBLISHED_RESOURCES = {
+    "kmpyt": ("kmpyt", {
+        "META-INF/kmpyt/LICENSE": "kmpYT-LICENSE",
+        "META-INF/kmpyt/THIRD_PARTY_NOTICES.md": "kmpYT-THIRD_PARTY_NOTICES.md",
+    }),
+    "nativecmpkit": ("nativecmpkit-ui", {
+        "LICENSE": "nativeCmpkit-LICENSE",
+        "NOTICE": "nativeCmpkit-NOTICE",
+        "THIRD_PARTY_NOTICES.md": None,
+        "licenses/android-liquid-glass-Apache-2.0.txt": None,
+        "licenses/compose-cupertino-Apache-2.0.txt": None,
+    }),
+}
 MAX_DOCUMENT = 4 * 1024 * 1024
 MAX_NOTICES = 128 * 1024 * 1024
 MAX_ARTIFACT = 1024 * 1024 * 1024
@@ -36,10 +50,9 @@ MAX_JSON = 32 * 1024 * 1024
 MAX_OUTPUT = 2 * MAX_NOTICES + 2 * MAX_JSON
 REQUIRED_BUILD_INPUTS = frozenset((
     "settings.gradle.kts", "build.gradle.kts", "gradle.properties", "gradle/libs.versions.toml",
-    "gradle/kmpyt.commit", "gradle/wrapper/gradle-wrapper.properties",
-    "composeApp/build.gradle.kts", "shared/build.gradle.kts", "scripts/runtime-inventory.init.gradle",
-    "third_party/kmpYT/settings.gradle.kts", "third_party/kmpYT/build.gradle.kts",
-    "third_party/kmpYT/kmpyt/build.gradle.kts", "third_party/kmpYT/gradle.properties",
+    "gradle/kmpyt.commit", "gradle/nativecmpkit.commit", "gradle/wrapper/gradle-wrapper.properties",
+    "composeApp/build.gradle.kts", "shared/build.gradle.kts", "nativeComponents/build.gradle.kts",
+    "scripts/runtime-inventory.init.gradle", PUBLISHED_NOTICES.as_posix(),
 ))
 CONFIGURATIONS = {
     "desktop-linux-x64": "desktopRuntimeClasspath",
@@ -50,7 +63,6 @@ CONFIGURATIONS = {
     "android-debug": "debugRuntimeClasspath",
     "ios-arm64": "iosArm64CompileKlibraries",
     "ios-simulator-arm64": "iosSimulatorArm64CompileKlibraries",
-    "ios-simulator-x64": "iosX64CompileKlibraries",
 }
 HELPER_COMPONENTS = frozenset(("node", "chromium"))
 HELPER_PLATFORMS = frozenset(name for name in CONFIGURATIONS if name.startswith("desktop-"))
@@ -131,61 +143,42 @@ def read_json(path: Path) -> dict:
     return result
 
 
-def git(directory: Path, *arguments: str) -> bytes:
-    result = subprocess.run(["git", "-C", str(directory), *arguments], capture_output=True, check=False)
-    if result.returncode:
-        raise NoticeError("Required local Git provenance is unavailable (no remote operation attempted)")
-    return result.stdout
+def source_notices(root: Path) -> tuple[dict[str, bytes], dict, list[tuple[bytes, dict]]]:
+    catalog = tomllib.loads(read_bounded(owned(root, root / "gradle/libs.versions.toml")).decode("utf-8"))
+    releases = read_json(owned(root, root / PUBLISHED_NOTICES))
+    files = {name: read_bounded(owned(root, root / name)) for name in ("LICENSE", "NOTICE.md")}
+    supplementary = []
+    for key, (alias, resources) in PUBLISHED_RESOURCES.items():
+        release = releases[key]
+        library = catalog["libraries"][alias]
+        coordinate = library["module"] + ":" + catalog["versions"][library["version"]["ref"]]
+        revision = read_bounded(owned(root, root / f"gradle/{key}.commit"), 128).decode("ascii").strip()
+        if not re.fullmatch(r"[a-f0-9]{40}", revision):
+            raise NoticeError(f"Full immutable {key} release revision required")
+        if release["coordinate"] != coordinate or release["sourceRevision"] != revision:
+            raise NoticeError(f"{key} notice provenance differs from the pinned Maven release")
+        for entry, resource in resources.items():
+            checksum = release["documents"][entry]
+            if not re.fullmatch(r"[a-f0-9]{64}", checksum):
+                raise NoticeError(f"Invalid {key} notice SHA-256: {entry}")
+            path = owned(root, root / PUBLISHED_NOTICES.parent / "texts" / f"{checksum}.txt")
+            data = read_bounded(path)
+            if digest(data) != checksum:
+                raise NoticeError(f"{key} notice differs from its published bytes: {entry}")
+            if resource:
+                files[resource] = data
+            else:
+                supplementary.append((data, {"component": coordinate, "entry": entry,
+                    "archive": release["archive"], "role": "license" if entry.startswith("licenses/") else "notice"}))
 
-
-def source_notices(root: Path, test_worktree: Path | None = None) -> tuple[dict[str, bytes], dict]:
-    root = root.resolve()
-    pin = read_bounded(owned(root, root / "gradle/kmpyt.commit"), 128).decode("utf-8").strip()
-    if not re.fullmatch(r"[a-f0-9]{40}", pin):
-        raise NoticeError("Full immutable kmpYT pin required")
-    upstream = owned(root, test_worktree or root / "third_party/kmpYT")
-    revision = git(upstream, "rev-parse", "HEAD").decode("ascii").strip()
-    if test_worktree is None and revision != pin:
-        raise NoticeError("Actual kmpYT checkout differs from gradle/kmpyt.commit")
-    source_files = {"LICENSE": root / "LICENSE", "NOTICE.md": root / "NOTICE.md",
-                    "kmpYT-LICENSE": upstream / "LICENSE",
-                    "kmpYT-THIRD_PARTY_NOTICES.md": upstream / "THIRD_PARTY_NOTICES.md"}
-    files = {}
-    for name, path in source_files.items():
-        path = owned(root, path)
-        if not path.is_file() or path.stat().st_size > MAX_DOCUMENT:
-            raise NoticeError("Complete source notice missing: " + name)
-        files[name] = read_bounded(path)
-    if digest(files["LICENSE"]) != GPL_SHA256:
-        raise NoticeError("Veyra GPL text differs from the complete reviewed license")
-    if digest(files["kmpYT-LICENSE"]) != MIT_SHA256:
-        raise NoticeError("kmpYT MIT text differs from the complete reviewed grant")
-    for name, upstream_name in (("kmpYT-LICENSE", "LICENSE"), ("kmpYT-THIRD_PARTY_NOTICES.md", "THIRD_PARTY_NOTICES.md")):
-        object_name = revision + ":" + upstream_name
-        if int(git(upstream, "cat-file", "-s", object_name)) > MAX_DOCUMENT:
-            raise NoticeError("Oversized committed source notice")
-        if git(upstream, "show", object_name) != files[name]:
-            raise NoticeError("kmpYT notice is not the exact committed file: " + upstream_name)
-    # nativeCmpkit UI sources are compiled from their own pinned submodule; bundle its exact grant.
-    kit_pin = read_bounded(owned(root, root / "gradle/nativecmpkit.commit"), 128).decode("utf-8").strip()
-    if not re.fullmatch(r"[a-f0-9]{40}", kit_pin):
-        raise NoticeError("Full immutable nativeCmpkit pin required")
-    kit = owned(root, root / "third_party/nativeCmpkit")
-    kit_revision = git(kit, "rev-parse", "HEAD").decode("ascii").strip()
-    if kit_revision != kit_pin:
-        raise NoticeError("Actual nativeCmpkit checkout differs from gradle/nativecmpkit.commit")
-    kit_license = owned(root, kit / "LICENSE")
-    if not kit_license.is_file() or kit_license.stat().st_size > MAX_DOCUMENT:
-        raise NoticeError("Complete source notice missing: nativeCmpkit-LICENSE")
-    files["nativeCmpkit-LICENSE"] = read_bounded(kit_license)
-    if digest(files["nativeCmpkit-LICENSE"]) != APACHE_SHA256:
-        raise NoticeError("nativeCmpkit Apache-2.0 text differs from the complete reviewed license")
-    if git(kit, "show", kit_revision + ":LICENSE") != files["nativeCmpkit-LICENSE"]:
-        raise NoticeError("nativeCmpkit notice is not the exact committed file: LICENSE")
-    source = {"kmpytPin": pin, "kmpytNoticeRevision": revision, "nativecmpkitPin": kit_pin,
-              "mode": "test-only-license-worktree" if test_worktree else "actual-pinned-checkout",
-              "publicationVerified": False}
-    return files, source
+    for file, checksum in (("LICENSE", GPL_SHA256), ("kmpYT-LICENSE", MIT_SHA256), ("nativeCmpkit-LICENSE", APACHE_SHA256)):
+        if digest(files[file]) != checksum:
+            raise NoticeError(f"{file} differs from the complete reviewed license")
+    source = {"kmpytPin": releases["kmpyt"]["sourceRevision"],
+              "kmpytNoticeRevision": releases["kmpyt"]["sourceRevision"],
+              "nativecmpkitPin": releases["nativecmpkit"]["sourceRevision"],
+              "mode": "pinned-maven-publications", "releases": releases, "publicationVerified": False}
+    return files, source, supplementary
 
 
 def is_test_component(group: str, module: str) -> bool:
@@ -798,11 +791,10 @@ def load_helper_inventories(root: Path, paths: list[Path], runtime_platforms: li
     return inventories, helpers, inventory_issues, notice_issues
 
 
-def generate(root: Path, inventory_paths: list[Path], test_worktree: Path | None = None,
-             supplements: list[Path] | None = None,
+def generate(root: Path, inventory_paths: list[Path], supplements: list[Path] | None = None,
              helper_inventories: list[Path] | None = None) -> tuple[dict[str, bytes], dict]:
     root = root.resolve()
-    files, source = source_notices(root, test_worktree)
+    files, source, published_documents = source_notices(root)
     inventories = [load_inventory(root, path, source["kmpytPin"]) for path in inventory_paths]
     platforms = [item["platform"] for item in inventories]
     if len(set(platforms)) != len(platforms):
@@ -810,8 +802,6 @@ def generate(root: Path, inventory_paths: list[Path], test_worktree: Path | None
     issues = set()
     if not inventories:
         issues.add("Exact production runtime inventory has not been supplied.")
-    if test_worktree:
-        issues.add("TEST ONLY: notices taken from a different worktree; never package this output.")
     documents: dict[str, dict] = {}
     components = []
     project_artifacts = []
@@ -841,6 +831,9 @@ def generate(root: Path, inventory_paths: list[Path], test_worktree: Path | None
             raise NoticeError("Generated legal resources exceed total limit")
         return sha
 
+    for data, origin in published_documents:
+        add_document(data, origin)
+
     # These authored/retained asset notices are not inferred from Gradle caches.
     for name in ("composeApp/src/commonMain/composeResources/files/licenses/ibm_plex_sans_arabic_ofl.txt",
                  "native/licenses/Mozilla-Public-License-2.0.txt", "native/licenses/ca-bundle-provenance.md"):
@@ -861,7 +854,7 @@ def generate(root: Path, inventory_paths: list[Path], test_worktree: Path | None
                 # unsafe entries. Do not feed our own generated legal resources
                 # back into themselves on every package/inventory cycle.
                 grant = {"project::": "LICENSE", "project::composeApp": "LICENSE",
-                         "project::shared": "LICENSE", "project::kmpYT:kmpyt": "kmpYT-LICENSE"}.get(component["id"])
+                         "project::shared": "LICENSE", "project::nativeComponents": "LICENSE"}.get(component["id"])
                 if grant is None:
                     issues.add(platform + ": source-project grant mapping needs review for " + component["id"])
                 for artifact in inventory["artifacts"]:
@@ -935,7 +928,7 @@ def generate(root: Path, inventory_paths: list[Path], test_worktree: Path | None
             "helperRuntimeInventoryIssues": sorted(runtime_issues)}
 
     report = {"schemaVersion": 1, "generator": "scripts/package-notices.py", "source": source,
-              "testOnly": test_worktree is not None, "platforms": sorted(platforms),
+              "testOnly": False, "platforms": sorted(platforms),
               "noticeCoverageComplete": not issues, "coverageIssues": sorted(issues),
               "binaryRedistributionReady": False,
               "unverifiedReleaseGates": ["Exact final package closure (including JDK, native libraries and separately provisioned helpers).",
@@ -950,7 +943,7 @@ def generate(root: Path, inventory_paths: list[Path], test_worktree: Path | None
             "bundled FFmpeg and JDK inventories, terms and source/build obligations require separate verification.")
     for item in report["documents"]:
         item["origins"].sort(key=lambda value: json.dumps(value, sort_keys=True))
-    heading = ["Veyra offline third-party notices", "", "Generated from the actual pinned source and only explicitly supplied production inventories.",
+    heading = ["Veyra offline third-party notices", "", "Generated from the pinned Maven releases and explicitly supplied production inventories.",
                "License filenames and POM pointers do not prove complete terms; explicit full-text review is required.",
                "This file does NOT certify a binary release, native source closure, installation or physical audio.",
                "", "Inventoried platforms: " + (", ".join(sorted(platforms)) or "none yet"), "",
@@ -973,8 +966,9 @@ def generate(root: Path, inventory_paths: list[Path], test_worktree: Path | None
         "LICENSE — complete Veyra GPL3 text; Veyra's own code is GPL-3.0-or-later.\n"
         "NOTICE.md — unmodified root software/source notice.\n"
         "kmpYT-LICENSE — complete reviewed MIT text from the recorded upstream revision.\n"
-        "kmpYT-THIRD_PARTY_NOTICES.md — unmodified pinned upstream audit/fixture notice.\n"
-        "nativeCmpkit-LICENSE — complete Apache-2.0 text from the pinned nativeCmpkit revision.\n"
+        "kmpYT-THIRD_PARTY_NOTICES.md — unmodified publisher audit and fixture notice.\n"
+        "nativeCmpkit-LICENSE — complete Apache-2.0 text from the NativeCmpKit release.\n"
+        "nativeCmpkit-NOTICE — NativeCmpKit upstream copyright and attribution.\n"
         "THIRD_PARTY_NOTICES.txt — retained asset/dependency texts and explicit open coverage issues.\n"
         "index.json — exact hashes, production coordinates, provenance and nonclaims.\n\n"
         "Binary redistribution readiness is NOT established by this generator.\n").encode("utf-8")
@@ -1084,12 +1078,9 @@ def main() -> int:
     parser.add_argument("--output", type=Path, default=ROOT / LEGAL)
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--require-notices-complete", action="store_true", help="Fail on notice gaps; NEVER certifies binary/source closure")
-    parser.add_argument("--test-license-worktree", type=Path, help="Testing only; output must remain in .work and cannot satisfy completeness")
     args = parser.parse_args()
     output = output_path(ROOT, args.output)
-    if args.test_license_worktree and (not output.is_relative_to((ROOT / ".work").resolve()) or args.require_notices_complete):
-        raise NoticeError("Test license-worktree override cannot populate production resources or satisfy a release gate")
-    files, report = generate(ROOT, args.inventory, args.test_license_worktree, args.supplement, args.helper_inventory)
+    files, report = generate(ROOT, args.inventory, args.supplement, args.helper_inventory)
     sync_output(ROOT, output, files, args.check)
     print(("Verified" if args.check else "Generated") + " offline notices: " + str(len(report["components"]))
           + " production components, " + str(len(report["documents"])) + " retained texts, "
@@ -1101,6 +1092,6 @@ def main() -> int:
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except (NoticeError, OSError, KeyError, TypeError, UnicodeError, json.JSONDecodeError, ET.ParseError, zipfile.BadZipFile) as error:
+    except (NoticeError, OSError, KeyError, TypeError, UnicodeError, json.JSONDecodeError, tomllib.TOMLDecodeError, ET.ParseError, zipfile.BadZipFile) as error:
         print("Notice verification failed: " + str(error), file=sys.stderr)
         raise SystemExit(1)

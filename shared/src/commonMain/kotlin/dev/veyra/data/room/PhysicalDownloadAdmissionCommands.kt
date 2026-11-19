@@ -32,7 +32,18 @@ private fun AcquisitionGraph.admitStandaloneClaim(
 ): Pair<AcquisitionGraph, DownloadClaimId> {
     val state = state()
     val existing = state.claims.values.singleOrNull { it.physicalJobId == jobId && it.owner !is DownloadClaimOwner.BatchMember }
-    if (existing != null) return this to existing.id // Identity/intent is retained; resume is an explicit generation-CAS command.
+    if (existing != null) {
+        // A new Download tap after deletion must renew the settled claim. Keep its identity
+        // and recording so an earlier owner cannot regain authority over the new intent.
+        if (existing.intent == DownloadBatchIntent.CANCELLED) {
+            val next = withClaim(existing.copy(intent = DownloadBatchIntent.ACTIVE, retainCompletedAsset = true,
+                generation = existing.generation + 1, ownerIntentRevision = existing.ownerIntentRevision + 1,
+                updatedEpochMs = maxOf(existing.updatedEpochMs, now)))
+            val job = requireNotNull(next.physicalJoin(jobId))
+            return next.reconcileJob(job, maxOf(job.job.updatedEpochMs, now)) to existing.id
+        }
+        return this to existing.id
+    }
     require(proposedId !in state.claims)
     val claim = DownloadClaim(proposedId,
         if (schema2) DownloadClaimOwner.Schema2Standalone(jobId) else DownloadClaimOwner.Standalone(jobId),

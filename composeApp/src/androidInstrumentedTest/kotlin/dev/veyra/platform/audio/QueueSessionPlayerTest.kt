@@ -95,7 +95,7 @@ class QueueSessionPlayerTest {
             withContext(Dispatchers.Main.immediate) { facade.seekToNext() }
             assertEquals(PlaybackCommand.Next, withTimeout(2_000) { commands.receive() })
             withContext(Dispatchers.Main.immediate) { facade.seekTo(5_000) }
-            assertEquals(PlaybackCommand.Seek(5_000), withTimeout(2_000) { commands.receive() })
+            assertEquals(PlaybackCommand.Seek(5_000, "occurrence-1", 0), withTimeout(2_000) { commands.receive() })
             withContext(Dispatchers.Main.immediate) {
                 facade.seekTo(1, 9_000) // Never drop an unsupported cross-item offset.
                 facade.playbackParameters = PlaybackParameters(1.25f, 0.8f)

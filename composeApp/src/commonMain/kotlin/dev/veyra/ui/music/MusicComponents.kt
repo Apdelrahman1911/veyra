@@ -52,10 +52,10 @@ import dev.veyra.model.SourceProvider
 import dev.veyra.ui.design.NativeMenu
 import dev.veyra.ui.design.displayMetadata
 import dev.veyra.nativecomponents.NativeAlert
-import com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosAction
-import com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosActionStyle
-import com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosProperties
-import com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosStyle
+import io.github.apdelrahman1911.kira.ui.dialog.uikit.AlertDialogIosAction
+import io.github.apdelrahman1911.kira.ui.dialog.uikit.AlertDialogIosActionStyle
+import io.github.apdelrahman1911.kira.ui.dialog.uikit.AlertDialogIosProperties
+import io.github.apdelrahman1911.kira.ui.dialog.uikit.AlertDialogIosStyle
 import dev.veyra.ui.design.Artwork
 import dev.veyra.ui.design.AppStrings
 import dev.veyra.ui.design.LocalStrings
@@ -127,6 +127,7 @@ internal fun MusicUiOptions.downloadSurface(snapshot: AppSnapshot): DownloadSurf
 internal fun DownloadSurface?.savedCatalogueBinding(mediaId: String): String? =
     this?.unambiguousCatalogueBinding(mediaId)
 internal fun DownloadSurfaceEntry.statusText(strings: AppStrings): String = when {
+    isFinishing && status == DownloadStatus.RUNNING -> strings.text(TextKey.DownloadFinalizing)
     status == DownloadStatus.COMPLETE && !ready && origin != DownloadSurfaceOrigin.TYPED_SOURCE ->
         strings.text(TextKey.FileUnavailable)
     else -> strings.downloadStatus(status)
@@ -298,11 +299,11 @@ internal fun savedIcon(item: MediaItem, saved: Boolean): ImageVector = when {
 @Composable
 internal fun ConfirmActionDialog(title: String, description: String, confirm: String, onDismiss: () -> Unit, onConfirm: () -> Unit) {
     val strings = LocalStrings.current
-    com.mohamedrejeb.calf.ui.dialog.AdaptiveAlertDialog(
+    io.github.apdelrahman1911.kira.ui.dialog.AdaptiveAlertDialog(
         onConfirm = onConfirm, onDismiss = onDismiss,
         confirmText = confirm, dismissText = strings.text(TextKey.Cancel), title = title, text = description,
-        iosConfirmButtonStyle = com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosActionStyle.Default,
-        iosDismissButtonStyle = com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosActionStyle.Cancel,
+        iosConfirmButtonStyle = io.github.apdelrahman1911.kira.ui.dialog.uikit.AlertDialogIosActionStyle.Default,
+        iosDismissButtonStyle = io.github.apdelrahman1911.kira.ui.dialog.uikit.AlertDialogIosActionStyle.Cancel,
         materialConfirmButton = { TextButton(onClick = onConfirm, modifier = Modifier.heightIn(min = 48.dp).testTag("confirm-action")) { Text(confirm) } },
         materialDismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp).testTag("cancel-action")) { Text(strings.text(TextKey.Cancel)) } },
     )
@@ -315,7 +316,7 @@ internal fun PlaylistPicker(item: MediaItem, playlists: List<Playlist>, onAction
     var duplicate by remember { mutableStateOf<Playlist?>(null) }
     if (creating) {
         PlaylistNameDialog(onDismiss = { creating = false },
-            suggestedName = defaultPlaylistName(playlists) { strings.text(TextKey.DefaultPlaylistName).replace("{0}", it) }, onSave = {
+            suggestedName = defaultPlaylistName(playlists, strings::editablePlaylistName), onSave = {
             onAction(MusicUiAction.CreatePlaylist(it, item)); onDismiss()
         })
     } else if (duplicate != null) {

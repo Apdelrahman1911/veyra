@@ -82,6 +82,9 @@ class PlaybackController(
     private val engineOperations = Channel<EngineOperation>(128, onUndeliveredElement = { it.discard() })
     private val mutableState = MutableStateFlow(PlaybackState())
     val state: StateFlow<PlaybackState> = mutableState.asStateFlow()
+    private val mutableStartupTiming = MutableStateFlow<PlaybackStartupTiming?>(null)
+    val startupTiming: StateFlow<PlaybackStartupTiming?> = mutableStartupTiming.asStateFlow()
+    private var startup: Startup? = null
 
     private var initialized = false
     private var generation = 0L
@@ -183,7 +186,7 @@ class PlaybackController(
                             scoped(error)
                             if (error is CancellationException && !currentCoroutineContext().isActive) throw error
                         } else {
-                            if (error is CancellationException) throw error
+                            currentCoroutineContext().ensureActive()
                             if (error !is Exception) throw error
                             val failure = failureOf(error)
                             nativeReleaseFailure = failure
@@ -456,6 +459,16 @@ class PlaybackController(
                 drainPosition()
                 enforceOfflinePolicy()
                 checkSleepTimer()
+                val pending = startup?.takeIf { it.generation == generation }
+                if (pending != null) {
+                    val now = clock.monotonicMs()
+                    val activeSince = pending.activeSinceMs
+                    if (!mutableState.value.desiredPlaying) pending.activeSinceMs = null
+                    else if (activeSince == null) pending.activeSinceMs = now
+                    else if (now - activeSince >= 90_000) {
+                        failPlayback(AppFailure(FailureCode.NETWORK_UNAVAILABLE, "playback_startup_timed_out"))
+                    }
+                }
                 if (mutableState.value.isPlaying && progressDirty && clock.monotonicMs() - lastCheckpointMs >= checkpointIntervalMs) checkpoint()
                 checkCrossfade()
             }
@@ -467,8 +480,10 @@ class PlaybackController(
             block()
             result.complete(PlaybackResult.Accepted)
         } catch (cancelled: CancellationException) {
-            result.complete(PlaybackResult.Failure(AppFailure(FailureCode.CANCELLED)))
-            throw cancelled
+            val failure = failureOf(cancelled)
+            result.complete(PlaybackResult.Failure(failure))
+            currentCoroutineContext().ensureActive()
+            mutableState.value = mutableState.value.copy(failure = failure)
         } catch (error: Exception) {
             val failure = failureOf(error)
             mutableState.value = mutableState.value.copy(failure = failure)
@@ -1042,6 +1057,7 @@ class PlaybackController(
             executionBinding = reuseBindingId?.let { snapshot.playbackBindings[it] },
         )
         val token = generation
+        startup = item?.let { Startup(token, clock.monotonicMs()) }
         sendEngine(releaseBarrier = true) { stopNative(token) }
         if (item == null) return
         val offlineOnly = snapshot.settings.offlineOnly
@@ -1054,9 +1070,8 @@ class PlaybackController(
                 ensureActive()
                 unhanded = null // Channel's onUndeliveredElement owns disposal from this point.
                 messages.send(Message.Resolved(token, source))
-            } catch (cancelled: CancellationException) {
-                throw cancelled
             } catch (error: Exception) {
+                ensureActive()
                 messages.send(Message.ResolveFailed(token, failureOf(error)))
             } finally { unhanded?.let(::discardSource) }
         }
@@ -1096,6 +1111,7 @@ class PlaybackController(
             val token = generation
             val position = mutableState.value.positionMs
             val tagged = source.copy(item = mutableState.value.currentItem)
+            recordStartup { elapsed -> copy(sourceReadyMs = elapsed) }
             handedToEngine = true
             sendEngine(onDiscard = { discardSource(source) }) { engine.prepare(tagged, position, token) }
         } finally { if (!handedToEngine) discardSource(source) }
@@ -1115,6 +1131,7 @@ class PlaybackController(
                     seekable = event.seekable,
                 )
                 if (alreadyPrepared) return // Duration refresh must not cancel an overlap via setRate.
+                recordStartup { elapsed -> copy(engineReadyMs = elapsed) }
                 val token = generation
                 val speed = mutableState.value.speed
                 sendEngine {
@@ -1136,6 +1153,7 @@ class PlaybackController(
                 }
                 mutableState.value = mutableState.value.copy(phase = phase, isPlaying = event.isPlaying, effectiveSpeed = event.effectiveSpeed)
                 if (event.isPlaying) {
+                    recordStartup(finished = true) { elapsed -> copy(playingMs = elapsed) }
                     hasPlayedCurrent = true
                     if (!mutableState.value.desiredPlaying) sendEngine { token -> engine.pause(token) }
                 }
@@ -1337,8 +1355,10 @@ class PlaybackController(
                     ensureActive()
                     unhanded = null
                     messages.send(Message.NextResolved(outgoing, token, source))
-                } catch (cancelled: CancellationException) { throw cancelled }
-                catch (error: Exception) { messages.send(Message.NextResolveFailed(outgoing, token, failureOf(error))) }
+                } catch (error: Exception) {
+                    ensureActive()
+                    messages.send(Message.NextResolveFailed(outgoing, token, failureOf(error)))
+                }
                 finally { unhanded?.let(::discardSource) }
             }
             return
@@ -1513,6 +1533,7 @@ class PlaybackController(
     }
 
     private suspend fun stopTransport() {
+        startup = null
         cancelNext(notifyEngine = false)
         resolveJob?.cancel()
         typed?.retireCurrentLoad()
@@ -1527,9 +1548,24 @@ class PlaybackController(
     }
 
     private suspend fun failPlayback(failure: AppFailure) {
+        recordStartup(finished = true) { copy(failure = failure.code) }
         resumeToken = null
         stopTransport() // An engine failure is not proof that native audio has stopped.
         mutableState.value = mutableState.value.copy(phase = PlaybackPhase.ERROR, desiredPlaying = false, isPlaying = false, failure = failure)
+    }
+
+    private fun recordStartup(finished: Boolean = false, update: PlaybackStartupTiming.(Long) -> PlaybackStartupTiming) {
+        val pending = startup?.takeIf { it.generation == generation } ?: return
+        pending.timing = pending.timing.update((clock.monotonicMs() - pending.startedMs).coerceAtLeast(0))
+        if (finished) {
+            mutableStartupTiming.value = pending.timing
+            startup = null
+        }
+    }
+
+    private class Startup(val generation: Long, val startedMs: Long) {
+        var activeSinceMs: Long? = startedMs
+        var timing = PlaybackStartupTiming(generation)
     }
 
     /** Bounded URL renewal reuses the immutable receipt; it never searches for a different result. */
@@ -1573,8 +1609,8 @@ class PlaybackController(
         try {
             engine.stop(token)
             nativeReleaseFailure = null
-        } catch (cancelled: CancellationException) { throw cancelled }
-        catch (error: Exception) {
+        } catch (error: Exception) {
+            currentCoroutineContext().ensureActive()
             val failure = failureOf(error)
             nativeReleaseFailure = failure
             messages.send(Message.NativeReleaseFailed(token, failure))
@@ -1643,6 +1679,8 @@ class PlaybackController(
     private fun boundedPosition(position: Long, duration: Long?): Long = position.coerceAtLeast(0).let { if (duration != null && duration > 0) it.coerceAtMost(duration) else it }
     private fun failureOf(error: Exception): AppFailure = when (error) {
         is VeyraException -> error.failure
+        is TimeoutCancellationException -> AppFailure(FailureCode.NETWORK_UNAVAILABLE, "playback_startup_timed_out")
+        is CancellationException -> AppFailure(FailureCode.CANCELLED)
         is LocalMediaValidationReaderUnacknowledged -> AppFailure(FailureCode.STORAGE_IO, "local_validation_reader_unacknowledged")
         is IllegalArgumentException -> AppFailure(FailureCode.INVALID_STATE)
         else -> AppFailure(FailureCode.UNEXPECTED)
@@ -2136,6 +2174,7 @@ class PlaybackController(
                 failure = null, crossfade = null)
             currentLoad = null
             val token = generation
+            startup = selected?.let { Startup(token, clock.monotonicMs()) }
             sendEngine(releaseBarrier = true) { stopNative(token) }
             if (selected == null) return
             val load = AcquisitionLoad(token, token, expected(queue), selected.occurrenceId, policy, queue.positionMs,
@@ -2155,9 +2194,11 @@ class PlaybackController(
                     }
                     ensureActive()
                     messages.send(Message.SelectionResolved(load.outgoingGeneration, load))
-                } catch (cancelled: CancellationException) { throw cancelled }
-                catch (error: Exception) { messages.send(Message.AcquisitionResolveFailed(load.outgoingGeneration,
-                    load.generation.takeIf { load.isStage }, failureOf(error))) }
+                } catch (error: Exception) {
+                    ensureActive()
+                    messages.send(Message.AcquisitionResolveFailed(load.outgoingGeneration,
+                        load.generation.takeIf { load.isStage }, failureOf(error)))
+                }
             }
             if (load.isStage) nextResolveJob = launched else resolveJob = launched
         }
@@ -2192,6 +2233,7 @@ class PlaybackController(
             if (load.expectedBindingId != null && load.expectedBindingId != selected.bindingId) invalid("playback_binding_changed")
             if (selected.target !is PlaybackTarget.Schema2 && selected.executionContext == null) invalid("playback_typed_context_missing")
             load.selection = selected
+            if (!load.isStage) recordStartup { elapsed -> copy(selectionMs = elapsed) }
             val prior = sameBindingCheckpoint(selected, latest)
             val duration = measuredDuration(selected, latest)
             val position = boundedPosition(when (load.positionPolicy) {
@@ -2229,9 +2271,11 @@ class PlaybackController(
                         ensureActive(); unhanded = null
                         messages.send(Message.AcquisitionResolved(load.outgoingGeneration, load, prepared))
                     }
-                } catch (cancelled: CancellationException) { throw cancelled }
-                catch (error: Exception) { messages.send(Message.AcquisitionResolveFailed(load.outgoingGeneration,
-                    load.generation.takeIf { load.isStage }, failureOf(error))) }
+                } catch (error: Exception) {
+                    ensureActive()
+                    messages.send(Message.AcquisitionResolveFailed(load.outgoingGeneration,
+                        load.generation.takeIf { load.isStage }, failureOf(error)))
+                }
                 finally { unhanded?.let(::discardSource); legacyUnhanded?.let(::discardSource) }
             }
             if (load.isStage) nextResolveJob = launched else resolveJob = launched
@@ -2343,6 +2387,7 @@ class PlaybackController(
                 } else {
                     resolvedLocal = source.isLocal; materialization = prepared.validatedMaterialization; representationId = source.representationId
                     mutableState.value = mutableState.value.copy(phase = PlaybackPhase.PREPARING)
+                    recordStartup { elapsed -> copy(sourceReadyMs = elapsed) }
                 }
                 val position = requireNotNull(load.admitted).positionMs
                 queued = true // Channel disposal owns every rejected send from this point.

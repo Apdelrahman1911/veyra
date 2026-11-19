@@ -81,6 +81,7 @@ fun VeyraApp(container: AppContainer, modifier: Modifier = Modifier) {
     val screenDownloads = remember(snapshot, downloadPresentation) { downloadSurface(snapshot, downloadPresentation) }
     val screenOptions = remember(options, screenDownloads) { options.copy(downloads = screenDownloads) }
     val notice by container.notice.collectAsState()
+    val failureNotices by container.failureNotices.collectAsState()
     val storeStatus by container.store.status.collectAsState()
     val mediaRuntime by container.platform.mediaRuntimeStatus.collectAsState()
     val settings = snapshot.settings
@@ -97,7 +98,7 @@ fun VeyraApp(container: AppContainer, modifier: Modifier = Modifier) {
             val strings = LocalStrings.current
             val snackbar = remember { SnackbarHostState() }
             var snackbarChrome by remember { mutableStateOf(0.dp to false) }
-            val latestNotice = notice
+            val latestNotice = failureNotices.firstOrNull() ?: notice?.takeIf { it.failure == null }
             LaunchedEffect(latestNotice?.id, language) {
                 latestNotice?.let { message ->
                     val text = message.failure?.let(strings::errorFor) ?: message.text?.let(strings::text) ?: return@let
@@ -312,7 +313,7 @@ private fun StartupFailure(failure: AppFailure, canRecover: Boolean, onRestore: 
             }
         }
     }
-    if (confirm) com.mohamedrejeb.calf.ui.dialog.AdaptiveAlertDialog(
+    if (confirm) io.github.apdelrahman1911.kira.ui.dialog.AdaptiveAlertDialog(
         onConfirm = { confirm = false; onRestore() },
         onDismiss = { confirm = false },
         confirmText = strings.text(TextKey.RecoveryRestoreBackup),
@@ -324,8 +325,8 @@ private fun StartupFailure(failure: AppFailure, canRecover: Boolean, onRestore: 
         materialText = { Text(strings.text(TextKey.RecoveryBackupPrompt), modifier = Modifier.verticalScroll(rememberScrollState())) },
         materialConfirmButton = { TextButton(onClick = { confirm = false; onRestore() }, modifier = Modifier.testTag("recovery-confirm")) { Text(strings.text(TextKey.RecoveryRestoreBackup)) } },
         materialDismissButton = { TextButton(onClick = { confirm = false }, modifier = Modifier.testTag("recovery-cancel")) { Text(strings.text(TextKey.Cancel)) } },
-        iosConfirmButtonStyle = com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosActionStyle.Destructive,
-        iosDismissButtonStyle = com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosActionStyle.Cancel,
+        iosConfirmButtonStyle = io.github.apdelrahman1911.kira.ui.dialog.uikit.AlertDialogIosActionStyle.Destructive,
+        iosDismissButtonStyle = io.github.apdelrahman1911.kira.ui.dialog.uikit.AlertDialogIosActionStyle.Cancel,
     )
 }
 
@@ -524,7 +525,10 @@ internal fun LicensesScreen(readDocument: suspend (String) -> String = { Res.rea
     val strings = LocalStrings.current
     var documents by remember { mutableStateOf<List<Pair<String, String?>>?>(null) }
     LaunchedEffect(readDocument) {
-        val paths = listOf("NOTICE.md", "LICENSE", "kmpYT-LICENSE", "kmpYT-THIRD_PARTY_NOTICES.md", "nativeCmpkit-LICENSE", "THIRD_PARTY_NOTICES.txt")
+        val paths = listOf(
+            "NOTICE.md", "LICENSE", "kmpYT-LICENSE", "kmpYT-THIRD_PARTY_NOTICES.md",
+            "nativeCmpkit-LICENSE", "nativeCmpkit-NOTICE", "THIRD_PARTY_NOTICES.txt",
+        )
             .map { "files/legal/$it" } + "files/licenses/ibm_plex_sans_arabic_ofl.txt"
         documents = paths.map { path ->
             val body = try { readDocument(path) }

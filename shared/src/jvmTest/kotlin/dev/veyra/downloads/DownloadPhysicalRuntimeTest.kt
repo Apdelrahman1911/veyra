@@ -434,6 +434,27 @@ class DownloadPhysicalRuntimeTest {
         assertEquals(1, gateway.transfers.size)
     }
 
+    @Test fun shutdownDuringLocalRecoveryLeavesThePublishedFileEligibleOffline() = physicalRuntimeCase {
+        val intent = seedFinalization(published = true)
+        validation = {
+            hostState.value = hostState.value.copy(closed = true, suspended = true)
+            AssetValidation.Valid(733)
+        }
+        runtime.reconcilePass()
+        assertNull(currentJob().leaseOwner)
+        assertNull(repository.maintenanceFinishes.single().failure)
+        assertEquals(intent, repository.state.value.physicalFinalizations[intent.downloadId])
+        assertTrue(repository.publications.isEmpty())
+
+        clock.advance(5_100)
+        hostState.value = hostState.value.copy(closed = false, suspended = false, offlineOnly = true)
+        validation = { AssetValidation.Valid(733) }
+        runtime.reconcilePass()
+        assertEquals(DownloadStatus.COMPLETE, currentJob().status)
+        assertEquals(intent.finalPath, repository.publications.single().asset.uri)
+        assertTrue(gateway.transfers.isEmpty())
+    }
+
     @Test fun recoveryUsesTheOriginalMaterializerAttemptAndGenerationNotItsMaintenanceEpoch() = physicalRuntimeCase {
         val original = seedFinalization(published = true, attemptGeneration = 3)
         runtime.reconcilePass()

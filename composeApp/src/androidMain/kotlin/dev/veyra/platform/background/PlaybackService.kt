@@ -163,7 +163,7 @@ class PlaybackService : MediaSessionService() {
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         val state = app.playback.value
-        if (!state.isPlaying && !(state.desiredPlaying && state.isBuffering)) {
+        if (!state.isPlaying && !state.desiredPlaying) {
             stopSelf()
         }
     }

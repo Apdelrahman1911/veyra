@@ -366,10 +366,10 @@ def verify_features(executable: Path, cwd: Path, env: dict[str, str]) -> dict[st
 
 def verify_remux(executable: Path, directory: Path, env: dict[str, str]) -> dict[str, object]:
     """Authored upstream fixture, exact kmpYT local-copy command; not decode proof."""
-    fixtures = ROOT / "third_party/kmpYT/kmpyt/src/jvmTest/resources/research"
+    fixtures = Path(__file__).with_name("fixtures")
     audio, video = fixtures / "audio.m4a", fixtures / "video.mp4"
     if not audio.is_file() or not video.is_file() or not (fixtures / "LICENSE.txt").is_file():
-        raise ValueError("Pinned authored kmpYT test fixtures/license are required for remux verification")
+        raise ValueError("The local remux fixtures and their license are required for verification")
     output = directory / "authored-remux.mp4"
     log = directory / "remux.log"
     run([str(executable), "-nostdin", "-hide_banner", "-loglevel", "error", "-n",

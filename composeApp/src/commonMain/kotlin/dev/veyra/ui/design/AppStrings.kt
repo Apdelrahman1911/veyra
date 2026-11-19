@@ -376,13 +376,19 @@ enum class TextKey(internal val english: String, internal val arabic: String) {
     NotDownloaded("Not downloaded", "غير منزّل"),
     DownloadQueued("Queued for download", "في انتظار التنزيل"),
     DownloadPreparing("Preparing download…", "جارٍ تجهيز التنزيل…"),
-    DownloadStarted("Download started. Follow it in Library › Downloads.", "بدأ التنزيل. تابعه في المكتبة › التنزيلات."),
-    DownloadsQueued("Downloads queued", "التنزيلات في قائمة الانتظار"),
+    DownloadStarted("Download is listed in Library › Downloads.", "التنزيل مدرج في المكتبة › التنزيلات."),
+    DownloadsQueued("Downloads are listed in Library › Downloads.", "التنزيلات مدرجة في المكتبة › التنزيلات."),
     DownloadResolving("Preparing download…", "جارٍ تجهيز التنزيل…"),
     Downloading("Downloading…", "جارٍ التنزيل…"),
     DownloadPaused("Download paused", "التنزيل متوقف مؤقتًا"),
     DownloadFailed("Download failed", "تعذّر التنزيل"),
     DownloadVerifying("Verifying downloaded file…", "جارٍ التحقق من الملف المنزّل…"),
+    DownloadFinalizing("Finishing download…", "جارٍ إتمام التنزيل…"),
+    DownloadValidationTimedOut("Checking the downloaded file took too long. Try the download again.", "استغرق التحقق من الملف المنزّل وقتًا طويلًا. حاول تنزيله مرة أخرى."),
+    DownloadAdmissionNotVisible("The download was recorded, but the list has not updated. Reopen Downloads to check it.", "تم تسجيل التنزيل، لكن القائمة لم تُحدَّث. افتح التنزيلات مجددًا للتحقق."),
+    DownloadFilterEmpty("No downloads match the selected filter.", "لا توجد تنزيلات تطابق عامل التصفية المحدّد."),
+    ShowAllDownloads("Show all downloads", "عرض كل التنزيلات"),
+    PlaybackStartupTimedOut("Playback took too long to start. Try playing the item again.", "استغرق بدء التشغيل وقتًا طويلًا. حاول تشغيل العنصر مجددًا."),
     DownloadValidating("Validating downloaded audio…", "جارٍ التحقق من سلامة الصوت المنزّل…"),
     DownloadRetrying("Retrying download…", "جارٍ إعادة محاولة التنزيل…"),
     DownloadRunning("Downloading…", "جارٍ التنزيل…"),
@@ -626,6 +632,11 @@ class AppStrings(
 
     fun text(key: TextKey): String = if (isRtl) key.arabic else key.english
 
+    internal fun editablePlaylistName(number: String): String {
+        val key = TextKey.DefaultPlaylistName
+        return text(key).replace("{0}", number)
+    }
+
     /** Safe for a dynamic *key name*. Unknown backend text is never echoed to the UI. */
     fun textOrFallback(keyName: String, fallback: TextKey = TextKey.InformationUnavailable): String =
         text(TextKey.entries.firstOrNull { it.name == keyName } ?: fallback)
@@ -756,7 +767,8 @@ class AppStrings(
      * Never display, interpolate, normalize or otherwise interpret arbitrary failure.detail.
      */
     fun errorFor(failure: AppFailure): String = text(when (failure.code) {
-        FailureCode.NETWORK_UNAVAILABLE -> TextKey.ConnectionUnavailable
+        FailureCode.NETWORK_UNAVAILABLE -> if (failure.detail == "playback_startup_timed_out") TextKey.PlaybackStartupTimedOut
+            else TextKey.ConnectionUnavailable
         FailureCode.OFFLINE_POLICY -> TextKey.OfflinePolicy
         FailureCode.PROVIDER_ACCESS_REQUIRED -> TextKey.SourceRestricted
         FailureCode.RATE_LIMITED -> TextKey.RateLimited
@@ -777,6 +789,8 @@ class AppStrings(
         // Only data/download integrity problems ask for recovery; playback selection problems
         // must not tell the user their saved data is damaged.
         FailureCode.RECOVERY_REQUIRED -> when (failure.detail) {
+            "download_validation_timed_out" -> TextKey.DownloadValidationTimedOut
+            "download_admission_not_visible" -> TextKey.DownloadAdmissionNotVisible
             "YOUTUBE_SOURCE_EXPIRED", "kmpyt_source_expired" -> TextKey.SourceLinkExpired
             "acquisition_selection_unplayable" -> TextKey.FirstResultNotPlayable
             "acquisition_collection_action_required" -> TextKey.FirstResultCollection

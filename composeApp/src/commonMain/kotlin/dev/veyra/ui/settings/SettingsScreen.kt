@@ -36,9 +36,9 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import com.mohamedrejeb.calf.ui.slider.AdaptiveSlider
+import dev.veyra.nativecomponents.NativeSlider
 import androidx.compose.material3.Surface
-import com.mohamedrejeb.calf.ui.toggle.AdaptiveSwitch
+import dev.veyra.nativecomponents.NativeSwitch
 import androidx.compose.material3.Icon
 import androidx.compose.material3.TextButton
 import dev.veyra.ui.design.VeyraIcons
@@ -352,7 +352,7 @@ private fun ToggleSetting(title: String, description: String, checked: Boolean, 
         }
         // On iOS the switch is a native UISwitch drawn above Compose that takes its own taps, so it
         // must report them itself; the row stays toggleable for the rest of its area.
-        AdaptiveSwitch(checked = checked, onCheckedChange = if (enabled) onChange else null, enabled = enabled,
+        NativeSwitch(checked = checked, onCheckedChange = if (enabled) onChange else null, enabled = enabled,
             modifier = Modifier.sizeIn(minWidth = VeyraSpacing.TouchTarget, minHeight = VeyraSpacing.TouchTarget).clearAndSetSemantics { })
     }
 }
@@ -410,7 +410,7 @@ private fun TextSizeSetting(value: Float, onAction: (SettingsAction) -> Unit) {
             value = strings.format(TextKey.PercentValue, strings.number((draft * 100).roundToInt().toLong())),
             languageTag = if (strings.isRtl) "ar" else "en",
         )) {
-            AdaptiveSlider(value = draft, onValueChange = { draft = it }, valueRange = .75f..2f, steps = 24,
+            NativeSlider(value = draft, onValueChange = { draft = it }, valueRange = .75f..2f, steps = 24,
                 interactionSource = interactions,
                 onValueChangeFinished = { onAction(SettingsAction.SetTextScale((draft * 20).roundToInt() / 20f)) },
                 modifier = Modifier.fillMaxWidth().sizeIn(minHeight = VeyraSpacing.TouchTarget).testTag("settings-text-scale")

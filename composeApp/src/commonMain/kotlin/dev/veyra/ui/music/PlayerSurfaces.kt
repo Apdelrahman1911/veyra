@@ -7,7 +7,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
 import dev.veyra.ui.design.LocalVeyraColors
 import androidx.compose.ui.semantics.Role
-import com.mohamedrejeb.calf.ui.gesture.adaptiveClickable
+import io.github.apdelrahman1911.kira.ui.gesture.adaptiveClickable
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.draw.shadow
@@ -15,10 +15,10 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.foundation.BorderStroke
 import dev.veyra.ui.design.ActionButton
-import com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosAction
-import com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosActionStyle
-import com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosProperties
-import com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosStyle
+import io.github.apdelrahman1911.kira.ui.dialog.uikit.AlertDialogIosAction
+import io.github.apdelrahman1911.kira.ui.dialog.uikit.AlertDialogIosActionStyle
+import io.github.apdelrahman1911.kira.ui.dialog.uikit.AlertDialogIosProperties
+import io.github.apdelrahman1911.kira.ui.dialog.uikit.AlertDialogIosStyle
 import dev.veyra.nativecomponents.NativeAlert
 import dev.veyra.nativecomponents.NativeBarButton
 import dev.veyra.nativecomponents.NativeToolbar
@@ -114,7 +114,7 @@ import dev.veyra.ui.design.MetadataText
 import dev.veyra.ui.design.QuantityKey
 import dev.veyra.ui.design.TextKey
 import dev.veyra.ui.design.VeyraIcons
-import com.mohamedrejeb.calf.ui.slider.AdaptiveSlider
+import dev.veyra.nativecomponents.NativeSlider
 import dev.veyra.nativecomponents.LocalNativeControlAccessibility
 import dev.veyra.nativecomponents.NativeControlAccessibility
 
@@ -402,7 +402,7 @@ private fun PlayerDetails(
             itemVerticalAlignment = Alignment.CenterVertically) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.heightIn(min = 26.dp)) {
                 // Online preparation can take several seconds; a visible spinner shows the app is working.
-                if (playback.isBuffering) com.mohamedrejeb.calf.ui.progress.AdaptiveCircularProgressIndicator(
+                if (playback.isBuffering) io.github.apdelrahman1911.kira.ui.progress.AdaptiveCircularProgressIndicator(
                     Modifier.padding(end = 8.dp).size(14.dp).clearAndSetSemantics { },
                     strokeWidth = 2.dp,
                 )
@@ -541,7 +541,7 @@ private fun PlayerSeek(playback: PlaybackState, onAction: (MusicUiAction) -> Uni
                     value = spokenPosition,
                     languageTag = if (strings.isRtl) "ar" else "en",
                 )) {
-                    AdaptiveSlider(
+                    NativeSlider(
                         value = draft ?: seekFraction(position(), duration),
                         onValueChange = { if (enabled && activeOwner == owner) draft = it },
                         onValueChangeFinished = {

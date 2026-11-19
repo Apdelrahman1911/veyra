@@ -71,6 +71,8 @@ internal suspend fun DownloadFiles.validateMaterialization(
         is AssetValidation.Valid -> result.durationMs
         is AssetValidation.Invalid -> {
             onRejected(DownloadMaterializationNegative.Native(input, result.failure))
+            // Keep evidence of the actual rejection even when cancellation has already won.
+            currentCoroutineContext().ensureActive()
             throw VeyraException(result.failure)
         }
     }

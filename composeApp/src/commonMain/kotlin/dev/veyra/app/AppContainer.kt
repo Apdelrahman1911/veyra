@@ -172,6 +172,8 @@ class AppContainer(
     val podcastDetails = mutablePodcastDetails.asStateFlow()
     private val mutableNotice = MutableStateFlow<AppNotice?>(null)
     val notice = mutableNotice.asStateFlow()
+    private val mutableFailureNotices = MutableStateFlow<List<AppNotice>>(emptyList())
+    internal val failureNotices = mutableFailureNotices.asStateFlow()
     // Null means a user session has ACKed native coverage and activated the sole coordinator.
     // Never persist this process-local assertion, or turn a rejected tap into a delayed intent.
     private val mutableDownloadRestriction = MutableStateFlow<AppFailure?>(
@@ -205,7 +207,6 @@ class AppContainer(
     private var refreshJob: Job? = null
     private var mediaRuntimeJob: Job? = null
     private val collectionJobs = MutableStateFlow<Map<String, Job>>(emptyMap())
-    private val searchGeneration = MutableStateFlow(0L)
     private val discoveryGeneration = MutableStateFlow(0L)
 
     private suspend fun releaseRejectedResource(resource: PlaybackResource): Unit = rejectedResourceLock.withLock {
@@ -405,7 +406,10 @@ class AppContainer(
     fun cachedArtworkPath(mediaId: String): String? = artwork.cachedArtworkPath(mediaId)
     /** Emits when the set of locally cached covers changes. */
     val artworkUpdates: kotlinx.coroutines.flow.Flow<Unit> get() = artwork.cachedPaths.map { }
-    fun dismissNotice(id: String) { mutableNotice.update { if (it?.id == id) null else it } }
+    fun dismissNotice(id: String) {
+        mutableNotice.update { if (it?.id == id) null else it }
+        mutableFailureNotices.update { notices -> notices.filterNot { it.id == id } }
+    }
 
     fun selectDestination(destination: AppDestination) {
         mutableNavigation.update { it.copy(destination = destination, librarySection = if (destination == AppDestination.LIBRARY) LibrarySection.OVERVIEW else it.librarySection, details = emptyList(), playerOpen = false, queueOpen = false) }
@@ -750,7 +754,7 @@ class AppContainer(
             // Removal or a changed source identity is a stale row, rejected before source I/O.
             // Same-identity metadata edits are not a rebase: the displayed inputs stay frozen.
             requireTapCurrent(tapped)
-            if (typed != null) {
+            val id = if (typed != null) {
                 downloads.enqueueAccepted(requireNotNull(typed.requestId), requireNotNull(typed.bindingId)) {
                     requireTapCurrent(tapped)
                 }
@@ -761,6 +765,14 @@ class AppContainer(
                 val selectedMedia = selectExistingMedia(tapped)
                 downloads.enqueueAccepted(selectedMedia.first, selectedMedia.second) { requireTapCurrent(tapped) }
             }
+            // The commit is authoritative, but the screen consumes asynchronous projections.
+            // Wait for the exact row before telling the user where to find it.
+            val visible = withTimeoutOrNull(5_000) {
+                combine(downloads.presentation, downloads.acquisitionPresentation) { snapshot, presentation ->
+                    downloadSurface(snapshot, presentation).entries.any { it.id == id }
+                }.first { it }
+            }
+            if (visible != true) throw VeyraException(AppFailure(FailureCode.RECOVERY_REQUIRED, "download_admission_not_visible"))
             cacheArtwork(listOf(tapped))
             tapped.showId?.let { id -> store.state.value.shows[id]?.let { cacheArtwork(emptyList(), listOf(it)) } }
         }
@@ -845,10 +857,10 @@ class AppContainer(
         when (action) {
             is MusicUiAction.SearchChanged -> {
                 searchJob?.cancel()
-                searchGeneration.update { it + 1 }
                 val provider = if (action.kind == SearchKind.PODCASTS) SourceProvider.RSS
                     else action.provider.takeUnless { it == SourceProvider.RSS || it == SourceProvider.LOCAL } ?: SourceProvider.YOUTUBE
-                mutableSearch.value = SearchUiState(action.query, action.scope, action.kind, provider)
+                mutableSearch.update { SearchUiState(action.query, action.scope, action.kind, provider,
+                    requestGeneration = it.requestGeneration + 1) }
             }
             MusicUiAction.RunSearch -> runSearch(false)
             MusicUiAction.LoadMoreSearch -> runSearch(true)
@@ -866,10 +878,10 @@ class AppContainer(
                 navigate { it.copy(destination = AppDestination.SEARCH, details = emptyList(), playerOpen = false, queueOpen = false) }
                 if (mutableSearch.value.kind != action.kind) {
                     searchJob?.cancel()
-                    searchGeneration.update { it + 1 }
                     mutableSearch.update { SearchUiState(it.query, it.scope, action.kind,
                         if (action.kind == SearchKind.PODCASTS) SourceProvider.RSS
-                        else it.provider.takeUnless { provider -> provider == SourceProvider.RSS } ?: SourceProvider.YOUTUBE) }
+                        else it.provider.takeUnless { provider -> provider == SourceProvider.RSS } ?: SourceProvider.YOUTUBE,
+                        requestGeneration = it.requestGeneration + 1) }
                 }
             }
             is MusicUiAction.OpenLibrary -> navigate { it.copy(destination = AppDestination.LIBRARY,
@@ -1117,9 +1129,9 @@ class AppContainer(
         if (request.scope == SearchScope.LIBRARY) { mutableSearch.update { it.copy(searched = true, loading = false) }; return }
         if (request.loading || (more && request.page.nextPageToken == null)) return
         searchJob?.cancel()
-        val generation = searchGeneration.value + 1
-        searchGeneration.value = generation
-        mutableSearch.update { it.copy(loading = true, failure = null, searched = true, page = if (more) it.page else SourcePage()) }
+        val generation = request.requestGeneration + 1
+        mutableSearch.update { it.copy(loading = true, failure = null, searched = true,
+            page = if (more) it.page else SourcePage(), requestGeneration = generation) }
         searchJob = effects.launch {
             try {
                 val page = online {
@@ -1128,34 +1140,46 @@ class AppContainer(
                         SearchKind.MUSIC -> source(request.provider).search(request.query, if (more) request.page.nextPageToken else null)
                         SearchKind.ALL -> {
                             if (more) source(request.provider).search(request.query, request.page.nextPageToken)
-                            else {
-                                var musicFailure: AppFailure? = null
-                                var podcastFailure: AppFailure? = null
-                                val music = try { source(request.provider).search(request.query) }
-                                catch (cancelled: CancellationException) { throw cancelled }
-                                catch (error: Exception) { musicFailure = failureOf(error); SourcePage() }
-                                val podcastPage = try { podcastsSource.search(request.query) }
-                                catch (cancelled: CancellationException) { throw cancelled }
-                                catch (error: Exception) { podcastFailure = failureOf(error); SourcePage() }
-                                if (musicFailure != null && podcastFailure != null) throw VeyraException(musicFailure)
-                                mergePages(music, podcastPage).copy(nextPageToken = music.nextPageToken,
-                                    notice = musicFailure ?: podcastFailure ?: podcastPage.notice ?: music.notice)
-                            }
+                            else searchAll(request)
                         }
                     }
                 }
+                currentCoroutineContext().ensureActive()
+                if (mutableSearch.value.requestGeneration != generation) return@launch
                 rememberPage(page)
-                if (generation == searchGeneration.value) mutableSearch.update { it.copy(loading = false,
-                    page = if (more) mergePages(request.page, page) else page, failure = null) }
+                mutableSearch.update { current ->
+                    if (current.requestGeneration != generation) current else current.copy(loading = false,
+                        page = if (more) mergePages(request.page, page) else page, failure = null)
+                }
                 cacheArtwork(page.items, page.shows)
             } catch (cancelled: CancellationException) {
-                if (generation == searchGeneration.value) mutableSearch.update { it.copy(loading = false,
-                    failure = if (store.state.value.settings.offlineOnly) AppFailure(FailureCode.OFFLINE_POLICY) else it.failure) }
+                mutableSearch.update { current ->
+                    if (current.requestGeneration != generation) current else current.copy(loading = false,
+                        failure = if (store.state.value.settings.offlineOnly) AppFailure(FailureCode.OFFLINE_POLICY) else current.failure)
+                }
                 throw cancelled
             } catch (error: Exception) {
-                if (generation == searchGeneration.value) mutableSearch.update { it.copy(loading = false, failure = failureOf(error)) }
+                mutableSearch.update { current ->
+                    if (current.requestGeneration != generation) current else current.copy(loading = false, failure = failureOf(error))
+                }
             }
         }
+    }
+
+    private suspend fun searchAll(request: SearchUiState): SourcePage = coroutineScope {
+        suspend fun search(source: MediaSource): Result<SourcePage> = try { Result.success(source.search(request.query)) }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (error: Exception) { Result.failure(error) }
+        val music = async { search(source(request.provider)) }
+        val podcasts = async { search(podcastsSource) }
+        val musicResult = music.await()
+        val podcastResult = podcasts.await()
+        if (musicResult.isFailure && podcastResult.isFailure) musicResult.getOrThrow()
+        val musicPage = musicResult.getOrNull() ?: SourcePage()
+        val podcastPage = podcastResult.getOrNull() ?: SourcePage()
+        mergePages(musicPage, podcastPage).copy(nextPageToken = musicPage.nextPageToken,
+            notice = musicResult.exceptionOrNull()?.let(::failureOf) ?: podcastResult.exceptionOrNull()?.let(::failureOf)
+                ?: podcastPage.notice ?: musicPage.notice)
     }
 
     private fun discover(provider: SourceProvider, more: Boolean) {
@@ -1340,7 +1364,13 @@ class AppContainer(
     }
 
     private fun inform(text: TextKey) { mutableNotice.value = AppNotice(text = text) }
-    private fun fail(failure: AppFailure) { mutableNotice.value = AppNotice(failure = failure) }
+    private fun fail(failure: AppFailure) {
+        val message = AppNotice(failure = failure)
+        mutableFailureNotices.update { notices ->
+            if (notices.lastOrNull()?.failure == failure) notices else (notices + message).takeLast(32)
+        }
+        mutableNotice.value = message
+    }
     private fun report(error: Exception) = fail(failureOf(error))
     private fun failureOf(error: Throwable) = when (error) {
         is VeyraException -> error.failure

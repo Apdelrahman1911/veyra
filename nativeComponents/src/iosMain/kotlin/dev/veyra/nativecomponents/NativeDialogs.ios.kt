@@ -4,13 +4,13 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
-import com.mohamedrejeb.calf.ui.ExperimentalCalfUiApi
-import com.mohamedrejeb.calf.ui.dialog.AdaptiveBasicAlertDialog
-import com.mohamedrejeb.calf.ui.dialog.uikit.AlertDialogIosProperties
-import com.mohamedrejeb.calf.ui.sheet.AdaptiveBottomSheet
-import com.mohamedrejeb.calf.ui.sheet.rememberAdaptiveSheetState
+import io.github.apdelrahman1911.kira.ui.ExperimentalKiraUiApi
+import io.github.apdelrahman1911.kira.ui.dialog.AdaptiveBasicAlertDialog
+import io.github.apdelrahman1911.kira.ui.dialog.uikit.AlertDialogIosProperties
+import io.github.apdelrahman1911.kira.ui.sheet.AdaptiveBottomSheet
+import io.github.apdelrahman1911.kira.ui.sheet.rememberAdaptiveSheetState
 
-@OptIn(ExperimentalCalfUiApi::class)
+@OptIn(ExperimentalKiraUiApi::class)
 @Composable
 actual fun NativeAlert(ios: AlertDialogIosProperties, onDismiss: () -> Unit, material: @Composable () -> Unit) =
     AdaptiveBasicAlertDialog(onDismissRequest = onDismiss, iosProperties = ios, materialContent = {})

@@ -1,0 +1,29 @@
+{
+  "kmpyt": {
+    "archive": {
+      "sha256": "a80bbf529d2226d36deb50ecd5fc34a7ad9327269d0cbcd77cef993bd74affe6",
+      "url": "https://repo.maven.apache.org/maven2/io/github/apdelrahman1911/kmpyt/kmpyt-jvm/0.1.2/kmpyt-jvm-0.1.2.jar"
+    },
+    "coordinate": "io.github.apdelrahman1911.kmpyt:kmpyt:0.1.2",
+    "documents": {
+      "META-INF/kmpyt/LICENSE": "2b48ffd17a0263667e7df9b64b277520776571b1ce73365134b7e92a6d114bcb",
+      "META-INF/kmpyt/THIRD_PARTY_NOTICES.md": "08b4452d51cb19117fe6ec956d98c2eaf4fa6e0fe4a6ea21eeb90e3bae8c34a0"
+    },
+    "sourceRevision": "cf1856a425045e6269f65ab5ab6b5d698586e307"
+  },
+  "nativecmpkit": {
+    "archive": {
+      "sha256": "077c846729be8d2e6198c64c3b0f329f79cdc9b64a9339a4ffbab8f4d3a6c202",
+      "url": "https://repo.maven.apache.org/maven2/io/github/apdelrahman1911/nativecmpkit/kira-ui/0.1.0-preview.1/kira-ui-0.1.0-preview.1-notices.zip"
+    },
+    "coordinate": "io.github.apdelrahman1911.nativecmpkit:kira-ui:0.1.0-preview.1",
+    "documents": {
+      "LICENSE": "188187b988999fc9f6ecdae6ba6e49e4f53f0488ec5af68acbfff3b2cf0c8722",
+      "NOTICE": "ff2eebdec732e0199f3d18a95aab153143c78303187488b7c2f4640ac6ae6708",
+      "THIRD_PARTY_NOTICES.md": "96bc7dfdab6a518017f05263f9bc3bbecd3152f1033a660d826f050dbb363ee9",
+      "licenses/android-liquid-glass-Apache-2.0.txt": "4b9f7e7c2821a5a1822a6cf1e4a34e877bba48a99b9bba1f03e5e2eccf6dec56",
+      "licenses/compose-cupertino-Apache-2.0.txt": "f9a85c61ba4fe8bacc300053b3384b5fc7d9f585a08dc7b9a465b7c0716c4f50"
+    },
+    "sourceRevision": "6fac2815a6e3e7cdb1d1d5dd5259ac59e8663eaa"
+  }
+}

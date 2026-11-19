@@ -82,7 +82,8 @@ internal class MpvAudioDeck private constructor(
         var corruptWarning = false
         var openingDeadline = System.nanoTime() + 35_000_000_000L
     }
-    private data class Seek(val positionMs: Long, val sequence: Long, var began: Boolean = false, var deadline: Long = System.nanoTime() + 15_000_000_000L)
+    private data class Seek(val positionMs: Long, val sequence: Long, var began: Boolean = false,
+        var restarted: Boolean = false, var deadline: Long = System.nanoTime() + 15_000_000_000L)
     private data class Operation(val action: () -> Unit, val completion: CompletableDeferred<Unit>, val scoped: Boolean = false)
 
     override suspend fun prepare(source: DesktopNativeInput, startPositionMs: Long, generation: Long) = submit {
@@ -287,7 +288,10 @@ internal class MpvAudioDeck private constructor(
                         fail(session, AppFailure(FailureCode.NETWORK_UNAVAILABLE, "media_open_timeout"))
                         native.command(handle, "stop")
                     }
-                    session.pendingSeek?.let { if (now > it.deadline) finishSeek(session, success = false) }
+                    session.pendingSeek?.let { seek ->
+                        if (now > seek.deadline) finishSeek(session, success = false)
+                        else if (seek.restarted) finishSeekIfConverged(session)
+                    }
                     if (now - lastSampleNanos >= 150_000_000L) {
                         sample(session); lastSampleNanos = now
                     }
@@ -357,7 +361,7 @@ internal class MpvAudioDeck private constructor(
             }
             20 -> sessions[nativePlayingEntry]?.takeIf { it === active }?.pendingSeek?.began = true
             21 -> sessions[nativePlayingEntry]?.takeIf { it === active }?.let { session ->
-                session.pendingSeek?.takeIf { it.began }?.let { finishSeek(session, success = true) }
+                session.pendingSeek?.takeIf { it.began }?.restarted = true
                 sample(session)
             }
             24 -> active?.let { fail(it, AppFailure(FailureCode.INVALID_STATE, "native_event_queue_overflow")) }
@@ -370,13 +374,18 @@ internal class MpvAudioDeck private constructor(
         if (native.command(handle, "seek", seconds(seek.positionMs), "absolute+exact") < 0) finishSeek(session, false)
     }
 
-    private fun finishSeek(session: Session, success: Boolean) {
+    private fun finishSeekIfConverged(session: Session) {
         val pending = session.pendingSeek ?: return
         val actual = position()
-        val converged = success && abs(actual - pending.positionMs) <= 1_000
-        if (converged) session.confirmedSeek = pending.sequence
+        // Playback restart may reach the event queue before time-pos reflects the new seek.
+        if (abs(actual - pending.positionMs) <= 1_000) finishSeek(session, success = true, actual = actual)
+    }
+
+    private fun finishSeek(session: Session, success: Boolean, actual: Long = position()) {
+        val pending = session.pendingSeek ?: return
+        if (success) session.confirmedSeek = pending.sequence
         session.pendingSeek = null
-        publish(EngineEvent.SeekCompleted(session.generation, pending.sequence, actual, converged))
+        publish(EngineEvent.SeekCompleted(session.generation, pending.sequence, actual, success))
         session.queuedSeek?.let { next -> session.queuedSeek = null; startSeek(session, next) }
     }
 

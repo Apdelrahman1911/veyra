@@ -7,9 +7,9 @@ A local-first music and podcast application for **Android, iOS, Windows, macOS a
 ## Checkout and build
 
 ```sh
-git clone --recurse-submodules https://github.com/Apdelrahman1911/veyra.git
+git clone https://github.com/Apdelrahman1911/veyra.git
 cd veyra
-# Existing JDK21; Android SDK36 is needed for Android/configuration.
+# Use JDK 21 and Python 3.11+. Android builds require SDK 37.0 and Build Tools 36.0.0.
 scripts/gradle.sh :shared:jvmTest
 # Linux UI tests use an isolated, project-owned Xvfb (existing tools required):
 scripts/with-display.sh scripts/gradle.sh :composeApp:desktopTest
@@ -17,9 +17,16 @@ scripts/gradle.sh :composeApp:run
 scripts/gradle.sh :composeApp:assembleDebug
 ```
 
-Use `scripts/gradle.sh` rather than bare Gradle: it confines tool homes, caches and temporary files to ignored `.work/`, checks the pinned submodule/wrapper, and disables automatic system SDK/JDK installation. It does not alter your calling shell's GitHub authentication or system configuration. On Windows use Git Bash with the preinstalled JDK and SDK. Build instructions are being verified; a command shown here is not a passing result.
+Use `scripts/gradle.sh` to validate the Gradle wrapper and confine tool homes, caches and temporary files to the ignored `.work/` directory. On Windows, use Git Bash with the preinstalled JDK and SDK. Use Xcode 26.4.1 for iOS builds. The iOS targets are arm64 for devices and Apple Silicon simulators.
 
-The kmpYT dependency is an immutable Git submodule/composite build, not MavenLocal, JitPack or a mutable branch. Android uses Media3; iOS uses AVPlayer; desktop uses a pinned native libmpv runtime and a bundled JVM in distribution builds. Native distribution builds run on the target operating system.
+Gradle downloads two pinned libraries from Maven Central. A plain clone contains all Veyra sources required to build the app.
+
+| Library | Maven coordinate | Use in Veyra |
+| --- | --- | --- |
+| [kmpYT](https://central.sonatype.com/artifact/io.github.apdelrahman1911.kmpyt/kmpyt/0.1.2) | `io.github.apdelrahman1911.kmpyt:kmpyt:0.1.2` | Media search, source resolution and downloads |
+| [NativeCmpKit Kira UI](https://central.sonatype.com/artifact/io.github.apdelrahman1911.nativecmpkit/kira-ui/0.1.0-preview.1) | `io.github.apdelrahman1911.nativecmpkit:kira-ui:0.1.0-preview.1` | Adaptive UI components, with Kira Core resolved transitively |
+
+Android uses Media3. iOS uses AVPlayer. Desktop distribution builds use a pinned native libmpv runtime and include a JVM. Build native distributions on the target operating system.
 
 ## Data and privacy
 
@@ -27,4 +34,4 @@ Your library, favorites, playlists, follows, preferences and listening progress 
 
 ## License and delivery status
 
-New Veyra code: GPL-3.0-or-later. The kmpYT owner authorized MIT adoption; the complete license and contribution/dependency audit are merged in [kmpYT PR #1](https://github.com/Apdelrahman1911/kmpYT/pull/1). MIT is GPLv3-compatible. See [notices](NOTICE.md) and the [audit and remaining distribution obligations](docs/verification/licensing.md). Third-party rights and corresponding-source requirements remain intact. The official licensing merge is `45f7077880c37c20216d767b262bb5757b3010bf`; the final reviewed behavioral pin and exact binary inventories remain delivery gates. App-store publication is outside scope; final artifacts, signing status and platform verification will be linked here only when actually available.
+Veyra’s code is GPL-3.0-or-later. kmpYT retains its MIT license, and NativeCmpKit retains Apache-2.0 and upstream attribution. See the software notices and the distribution audit for license texts and remaining release requirements. [Software notices](NOTICE.md) · [Licensing audit](docs/verification/licensing.md)

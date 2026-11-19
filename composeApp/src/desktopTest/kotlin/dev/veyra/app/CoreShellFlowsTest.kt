@@ -92,7 +92,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
 import androidx.navigationevent.NavigationEventDispatcher
 import androidx.navigationevent.NavigationEventInput
-import androidx.compose.ui.platform.findDefaultNavigationEventDispatcherOwner
+import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -890,14 +890,13 @@ class CoreShellFlowsTest {
         capture("fixture-shell-en-light-fresh-typed-queue")
     }
 
-    @OptIn(androidx.compose.runtime.InternalComposeApi::class)
     private fun show(initial: AppSnapshot = CoreShellTestFixture.snapshot(), width: Dp = 960.dp, height: Dp = 720.dp,
         typedTitles: CoreShellTypedTitles = CoreShellTypedTitles()): CoreShellTestFixture {
         val app = runBlocking { withTimeout(20_000L) { CoreShellTestFixture.create(initial, typedTitles) } }
         fixture = app
         viewport = DpSize(width, height)
         ui.setContent {
-            backDispatcher = findDefaultNavigationEventDispatcherOwner()?.navigationEventDispatcher
+            backDispatcher = LocalNavigationEventDispatcherOwner.current?.navigationEventDispatcher
             CompositionLocalProvider(LocalDensity provides Density(1f, 1f)) {
                 Box(Modifier.size(viewport.width, viewport.height)) { if (mounted) VeyraApp(app.container) }
             }

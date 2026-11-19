@@ -198,25 +198,30 @@ internal class QueueSessionPlayer(
     override fun handleSetShuffleModeEnabled(shuffleModeEnabled: Boolean): ListenableFuture<*> =
         command(PlaybackCommand.SetShuffle(shuffleModeEnabled, snapshot.activeContext))
     override fun handleSeek(mediaItemIndex: Int, positionMs: Long, seekCommand: Int): ListenableFuture<*> {
+        val state = snapshot
         val request = when (seekCommand) {
             Player.COMMAND_SEEK_TO_NEXT, Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM -> PlaybackCommand.Next
             // The common Previous policy may restart the current item; do not advertise the
             // separately defined PREVIOUS_MEDIA_ITEM command and silently change its semantics.
             Player.COMMAND_SEEK_TO_PREVIOUS -> PlaybackCommand.Previous
-            Player.COMMAND_SEEK_BACK -> PlaybackCommand.SkipBack
-            Player.COMMAND_SEEK_FORWARD -> PlaybackCommand.SkipForward
+            Player.COMMAND_SEEK_BACK, Player.COMMAND_SEEK_FORWARD -> PlaybackCommand.SkipConfigured(
+                seekCommand == Player.COMMAND_SEEK_FORWARD,
+                state.currentEntryId ?: return unsupported("Queue occurrence is unavailable"), state.generation)
             Player.COMMAND_SEEK_TO_MEDIA_ITEM, Player.COMMAND_SEEK_TO_DEFAULT_POSITION -> {
-                val entry = snapshot.queue.entries.getOrNull(mediaItemIndex)
+                val entry = state.queue.entries.getOrNull(mediaItemIndex)
                     ?: return unsupported("Queue occurrence is unavailable")
-                if (entry.id == snapshot.currentEntryId) PlaybackCommand.Seek(positionMs.takeIf { it != C.TIME_UNSET } ?: 0)
+                if (entry.id == state.currentEntryId) PlaybackCommand.Seek(positionMs.takeIf { it != C.TIME_UNSET } ?: 0,
+                    entry.id, state.generation)
                 else {
                     // PlayEntry deliberately resumes podcasts. A cross-item seek with an explicit
                     // offset cannot be fulfilled atomically by this contract; never ignore it.
                     if (positionMs != C.TIME_UNSET) return unsupported("Cross-item offsets are not supported")
-                    PlaybackCommand.PlayEntry(snapshot.activeContext, entry.id)
+                    PlaybackCommand.PlayEntry(state.activeContext, entry.id)
                 }
             }
-            Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM -> PlaybackCommand.Seek(positionMs.takeIf { it != C.TIME_UNSET }?.coerceAtLeast(0) ?: 0)
+            Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM -> PlaybackCommand.Seek(
+                positionMs.takeIf { it != C.TIME_UNSET }?.coerceAtLeast(0) ?: 0,
+                state.currentEntryId ?: return unsupported("Queue occurrence is unavailable"), state.generation)
             else -> return unsupported("Seek command is unavailable")
         }
         return command(request)
