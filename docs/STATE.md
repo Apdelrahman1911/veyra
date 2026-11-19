@@ -19,6 +19,9 @@
   compiled native tests and built both unsigned Swift host targets without running them on a device.
   [macOS and Windows packaging](https://github.com/Apdelrahman1911/veyra/actions/runs/44484715719) ·
   [iOS](https://github.com/Apdelrahman1911/veyra/actions/runs/44485261475)
+- The downloaded Windows installer matched its hosted checksum and source inventory. Its
+  packaging run recorded a separate shared concurrency test failure. The revised fixture uses
+  the production lease duration and passed the focused local policy and ownership suites.
 
 ## Download and playback hardening — 2026-11-19
 

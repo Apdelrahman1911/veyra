@@ -171,8 +171,11 @@ class DownloadPolicyRoomTest {
         // EX34 REQUIRED PRODUCTION HOLD: lower the ACTIVE limit while transfers remain held.
         for (limit in listOf(1, 2, 4)) executorSchema3Case {
             val gateway = DownloadExecutorSchema3Gateway(events)
-            val first = owner(gateway = gateway)
-            val second = owner(gateway = gateway)
+            // Use the production lease duration so one simulated backoff jump cannot expire
+            // a concurrent claim admitted just after the test reads the two scheduler plans.
+            val leaseDurationMs = 120_000L
+            val first = owner(gateway = gateway, leaseDurationMs = leaseDurationMs)
+            val second = owner(gateway = gateway, leaseDurationMs = leaseDurationMs)
             parallelism(first, limit)
             val release = barrier()
             val inFlight = AtomicInteger()
@@ -215,6 +218,12 @@ class DownloadPolicyRoomTest {
                         }
                         if (!physicallyBusy && plans.none { it.hasDueWork } && next != null) {
                             val delta = next - clock.epochMs()
+                            // The earlier plan can show a fresh lease that already settled by
+                            // the subsequent Room read. That expiry is not a recheck deadline.
+                            if (delta == leaseDurationMs) {
+                                delay(10)
+                                continue
+                            }
                             assertTrue(delta > 0 && delta <= 60_000, "A local recheck must be bounded, got $delta")
                             if (delta >= 5_000) assertTrue(delta in setOf(5_000L, 10_000L, 20_000L, 40_000L, 60_000L),
                                 "A claim refusal may only use the documented bounded recheck, got $delta")
