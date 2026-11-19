@@ -8,12 +8,14 @@ from __future__ import annotations
 
 import ctypes
 import hashlib
+from http.client import IncompleteRead
 import json
 import os
 from pathlib import Path
 import re
 import subprocess
 import tempfile
+from urllib.error import HTTPError
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,6 +37,8 @@ LIBRARIES = (
     'libvorbis.so.0', 'libvorbisenc.so.2', 'libvulkan.so.1', 'libxcb.so.1', 'libzstd.so.1',
 )
 MAX_BYTES = 10 * 1024 * 1024
+UBUNTU_ARCHIVE = 'https://archive.ubuntu.com/ubuntu/'
+UBUNTU_SECURITY_ARCHIVE = 'https://security.ubuntu.com/ubuntu/'
 
 
 def metadata(package: str, output: str) -> dict[str, str]:
@@ -53,16 +57,28 @@ def metadata(package: str, output: str) -> dict[str, str]:
 
 
 def fetch(fields: dict[str, str], destination: Path) -> None:
-    # The reviewed Ubuntu index snapshot supplies the exact path/digest. Fetch only
-    # the Ubuntu archive, bounded, with no redirects to an arbitrary host.
-    url = 'https://archive.ubuntu.com/ubuntu/' + fields['Filename']
-    with urllib.request.urlopen(url, timeout=60) as response:
-        if response.status != 200 or not response.url.startswith('https://archive.ubuntu.com/ubuntu/'):
-            raise ValueError('Unexpected Ubuntu package response')
-        data = response.read(MAX_BYTES + 1)
-    if len(data) != int(fields['Size']) or hashlib.sha256(data).hexdigest() != fields['SHA256']:
-        raise ValueError('Ubuntu audio package size/hash mismatch')
-    destination.write_bytes(data)
+    # Both archives must serve the exact bytes selected by the reviewed Ubuntu index.
+    for archive in (UBUNTU_ARCHIVE, UBUNTU_SECURITY_ARCHIVE, UBUNTU_ARCHIVE):
+        url = archive + fields['Filename']
+        try:
+            with urllib.request.urlopen(url, timeout=60) as response:
+                if response.status != 200 or response.url != url:
+                    raise ValueError('Unexpected Ubuntu package response')
+                data = response.read(MAX_BYTES + 1)
+        except HTTPError as error:
+            error.close()
+            if error.code not in {404, 408, 429, 500, 502, 503, 504}:
+                raise
+            last_error = error
+            continue
+        except (OSError, IncompleteRead) as error:
+            last_error = error
+            continue
+        if len(data) != int(fields['Size']) or hashlib.sha256(data).hexdigest() != fields['SHA256']:
+            raise ValueError('Ubuntu audio package size/hash mismatch')
+        destination.write_bytes(data)
+        return
+    raise OSError("Could not fetch pinned Ubuntu package " + fields['Package']) from last_error
 
 
 def prepare() -> str:

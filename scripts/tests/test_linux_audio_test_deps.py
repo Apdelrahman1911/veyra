@@ -5,6 +5,7 @@ import importlib.util
 import io
 import json
 from pathlib import Path
+from ssl import SSLEOFError
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -66,6 +67,22 @@ class LinuxAudioTestDependencies(unittest.TestCase):
         response.url = 'https://example.invalid/package.deb'
         with patch.object(AUDIO.urllib.request, 'urlopen', return_value=response), self.assertRaises(ValueError):
             AUDIO.fetch(self.fields, self.destination)
+        self.assertFalse(self.destination.exists())
+
+    def test_tls_failure_uses_official_alternate_for_the_same_digest(self):
+        response = self.response(self.data)
+        response.url = AUDIO.UBUNTU_SECURITY_ARCHIVE + self.fields['Filename']
+        with patch.object(AUDIO.urllib.request, 'urlopen', side_effect=[SSLEOFError('authored EOF'), response]) as request:
+            AUDIO.fetch(self.fields, self.destination)
+        self.assertEqual(self.data, self.destination.read_bytes())
+        self.assertEqual([AUDIO.UBUNTU_ARCHIVE + self.fields['Filename'], response.url],
+                         [call.args[0] for call in request.call_args_list])
+
+    def test_transport_retries_are_bounded(self):
+        with patch.object(AUDIO.urllib.request, 'urlopen', side_effect=TimeoutError) as request, \
+                self.assertRaisesRegex(OSError, 'libpulse0'):
+            AUDIO.fetch(self.fields, self.destination)
+        self.assertEqual(3, request.call_count)
         self.assertFalse(self.destination.exists())
 
     def test_existing_library_needs_no_download_or_subprocess(self):

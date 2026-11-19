@@ -283,10 +283,14 @@ class CatalogLibraryUndoRoomTest {
             assertEquals(before.revision + 1, sql.longValue("SELECT revision FROM store_meta WHERE id=0"))
             assertEquals(0L, sql.longValue("SELECT count(*) FROM favorite_subjects"))
         }
-        assertEquals(before.snapshot(), store.state.value, "Failure to return a commit cannot publish its receipt")
-        assertTrue(store.catalogLibraryUndoAvailability.value.accepts(receipt), "The hint can lag an unknown committed return")
+        // The failed action returns no undo receipt. Room's independent invalidation observer
+        // can already have published the committed snapshot by the time the caller sees the error.
+        val committed = graph()
+        val observed = store.state.value
+        assertTrue(observed == before.snapshot() || observed == committed.snapshot())
         assertFailsWith<IllegalArgumentException> { store.undoCatalogLibrary(receipt) }
         val actual = graph()
+        assertEquals(committed.revision, actual.revision)
         assertTrue(actual.rows.favoriteSubjectRows.isEmpty())
         assertFalse(store.catalogLibraryUndoAvailability.value.accepts(receipt))
         assertOnlySavedRelationsChanged(before, actual)
