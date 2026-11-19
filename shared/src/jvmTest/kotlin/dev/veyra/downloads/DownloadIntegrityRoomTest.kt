@@ -29,6 +29,29 @@ class DownloadIntegrityRoomTest {
         assertNull(failed.finalization)
     }
 
+    @Test fun completedAtomicStageIsValidatedAfterRestartWithoutRetransferring() = executorSchema3Case {
+        val first = owner(atomicSourceStaging = true)
+        val landed = CompletableDeferred<Unit>()
+        first.gateway.transfer = { call ->
+            call.complete()
+            landed.complete(Unit)
+            awaitCancellation()
+        }
+        val (id, _) = enqueue(first)
+        first.coordinator.start(DownloadActivation.USER_SESSION)
+        landed.await()
+        assertNull(join(first, id).finalization)
+        first.coordinator.close()
+        closeStore(first.store)
+
+        val second = owner(atomicSourceStaging = true)
+        second.coordinator.start(DownloadActivation.USER_SESSION)
+        val result = complete(second, id)
+        assertNotNull(result.asset)
+        assertTrue(second.gateway.transfers.isEmpty())
+        assertTrue(second.validations.isNotEmpty())
+    }
+
     @Test fun concurrentRedownloadAfterDeletionRenewsOneClaimAndSurvivesReopen() = executorSchema3Case {
         val first = owner()
         val (id, selection) = enqueue(first)

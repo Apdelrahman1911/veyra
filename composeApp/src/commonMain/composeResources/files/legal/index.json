@@ -131,12 +131,12 @@
   "platforms": [],
   "schemaVersion": 1,
   "source": {
-    "kmpytNoticeRevision": "bd899eec55b0731527717a7bd998f2b3222d63b3",
-    "kmpytPin": "bd899eec55b0731527717a7bd998f2b3222d63b3",
+    "kmpytNoticeRevision": "387959a618a571067b52260b5a6eaadc9c60530f",
+    "kmpytPin": "387959a618a571067b52260b5a6eaadc9c60530f",
     "kmpytSnapshot": {
-      "revision": "bd899eec55b0731527717a7bd998f2b3222d63b3",
-      "treeSha256": "e3840b26f7097abf730d663eb747253bdffd542e21341de3d26e7d18b38673f9",
-      "version": "0.1.4"
+      "revision": "387959a618a571067b52260b5a6eaadc9c60530f",
+      "treeSha256": "3415e3fc668a8655e3b535bb187ebb5b2f16ae849e9620f59f6d636cbcb50e9c",
+      "version": "0.1.5"
     },
     "mode": "pinned-kmpyt-source",
     "nativecmpkitPin": "6fac2815a6e3e7cdb1d1d5dd5259ac59e8663eaa",

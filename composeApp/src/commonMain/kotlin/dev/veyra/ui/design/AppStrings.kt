@@ -383,7 +383,10 @@ enum class TextKey(internal val english: String, internal val arabic: String) {
     DownloadPaused("Download paused", "التنزيل متوقف مؤقتًا"),
     DownloadFailed("Download failed", "تعذّر التنزيل"),
     DownloadVerifying("Verifying downloaded file…", "جارٍ التحقق من الملف المنزّل…"),
-    DownloadFinalizing("Finishing download…", "جارٍ إتمام التنزيل…"),
+    DownloadFinalizing("Processing downloaded media…", "جارٍ معالجة الوسائط المنزّلة…"),
+    DownloadPublishing("Saving verified download…", "جارٍ حفظ التنزيل بعد التحقق…"),
+    DownloadExportFailed("Could not finish processing the audio. Retry the download.", "تعذّرت معالجة الصوت. حاول تنزيله مرة أخرى."),
+    DownloadExportTimedOut("Processing the downloaded audio took too long. Retry the download.", "استغرقت معالجة الصوت المنزّل وقتًا طويلًا. حاول تنزيله مرة أخرى."),
     DownloadValidationTimedOut("Checking the downloaded file took too long. Try the download again.", "استغرق التحقق من الملف المنزّل وقتًا طويلًا. حاول تنزيله مرة أخرى."),
     DownloadAdmissionNotVisible("The download was recorded, but the list has not updated. Reopen Downloads to check it.", "تم تسجيل التنزيل، لكن القائمة لم تُحدَّث. افتح التنزيلات مجددًا للتحقق."),
     DownloadFilterEmpty("No downloads match the selected filter.", "لا توجد تنزيلات تطابق عامل التصفية المحدّد."),
@@ -790,6 +793,8 @@ class AppStrings(
         // must not tell the user their saved data is damaged.
         FailureCode.RECOVERY_REQUIRED -> when (failure.detail) {
             "download_validation_timed_out" -> TextKey.DownloadValidationTimedOut
+            "ios_download_export_timeout" -> TextKey.DownloadExportTimedOut
+            "ios_download_export_failed", "ios_download_export_cancelled" -> TextKey.DownloadExportFailed
             "download_admission_not_visible" -> TextKey.DownloadAdmissionNotVisible
             "YOUTUBE_SOURCE_EXPIRED", "kmpyt_source_expired" -> TextKey.SourceLinkExpired
             "acquisition_selection_unplayable" -> TextKey.FirstResultNotPlayable

@@ -1486,6 +1486,7 @@ internal class DownloadPhysicalRuntime(
                     ensureRun(run, network = true)
                     stage(DownloadDiagnosticStage.SOURCE_PREPARATION)
                     val prepared = prepare(run)
+                    val previouslySelected = run.current.job.representationId
                     stage(DownloadDiagnosticStage.REPRESENTATION_COMMIT)
                     mutate(run) { repository.selectPhysicalDownloadRepresentation(SelectPhysicalDownloadRepresentation(
                         run.fence, prepared.representation.representationId, run.current.job.validatorGeneration,
@@ -1494,7 +1495,7 @@ internal class DownloadPhysicalRuntime(
                     val part = withContext(BlockingIo) { files.prepareStagingPath(requireNotNull(run.current.job.stagingPath)) }
                     var lastProgress: Long? = null
                     stage(DownloadDiagnosticStage.SOURCE_TRANSFER)
-                    val existing = if (dependencies.atomicSourceStaging) {
+                    val existing = if (dependencies.atomicSourceStaging && previouslySelected == prepared.representation.representationId) {
                         withContext(BlockingIo) { storageOperation { files.fileSystem.metadataOrNull(part) } }
                     } else null
                     val result = if (existing != null) {
@@ -1502,24 +1503,27 @@ internal class DownloadPhysicalRuntime(
                         // downloader only creates this destination after completing the transfer.
                         val size = existing.size?.takeIf { existing.isRegularFile && it > 0 }
                             ?: fail(FailureCode.CORRUPT_MEDIA, "invalid_interrupted_staging_output")
+                        recordDiagnostic(DownloadDiagnosticStage.STAGED_FILE_RECOVERED, run = run, outcome = DownloadDiagnosticOutcome.SETTLED)
                         Transferred(size, prepared.representation)
-                    } else run.validationReaders.validate { prepared.transfer(part.toString()) { progress ->
-                        val now = clock.monotonicMs()
-                        // A restarted transport (fewer bytes than saved) is recorded at once.
-                        val due = lastProgress == null || now - lastProgress!! >= PROGRESS_CHECKPOINT_MS ||
-                            progress.bytesDownloaded == progress.totalBytes || progress.bytesDownloaded < run.current.job.bytesDownloaded
-                        // Sources report every received buffer (a few KiB). The full check reads the
-                        // whole library for the global parallelism limit, so it runs with each
-                        // checkpoint; per buffer only the in-memory ownership gates run. Reading the
-                        // database per buffer held transfers to one buffer per read and kept a core busy.
-                        if (due) ensureRun(run, network = true) else ensureRunOwnership(run, network = true)
-                        if (progress.bytesDownloaded < 0 || progress.totalBytes?.let { it < progress.bytesDownloaded } == true)
-                            fail(FailureCode.CORRUPT_MEDIA, "invalid_transfer_count")
-                        if (due) {
-                            checkpoint(run, progress.bytesDownloaded, progress.totalBytes)
-                            lastProgress = now
+                    } else run.validationReaders.validate {
+                        prepared.transfer(part.toString()) { progress ->
+                            val now = clock.monotonicMs()
+                            // A restarted transport (fewer bytes than saved) is recorded at once.
+                            val due = lastProgress == null || now - lastProgress!! >= PROGRESS_CHECKPOINT_MS ||
+                                progress.bytesDownloaded == progress.totalBytes || progress.bytesDownloaded < run.current.job.bytesDownloaded
+                            // Sources report every received buffer (a few KiB). The full check reads the
+                            // whole library for the global parallelism limit, so it runs with each
+                            // checkpoint; per buffer only the in-memory ownership gates run. Reading the
+                            // database per buffer held transfers to one buffer per read and kept a core busy.
+                            if (due) ensureRun(run, network = true) else ensureRunOwnership(run, network = true)
+                            if (progress.bytesDownloaded < 0 || progress.totalBytes?.let { it < progress.bytesDownloaded } == true)
+                                fail(FailureCode.CORRUPT_MEDIA, "invalid_transfer_count")
+                            if (due) {
+                                checkpoint(run, progress.bytesDownloaded, progress.totalBytes)
+                                lastProgress = now
+                            }
                         }
-                    } }
+                    }
                     ensureRun(run, network = true)
                     stage(DownloadDiagnosticStage.TRANSFER_INTEGRITY)
                     if (result.bytesWritten <= 0 || result.representation != prepared.representation)

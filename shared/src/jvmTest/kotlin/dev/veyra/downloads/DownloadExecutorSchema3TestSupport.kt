@@ -66,8 +66,9 @@ internal class DownloadExecutorSchema3Fixture(
         leaseDurationMs: Long = 1_000,
         schedulerClock: Clock = clock,
         validationTimeoutMs: Long = 120_000,
+        atomicSourceStaging: Boolean = false,
     ): DownloadExecutorSchema3Owner = DownloadExecutorSchema3Owner(this, store, gateway, executionGate,
-        capabilities, parentScope, heartbeatMs, leaseDurationMs, schedulerClock, validationTimeoutMs).also { owners += it }
+        capabilities, parentScope, heartbeatMs, leaseDurationMs, schedulerClock, validationTimeoutMs, atomicSourceStaging).also { owners += it }
 
     fun extraScope(): CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default).also { additionalScopes += it }
     fun barrier(): DownloadBarrier = DownloadBarrier().also { barriers += it }
@@ -300,6 +301,7 @@ internal class DownloadExecutorSchema3Owner(
     leaseDurationMs: Long,
     schedulerClock: Clock,
     validationTimeoutMs: Long,
+    atomicSourceStaging: Boolean,
 ) {
     val repository = DownloadExecutorRepositoryFaults(store.acquisition)
     val answers = java.util.concurrent.ConcurrentHashMap<AcquisitionRequestId, SourceAcquisitionResult>()
@@ -324,7 +326,7 @@ internal class DownloadExecutorSchema3Owner(
     val materializationEvidence = DownloadMaterializationEvidence(store.transactionOwner)
     val dependencies = DownloadAcquisitionDependencies(repository, gateway, localValidator, { beforeDelete(it) },
         { beforeAdoption(it) }, { coverageChecks.incrementAndGet(); admission() }, acquisition, batches, materializationEvidence,
-        validationTimeoutMs = validationTimeoutMs)
+        validationTimeoutMs = validationTimeoutMs, atomicSourceStaging = atomicSourceStaging)
     val resolver = AppSourceResolver(store, fixture.files, legacyValidator, legacy, schedulerClock, materializationEvidence)
     val coordinator = DownloadCoordinator(store, fixture.files, resolver, legacy, legacyValidator, capabilities,
         parentScope, executionGate ?: gate, schedulerClock, pollingMs = 30, leaseDurationMs = leaseDurationMs,

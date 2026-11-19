@@ -86,6 +86,7 @@ data class DownloadSurfaceEntry(
      * pick the first/newest member or infer sibling grants.
      */
     val retainedValidationChoices: List<RetainedValidationTarget> = emptyList(),
+    val publishing: Boolean = false,
 ) {
     init {
         require(id.isNotBlank() && bytesDownloaded >= 0 && (totalBytes == null || totalBytes >= 0))
@@ -206,6 +207,7 @@ private fun typedEntries(presentation: DownloadAcquisitionPresentation,
             mediaId = mediaId,
             displayTitle = if (mediaId == null) sourceRecordingTitle(presentation, producer) else null,
             status = projected.status,
+            publishing = projected.status == DownloadStatus.VERIFYING && canonical.id in state.physicalFinalizations,
             bytesDownloaded = projected.bytesDownloaded,
             totalBytes = projected.totalBytes,
             failure = projected.failure,

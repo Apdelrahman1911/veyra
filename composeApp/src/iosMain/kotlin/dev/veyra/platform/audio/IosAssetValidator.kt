@@ -14,6 +14,7 @@ import dev.veyra.playback.LocalMediaValidationReaderRelease
 import dev.veyra.playback.LocalMediaValidationReaderUnacknowledged
 import dev.veyra.playback.LocalMediaValidator
 import kotlin.coroutines.CoroutineContext
+import kotlin.time.TimeSource
 import kotlinx.cinterop.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -95,7 +96,7 @@ class IosAssetValidator internal constructor(
                 val output = alloc<ExtAudioFileRefVar>()
                 output.value = null
                 diagnosticStep = IosValidationDiagnosticStep.OPEN
-                val openStatus = ExtAudioFileOpenURL(nativeUrl, output.ptr)
+                val openStatus = traceIosDecoder("OPEN") { ExtAudioFileOpenURL(nativeUrl, output.ptr) }
                 val nativeFile = output.value
                 // A partially constructed NONNULL handle is owned BEFORE the status is checked,
                 // before cancellation/faults, and before any format/property/decode operation.
@@ -148,12 +149,12 @@ class IosAssetValidator internal constructor(
                 fun decodeAt(fileFrame: Long) {
                     context.ensureActive()
                     nativeFault.before(input, IosValidationNativeStep.SEEK, handle)
-                    requireNativeStatus(ExtAudioFileSeek(handle, fileFrame))
+                    requireNativeStatus(traceIosDecoder("SEEK_${diagnosticStep.name}") { ExtAudioFileSeek(handle, fileFrame) })
                     framesRead.value = framesRequested
                     buffers.mBuffers[0].mDataByteSize = SAMPLE_BYTES.toUInt()
                     context.ensureActive()
                     nativeFault.before(input, IosValidationNativeStep.READ, handle)
-                    requireNativeStatus(ExtAudioFileRead(handle, framesRead.ptr, buffers.ptr))
+                    requireNativeStatus(traceIosDecoder("READ_${diagnosticStep.name}") { ExtAudioFileRead(handle, framesRead.ptr, buffers.ptr) })
                     check(framesRead.value in 1u..framesRequested)
                     check(buffers.mBuffers[0].mDataByteSize in (framesRead.value * frameBytes)..SAMPLE_BYTES.toUInt())
                     context.ensureActive()
@@ -227,7 +228,7 @@ class IosAssetValidator internal constructor(
                     fault.before(input, IosValidationNativeStep.DISPOSE, handle)
                     val forcedFailure = fault.disposeFailureStatus(input, handle)
                     check(forcedFailure == null || forcedFailure != 0)
-                    val status = forcedFailure ?: ExtAudioFileDispose(handle)
+                    val status = forcedFailure ?: traceIosDecoder("DISPOSE") { ExtAudioFileDispose(handle) }
                     if (status != 0) unacknowledged()
                 }
                 CFRelease(nativeUrl)
@@ -312,4 +313,15 @@ internal suspend fun runIosFileValidation(
     if (result != null) return result
     requestCancellation()
     return AssetValidation.Invalid(AppFailure(FailureCode.RECOVERY_REQUIRED, "download_validation_timed_out"))
+}
+
+@OptIn(kotlin.experimental.ExperimentalNativeApi::class)
+private inline fun traceIosDecoder(stage: String, call: () -> Int): Int {
+    if (!kotlin.native.Platform.isDebugBinary) return call()
+    val start = TimeSource.Monotonic.markNow()
+    println("VEYRA_IOS_DECODER ts_ms=${(NSDate().timeIntervalSince1970 * 1000).toLong()} stage=$stage outcome=START")
+    val status = call()
+    println("VEYRA_IOS_DECODER ts_ms=${(NSDate().timeIntervalSince1970 * 1000).toLong()} stage=$stage " +
+        "outcome=${if (status == 0) "SUCCESS" else "FAILED"} duration_ms=${start.elapsedNow().inWholeMilliseconds} os_status=$status")
+    return status
 }

@@ -127,6 +127,7 @@ internal fun MusicUiOptions.downloadSurface(snapshot: AppSnapshot): DownloadSurf
 internal fun DownloadSurface?.savedCatalogueBinding(mediaId: String): String? =
     this?.unambiguousCatalogueBinding(mediaId)
 internal fun DownloadSurfaceEntry.statusText(strings: AppStrings): String = when {
+    publishing -> strings.text(TextKey.DownloadPublishing)
     isFinishing && status == DownloadStatus.RUNNING -> strings.text(TextKey.DownloadFinalizing)
     status == DownloadStatus.COMPLETE && !ready && origin != DownloadSurfaceOrigin.TYPED_SOURCE ->
         strings.text(TextKey.FileUnavailable)
