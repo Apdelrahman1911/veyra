@@ -15,11 +15,8 @@ import dev.veyra.playback.LocalMediaValidationReaderUnacknowledged
 import dev.veyra.playback.LocalMediaValidator
 import kotlin.coroutines.CoroutineContext
 import kotlinx.cinterop.*
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.MutableStateFlow
 import platform.AudioToolbox.*
 import platform.CoreAudioTypes.*
 import platform.CoreFoundation.*
@@ -55,12 +52,8 @@ class IosAssetValidator internal constructor(
             asset.mimeType, asset.codecs, asset.sha256, asset.representationId, asset.validatorGeneration))
     }
 
-    override suspend fun validateLocal(input: LocalMediaValidationInput): AssetValidation = withContext(Dispatchers.Default) {
-        val context = currentCoroutineContext()
-        // This function and all C operations below are NON-suspending. ExtAudioFileRead requires
-        // one thread for an instance; a Default dispatcher migration between samples is forbidden.
-        validateOnCurrentThread(input, context)
-    }
+    override suspend fun validateLocal(input: LocalMediaValidationInput): AssetValidation =
+        runIosFileValidation(input) { context -> validateOnCurrentThread(input, context) }
 
     private fun validateOnCurrentThread(input: LocalMediaValidationInput, context: CoroutineContext): AssetValidation {
         val reader = ValidationReader(input, nativeFault)
@@ -280,4 +273,43 @@ class IosAssetValidator internal constructor(
         val retainedLock = NSLock()
         val retainedValidationReaders = mutableSetOf<ValidationReader>()
     }
+}
+
+private val iosValidationWorkers = CoroutineScope(SupervisorJob() + Dispatchers.Default.limitedParallelism(2))
+
+// ExtAudioFile operations and disposal stay in one nonsuspending worker. A caller may stop
+// waiting, but only completion of that worker can acknowledge release of its exact file.
+internal suspend fun runIosFileValidation(
+    input: LocalMediaValidationInput,
+    timeoutMs: Long = 45_000,
+    validate: (CoroutineContext) -> AssetValidation,
+): AssetValidation {
+    currentCoroutineContext().ensureActive()
+    val unacknowledged = MutableStateFlow<LocalMediaValidationReaderUnacknowledged?>(null)
+    val worker = iosValidationWorkers.async {
+        try {
+            validate(currentCoroutineContext())
+        } catch (failed: LocalMediaValidationReaderUnacknowledged) {
+            unacknowledged.value = failed
+            throw failed
+        }
+    }
+    fun requestCancellation() {
+        worker.cancel()
+        if (!worker.isCompleted) {
+            throw LocalMediaValidationReaderUnacknowledged(input, LocalMediaValidationReaderRelease {
+                worker.isCompleted && (unacknowledged.value?.reader?.isReleased() ?: true)
+            })
+        }
+        unacknowledged.value?.let { throw it }
+    }
+    val result = try {
+        withTimeoutOrNull(timeoutMs) { worker.await() }
+    } catch (cancelled: CancellationException) {
+        requestCancellation()
+        throw cancelled
+    }
+    if (result != null) return result
+    requestCancellation()
+    return AssetValidation.Invalid(AppFailure(FailureCode.RECOVERY_REQUIRED, "download_validation_timed_out"))
 }

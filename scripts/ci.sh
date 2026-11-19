@@ -86,10 +86,26 @@ case "$mode" in
         [ "$(uname -m)" = arm64 ] || { printf '%s\n' 'iOS CI requires an Apple Silicon host for the simulator target.' >&2; exit 1; }
         export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode_26.4.1.app/Contents/Developer}"
         [ -d "$DEVELOPER_DIR" ] || { printf '%s\n' 'Pinned Xcode 26.4.1 is unavailable.' >&2; exit 1; }
-        # Compile native tests without claiming execution in CoreSimulator.
-        "$SCRIPT_DIR/gradle.sh" :shared:compileTestKotlinIosSimulatorArm64 :composeApp:compileTestKotlinIosSimulatorArm64 :composeApp:linkDebugFrameworkIosArm64
+        sdk="$(xcrun --sdk iphonesimulator --show-sdk-version)"
+        runtime="com.apple.CoreSimulator.SimRuntime.iOS-${sdk//./-}"
+        device_type="$(xcrun simctl list -j devices available | python3 -B -c '
+import json, sys
+for device in json.load(sys.stdin)["devices"].get(sys.argv[1], []):
+    if device["isAvailable"] and device["name"].startswith("iPhone") and device.get("deviceTypeIdentifier"):
+        print(device["deviceTypeIdentifier"])
+        sys.exit(0)
+raise SystemExit("No installed iPhone simulator matches the Xcode SDK")
+' "$runtime")"
+        simulator="$(xcrun simctl create "Veyra CI ${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}" "$device_type" "$runtime")"
+        trap 'xcrun simctl shutdown "$simulator" 2>/dev/null || true; xcrun simctl delete "$simulator"' EXIT
+        python3 -B - "$simulator" <<'PYTHON'
+import subprocess, sys
+subprocess.run(["xcrun", "simctl", "bootstatus", sys.argv[1], "-b"], timeout=360, check=True)
+PYTHON
+        "$SCRIPT_DIR/gradle.sh" --continue :shared:iosSimulatorArm64Test :composeApp:iosSimulatorArm64Test \
+            "-PiosSimulatorDevice=$simulator"
         "$SCRIPT_DIR/build-ios.sh" simulator
         "$SCRIPT_DIR/build-ios.sh" device
-        python3 -B scripts/verification-summary.py --phase ios
+        python3 -B scripts/verification-summary.py --phase ios --require-tests shared composeApp
         ;;
 esac

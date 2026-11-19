@@ -40,6 +40,7 @@ interface PlatformServices {
      */
     val localValidator: LocalMediaValidator get() = validator as? LocalMediaValidator
         ?: LocalMediaValidator { throw VeyraException(AppFailure(FailureCode.UNSUPPORTED_SOURCE, "local_validator_unavailable")) }
+    val atomicSourceStaging: Boolean get() = false
     val youtube: YouTubeMediaSource
     val systemLanguage: LanguagePreference
     val systemDarkTheme: Boolean get() = false

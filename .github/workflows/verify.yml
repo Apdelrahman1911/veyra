@@ -340,7 +340,7 @@ jobs:
 
   ios:
     if: ${{ github.event.repository.private == false && inputs.retention_canary != true && (inputs.scope == 'all' || inputs.scope == 'ios') }}
-    name: iOS full Swift host compile (arm64)
+    name: iOS simulator tests and Swift host builds (arm64)
     runs-on: macos-26
     timeout-minutes: 150
     permissions:
@@ -360,9 +360,9 @@ jobs:
       - name: Verify checkout, wrapper and pinned publication notices
         id: bootstrap
         run: scripts/verify-checkout.sh
-      - name: Compile native tests and full unsigned simulator/device applications
+      - name: Execute native simulator tests and build unsigned applications
         id: ios_tests
-        timeout-minutes: 45
+        timeout-minutes: 65
         continue-on-error: true
         run: scripts/ci.sh ios
       - name: Rebuild unsigned iOS outputs independently of test outcome
@@ -371,8 +371,10 @@ jobs:
         timeout-minutes: 40
         continue-on-error: true
         run: |
-          scripts/build-ios.sh simulator
-          scripts/build-ios.sh device
+          if [ "${{ steps.ios_tests.outcome }}" != success ]; then
+            scripts/build-ios.sh simulator
+            scripts/build-ios.sh device
+          fi
       - name: Generate iOS inventory and inventory-backed legal copy
         id: ios_inventory
         if: ${{ always() && inputs.retain_builds == true && steps.bootstrap.outcome == 'success' }}
@@ -432,7 +434,7 @@ jobs:
           if [ "${{ steps.ios_tests.outcome }}" != success ] || [ "${{ steps.ios_build.outcome }}" != success ] || \
              [ "${{ steps.ios_inventory.outcome }}" != success ] || [ -z "$app" ]; then outcome=failed; fi
           args=(--platform "$platform" --lane-outcome "$outcome"
-            --diagnostic "tests=${{ steps.ios_tests.outcome }} build=${{ steps.ios_build.outcome }} inventory=${{ steps.ios_inventory.outcome }} app=$([ -n "$app" ] && echo present || echo missing) classification=unsigned-compile-only")
+            --diagnostic "tests=${{ steps.ios_tests.outcome }} build=${{ steps.ios_build.outcome }} inventory=${{ steps.ios_inventory.outcome }} app=$([ -n "$app" ] && echo present || echo missing) classification=unsigned-physical-device-build")
           [ -n "$app" ] && args+=(--directory "device-app=$app")
           [ -d "$framework" ] && args+=(--directory "device-framework=$framework")
           args+=(--legal composeApp/src/commonMain/composeResources/files/legal)
@@ -451,7 +453,7 @@ jobs:
             find .work/xcode -type d -path "*DerivedData-simulator-arm64/Build/Products/*-iphonesimulator/Veyra.app" -print -quit | grep -q .
             find .work/xcode -type d -path "*DerivedData-device-arm64/Build/Products/*-iphoneos/Veyra.app" -print -quit | grep -q .
           fi
-      - name: Report compile-only native status (no simulator or physical run)
+      - name: Report actual iOS simulator test counts
         if: ${{ always() && steps.checkout.outcome == 'success' }}
         env:
           VEYRA_JOB_STATUS: ${{ job.status }}

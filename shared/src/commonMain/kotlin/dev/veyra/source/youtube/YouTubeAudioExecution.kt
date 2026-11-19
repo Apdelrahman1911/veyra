@@ -1,14 +1,19 @@
 package dev.veyra.source.youtube
 
+import dev.kmpyt.DownloadProcessingException
 import dev.kmpyt.YouTubeClient
 import dev.kmpyt.YouTubePlaybackResource
 import dev.kmpyt.extraction.*
 import dev.kmpyt.youtube.YouTubeBrowseText
 import dev.kmpyt.youtube.YouTubeFormatSelection
 import dev.veyra.model.FailureCode
+import dev.veyra.model.OfflineAssetKind
 import dev.veyra.model.StreamTransport
 import dev.veyra.model.VeyraException
 import dev.veyra.playback.EngineCapabilities
+import dev.veyra.playback.LocalMediaValidationInput
+import dev.veyra.playback.LocalMediaValidationReaderRelease
+import dev.veyra.playback.LocalMediaValidationReaderUnacknowledged
 import dev.veyra.playback.EphemeralPlaybackEndpoint
 import dev.veyra.playback.PlaybackResource
 import dev.veyra.source.ResolvePurpose
@@ -238,6 +243,15 @@ internal class YouTubeAudioExecution(
                 currentCoroutineContext().ensureActive()
                 return YouTubeTransferResult(result.bytesWritten, planned.representation.mimeType,
                     planned.representation.codecs, planned.representation.extension, planned.representation.key)
+            } catch (failure: DownloadProcessingException) {
+                if (!failure.restartRequired) throw failure
+                // AVFoundation may still access this exact staging generation. Keep the
+                // caller's existing file and native ownership barrier until process exit.
+                throw LocalMediaValidationReaderUnacknowledged(
+                    LocalMediaValidationInput(destinationPath, OfflineAssetKind.FILE, 0,
+                        plan.primary.materializedAudioMime(), null, null, planned.representation.key, 0),
+                    LocalMediaValidationReaderRelease { false },
+                )
             } catch (failure: Exception) {
                 if (!failure.isYouTubeExpiredLink() || planned.selection.refreshed) throw failure
                 planned = renew(prepared, planned)

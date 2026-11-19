@@ -15,6 +15,7 @@ import dev.veyra.platform.background.IosDownloadExecutionGate
 import dev.veyra.playback.PlaybackCommand
 import dev.veyra.playback.PlaybackResult
 import dev.veyra.playback.PlaybackState
+import dev.veyra.playback.SystemClock
 import dev.veyra.source.network.PublicUrlPolicy
 import dev.veyra.source.youtube.createIosYouTubeSource
 import kotlin.coroutines.resume
@@ -183,6 +184,7 @@ internal sealed interface IosBootstrap {
     data class Failed(val failure: AppFailure) : IosBootstrap
 }
 
+@OptIn(kotlin.experimental.ExperimentalNativeApi::class)
 private class IosPlatformServices(
     override val dataDirectory: String,
     override val downloadExecution: IosDownloadExecutionGate,
@@ -190,7 +192,12 @@ private class IosPlatformServices(
     override val store = createPlatformLibraryStore(dataDirectory)
     override val engine = IosAudioEngine()
     override val validator = IosAssetValidator("$dataDirectory/media")
-    override val youtube = createIosYouTubeSource()
+    override val atomicSourceStaging = true
+    override val youtube = if (kotlin.native.Platform.isDebugBinary) createIosYouTubeSource { event ->
+        println("VEYRA_IOS_DOWNLOAD ts_ms=${SystemClock().epochMs()} operation=${event.operationId} " +
+            "stage=${event.stage} outcome=${event.outcome} duration_ms=${event.durationMs} " +
+            "failure=${event.processingFailure} restart=${event.restartRequired}")
+    } else createIosYouTubeSource()
     override val systemLanguage: LanguagePreference get() = iosLanguage()
     override val systemDarkTheme: Boolean get() = UITraitCollection.currentTraitCollection.userInterfaceStyle == UIUserInterfaceStyle.UIUserInterfaceStyleDark
     // Local import is intentionally unavailable until central kmpYT registration is verified.

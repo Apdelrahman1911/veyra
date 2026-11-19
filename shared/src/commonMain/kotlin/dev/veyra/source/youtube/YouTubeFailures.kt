@@ -1,5 +1,8 @@
 package dev.veyra.source.youtube
 
+import dev.kmpyt.DownloadProcessingException
+import dev.veyra.playback.LocalMediaValidationReaderUnacknowledged
+
 import dev.kmpyt.extraction.ExtractionReport
 import dev.kmpyt.extraction.TrackRole
 import dev.veyra.model.AppFailure
@@ -87,9 +90,15 @@ internal fun Throwable.isYouTubeExpiredLink(): Boolean =
 
 internal fun Throwable.asYouTubeFailure(download: Boolean = false): Nothing {
     if (this is CancellationException) throw this
-    if (this is VeyraException) throw this
+    if (this is VeyraException || this is LocalMediaValidationReaderUnacknowledged) throw this
     val names = generateSequence(this) { it.cause }.take(4).mapNotNull { it::class.simpleName }.toSet()
     val failure = when {
+        this is DownloadProcessingException -> AppFailure(FailureCode.RECOVERY_REQUIRED,
+            when (reason) {
+                DownloadProcessingException.Reason.EXPORT_TIMEOUT -> "ios_download_export_timeout"
+                DownloadProcessingException.Reason.EXPORT_FAILED -> "ios_download_export_failed"
+                DownloadProcessingException.Reason.EXPORT_CANCELLED -> "ios_download_export_cancelled"
+            })
         isYouTubeExpiredLink() -> AppFailure(FailureCode.RECOVERY_REQUIRED, "YOUTUBE_SOURCE_EXPIRED")
         "InsufficientMediaStorageException" in names -> AppFailure(FailureCode.STORAGE_FULL, "YOUTUBE_STORAGE_FULL")
         names.any { it in setOf("IosMediaStorageException", "MediaStorageAbort", "FileNotFoundException", "FileSystemException") } ->

@@ -104,9 +104,11 @@ class AppAcquisitionOwner internal constructor(
         beforePhysicalDelete: suspend (MaterializationAsset) -> Unit,
         beforePhysicalAdoption: suspend (PhysicalDownloadProducer.Schema2) -> Unit,
         requireOwnerAdmission: () -> Unit,
+        atomicSourceStaging: Boolean,
     ) = DownloadAcquisitionDependencies(
         repository, gateway, validator, beforePhysicalDelete, beforePhysicalAdoption,
         requireOwnerAdmission, acquisition, batches, materializationEvidence,
+        atomicSourceStaging = atomicSourceStaging,
     )
 
     /** The adapter operates the existing DownloadCoordinator executor, never another executor. */

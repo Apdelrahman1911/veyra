@@ -25,10 +25,9 @@ def collect_tests(module: str, phase: str, repository: Path = ROOT) -> dict[str,
     tasks = {
         "desktop": {"shared": "jvmTest", "composeApp": "desktopTest"},
         "android": {"shared": "testDebugUnitTest", "composeApp": "testDebugUnitTest"},
+        "ios": {"shared": "iosSimulatorArm64Test", "composeApp": "iosSimulatorArm64Test"},
     }
     base = repository / module / "build" / "test-results"
-    if phase == "ios":
-        return counts  # Native sources are compiled, NOT executed by initial CI.
     pattern = tasks[phase][module] + "/TEST-*.xml" if phase in tasks else "**/TEST-*.xml"
     for path in sorted(base.glob(pattern)):
         if not path.resolve().is_relative_to(repository.resolve()):

@@ -91,7 +91,9 @@ internal fun projectPhysicalDownloadStates(state: AcquisitionRepositoryState,
     checked: Map<String, MaterializationAsset>, host: DownloadPhysicalHostState): Map<String, PhysicalDownloadJob> {
     val checkedIds = checkedPhysicalDownloadIds(state, checked)
     return state.physicalDownloads.mapValues { (id, job) ->
-        if (job.status != DownloadStatus.COMPLETE || job.cleanupPending || id in checkedIds) job
+        if (host.failure?.detail == "download_owner_drain_failed_restart_required" &&
+            job.status in DownloadClaimRules.busy) job.copy(status = DownloadStatus.NEEDS_FOREGROUND, failure = host.failure)
+        else if (job.status != DownloadStatus.COMPLETE || job.cleanupPending || id in checkedIds) job
         else if (!DownloadPhysicalClaimRules.knownProducer(job)) job.copy(status = DownloadStatus.NEEDS_FOREGROUND,
             failure = AppFailure(FailureCode.RECOVERY_REQUIRED, "download_legacy_acquisition_required"))
         else if (host.suspended || host.failure != null || DownloadPhysicalClaimRules.backgroundBlocked(job))

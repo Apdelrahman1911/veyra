@@ -134,6 +134,7 @@ class AppContainer(
         beforePhysicalDelete = { asset -> playback.releaseForMaterializationRemoval(asset).getOrThrow() },
         beforePhysicalAdoption = { producer -> playback.releaseForAssetRemoval(producer.mediaId).getOrThrow() },
         requireOwnerAdmission = ::requireDownloadOwnerAdmission,
+        atomicSourceStaging = platform.atomicSourceStaging,
     )
     val downloads = DownloadCoordinator(store, files, resolver, executionGateway, platform.validator,
         platform.engine.capabilities, scope, platform.downloadExecution, clock,

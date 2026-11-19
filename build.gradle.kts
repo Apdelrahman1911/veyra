@@ -1,3 +1,5 @@
+import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest
+
 plugins {
     alias(libs.plugins.kotlin.multiplatform) apply false
     alias(libs.plugins.kotlin.serialization) apply false
@@ -12,4 +14,10 @@ plugins {
 allprojects {
     group = "dev.veyra"
     version = "1.0.0"
+}
+
+subprojects {
+    tasks.withType<KotlinNativeSimulatorTest>().configureEach {
+        providers.gradleProperty("iosSimulatorDevice").orNull?.let { device.set(it) }
+    }
 }

@@ -24,7 +24,7 @@ enum class DownloadDiagnosticStage {
     ATTEMPT_SETTLEMENT, MAINTENANCE_OPERATION,
 }
 
-enum class DownloadDiagnosticOutcome { FAILURE, STALE, SETTLED }
+enum class DownloadDiagnosticOutcome { FAILURE, STALE, SETTLED, STARTED, CANCELLED }
 enum class DownloadDiagnosticClaimDemand {
     CONTINUE, PAUSE_AND_RETAIN, CANCEL_UNFINISHED_KEEP_COMPLETE, REMOVE_CANDIDATE, UNOWNED_UNKNOWN, INVALID_JOIN,
 }
@@ -65,7 +65,9 @@ data class DownloadDiagnosticFailure private constructor(
                 "YOUTUBE_ACQUISITION_EXECUTION_MISMATCH", "YOUTUBE_ACQUISITION_INSPECTION_MISMATCH" ->
                     DownloadDiagnosticReason.ACQUISITION_IDENTITY
                 "YOUTUBE_INVALID_SELECTION" -> DownloadDiagnosticReason.SELECTION_REJECTED
-                "owned_file_integrity" -> DownloadDiagnosticReason.OWNED_FILE_INTEGRITY
+                "download_validation_timed_out", "local_validation_reader_unacknowledged",
+                "ios_download_export_timeout", "ios_download_export_failed", "ios_download_export_cancelled",
+                "invalid_interrupted_staging_output", "owned_file_integrity" -> DownloadDiagnosticReason.OWNED_FILE_INTEGRITY
                 else -> DownloadDiagnosticReason.UNCLASSIFIED
             }
             val kind = when (error) {
@@ -124,6 +126,8 @@ data class DownloadDiagnosticEvent internal constructor(
     val lastCommitted: DownloadDiagnosticPhysicalState?,
     val cachedObservation: DownloadDiagnosticPhysicalState?,
     val host: DownloadDiagnosticHostState?,
+    val epochMs: Long? = null,
+    val durationMs: Long? = null,
 )
 
 internal class DownloadDiagnosticRecorder {
@@ -144,11 +148,13 @@ internal class DownloadDiagnosticRecorder {
         lastCommitted: DownloadDiagnosticPhysicalState? = null,
         cachedObservation: DownloadDiagnosticPhysicalState? = null,
         host: DownloadDiagnosticHostState? = null,
+        epochMs: Long? = null,
+        durationMs: Long? = null,
     ) {
         val sanitized = failure?.let { DownloadDiagnosticFailure.from(it, error) }
         mutableEntries.update { entries ->
             val event = DownloadDiagnosticEvent((entries.lastOrNull()?.sequence ?: 0) + 1, stage, outcome, sanitized,
-                expectedOwnershipGeneration, expectedAttemptNumber, runSequence, lastCommitted, cachedObservation, host)
+                expectedOwnershipGeneration, expectedAttemptNumber, runSequence, lastCommitted, cachedObservation, host, epochMs, durationMs)
             entries.takeLast(31) + event
         }
     }
