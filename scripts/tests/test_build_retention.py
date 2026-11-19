@@ -114,17 +114,18 @@ class BuildRetentionTest(unittest.TestCase):
         sha = hashlib.sha256(text).hexdigest()
         name = "notices/" + sha + ".txt"
         (self.legal / "notices").mkdir()
-        (self.legal / name).write_bytes(text)
-        (self.legal / "LICENSE").write_bytes(text)
+        indexed_texts = (name, "LICENSE", "nativeCmpkit-LICENSE", "nativeCmpkit-NOTICE")
+        for filename in indexed_texts:
+            (self.legal / filename).write_bytes(text)
         (self.legal / "unlisted.txt").write_text("authored unlisted sentinel\n")
         value = json.loads((self.legal / "index.json").read_text())
-        value["fileHashes"].update({name: sha, "LICENSE": sha})
+        value["fileHashes"].update(dict.fromkeys(indexed_texts, sha))
         (self.legal / "index.json").write_text(json.dumps(value))
         self.run_create("--package", str(self.package))
         self.run_verify()
         with zipfile.ZipFile(self.packet / "support.zip") as archive:
-            self.assertEqual(text, archive.read("legal/0/" + name))
-            self.assertEqual(text, archive.read("legal/0/LICENSE"))
+            for filename in indexed_texts:
+                self.assertEqual(text, archive.read("legal/0/" + filename))
             self.assertNotIn("legal/0/unlisted.txt", archive.namelist())
 
     def test_missing_or_changed_indexed_legal_text_prevents_a_partial_packet(self):

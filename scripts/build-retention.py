@@ -286,7 +286,8 @@ def gather_support(args: argparse.Namespace, root: Path) -> tuple[dict[str, byte
             # content-addressed notices. Never scan the directory or follow an
             # arbitrary index path into other repository files.
             if name not in ("INDEX.txt", "LICENSE", "NOTICE.md", "THIRD_PARTY_NOTICES.txt",
-                            "kmpYT-LICENSE", "kmpYT-THIRD_PARTY_NOTICES.md") and not (
+                            "kmpYT-LICENSE", "kmpYT-THIRD_PARTY_NOTICES.md",
+                            "nativeCmpkit-LICENSE", "nativeCmpkit-NOTICE") and not (
                     isinstance(name, str) and re.fullmatch(r"notices/[0-9a-f]{64}\.txt", name)):
                 raise LaneError("Unsafe or unsupported indexed legal path")
             exact_hex(expected, "indexed legal SHA-256", 64)
