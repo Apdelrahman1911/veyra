@@ -1,5 +1,15 @@
 # Veyra — resumable state
 
+## iPhone diagnostics — 2026-11-19
+
+- **Settings → Diagnostics** controls local recording and JSON Lines export. Recording is off by default.
+  The opt-in setting and session identifier persist across launches. Per-process identifiers distinguish
+  operation sequences. A private keyed download alias joins acceptance, physical transfer, native export,
+  decoder validation and Room publication without exposing a database or media identifier.
+- Veyra still builds the checked-in kmpYT composite. The `source-v0.1.9` source snapshot at
+  `36d6154a9c979c588142151b5f7a3440e58704e7` adds typed iOS source request and download diagnostic receipts.
+  Maven Central publishing remains paused. [iPhone session and workflow checklist](verification/iphone-workflow-checklist.md)
+
 ## iOS download finalization — 2026-11-19
 
 - Veyra uses the checked-in kmpYT `0.1.7` snapshot at `088077261e038529a441a0d28d137b096ed12d4a`.
@@ -17,12 +27,13 @@
   10 targeted recovery tests. The later snapshot updates iOS implementation and fixtures only,
   with accompanying version, notice and documentation changes.
   [Android and Windows CI](https://github.com/Apdelrahman1911/veyra/actions/runs/44579816359)
-- Native iOS test sources compile. The native suites and unsigned iOS host builds need their own
-  hosted receipts. [Veyra iOS CI](https://github.com/Apdelrahman1911/veyra/actions/runs/44584302654) ·
+- On `source-v0.1.7`, both iOS simulator architectures passed 487 Kotlin tests and five
+  UIKit/WebKit tests each. Veyra's full simulator test step passed after switching from the
+  default standalone launch to the explicitly booted device. The full boot gives AVPlayer access
+  to the simulator media services. [Veyra iOS CI](https://github.com/Apdelrahman1911/veyra/actions/runs/44598638999) ·
   [kmpYT CI](https://github.com/Apdelrahman1911/kmpYT/actions/runs/44584271514)
 - The original iPhone stall still needs a device observation. The scoped Debug console messages
   and manual cases are in the [iPhone download checklist](verification/iphone-download-finalization.md).
-  App-wide opt-in diagnostics and in-app export follow native download verification.
 
 ## kmpYT checked-in source integration — 2026-11-19
 

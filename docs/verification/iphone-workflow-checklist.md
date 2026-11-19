@@ -2,6 +2,17 @@
 
 Use media you are authorized to play and download. Keep a short track, a long episode, and a known working public RSS feed handy. Use an existing Veyra installation for restart and state-restoration checks, and use a development build with the same bundle identifier to retain its data. See the [download test and installation instructions](iphone-download-finalization.md).
 
+## Start a diagnostic session
+
+1. In Veyra, open **Settings → Diagnostics** and turn on **Record diagnostic logs**. Copy the displayed **Session** identifier into your notes.
+2. Close Veyra from the app switcher and open it again to capture startup and restoration. Confirm that recording remains enabled and the same session identifier is displayed.
+3. Run the cases below. Make a note of start and finish times for each case as you go. During a long session, export after a failure before attempting another reproduction.
+4. Open **Settings → Diagnostics → Export diagnostic logs**. Choose **Save to Files** or share `Veyra-diagnostics.jsonl` from the iOS share sheet. Send that file with your session identifier and the case notes. Turn off **Record diagnostic logs** when finished. Export stays available while recording is off.
+
+Veyra stores two rolling segments of up to 1 MiB each. The export includes the records still in those segments. It contains timestamps and process-scoped operation identifiers. The download correlation key lets us follow an accepted download across retries and app restarts. An abrupt exit can lose events still queued to disk. The export does not include titles, searches, feed URLs, file paths, credentials, artwork, or media contents.
+
+## Test cases
+
 For each case, record **Pass**, **Fail**, or **Skipped**, the time with time zone, and what you saw or heard. Include a screen label and elapsed wait for failures. Record whether audio actually came out of the expected speaker or headset. The app can measure native playback state without being able to hear its own output. Avoid putting titles, personal feed URLs, or account details in your notes.
 
 | Case | Exercise | Expected observation |

@@ -1,6 +1,9 @@
 package dev.veyra.data
 
 import dev.veyra.platform.BlockingIo
+import dev.veyra.diagnostics.DiagnosticComponent.DATABASE
+import dev.veyra.diagnostics.DiagnosticOperation.*
+import dev.veyra.diagnostics.Diagnostics
 import dev.veyra.data.room.*
 import dev.veyra.model.*
 import kotlinx.coroutines.*
@@ -40,6 +43,9 @@ class LibraryStore internal constructor(
     constructor(database: VeyraDatabase, dispatcher: CoroutineDispatcher = BlockingIo) :
         this(RoomLibraryPersistence(database), dispatcher)
 
+    private val diagnosticSink = MutableStateFlow(Diagnostics.None)
+    fun attachDiagnostics(diagnostics: Diagnostics) { diagnosticSink.value = diagnostics }
+
     private val mutex = Mutex()
     private val observerJob = SupervisorJob()
     private val observerScope = CoroutineScope(observerJob + dispatcher)
@@ -71,7 +77,10 @@ class LibraryStore internal constructor(
         LibraryAcquisitionView(graph.snapshot(), graph.state())
     }
 
-    internal suspend fun <T> readAcquisition(project: (AcquisitionGraph) -> T): T = withContext(dispatcher) {
+    internal suspend fun <T> readAcquisition(project: (AcquisitionGraph) -> T): T =
+        diagnosticSink.value.trace(DATABASE, ROOM_READ) { readAcquisitionOwned(project) }
+
+    private suspend fun <T> readAcquisitionOwned(project: (AcquisitionGraph) -> T): T = withContext(dispatcher) {
         mutex.withLock {
             initializeLocked().getOrThrow()
             val backend = requireAcquisitionBackend()
@@ -91,6 +100,11 @@ class LibraryStore internal constructor(
 
     /** Post-COMMIT callbacks run before the same mutex is released, never in mutation.result. */
     private suspend fun <T, R> transactAcquisitionPublished(
+        transform: (AcquisitionGraph) -> AcquisitionMutation<T>,
+        published: (AcquisitionGraph, T) -> R,
+    ): R = diagnosticSink.value.trace(DATABASE, ROOM_WRITE) { transactAcquisitionOwned(transform, published) }
+
+    private suspend fun <T, R> transactAcquisitionOwned(
         transform: (AcquisitionGraph) -> AcquisitionMutation<T>,
         published: (AcquisitionGraph, T) -> R,
     ): R = withContext(dispatcher) {
@@ -141,9 +155,17 @@ class LibraryStore internal constructor(
         publishGraph(persistence.readAcquisitionGraph())
     } else persistence.read().also { mutableState.value = it }
 
-    suspend fun initialize(): StoreResult = withContext(dispatcher) { mutex.withLock { initializeLocked() } }
+    suspend fun initialize(): StoreResult = diagnosticSink.value.trace(DATABASE, INITIALIZE,
+        resultFailure = { (it as? StoreResult.Failure)?.failure?.code }) {
+        withContext(dispatcher) { mutex.withLock { initializeLocked() } }
+    }
 
-    suspend fun update(expectedRevision: Long? = null, transform: (AppSnapshot) -> AppSnapshot): StoreResult = withContext(dispatcher) {
+    suspend fun update(expectedRevision: Long? = null, transform: (AppSnapshot) -> AppSnapshot): StoreResult =
+        diagnosticSink.value.trace(DATABASE, ROOM_WRITE, resultFailure = { (it as? StoreResult.Failure)?.failure?.code }) {
+            updateOwned(expectedRevision, transform)
+        }
+
+    private suspend fun updateOwned(expectedRevision: Long?, transform: (AppSnapshot) -> AppSnapshot): StoreResult = withContext(dispatcher) {
         mutex.withLock {
             val loaded = initializeLocked()
             if (loaded is StoreResult.Failure) return@withLock loaded

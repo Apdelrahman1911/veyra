@@ -3,6 +3,11 @@
 package dev.veyra.app
 
 import dev.veyra.data.createPlatformLibraryStore
+import dev.kmpyt.IosDownloadStageOutcome
+import dev.kmpyt.IosResearchOutcome
+import dev.veyra.diagnostics.*
+import dev.veyra.diagnostics.DiagnosticComponent as Component
+import dev.veyra.diagnostics.DiagnosticOperation.*
 import dev.veyra.downloads.DownloadDiagnosticFailure
 import dev.veyra.model.AppFailure
 import dev.veyra.model.FailureCode
@@ -31,6 +36,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import okio.FileSystem
 import okio.Path.Companion.toPath
+import okio.Path
 import platform.Foundation.*
 import platform.UIKit.*
 
@@ -62,6 +68,7 @@ internal object IosApplication {
     private var nowPlaying: IosNowPlayingBridge? = null
     private var started = false
     private var active = false
+    private var diagnostics = Diagnostics.None
 
     fun start() {
         if (started) return
@@ -70,11 +77,16 @@ internal object IosApplication {
             val created = try {
                 val directory = withContext(Dispatchers.Default) { applicationDirectory() }
                 debugIosStartup("directory_ready")
-                val platform = IosPlatformServices(directory, gate)
+                val platform = IosPlatformServices(directory, gate, scope)
+                diagnostics = platform.diagnosticJournal.diagnostics
+                gate.diagnostics = diagnostics
+                diagnostics.record(Component.APP, PROCESS, DiagnosticOutcome.STARTED,
+                    value = NSBundle.mainBundle.objectForInfoDictionaryKey("CFBundleVersion")?.toString()?.toLongOrNull())
+                if (active) diagnostics.record(Component.APP, FOREGROUND)
                 debugIosStartup("platform_ready")
                 AppContainer(platform, scope).also { created ->
                     container = created
-                    nowPlaying = IosNowPlayingBridge(scope, playback, ::dispatch,
+                    nowPlaying = IosNowPlayingBridge(scope, playback, { command -> dispatch(command, remote = true) },
                         skipBackSeconds = { created.store.state.value.settings.skipBackSeconds },
                         skipForwardSeconds = { created.store.state.value.settings.skipForwardSeconds },
                         cachedArtworkPath = { id ->
@@ -88,6 +100,7 @@ internal object IosApplication {
                             }
                         },
                         artworkUpdates = created.artworkUpdates,
+                        diagnostics = diagnostics,
                     )
                 }
             } catch (cancelled: CancellationException) {
@@ -96,12 +109,14 @@ internal object IosApplication {
                 debugIosStartup("bootstrap_failed", error)
                 val failure = (error as? VeyraException)?.failure
                     ?: AppFailure(FailureCode.RECOVERY_REQUIRED, "application_initialization")
+                diagnostics.record(Component.APP, INITIALIZE, DiagnosticOutcome.FAILED, failure = failure.code)
                 mutableBootstrap.value = IosBootstrap.Failed(failure)
                 return@launch
             }
             // The common UI must remain mounted on Failed so explicit backup recovery is usable.
             mutableBootstrap.value = IosBootstrap.Available(created)
             observeIosDiagnostics(scope, created)
+            created.observeDiagnosticState(scope)
             launch {
                 var previousFailure: AppFailure? = null
                 created.playback.state.collect {
@@ -129,6 +144,7 @@ internal object IosApplication {
 
     fun becameActive() {
         active = true
+        diagnostics.record(Component.APP, FOREGROUND)
         gate.didBecomeActive()
         resumeDownloadsWhenActive()
     }
@@ -139,7 +155,7 @@ internal object IosApplication {
                 val initialized = container ?: return@launch
                 if (initialized.initialization.value !is AppInitialization.Ready) return@launch
                 if (gate.awaitForegroundReady() && active && initialized.initialization.value is AppInitialization.Ready) {
-                    initialized.downloads.resumePending()
+                    diagnostics.trace(Component.DOWNLOAD, SCHEDULER) { initialized.downloads.resumePending() }
                 }
             }
             catch (cancelled: CancellationException) { throw cancelled }
@@ -148,14 +164,17 @@ internal object IosApplication {
     }
     fun enteredBackground() {
         active = false
+        diagnostics.record(Component.APP, BACKGROUND)
         gate.didEnterBackground()
         checkpoint()
         // audio background mode is independent: entering background never pauses permitted audio.
     }
     fun checkpoint() {
+        diagnostics.record(Component.APP, INACTIVE)
         if (container?.initialization?.value is AppInitialization.Ready) scope.launch { dispatch(PlaybackCommand.FlushProgress) }
     }
     fun terminate() {
+        diagnostics.record(Component.APP, TERMINATE)
         scope.launch {
             gate.close()
             nowPlaying?.close()
@@ -163,7 +182,12 @@ internal object IosApplication {
             container?.close()
         }
     }
-    private suspend fun dispatch(command: PlaybackCommand): PlaybackResult {
+    private suspend fun dispatch(command: PlaybackCommand, remote: Boolean = false): PlaybackResult =
+        diagnostics.trace(Component.NATIVE_AUDIO, if (remote) REMOTE else HISTORY,
+            phase = if (remote) DiagnosticPhase.OS_MEDIA_COMMAND else null,
+            resultFailure = { (it as? PlaybackResult.Failure)?.failure?.code }) { dispatchOwned(command) }
+
+    private suspend fun dispatchOwned(command: PlaybackCommand): PlaybackResult {
         val state = bootstrap.value
         val available = (state as? IosBootstrap.Available)?.container
         val failure = (state as? IosBootstrap.Failed)?.failure
@@ -188,16 +212,37 @@ internal sealed interface IosBootstrap {
 private class IosPlatformServices(
     override val dataDirectory: String,
     override val downloadExecution: IosDownloadExecutionGate,
+    scope: CoroutineScope,
 ) : PlatformServices {
+    override val diagnosticJournal = iosDiagnosticJournal(scope, dataDirectory)
     override val store = createPlatformLibraryStore(dataDirectory)
-    override val engine = IosAudioEngine()
-    override val validator = IosAssetValidator("$dataDirectory/media")
+    override val engine = IosAudioEngine(diagnosticJournal.diagnostics)
+    override val validator = IosAssetValidator("$dataDirectory/media", diagnosticJournal.diagnostics)
     override val atomicSourceStaging = true
-    override val youtube = if (kotlin.native.Platform.isDebugBinary) createIosYouTubeSource { event ->
-        println("VEYRA_IOS_DOWNLOAD ts_ms=${SystemClock().epochMs()} operation=${event.operationId} " +
-            "stage=${event.stage} outcome=${event.outcome} duration_ms=${event.durationMs} " +
-            "failure=${event.processingFailure} restart=${event.restartRequired}")
-    } else createIosYouTubeSource()
+    override val youtube = createIosYouTubeSource(download = { event ->
+        val diagnostics = diagnosticJournal.diagnostics
+        if (diagnostics.enabled) diagnostics.record(Component.DOWNLOAD, NATIVE_TRANSFER, when (event.outcome) {
+            IosDownloadStageOutcome.START -> DiagnosticOutcome.STARTED
+            IosDownloadStageOutcome.SUCCESS -> DiagnosticOutcome.SUCCEEDED
+            IosDownloadStageOutcome.CANCELLED -> DiagnosticOutcome.CANCELLED
+            IosDownloadStageOutcome.FAILED -> DiagnosticOutcome.FAILED
+        }, phase = event.stage, detail = event.processingFailure, durationMs = event.durationMs,
+            value = if (event.restartRequired) 1 else 0, generation = event.operationId?.hashCode()?.toLong(), link = event.correlationKey)
+        if (kotlin.native.Platform.isDebugBinary) {
+            println("VEYRA_IOS_DOWNLOAD ts_ms=${SystemClock().epochMs()} operation=${event.operationId} " +
+                "stage=${event.stage} outcome=${event.outcome} duration_ms=${event.durationMs} " +
+                "failure=${event.processingFailure} restart=${event.restartRequired}")
+        }
+    }, research = { event ->
+        diagnosticJournal.diagnostics.record(Component.NETWORK, HTTP, when (event.outcome) {
+            IosResearchOutcome.STARTED -> DiagnosticOutcome.STARTED
+            IosResearchOutcome.SUCCEEDED -> DiagnosticOutcome.SUCCEEDED
+            IosResearchOutcome.CANCELLED -> DiagnosticOutcome.CANCELLED
+            else -> DiagnosticOutcome.FAILED
+        }, phase = event.stage, detail = event.outcome, durationMs = event.durationMs, value = event.status?.toLong(),
+            generation = event.requestId, sourceCorrelationId = event.correlationId)
+    }, diagnosticsEnabled = { diagnosticJournal.diagnostics.enabled })
+    override suspend fun shareDiagnostics(path: Path) = shareIosDiagnostics(path)
     override val systemLanguage: LanguagePreference get() = iosLanguage()
     override val systemDarkTheme: Boolean get() = UITraitCollection.currentTraitCollection.userInterfaceStyle == UIUserInterfaceStyle.UIUserInterfaceStyleDark
     // Local import is intentionally unavailable until central kmpYT registration is verified.

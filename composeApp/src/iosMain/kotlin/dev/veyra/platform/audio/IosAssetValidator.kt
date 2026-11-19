@@ -3,6 +3,9 @@
 package dev.veyra.platform.audio
 
 import dev.veyra.downloads.DownloadFiles
+import dev.veyra.diagnostics.*
+import dev.veyra.diagnostics.DiagnosticComponent.NATIVE_AUDIO
+import dev.veyra.diagnostics.DiagnosticOperation.DECODER
 import dev.veyra.model.AppFailure
 import dev.veyra.model.FailureCode
 import dev.veyra.model.OfflineAsset
@@ -44,8 +47,10 @@ internal fun interface IosValidationNativeFault {
 class IosAssetValidator internal constructor(
     private val mediaRoot: String?,
     private val nativeFault: IosValidationNativeFault,
+    private val diagnostics: Diagnostics = Diagnostics.None,
 ) : AssetValidator, LocalMediaValidator {
-    constructor(mediaRoot: String? = null) : this(mediaRoot, IosValidationNativeFault { _, _, _ -> })
+    constructor(mediaRoot: String? = null, diagnostics: Diagnostics = Diagnostics.None) :
+        this(mediaRoot, IosValidationNativeFault { _, _, _ -> }, diagnostics)
 
     override suspend fun validate(asset: OfflineAsset): AssetValidation {
         if (asset.sizeBytes < 0 || asset.validatorGeneration < 0) return invalid(FailureCode.CORRUPT_MEDIA)
@@ -54,10 +59,13 @@ class IosAssetValidator internal constructor(
     }
 
     override suspend fun validateLocal(input: LocalMediaValidationInput): AssetValidation =
-        runIosFileValidation(input) { context -> validateOnCurrentThread(input, context) }
+        diagnostics.trace(NATIVE_AUDIO, DECODER, resultFailure = { (it as? AssetValidation.Invalid)?.failure?.code }) {
+            val trace = currentCoroutineContext()[DiagnosticContext]
+            runIosFileValidation(input) { context -> validateOnCurrentThread(input, context, trace) }
+        }
 
-    private fun validateOnCurrentThread(input: LocalMediaValidationInput, context: CoroutineContext): AssetValidation {
-        val reader = ValidationReader(input, nativeFault)
+    private fun validateOnCurrentThread(input: LocalMediaValidationInput, context: CoroutineContext, trace: DiagnosticContext?): AssetValidation {
+        val reader = ValidationReader(input, nativeFault, diagnostics, trace)
         var diagnosticStep = IosValidationDiagnosticStep.PATH
         try {
             context.ensureActive()
@@ -96,7 +104,7 @@ class IosAssetValidator internal constructor(
                 val output = alloc<ExtAudioFileRefVar>()
                 output.value = null
                 diagnosticStep = IosValidationDiagnosticStep.OPEN
-                val openStatus = traceIosDecoder("OPEN") { ExtAudioFileOpenURL(nativeUrl, output.ptr) }
+                val openStatus = traceIosDecoder(DiagnosticPhase.OPEN, diagnostics, trace) { ExtAudioFileOpenURL(nativeUrl, output.ptr) }
                 val nativeFile = output.value
                 // A partially constructed NONNULL handle is owned BEFORE the status is checked,
                 // before cancellation/faults, and before any format/property/decode operation.
@@ -108,14 +116,16 @@ class IosAssetValidator internal constructor(
                 val fileFormat = alloc<AudioStreamBasicDescription>()
                 val propertySize = alloc<UIntVar>()
                 propertySize.value = sizeOf<AudioStreamBasicDescription>().toUInt()
-                requireNativeStatus(ExtAudioFileGetProperty(handle, kExtAudioFileProperty_FileDataFormat,
-                    propertySize.ptr, fileFormat.ptr))
+                requireNativeStatus(traceIosDecoder(DiagnosticPhase.FORMAT, diagnostics, trace) {
+                    ExtAudioFileGetProperty(handle, kExtAudioFileProperty_FileDataFormat, propertySize.ptr, fileFormat.ptr)
+                })
                 check(propertySize.value == sizeOf<AudioStreamBasicDescription>().toUInt())
                 diagnosticStep = IosValidationDiagnosticStep.LENGTH
                 val fileFrames = alloc<LongVar>() // kExtAudioFileProperty_FileLengthFrames is SInt64.
                 propertySize.value = sizeOf<LongVar>().toUInt()
-                requireNativeStatus(ExtAudioFileGetProperty(handle, kExtAudioFileProperty_FileLengthFrames,
-                    propertySize.ptr, fileFrames.ptr))
+                requireNativeStatus(traceIosDecoder(DiagnosticPhase.LENGTH, diagnostics, trace) {
+                    ExtAudioFileGetProperty(handle, kExtAudioFileProperty_FileLengthFrames, propertySize.ptr, fileFrames.ptr)
+                })
                 check(propertySize.value == sizeOf<LongVar>().toUInt())
                 val sampleRate = fileFormat.mSampleRate
                 val channels = fileFormat.mChannelsPerFrame
@@ -136,8 +146,10 @@ class IosAssetValidator internal constructor(
                     mReserved = 0u
                 }
                 diagnosticStep = IosValidationDiagnosticStep.CLIENT_FORMAT
-                requireNativeStatus(ExtAudioFileSetProperty(handle, kExtAudioFileProperty_ClientDataFormat,
-                    sizeOf<AudioStreamBasicDescription>().toUInt(), clientFormat.ptr))
+                requireNativeStatus(traceIosDecoder(DiagnosticPhase.CLIENT_FORMAT, diagnostics, trace) {
+                    ExtAudioFileSetProperty(handle, kExtAudioFileProperty_ClientDataFormat,
+                        sizeOf<AudioStreamBasicDescription>().toUInt(), clientFormat.ptr)
+                })
                 nativeFault.before(input, IosValidationNativeStep.FORMAT_READY, handle)
                 val sample = allocArray<ByteVar>(SAMPLE_BYTES)
                 val buffers = alloc<AudioBufferList>()
@@ -149,12 +161,15 @@ class IosAssetValidator internal constructor(
                 fun decodeAt(fileFrame: Long) {
                     context.ensureActive()
                     nativeFault.before(input, IosValidationNativeStep.SEEK, handle)
-                    requireNativeStatus(traceIosDecoder("SEEK_${diagnosticStep.name}") { ExtAudioFileSeek(handle, fileFrame) })
+                    val first = diagnosticStep == IosValidationDiagnosticStep.FIRST_SAMPLE
+                    requireNativeStatus(traceIosDecoder(if (first) DiagnosticPhase.FIRST_SAMPLE_SEEK else DiagnosticPhase.LAST_SAMPLE_SEEK,
+                        diagnostics, trace) { ExtAudioFileSeek(handle, fileFrame) })
                     framesRead.value = framesRequested
                     buffers.mBuffers[0].mDataByteSize = SAMPLE_BYTES.toUInt()
                     context.ensureActive()
                     nativeFault.before(input, IosValidationNativeStep.READ, handle)
-                    requireNativeStatus(traceIosDecoder("READ_${diagnosticStep.name}") { ExtAudioFileRead(handle, framesRead.ptr, buffers.ptr) })
+                    requireNativeStatus(traceIosDecoder(if (first) DiagnosticPhase.FIRST_SAMPLE_READ else DiagnosticPhase.LAST_SAMPLE_READ,
+                        diagnostics, trace) { ExtAudioFileRead(handle, framesRead.ptr, buffers.ptr) })
                     check(framesRead.value in 1u..framesRequested)
                     check(buffers.mBuffers[0].mDataByteSize in (framesRead.value * frameBytes)..SAMPLE_BYTES.toUInt())
                     context.ensureActive()
@@ -192,6 +207,8 @@ class IosAssetValidator internal constructor(
     private class ValidationReader(
         private val input: LocalMediaValidationInput,
         private val fault: IosValidationNativeFault,
+        private val diagnostics: Diagnostics,
+        private val trace: DiagnosticContext?,
     ) : LocalMediaValidationReaderRelease {
         private var url: CFURLRef? = null
         private var file: ExtAudioFileRef? = null
@@ -228,7 +245,7 @@ class IosAssetValidator internal constructor(
                     fault.before(input, IosValidationNativeStep.DISPOSE, handle)
                     val forcedFailure = fault.disposeFailureStatus(input, handle)
                     check(forcedFailure == null || forcedFailure != 0)
-                    val status = forcedFailure ?: traceIosDecoder("DISPOSE") { ExtAudioFileDispose(handle) }
+                    val status = forcedFailure ?: traceIosDecoder(DiagnosticPhase.DISPOSE, diagnostics, trace) { ExtAudioFileDispose(handle) }
                     if (status != 0) unacknowledged()
                 }
                 CFRelease(nativeUrl)
@@ -316,12 +333,16 @@ internal suspend fun runIosFileValidation(
 }
 
 @OptIn(kotlin.experimental.ExperimentalNativeApi::class)
-private inline fun traceIosDecoder(stage: String, call: () -> Int): Int {
-    if (!kotlin.native.Platform.isDebugBinary) return call()
-    val start = TimeSource.Monotonic.markNow()
-    println("VEYRA_IOS_DECODER ts_ms=${(NSDate().timeIntervalSince1970 * 1000).toLong()} stage=$stage outcome=START")
+private inline fun traceIosDecoder(stage: DiagnosticPhase, diagnostics: Diagnostics, trace: DiagnosticContext?, call: () -> Int): Int {
+    val debug = kotlin.native.Platform.isDebugBinary
+    if (!debug && !diagnostics.enabled) return call()
+    val operation = diagnostics.begin(NATIVE_AUDIO, DECODER, trace, stage)
+    val start = if (debug) TimeSource.Monotonic.markNow() else null
+    if (debug) println("VEYRA_IOS_DECODER ts_ms=${(NSDate().timeIntervalSince1970 * 1000).toLong()} stage=$stage outcome=START")
     val status = call()
-    println("VEYRA_IOS_DECODER ts_ms=${(NSDate().timeIntervalSince1970 * 1000).toLong()} stage=$stage " +
+    diagnostics.end(NATIVE_AUDIO, DECODER, operation,
+        if (status == 0) DiagnosticOutcome.SUCCEEDED else DiagnosticOutcome.FAILED, phase = stage, value = status.toLong())
+    if (start != null) println("VEYRA_IOS_DECODER ts_ms=${(NSDate().timeIntervalSince1970 * 1000).toLong()} stage=$stage " +
         "outcome=${if (status == 0) "SUCCESS" else "FAILED"} duration_ms=${start.elapsedNow().inWholeMilliseconds} os_status=$status")
     return status
 }

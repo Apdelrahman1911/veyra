@@ -47,6 +47,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.rememberCoroutineScope
 import dev.veyra.nativecomponents.LocalNativeControlAccessibility
 import dev.veyra.nativecomponents.NativeControlAccessibility
 import androidx.compose.runtime.getValue
@@ -69,6 +71,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.unit.dp
 import dev.veyra.model.AppSettings
+import dev.veyra.diagnostics.DiagnosticJournal
 import dev.veyra.model.LanguagePreference
 import dev.veyra.model.ThemeMode
 import dev.veyra.playback.EngineCapabilities
@@ -79,6 +82,9 @@ import dev.veyra.ui.design.TextKey
 import dev.veyra.ui.design.VeyraRadii
 import dev.veyra.ui.design.VeyraSpacing
 import kotlin.math.roundToInt
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
+import okio.Path
 
 /** Real persisted settings supplied by the root. No client, engine or store is created here. */
 @Composable
@@ -90,8 +96,11 @@ fun SettingsScreen(
     onManageStorage: () -> Unit,
     onOpenLicenses: () -> Unit,
     modifier: Modifier = Modifier,
+    diagnosticJournal: DiagnosticJournal? = null,
+    onShareDiagnostics: suspend (Path) -> Unit = {},
 ) {
     val strings = LocalStrings.current
+    val diagnosticScope = rememberCoroutineScope()
     Box(modifier.fillMaxSize().testTag("settings-screen"), contentAlignment = Alignment.TopCenter) {
         LazyColumn(
             modifier = Modifier.widthIn(max = 880.dp).fillMaxSize().testTag("settings-list"),
@@ -201,6 +210,37 @@ fun SettingsScreen(
                         Modifier.testTag("settings-manage-storage"))
                 }
             }
+            diagnosticJournal?.let { journal -> item("diagnostics") {
+                val capture by journal.state.collectAsState()
+                var working by remember { mutableStateOf(false) }
+                var failed by remember { mutableStateOf(false) }
+                fun runOperation(operation: suspend () -> Unit) {
+                    if (working) return
+                    working = true
+                    failed = false
+                    diagnosticScope.launch {
+                        try { operation() }
+                        catch (cancelled: CancellationException) { throw cancelled }
+                        catch (_: Exception) { failed = true }
+                        finally { working = false }
+                    }
+                }
+                SettingsSection(TextKey.Diagnostics, VeyraIcons.Info) {
+                    ToggleSetting(strings.text(TextKey.DiagnosticsCapture), strings.text(TextKey.DiagnosticsDescription),
+                        checked = capture.enabled, enabled = !working, modifier = Modifier.testTag("settings-diagnostics-capture"),
+                        onChange = { enabled -> runOperation { journal.setEnabled(enabled) } })
+                    capture.sessionId?.let { id ->
+                        Text(strings.format(TextKey.DiagnosticsSession, id), style = MaterialTheme.typography.bodySmall)
+                        SettingsButton(strings.text(TextKey.DiagnosticsExport),
+                            onClick = { runOperation { onShareDiagnostics(journal.export()) } }, enabled = !working,
+                            modifier = Modifier.testTag("settings-diagnostics-export"))
+                    }
+                    if (failed || capture.writeFailed) {
+                        Text(strings.text(if (failed) TextKey.DiagnosticsExportFailed else TextKey.DiagnosticsWriteFailed),
+                            color = LocalVeyraColors.current.warning, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            } }
             item("about") {
                 SettingsSection(TextKey.About, VeyraIcons.Info) {
                     SettingsLinkRow(strings.text(TextKey.Licenses), VeyraIcons.OpenInNew, onOpenLicenses,

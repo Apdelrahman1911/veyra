@@ -2,6 +2,7 @@
 
 package dev.veyra.platform.background
 
+import dev.veyra.diagnostics.*
 import dev.veyra.downloads.DownloadExecutionGate
 import dev.veyra.downloads.DownloadExecutionLease
 import dev.veyra.model.AppFailure
@@ -30,6 +31,7 @@ class IosDownloadExecutionGate internal constructor(
     private val host: IosBackgroundTaskHost,
 ) : DownloadExecutionGate {
     constructor(scope: CoroutineScope) : this(scope, UIKitBackgroundTaskHost)
+    internal var diagnostics = Diagnostics.None
 
     private val leases = linkedMapOf<Long, Lease>()
     private var nextId = 0L
@@ -65,6 +67,8 @@ class IosDownloadExecutionGate internal constructor(
             }
         } catch (error: Throwable) {
             created?.let { release(it) }
+            if (error is VeyraException) diagnostics.record(DiagnosticComponent.DOWNLOAD, DiagnosticOperation.SCHEDULER,
+                DiagnosticOutcome.REJECTED, failure = error.failure.code)
             throw error
         }
     }
@@ -177,6 +181,9 @@ class IosDownloadExecutionGate internal constructor(
         watchdog?.cancel()
         watchdog = null
         val expired = leases.values.filter { !it.expired && !it.released }
+        if (previous != null || expired.isNotEmpty()) diagnostics.record(DiagnosticComponent.DOWNLOAD, DiagnosticOperation.SCHEDULER,
+            DiagnosticOutcome.CANCELLED, if (systemDeadline) DiagnosticPhase.NATIVE_DEADLINE else DiagnosticPhase.WATCHDOG_DEADLINE,
+            value = expired.size.toLong())
         expired.forEach { it.expired = true }
         if (expired.isEmpty()) { previous?.let(::endOnce); return }
         previous?.let { ending += it }

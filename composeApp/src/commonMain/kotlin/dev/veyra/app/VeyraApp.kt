@@ -266,7 +266,9 @@ fun VeyraApp(container: AppContainer, modifier: Modifier = Modifier) {
                                                             AppDestination.SETTINGS -> SettingsScreen(settings, container.platform.engine.capabilities, storageBytes,
                                                                 onSettingsChange = { action -> container.changeSettings { action.applyTo(it) } },
                                                                 onManageStorage = { container.onMusicAction(MusicUiAction.OpenLibrary(LibrarySection.DOWNLOADS)) },
-                                                                onOpenLicenses = container::openLicenses)
+                                                                onOpenLicenses = container::openLicenses,
+                                                                diagnosticJournal = container.platform.diagnosticJournal,
+                                                                onShareDiagnostics = container.platform::shareDiagnostics)
                                                         }
                                                     }
                                                 }

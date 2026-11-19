@@ -1,5 +1,9 @@
 package dev.veyra.source.network
 
+import dev.veyra.diagnostics.DiagnosticComponent.NETWORK
+import dev.veyra.diagnostics.DiagnosticContext
+import dev.veyra.diagnostics.DiagnosticOperation.HTTP
+import dev.veyra.diagnostics.Diagnostics
 import dev.veyra.model.AppFailure
 import dev.veyra.model.FailureCode
 import dev.veyra.model.VeyraException
@@ -15,6 +19,7 @@ import io.ktor.http.takeFrom
 import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.readAvailable
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlin.time.Clock
@@ -68,7 +73,8 @@ fun interface PublicDnsResolver { suspend fun resolve(host: String): List<String
 internal expect fun platformHttpClient(): HttpClient
 internal expect suspend fun platformResolveHost(host: String): List<String>
 
-fun createSafeHttp(): SafeHttp = KtorSafeHttp(platformHttpClient(), PublicDnsResolver(::platformResolveHost))
+fun createSafeHttp(diagnostics: Diagnostics = Diagnostics.None): SafeHttp =
+    KtorSafeHttp(platformHttpClient(), PublicDnsResolver(::platformResolveHost), diagnostics = diagnostics)
 
 /**
  * HTTPS + public-DNS preflight at every hop, bounded redirects, no credentials or cross-host
@@ -83,6 +89,7 @@ class KtorSafeHttp(
     private val dns: PublicDnsResolver,
     private val nowMs: () -> Long = { Clock.System.now().toEpochMilliseconds() },
     private val ownsClient: Boolean = true,
+    private val diagnostics: Diagnostics = Diagnostics.None,
 ) : SafeHttp {
     private val rateLock = Mutex()
     private val blockedUntil = linkedMapOf<String, Long>()
@@ -133,6 +140,11 @@ class KtorSafeHttp(
     override suspend fun <T> stream(
         request: SafeHttpRequest,
         consume: suspend (SafeHttpResponse, ByteReadChannel) -> T,
+    ): T = diagnostics.trace(NETWORK, HTTP, phase = request.method) { streamOwned(request, consume) }
+
+    private suspend fun <T> streamOwned(
+        request: SafeHttpRequest,
+        consume: suspend (SafeHttpResponse, ByteReadChannel) -> T,
     ): T {
         var requestHeaders = checkedHeaders(request.headers)
         require(request.timeoutMs == null || request.timeoutMs in 1..3_600_000)
@@ -159,6 +171,8 @@ class KtorSafeHttp(
                     }
                 }.execute { response ->
                     val status = response.status.value
+                    if (diagnostics.enabled) diagnostics.record(NETWORK, HTTP, phase = request.method,
+                        context = currentCoroutineContext()[DiagnosticContext], value = status.toLong(), generation = hop.toLong())
                     val headers = response.headers.entries().associate { it.key.lowercase() to it.value.joinToString(",") }
                     val meta = SafeHttpResponse(status, headers, current)
                     if (status == 429) {

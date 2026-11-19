@@ -16,6 +16,7 @@ import dev.veyra.downloads.DownloadAcquisitionDependencies
 import dev.veyra.downloads.DownloadFiles
 import dev.veyra.downloads.DownloadMaterializationEvidence
 import dev.veyra.model.*
+import dev.veyra.diagnostics.Diagnostics
 import dev.veyra.playback.AcquisitionPlaybackResolver
 import dev.veyra.playback.Clock
 import dev.veyra.playback.LocalMediaValidator
@@ -105,10 +106,12 @@ class AppAcquisitionOwner internal constructor(
         beforePhysicalAdoption: suspend (PhysicalDownloadProducer.Schema2) -> Unit,
         requireOwnerAdmission: () -> Unit,
         atomicSourceStaging: Boolean,
+        diagnostics: Diagnostics,
     ) = DownloadAcquisitionDependencies(
         repository, gateway, validator, beforePhysicalDelete, beforePhysicalAdoption,
         requireOwnerAdmission, acquisition, batches, materializationEvidence,
         atomicSourceStaging = atomicSourceStaging,
+        diagnostics = diagnostics,
     )
 
     /** The adapter operates the existing DownloadCoordinator executor, never another executor. */

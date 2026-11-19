@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import dev.veyra.model.AppSettings
+import dev.veyra.diagnostics.DiagnosticJournal
 import dev.veyra.model.LanguagePreference
 import dev.veyra.model.ThemeMode
 import dev.veyra.playback.EngineCapabilities
@@ -54,6 +55,15 @@ import org.junit.Rule
 import org.junit.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.runBlocking
+import okio.FileSystem
+import okio.Path
+import java.util.UUID
 
 /**
  * Settings presentation/intent fixtures only. No Room, source, player, network or runtime installer
@@ -106,10 +116,37 @@ class SettingsScreenTest {
             tag.startsWith("settings-parallelism") || tag.startsWith("settings-storage") ||
                 tag == "settings-manage-storage" -> TextKey.Downloads
             tag == "settings-licenses" -> TextKey.About
+            tag.startsWith("settings-diagnostics") -> TextKey.Diagnostics
             else -> error("Missing settings section for $tag")
         }
         expandSection(section)
         compose.onNodeWithTag("settings-list").performScrollToNode(hasTestTag(tag))
+    }
+
+    @Test fun diagnosticSettingsEnableCaptureAndExportARealFile() {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val directory = FileSystem.SYSTEM_TEMPORARY_DIRECTORY / "veyra-diagnostic-settings-${UUID.randomUUID()}"
+        val journal = DiagnosticJournal(scope, directory)
+        val exported = CompletableDeferred<Path>()
+        try {
+            compose.setContent { Frame {
+                SettingsScreen(AppSettings(), supported, null, {}, {}, {},
+                    diagnosticJournal = journal, onShareDiagnostics = { exported.complete(it) })
+            } }
+            scrollTo("settings-diagnostics-capture")
+            compose.onNodeWithTag("settings-diagnostics-capture").assertIsOff().performClick()
+            compose.waitUntil(5_000) { journal.state.value.enabled }
+            compose.onNodeWithTag("settings-diagnostics-capture").assertIsOn()
+            scrollTo("settings-diagnostics-export")
+            compose.onNodeWithTag("settings-diagnostics-export").performClick()
+            compose.waitUntil(5_000) { exported.isCompleted }
+            val file = runBlocking { exported.await() }
+            assertEquals("Veyra-diagnostics.jsonl", file.name)
+            assertTrue(FileSystem.SYSTEM.read(file) { readUtf8() }.contains(journal.state.value.sessionId!!))
+        } finally {
+            scope.cancel()
+            FileSystem.SYSTEM.deleteRecursively(directory)
+        }
     }
 
     @Test fun unsupportedCrossfadeDoesNotOfferEnableOrWriteAnythingOnComposition() {

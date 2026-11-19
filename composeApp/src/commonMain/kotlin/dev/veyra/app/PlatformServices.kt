@@ -1,6 +1,7 @@
 package dev.veyra.app
 
 import dev.veyra.data.LibraryStore
+import dev.veyra.diagnostics.DiagnosticJournal
 import dev.veyra.downloads.DownloadExecutionGate
 import dev.veyra.downloads.DownloadNetworkState
 import dev.veyra.downloads.ProcessLifetimeDownloadGate
@@ -15,6 +16,7 @@ import dev.veyra.playback.LocalMediaValidator
 import dev.veyra.source.youtube.YouTubeMediaSource
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import okio.Path
 
 enum class MediaRuntimePhase { READY, REQUIRED, VERIFYING, DOWNLOADING, INSTALLING, ERROR }
 enum class MediaRuntimeComponent { NODE, CHROMIUM, FFMPEG }
@@ -41,6 +43,8 @@ interface PlatformServices {
     val localValidator: LocalMediaValidator get() = validator as? LocalMediaValidator
         ?: LocalMediaValidator { throw VeyraException(AppFailure(FailureCode.UNSUPPORTED_SOURCE, "local_validator_unavailable")) }
     val atomicSourceStaging: Boolean get() = false
+    val diagnosticJournal: DiagnosticJournal? get() = null
+    suspend fun shareDiagnostics(path: Path) = Unit
     val youtube: YouTubeMediaSource
     val systemLanguage: LanguagePreference
     val systemDarkTheme: Boolean get() = false

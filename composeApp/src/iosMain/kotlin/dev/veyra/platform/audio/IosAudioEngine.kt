@@ -2,6 +2,9 @@
 
 package dev.veyra.platform.audio
 
+import dev.veyra.diagnostics.*
+import dev.veyra.diagnostics.DiagnosticComponent.NATIVE_AUDIO
+import dev.veyra.diagnostics.DiagnosticOperation as Operation
 import dev.veyra.model.AppFailure
 import dev.veyra.model.FailureCode
 import dev.veyra.model.PlaybackControlsMode
@@ -56,8 +59,11 @@ internal fun interface IosNativeRetirementFault {
 }
 
 /** One app transport, two managed AVPlayer decks, one audio session, no native-owned playlist. */
-class IosAudioEngine internal constructor(private val retirementFault: IosNativeRetirementFault) : CrossfadeAudioEngine {
-    constructor() : this(IosNativeRetirementFault { _, _ -> })
+class IosAudioEngine internal constructor(
+    private val retirementFault: IosNativeRetirementFault,
+    private val diagnostics: Diagnostics = Diagnostics.None,
+) : CrossfadeAudioEngine {
+    constructor(diagnostics: Diagnostics = Diagnostics.None) : this(IosNativeRetirementFault { _, _ -> }, diagnostics)
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val controls = Channel<EngineEvent>(Channel.UNLIMITED)
@@ -758,6 +764,8 @@ class IosAudioEngine internal constructor(private val retirementFault: IosNative
         }
     }
     private fun emitInterruption(event: EngineEvent.Interruption) {
+        diagnostics.record(NATIVE_AUDIO, Operation.INTERRUPTION, phase = event.kind,
+            value = if (event.mayResume) 1 else 0, generation = event.generation)
         val pending = fade?.takeIf { it.awaitingConfirmation && it.outgoing.generation == event.generation }
         if (pending != null) pending.pendingInterruptions += event else emit(event)
     }
@@ -971,6 +979,16 @@ class IosAudioEngine internal constructor(private val retirementFault: IosNative
         sessionObservers += center.addObserverForName(AVAudioSessionRouteChangeNotification,
             `object` = null, queue = NSOperationQueue.mainQueue) { notification ->
             val reason = (notification?.userInfo?.get(AVAudioSessionRouteChangeReasonKey) as? NSNumber)?.longLongValue
+            if (diagnostics.enabled) {
+                val port = (session.currentRoute.outputs.firstOrNull() as? AVAudioSessionPortDescription)?.portType
+                val route = when (port) {
+                    AVAudioSessionPortBluetoothA2DP, AVAudioSessionPortBluetoothHFP, AVAudioSessionPortBluetoothLE -> DiagnosticRoute.BLUETOOTH
+                    AVAudioSessionPortHeadphones, AVAudioSessionPortHeadsetMic -> DiagnosticRoute.WIRED
+                    AVAudioSessionPortBuiltInSpeaker, AVAudioSessionPortBuiltInReceiver -> DiagnosticRoute.BUILT_IN
+                    else -> DiagnosticRoute.OTHER
+                }
+                diagnostics.record(NATIVE_AUDIO, Operation.ROUTE, phase = route, value = reason, generation = active?.generation)
+            }
             if (reason == AVAudioSessionRouteChangeReasonOldDeviceUnavailable.toLong()) {
                 pauseForInterruption()
                 active?.let { deck ->
@@ -1042,7 +1060,14 @@ class IosAudioEngine internal constructor(private val retirementFault: IosNative
             (event as? AVPlayerItemErrorLogEvent)?.errorStatusCode?.toInt()?.takeIf { it in 100..599 }
         }?.lastOrNull()
         debugNativeSourceFailure(deck.source, status)
-        return classifyIosAudioFailure(deck.item.error, deck.source.isLocal, status)
+        val error = deck.item.error
+        val classified = classifyIosAudioFailure(error, deck.source.isLocal, status)
+        if (diagnostics.enabled) {
+            val underlying = error?.userInfo?.get(NSUnderlyingErrorKey) as? NSError
+            diagnostics.record(NATIVE_AUDIO, Operation.PLAYER_STATE, DiagnosticOutcome.FAILED,
+                failure = classified.code, value = error?.code, expected = underlying?.code, generation = deck.generation)
+        }
+        return classified
     }
 
     private fun fail(deck: Deck, code: FailureCode, detail: String) {
@@ -1102,6 +1127,8 @@ class IosAudioEngine internal constructor(private val retirementFault: IosNative
         actionAtItemEnd = AVPlayerActionAtItemEndPause
     }
 }
+
+private enum class DiagnosticRoute { BLUETOOTH, WIRED, BUILT_IN, OTHER }
 
 /** Bounded Debug-only error codes; NSError descriptions/userInfo may contain signed URLs. */
 @OptIn(kotlin.experimental.ExperimentalNativeApi::class)

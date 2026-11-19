@@ -2,6 +2,9 @@ package dev.veyra.playback
 
 import dev.veyra.acquisition.*
 import dev.veyra.data.*
+import dev.veyra.diagnostics.*
+import dev.veyra.diagnostics.DiagnosticComponent.PLAYBACK
+import dev.veyra.diagnostics.DiagnosticOperation as Operation
 import dev.veyra.model.*
 import dev.veyra.source.SourceResolver
 import dev.veyra.source.SourceReaderOwner
@@ -19,6 +22,7 @@ import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlin.concurrent.Volatile
+import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.random.Random
 
 private const val GRACEFUL_SHUTDOWN_TIMEOUT_MS = 5_000L
@@ -50,6 +54,7 @@ class PlaybackController(
     private val checkpointIntervalMs: Long = 5_000,
     private val acquisition: PlaybackAcquisitionServices? = null,
     private val testHooks: PlaybackTestHooks = PlaybackTestHooks(),
+    private val diagnostics: Diagnostics = Diagnostics.None,
 ) {
     // Reject a composition error before attaching any child Job or accepting a resource owner.
     init {
@@ -259,7 +264,14 @@ class PlaybackController(
     }
 
     suspend fun initialize(): PlaybackResult = request { Message.Initialize(it) }
-    suspend fun dispatch(command: PlaybackCommand): PlaybackResult = request { Message.Command(command, it) }
+    suspend fun dispatch(command: PlaybackCommand): PlaybackResult {
+        if (!diagnostics.enabled) return request { Message.Command(command, it) }
+        return diagnostics.trace(PLAYBACK, command.diagnosticOperation(),
+            resultFailure = { (it as? PlaybackResult.Failure)?.failure?.code }) {
+            val trace = currentCoroutineContext()[DiagnosticContext]
+            request { Message.Command(command, it, trace) }
+        }
+    }
 
     /**
      * Native-release acknowledgement, unlike the queued Stop command. Persist removal intent before
@@ -373,12 +385,8 @@ class PlaybackController(
         when (message) {
             is Message.Initialize -> complete(message.result) { initializeOwned() }
             is Message.Command -> complete(message.result) {
-                initializeOwned()
-                drainPosition()
-                enforceOfflinePolicy()
-                checkSleepTimer()
-                handleCommand(message.command)
-                checkCrossfade()
+                if (message.trace == null) handleUserCommand(message.command)
+                else withContext(message.trace) { handleUserCommand(message.command) }
             }
             is Message.Shutdown -> complete(message.result) {
                 if (initialized) {
@@ -473,6 +481,15 @@ class PlaybackController(
                 checkCrossfade()
             }
         }
+    }
+
+    private suspend fun handleUserCommand(command: PlaybackCommand) {
+        initializeOwned()
+        drainPosition()
+        enforceOfflinePolicy()
+        checkSleepTimer()
+        handleCommand(command)
+        checkCrossfade()
     }
 
     private suspend fun complete(result: CompletableDeferred<PlaybackResult>, block: suspend () -> Unit) {
@@ -847,6 +864,8 @@ class PlaybackController(
         val target = boundedPosition(positionMs, current.durationMs)
         val sequence = ++seekSequence
         pendingSeekSequence = sequence
+        diagnosticSeek?.let { diagnostics.end(PLAYBACK, Operation.SEEK, it, DiagnosticOutcome.CANCELLED, phase = DiagnosticPhase.SUPERSEDED) }
+        diagnosticSeek = diagnostics.begin(PLAYBACK, Operation.SEEK, currentCoroutineContext()[DiagnosticContext], generation = generation)
         terminalGeneration = -1 // Scrubbing back from a completed item is a new native seek barrier.
         mutableState.value = mutableState.value.copy(pendingSeekMs = target, failure = null,
             phase = if (mutableState.value.phase == PlaybackPhase.ENDED) PlaybackPhase.PAUSED else mutableState.value.phase)
@@ -1057,7 +1076,7 @@ class PlaybackController(
             executionBinding = reuseBindingId?.let { snapshot.playbackBindings[it] },
         )
         val token = generation
-        startup = item?.let { Startup(token, clock.monotonicMs()) }
+        startMeasurement(item != null, token, currentCoroutineContext()[DiagnosticContext])
         sendEngine(releaseBarrier = true) { stopNative(token) }
         if (item == null) return
         val offlineOnly = snapshot.settings.offlineOnly
@@ -1173,6 +1192,10 @@ class PlaybackController(
             is EngineEvent.SeekCompleted -> {
                 if (typed != null && preparedGeneration != generation) return
                 if (event.seekSequence != pendingSeekSequence || terminalGeneration == generation) return
+                diagnostics.end(PLAYBACK, Operation.SEEK, diagnosticSeek,
+                    if (event.success) DiagnosticOutcome.SUCCEEDED else DiagnosticOutcome.FAILED,
+                    failure = FailureCode.UNEXPECTED.takeUnless { event.success }, generation = generation)
+                diagnosticSeek = null
                 pendingSeekSequence = null
                 if (event.success) {
                     confirmedSeekSequence = event.seekSequence
@@ -1533,7 +1556,7 @@ class PlaybackController(
     }
 
     private suspend fun stopTransport() {
-        startup = null
+        stopMeasurement()
         cancelNext(notifyEngine = false)
         resolveJob?.cancel()
         typed?.retireCurrentLoad()
@@ -1556,21 +1579,56 @@ class PlaybackController(
 
     private fun recordStartup(finished: Boolean = false, update: PlaybackStartupTiming.(Long) -> PlaybackStartupTiming) {
         val pending = startup?.takeIf { it.generation == generation } ?: return
-        pending.timing = pending.timing.update((clock.monotonicMs() - pending.startedMs).coerceAtLeast(0))
+        val before = pending.timing
+        val elapsed = (clock.monotonicMs() - pending.startedMs).coerceAtLeast(0)
+        val timing = before.update(elapsed)
+        pending.timing = timing
+        if (pending.trace != null && !finished && before != timing) {
+            val phase = when {
+                timing.engineReadyMs != before.engineReadyMs -> DiagnosticPhase.ENGINE_READY
+                timing.sourceReadyMs != before.sourceReadyMs -> DiagnosticPhase.SOURCE_READY
+                else -> DiagnosticPhase.SELECTION
+            }
+            diagnostics.record(PLAYBACK, Operation.STARTUP, phase = phase, context = pending.trace,
+                durationMs = elapsed, generation = generation)
+        }
         if (finished) {
-            mutableStartupTiming.value = pending.timing
+            diagnostics.end(PLAYBACK, Operation.STARTUP, pending.trace,
+                if (timing.failure == null) DiagnosticOutcome.SUCCEEDED else DiagnosticOutcome.FAILED,
+                timing.failure, phase = DiagnosticPhase.PLAYING.takeIf { timing.playingMs != null }, generation = generation)
+            mutableStartupTiming.value = timing
             startup = null
         }
     }
 
-    private class Startup(val generation: Long, val startedMs: Long) {
+    private fun startMeasurement(active: Boolean, token: Long, parent: DiagnosticContext?) {
+        stopMeasurement()
+        if (active) startup = Startup(token, clock.monotonicMs(), diagnostics.begin(PLAYBACK, Operation.STARTUP, parent, generation = token))
+    }
+
+    private fun stopMeasurement() {
+        diagnosticSeek?.let { diagnostics.end(PLAYBACK, Operation.SEEK, it, DiagnosticOutcome.CANCELLED, phase = DiagnosticPhase.SUPERSEDED) }
+        diagnosticSeek = null
+        startup?.let { pending ->
+            diagnostics.end(PLAYBACK, Operation.STARTUP, pending.trace, DiagnosticOutcome.CANCELLED,
+                phase = DiagnosticPhase.SUPERSEDED, generation = pending.generation)
+        }
+        startup = null
+    }
+
+    private var diagnosticSeek: DiagnosticContext? = null
+
+    private class Startup(val generation: Long, val startedMs: Long, val trace: DiagnosticContext?) {
         var activeSinceMs: Long? = startedMs
         var timing = PlaybackStartupTiming(generation)
     }
 
     /** Bounded URL renewal reuses the immutable receipt; it never searches for a different result. */
     private suspend fun renewSourceAfterFailure(failure: AppFailure): Boolean {
-        if (typed != null) return typed.renew(failure)
+        if (typed != null) return typed.renew(failure).also { renewed ->
+            if (renewed) diagnostics.record(PLAYBACK, Operation.MEDIA_SOURCE, DiagnosticOutcome.RETRYING,
+                context = startup?.trace, failure = failure.code, generation = generation)
+        }
         val current = mutableState.value
         val binding = current.executionBinding ?: return false
         if (!current.desiredPlaying || resolvedLocal || store.state.value.settings.offlineOnly || sourceRenewals >= 2) return false
@@ -1579,6 +1637,8 @@ class PlaybackController(
         if ((failure.retryAfterMs ?: 0) > 30_000) return false // Do not violate a long provider retry delay.
         checkpoint(force = true)
         sourceRenewals++
+        diagnostics.record(PLAYBACK, Operation.MEDIA_SOURCE, DiagnosticOutcome.RETRYING,
+            context = startup?.trace, failure = failure.code, value = sourceRenewals.toLong(), generation = generation)
         val delayMs = maxOf(1_000L * sourceRenewals, (failure.retryAfterMs ?: 0).coerceAtLeast(0))
         activate(store.state.value, desiredPlaying = true, manual = false, reuseBindingId = binding.id, renewalDelayMs = delayMs)
         return true
@@ -1602,7 +1662,10 @@ class PlaybackController(
         assetReleases.removeAll { it.result.isCompleted }
         assetReleases.filter { it.target.matches(identity) }.forEach { it.readerAdmissionChanged = true }
         resolutions.removeAll { it.job.isCompleted }
-        return ownerScope.launch(block = block).also { resolutions += MediaResolution(identity, it) }
+        val child = if (diagnostics.enabled) ownerScope.launch(startup?.trace ?: EmptyCoroutineContext) {
+            diagnostics.trace(PLAYBACK, Operation.MEDIA_SOURCE) { block() }
+        } else ownerScope.launch(block = block)
+        return child.also { resolutions += MediaResolution(identity, it) }
     }
 
     private suspend fun stopNative(token: Long) {
@@ -2174,7 +2237,7 @@ class PlaybackController(
                 failure = null, crossfade = null)
             currentLoad = null
             val token = generation
-            startup = selected?.let { Startup(token, clock.monotonicMs()) }
+            startMeasurement(selected != null, token, currentCoroutineContext()[DiagnosticContext])
             sendEngine(releaseBarrier = true) { stopNative(token) }
             if (selected == null) return
             val load = AcquisitionLoad(token, token, expected(queue), selected.occurrenceId, policy, queue.positionMs,
@@ -2774,7 +2837,8 @@ class PlaybackController(
     }
     private sealed interface Message {
         data class Initialize(val result: CompletableDeferred<PlaybackResult>) : Message
-        data class Command(val command: PlaybackCommand, val result: CompletableDeferred<PlaybackResult>) : Message
+        data class Command(val command: PlaybackCommand, val result: CompletableDeferred<PlaybackResult>,
+            val trace: DiagnosticContext? = null) : Message
         data class Shutdown(val result: CompletableDeferred<PlaybackResult>) : Message
         data class ReleaseAsset(val target: ReaderTarget, val result: CompletableDeferred<PlaybackResult>) : Message
         data class AssetResolversReleased(val release: AssetRelease) : Message

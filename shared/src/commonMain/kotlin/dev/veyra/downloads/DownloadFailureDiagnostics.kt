@@ -128,6 +128,7 @@ data class DownloadDiagnosticEvent internal constructor(
     val host: DownloadDiagnosticHostState?,
     val epochMs: Long? = null,
     val durationMs: Long? = null,
+    val downloadKey: Long? = null,
 )
 
 internal class DownloadDiagnosticRecorder {
@@ -150,11 +151,12 @@ internal class DownloadDiagnosticRecorder {
         host: DownloadDiagnosticHostState? = null,
         epochMs: Long? = null,
         durationMs: Long? = null,
+        downloadKey: Long? = null,
     ) {
         val sanitized = failure?.let { DownloadDiagnosticFailure.from(it, error) }
         mutableEntries.update { entries ->
             val event = DownloadDiagnosticEvent((entries.lastOrNull()?.sequence ?: 0) + 1, stage, outcome, sanitized,
-                expectedOwnershipGeneration, expectedAttemptNumber, runSequence, lastCommitted, cachedObservation, host, epochMs, durationMs)
+                expectedOwnershipGeneration, expectedAttemptNumber, runSequence, lastCommitted, cachedObservation, host, epochMs, durationMs, downloadKey)
             entries.takeLast(31) + event
         }
     }

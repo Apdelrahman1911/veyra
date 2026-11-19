@@ -1,11 +1,17 @@
 package dev.veyra.downloads
 
+import dev.kmpyt.DownloadTraceContext
+import dev.kmpyt.ResearchTraceContext
+import dev.veyra.diagnostics.*
+import dev.veyra.diagnostics.DiagnosticComponent.DOWNLOAD
+import dev.veyra.diagnostics.DiagnosticOperation as Operation
 import dev.veyra.platform.BlockingIo
 import dev.veyra.acquisition.*
 import dev.veyra.data.*
 import dev.veyra.model.*
 import dev.veyra.playback.*
 import dev.veyra.source.execution.*
+import kotlin.coroutines.EmptyCoroutineContext
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
@@ -41,6 +47,7 @@ class DownloadAcquisitionDependencies(
     /** Only platforms whose downloader writes the staging destination by an atomic completed-file move. */
     internal val atomicSourceStaging: Boolean = false,
     internal val sourceFinishingTimeoutMs: Long = 150_000,
+    internal val diagnostics: Diagnostics = Diagnostics.None,
 ) {
     init {
         require(compatibilityPolicyVersion >= 1)
@@ -1446,6 +1453,9 @@ internal class DownloadPhysicalRuntime(
     }
 
     internal suspend fun execute(run: DownloadPhysicalRun) {
+        val diagnostics = dependencies.diagnostics
+        val key = diagnostics.downloadKey(run.fence.downloadId)
+        val trace = diagnostics.begin(DOWNLOAD, Operation.DOWNLOAD, generation = run.diagnosticSequence, link = key)
         var allowance: DownloadExecutionLease? = null
         var publicationLease: DownloadFileLease? = null
         val failure = MutableStateFlow<AppFailure?>(null)
@@ -1487,7 +1497,8 @@ internal class DownloadPhysicalRuntime(
                     withContext(NonCancellable) { allowance = gate.acquire { expire(run) } }
                     ensureRun(run, network = true)
                     stage(DownloadDiagnosticStage.SOURCE_PREPARATION)
-                    val prepared = prepare(run)
+                    val prepared = if (trace == null) prepare(run) else
+                        withContext(trace + ResearchTraceContext(trace.correlationId)) { prepare(run) }
                     val previouslySelected = run.current.job.representationId
                     stage(DownloadDiagnosticStage.REPRESENTATION_COMMIT)
                     mutate(run) { repository.selectPhysicalDownloadRepresentation(SelectPhysicalDownloadRepresentation(
@@ -1508,7 +1519,7 @@ internal class DownloadPhysicalRuntime(
                         recordDiagnostic(DownloadDiagnosticStage.STAGED_FILE_RECOVERED, run = run, outcome = DownloadDiagnosticOutcome.SETTLED)
                         Transferred(size, prepared.representation)
                     } else run.validationReaders.validate {
-                        transferWithFinishingDeadline(prepared, part.toString()) { progress ->
+                        transferWithFinishingDeadline(prepared, part.toString(), trace, key) { progress ->
                             val now = clock.monotonicMs()
                             // A restarted transport (fewer bytes than saved) is recorded at once.
                             val due = lastProgress == null || now - lastProgress!! >= PROGRESS_CHECKPOINT_MS ||
@@ -1542,7 +1553,7 @@ internal class DownloadPhysicalRuntime(
                         result.representation.mimeType, result.representation.codecs, hash,
                         result.representation.representationId, run.current.job.validatorGeneration)
                     stage(DownloadDiagnosticStage.NATIVE_VALIDATION)
-                    val duration = validate(run, local)
+                    val duration = if (trace == null) validate(run, local) else withContext(trace) { validate(run, local) }
                     ensureRun(run, network = true)
                     stage(DownloadDiagnosticStage.FINALIZATION_PREPARE)
                     val intent = PhysicalDownloadFinalization(run.fence.downloadId, run.fence.producer, part.toString(),
@@ -1577,6 +1588,11 @@ internal class DownloadPhysicalRuntime(
             if (failure.value?.code == FailureCode.BACKGROUND_RESTRICTED) expire(run)
             else host.publishFailure(checkNotNull(failure.value))
         } finally {
+            dependencies.diagnostics.end(DOWNLOAD, Operation.DOWNLOAD, trace, when {
+                run.published != null -> DiagnosticOutcome.SUCCEEDED
+                failure.value != null -> DiagnosticOutcome.FAILED
+                else -> DiagnosticOutcome.CANCELLED
+            }, failure.value?.code, phase = diagnosticStage, generation = run.diagnosticSequence)
             withContext(NonCancellable) {
                 retainCleanup(run.epoch, partial, listOf(
                     { run.validationReaders.requireReleased() },
@@ -1613,13 +1629,17 @@ internal class DownloadPhysicalRuntime(
     private suspend fun transferWithFinishingDeadline(
         prepared: Prepared,
         path: String,
+        trace: DiagnosticContext?,
+        diagnosticKey: Long?,
         onProgress: suspend (AcquisitionTransferProgress) -> Unit,
     ): Transferred {
         if (!dependencies.atomicSourceStaging) return prepared.transfer(path, onProgress)
         val completeBytes = CompletableDeferred<Unit>()
         val retained = MutableStateFlow<LocalMediaValidationReaderUnacknowledged?>(null)
         val owner = SupervisorJob()
-        val worker = CoroutineScope(currentCoroutineContext() + owner).async {
+        val diagnosticContext = if (trace == null || diagnosticKey == null) EmptyCoroutineContext
+            else trace + DownloadTraceContext(diagnosticKey) + ResearchTraceContext(trace.correlationId)
+        val worker = CoroutineScope(currentCoroutineContext() + owner + diagnosticContext).async {
             try {
                 prepared.transfer(path) { progress ->
                     if (progress.totalBytes != null && progress.totalBytes > 0 &&
@@ -1759,6 +1779,7 @@ internal class DownloadPhysicalRuntime(
         val state = host.state()
         val before = run.current.job
         val retry = !cancelled && failure?.code in RETRYABLE && before.automaticRetryCount < 5
+        val retryDelay = if (retry) DownloadCoordinator.retryDelayMs(before.automaticRetryCount, failure?.retryAfterMs) else null
         // A foreground resume advances the host generation. A LATE finish from the previous
         // generation must not relabel the newly admitted/resumed host as suspended again.
         val activeSuspension = run.hostFinishStatus.value?.takeIf { state.generation == run.hostGeneration }
@@ -1773,7 +1794,7 @@ internal class DownloadPhysicalRuntime(
         val settlement = try { settle { repository.finishPhysicalDownloadAttempt(FinishPhysicalDownloadAttempt(run.fence, target,
             if (cancelled) DownloadAttemptStatus.PAUSED else DownloadAttemptStatus.FAILED,
             if (target == DownloadStatus.NEEDS_FOREGROUND) AppFailure(FailureCode.BACKGROUND_RESTRICTED) else failure,
-            if (retry) deadline(DownloadCoordinator.retryDelayMs(before.automaticRetryCount, failure?.retryAfterMs)) else before.nextRetryEpochMs,
+            retryDelay?.let(::deadline) ?: before.nextRetryEpochMs,
             before.automaticRetryCount + if (retry) 1 else 0, clock.epochMs())) } }
         catch (error: CancellationException) { throw error }
         catch (error: Exception) {
@@ -1783,6 +1804,12 @@ internal class DownloadPhysicalRuntime(
         recordDiagnostic(DownloadDiagnosticStage.ATTEMPT_SETTLEMENT, failure, run = run,
             outcome = if (settlement == AcquisitionDownloadDurableSettlement.Stale) DownloadDiagnosticOutcome.STALE
                 else DownloadDiagnosticOutcome.SETTLED)
+        if (retryDelay != null && settlement is AcquisitionDownloadDurableSettlement.Confirmed) {
+            val diagnostics = dependencies.diagnostics
+            diagnostics.record(DOWNLOAD, Operation.DOWNLOAD_RETRY, DiagnosticOutcome.RETRYING, phase = target,
+                failure = failure?.code, value = retryDelay, generation = run.diagnosticSequence,
+                link = diagnostics.downloadKey(run.fence.downloadId))
+        }
         return settlement
     }
 
@@ -2092,7 +2119,8 @@ internal class DownloadPhysicalRuntime(
                 observedAttemptId?.let { cached.physicalAttempts[it] }, observedFinalization, fence, now,
                 current?.job?.representationId, diagnosticDownloadClaimDemand(observed.id,
                     cached.claims.values.filter { it.physicalJobId == observed.id })) else null,
-            state.diagnosticState(run?.hostGeneration), epochMs = now, durationMs = durationMs)
+            state.diagnosticState(run?.hostGeneration), epochMs = now, durationMs = durationMs,
+            downloadKey = fence?.downloadId?.let(dependencies.diagnostics::downloadKey))
     }
 
     internal suspend fun <T> diagnosedCommand(stage: DownloadDiagnosticStage, action: suspend () -> T): T = try {

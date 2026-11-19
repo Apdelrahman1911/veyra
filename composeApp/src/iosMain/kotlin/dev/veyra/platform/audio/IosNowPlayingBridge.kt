@@ -2,6 +2,8 @@
 
 package dev.veyra.platform.audio
 
+import dev.veyra.diagnostics.*
+import dev.veyra.model.FailureCode
 import dev.veyra.model.MediaItem
 import dev.veyra.model.QueueContext
 import dev.veyra.model.RepeatMode
@@ -34,6 +36,7 @@ class IosNowPlayingBridge(
     private val cachedArtworkPath: suspend (String) -> String? = { null },
     /** The cover is usually still downloading when a song starts; retry when the cache changes. */
     private val artworkUpdates: Flow<Unit> = emptyFlow(),
+    private val diagnostics: Diagnostics = Diagnostics.None,
 ) {
     private val commands = MPRemoteCommandCenter.sharedCommandCenter()
     private val nowPlaying = MPNowPlayingInfoCenter.defaultCenter()
@@ -133,9 +136,13 @@ class IosNowPlayingBridge(
 
     private fun register(command: MPRemoteCommand, make: (PlaybackState, MPRemoteCommandEvent?) -> PlaybackCommand?) {
         val target = command.addTargetWithHandler { event ->
-            if (closed) return@addTargetWithHandler MPRemoteCommandHandlerStatusCommandFailed
-            val request = make(playback.value, event)
-                ?: return@addTargetWithHandler MPRemoteCommandHandlerStatusNoActionableNowPlayingItem
+            val request = if (closed) null else make(playback.value, event)
+            if (request == null) {
+                diagnostics.record(DiagnosticComponent.NATIVE_AUDIO, DiagnosticOperation.REMOTE,
+                    DiagnosticOutcome.REJECTED, DiagnosticPhase.OS_MEDIA_COMMAND, failure = FailureCode.INVALID_STATE)
+                return@addTargetWithHandler if (closed) MPRemoteCommandHandlerStatusCommandFailed
+                    else MPRemoteCommandHandlerStatusNoActionableNowPlayingItem
+            }
             // The synchronous OS result acknowledges enqueueing, not successful audible playback.
             // The shared controller serializes and reports the real command result in its state.
             scope.launch { if (!closed) dispatch(request) }

@@ -17,6 +17,9 @@ import dev.veyra.data.getOrThrow
 import dev.veyra.downloads.DownloadCoordinator
 import dev.veyra.downloads.DownloadFiles
 import dev.veyra.downloads.DownloadActivation
+import dev.veyra.diagnostics.*
+import dev.veyra.diagnostics.DiagnosticComponent as Component
+import dev.veyra.diagnostics.DiagnosticOperation.*
 import dev.veyra.model.*
 import dev.veyra.playback.*
 import dev.veyra.source.*
@@ -34,6 +37,7 @@ import dev.veyra.ui.downloads.DownloadSurfaceOrigin
 import dev.veyra.ui.downloads.downloadSurface
 import dev.veyra.ui.music.*
 import dev.veyra.ui.podcasts.*
+import kotlin.coroutines.EmptyCoroutineContext
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
@@ -66,7 +70,7 @@ private const val PLAYER_PROGRAM_PREWARM_DELAY_MS = 1_500L
 class AppContainer(
     val platform: PlatformServices,
     parentScope: CoroutineScope,
-    private val http: SafeHttp = createSafeHttp(),
+    private val http: SafeHttp = createSafeHttp(platform.diagnosticJournal?.diagnostics ?: Diagnostics.None),
     gateway: KmpMediaGateway = YouTubeKmpMediaGateway(platform.youtube),
     private val clock: Clock = SystemClock(),
     private val playbackTestHooks: PlaybackTestHooks = PlaybackTestHooks(),
@@ -99,7 +103,8 @@ class AppContainer(
     private var rejectedResourceFailure: AppFailure? = null
     // Completion includes policy-return failure cleanup, not just the inner request coroutine.
     private val activeAcquisitions = MutableStateFlow<List<CompletableDeferred<Unit>>>(emptyList())
-    val store: LibraryStore = platform.store
+    internal val diagnostics = platform.diagnosticJournal?.diagnostics ?: Diagnostics.None
+    val store: LibraryStore = platform.store.also { it.attachDiagnostics(diagnostics) }
     private val downloadCoverageAcknowledged = MutableStateFlow(false)
     private val executionGateway = PolicyMediaGateway(gateway, object : PolicyMediaGatewayHooks {
         override suspend fun <T> online(block: suspend () -> T): T = this@AppContainer.online(block)
@@ -127,7 +132,7 @@ class AppContainer(
         // Each periodic save is a full transactional library read, write and readback (the D006
         // integrity guard). Pause, seek, stop and backgrounding still save at once.
         checkpointIntervalMs = 15_000,
-        acquisition = acquisitionOwner.playbackServices, testHooks = playbackTestHooks)
+        acquisition = acquisitionOwner.playbackServices, testHooks = playbackTestHooks, diagnostics = diagnostics)
     private val acquisition = acquisitionOwner.acquisition
     private val downloadBatches = acquisitionOwner.batches
     private val acquisitionDependencies = acquisitionOwner.downloadDependencies(
@@ -135,6 +140,7 @@ class AppContainer(
         beforePhysicalAdoption = { producer -> playback.releaseForAssetRemoval(producer.mediaId).getOrThrow() },
         requireOwnerAdmission = ::requireDownloadOwnerAdmission,
         atomicSourceStaging = platform.atomicSourceStaging,
+        diagnostics = diagnostics,
     )
     val downloads = DownloadCoordinator(store, files, resolver, executionGateway, platform.validator,
         platform.engine.capabilities, scope, platform.downloadExecution, clock,
@@ -234,7 +240,7 @@ class AppContainer(
         rejectedResourceFailure?.let { throw VeyraException(it) }
     }
 
-    suspend fun initialize() = lifecycleLock.withLock { initializeLocked() }
+    suspend fun initialize() = diagnostics.trace(Component.APP, INITIALIZE) { lifecycleLock.withLock { initializeLocked() } }
 
     /**
      * A native wake may open Room to repair schedules, but must not open a user session. In
@@ -384,8 +390,10 @@ class AppContainer(
                     (store.status.value as? StoreStatus.Failed)?.failure?.code != FailureCode.RECOVERY_REQUIRED) return@withLock
                 mutableInitialization.value = AppInitialization.Loading
                 try {
-                    store.recoverFromBackup().getOrThrow()
-                    initializeLocked()
+                    diagnostics.trace(Component.DATABASE, RESTORE) {
+                        store.recoverFromBackup().getOrThrow()
+                        initializeLocked()
+                    }
                 } catch (cancelled: CancellationException) { throw cancelled }
                 catch (error: Exception) { mutableInitialization.value = AppInitialization.Failed(failureOf(error)) }
             }
@@ -415,6 +423,7 @@ class AppContainer(
     fun selectDestination(destination: AppDestination) {
         mutableNavigation.update { it.copy(destination = destination, librarySection = if (destination == AppDestination.LIBRARY) LibrarySection.OVERVIEW else it.librarySection, details = emptyList(), playerOpen = false, queueOpen = false) }
         navigationWrites.trySend(Unit)
+        diagnostics.record(Component.UI, NAVIGATE, phase = destination)
         if (destination == AppDestination.SETTINGS) refreshStorage()
     }
 
@@ -437,7 +446,7 @@ class AppContainer(
             // Resolving the first result takes a network round trip; acknowledge the tap at once.
             if (action is MusicUiAction.Download) inform(TextKey.DownloadPreparing)
         }
-        submit { handleMusic(action) }
+        submit(action.diagnosticOperation()) { handleMusic(action) }
     }
 
     fun onPodcastAction(action: PodcastAction) {
@@ -445,13 +454,14 @@ class AppContainer(
             if (rejectUncoveredDownloadIntent()) return
             if (action is PodcastAction.Download) inform(TextKey.DownloadPreparing)
         }
-        submit { handlePodcast(action) }
+        submit(action.diagnosticOperation()) { handlePodcast(action) }
     }
 
     private fun rejectUncoveredDownloadIntent(): Boolean {
         val restriction = mutableDownloadRestriction.value ?: return false
         // The action channel can be waiting on an unrelated long command. Reject at the actual
         // tap, not just when the consumer eventually executes after an intervening coverage ACK.
+        diagnostics.record(Component.DOWNLOAD, DOWNLOAD, DiagnosticOutcome.REJECTED, failure = restriction.code)
         fail(restriction)
         return true
     }
@@ -473,14 +483,19 @@ class AppContainer(
     fun refreshStorage() {
         if (closed) return
         effects.launch {
-            try { mutableStorageBytes.value = files.bytesUsed() }
+            try { mutableStorageBytes.value = diagnostics.trace(Component.STORAGE, STORAGE_USAGE) { files.bytesUsed() } }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) { report(error) }
         }
     }
 
-    private fun submit(action: suspend () -> Unit) {
-        if (closed || mutableInitialization.value !is AppInitialization.Ready || actions.trySend(action).isFailure) {
+    private fun submit(operation: DiagnosticOperation = SETTINGS, action: suspend () -> Unit) {
+        val context = diagnostics.begin(Component.UI, operation)
+        val perform: suspend () -> Unit = if (context == null) action else {
+            { diagnostics.execute(Component.UI, operation, context, DiagnosticPhase.ACCEPTED, block = action) }
+        }
+        if (closed || mutableInitialization.value !is AppInitialization.Ready || actions.trySend(perform).isFailure) {
+            diagnostics.end(Component.UI, operation, context, DiagnosticOutcome.REJECTED, FailureCode.INVALID_STATE)
             fail(AppFailure(FailureCode.INVALID_STATE))
         }
     }
@@ -499,7 +514,9 @@ class AppContainer(
 
     private suspend fun persistNavigationOrThrow() {
         val values = mutableNavigation.value.persisted()
-        store.update { old -> old.copy(navigation = old.navigation.filterKeys { it.startsWith("podcast.options.") } + values) }.getOrThrow()
+        diagnostics.trace(Component.DATABASE, NAVIGATE) {
+            store.update { old -> old.copy(navigation = old.navigation.filterKeys { it.startsWith("podcast.options.") } + values) }.getOrThrow()
+        }
     }
 
     private fun current(item: MediaItem): MediaItem = store.state.value.media[item.id] ?: item
@@ -742,7 +759,7 @@ class AppContainer(
         cacheArtwork(listOf(media))
     }
 
-    private fun download(item: MediaItem): Deferred<Boolean> {
+    private fun download(item: MediaItem, parent: DiagnosticContext?): Deferred<Boolean> {
         // Freeze the ACTUAL displayed catalogue row at the action boundary. Never refresh it from
         // the store here: a metadata update between tap and admission must not silently replace
         // the complete title/query the user saw and requested.
@@ -751,7 +768,7 @@ class AppContainer(
             it.catalogMedia?.id == tapped.id && it.requestId != null && it.bindingId != null
         }
         val legacyBindingId = playback.state.value.executionBinding?.takeIf { it.mediaId == tapped.id }?.id
-        return downloadEffect(requiresCoverage = true) {
+        return downloadEffect(DOWNLOAD, parent, requiresCoverage = true) {
             // Removal or a changed source identity is a stale row, rejected before source I/O.
             // Same-identity metadata edits are not a rebase: the displayed inputs stay frozen.
             requireTapCurrent(tapped)
@@ -774,6 +791,8 @@ class AppContainer(
                 }.first { it }
             }
             if (visible != true) throw VeyraException(AppFailure(FailureCode.RECOVERY_REQUIRED, "download_admission_not_visible"))
+            diagnostics.record(Component.DOWNLOAD, DOWNLOAD, phase = DiagnosticPhase.ACCEPTED,
+                context = currentCoroutineContext()[DiagnosticContext], link = diagnostics.downloadKey(id))
             cacheArtwork(listOf(tapped))
             tapped.showId?.let { id -> store.state.value.shows[id]?.let { cacheArtwork(emptyList(), listOf(it)) } }
         }
@@ -829,14 +848,21 @@ class AppContainer(
      * native/file cleanup. Enter that ordering point immediately, but never make playback,
      * navigation or an offline-policy change wait for a download's release/validation barrier.
      */
-    private fun downloadEffect(requiresCoverage: Boolean = false, action: suspend () -> Unit): Deferred<Boolean> =
-        effects.async(start = CoroutineStart.UNDISPATCHED) {
+    private suspend fun controlDownload(operation: DiagnosticOperation, downloadId: String, requiresCoverage: Boolean = false,
+        action: suspend () -> Unit): Deferred<Boolean> =
+        downloadEffect(operation, currentCoroutineContext()[DiagnosticContext], requiresCoverage, downloadId, action)
+
+    private fun downloadEffect(operation: DiagnosticOperation, parent: DiagnosticContext?, requiresCoverage: Boolean = false,
+        downloadId: String? = null, action: suspend () -> Unit): Deferred<Boolean> =
+        effects.async(parent ?: EmptyCoroutineContext, start = CoroutineStart.UNDISPATCHED) {
         try {
             // This synchronous check precedes the coordinator's first suspension/admission point.
             // NEVER await ensureDownloadScheduling here: Pause/Cancel could overtake that wait
             // and a late ACK would resurrect the older enqueue/resume action.
-            if (requiresCoverage) mutableDownloadRestriction.value?.let { throw VeyraException(it) }
-            action()
+            diagnostics.trace(Component.DOWNLOAD, operation, link = downloadId?.let(diagnostics::downloadKey)) {
+                if (requiresCoverage) mutableDownloadRestriction.value?.let { throw VeyraException(it) }
+                action()
+            }
             true
         }
         catch (cancelled: CancellationException) {
@@ -986,17 +1012,18 @@ class AppContainer(
                 store.undoCatalogLibrary(undo)
                 undoLibrary.value = null
             }
-            is MusicUiAction.Download -> download(action.item).let { started ->
+            is MusicUiAction.Download -> download(action.item, currentCoroutineContext()[DiagnosticContext]).let { started ->
                 effects.launch { if (started.await()) inform(TextKey.DownloadStarted) }
             }
             is MusicUiAction.DownloadCollection -> {
-                val pending = action.items.distinctBy { it.id }.map(::download)
+                val parent = currentCoroutineContext()[DiagnosticContext]
+                val pending = action.items.distinctBy { it.id }.map { download(it, parent) }
                 effects.launch { if (pending.isNotEmpty() && pending.awaitAll().all { it }) inform(TextKey.DownloadsQueued) }
             }
-            is MusicUiAction.PauseDownload -> downloadEffect { downloads.pause(action.downloadId) }
-            is MusicUiAction.ResumeDownload -> downloadEffect(requiresCoverage = true) { resumeDownload(action.downloadId) }
-            is MusicUiAction.CancelDownload -> downloadEffect { downloads.cancel(action.downloadId) }
-            is MusicUiAction.RemoveDownload -> downloadEffect { removeDownload(action.downloadId) }
+            is MusicUiAction.PauseDownload -> controlDownload(DOWNLOAD_PAUSE, action.downloadId) { downloads.pause(action.downloadId) }
+            is MusicUiAction.ResumeDownload -> controlDownload(DOWNLOAD_RESUME, action.downloadId, requiresCoverage = true) { resumeDownload(action.downloadId) }
+            is MusicUiAction.CancelDownload -> controlDownload(DOWNLOAD_CANCEL, action.downloadId) { downloads.cancel(action.downloadId) }
+            is MusicUiAction.RemoveDownload -> controlDownload(DOWNLOAD_REMOVE, action.downloadId) { removeDownload(action.downloadId) }
             MusicUiAction.ManageStorage -> selectDestination(AppDestination.SETTINGS)
             MusicUiAction.OpenPlayer -> navigate { it.copy(playerOpen = true, queueOpen = false) }
             is MusicUiAction.OpenQueue -> navigate { it.copy(queueOpen = true, viewedQueue = action.context ?: playback.state.value.activeContext) }
@@ -1098,13 +1125,13 @@ class AppContainer(
             is PodcastAction.PlayNext -> command(PlaybackCommand.Enqueue(QueueContext.PODCAST, listOf(episode(action.mediaId)), EnqueuePosition.NEXT))
             is PodcastAction.AddToEnd -> command(PlaybackCommand.Enqueue(QueueContext.PODCAST, listOf(episode(action.mediaId))))
             PodcastAction.OpenQueue -> navigate { it.copy(queueOpen = true, viewedQueue = QueueContext.PODCAST) }
-            is PodcastAction.Download -> download(episode(action.mediaId)).let { started ->
+            is PodcastAction.Download -> download(episode(action.mediaId), currentCoroutineContext()[DiagnosticContext]).let { started ->
                 effects.launch { if (started.await()) inform(TextKey.DownloadStarted) }
             }
-            is PodcastAction.PauseDownload -> downloadEffect { downloads.pause(action.downloadId) }
-            is PodcastAction.ResumeDownload -> downloadEffect(requiresCoverage = true) { resumeDownload(action.downloadId) }
-            is PodcastAction.CancelDownload -> downloadEffect { downloads.cancel(action.downloadId) }
-            is PodcastAction.RemoveDownload -> downloadEffect { removeDownload(action.downloadId) }
+            is PodcastAction.PauseDownload -> controlDownload(DOWNLOAD_PAUSE, action.downloadId) { downloads.pause(action.downloadId) }
+            is PodcastAction.ResumeDownload -> controlDownload(DOWNLOAD_RESUME, action.downloadId, requiresCoverage = true) { resumeDownload(action.downloadId) }
+            is PodcastAction.CancelDownload -> controlDownload(DOWNLOAD_CANCEL, action.downloadId) { downloads.cancel(action.downloadId) }
+            is PodcastAction.RemoveDownload -> controlDownload(DOWNLOAD_REMOVE, action.downloadId) { removeDownload(action.downloadId) }
             is PodcastAction.OpenPublisher -> openExternalInBackground(action.url)
         }
     }
@@ -1133,9 +1160,10 @@ class AppContainer(
         val generation = request.requestGeneration + 1
         mutableSearch.update { it.copy(loading = true, failure = null, searched = true,
             page = if (more) it.page else SourcePage(), requestGeneration = generation) }
-        searchJob = effects.launch {
+        val parent = currentCoroutineContext()[DiagnosticContext]
+        searchJob = effects.launch(parent ?: EmptyCoroutineContext) {
             try {
-                val page = online {
+                val page = diagnostics.trace(Component.NETWORK, SEARCH, phase = request.kind) { online {
                     when (request.kind) {
                         SearchKind.PODCASTS -> podcastsSource.search(request.query)
                         SearchKind.MUSIC -> source(request.provider).search(request.query, if (more) request.page.nextPageToken else null)
@@ -1144,7 +1172,7 @@ class AppContainer(
                             else searchAll(request)
                         }
                     }
-                }
+                } }
                 currentCoroutineContext().ensureActive()
                 if (mutableSearch.value.requestGeneration != generation) return@launch
                 rememberPage(page)
@@ -1152,6 +1180,9 @@ class AppContainer(
                     if (current.requestGeneration != generation) current else current.copy(loading = false,
                         page = if (more) mergePages(request.page, page) else page, failure = null)
                 }
+                diagnostics.record(Component.UI, SEARCH, context = parent, failure = page.notice?.code,
+                    phase = when { page.notice != null -> DiagnosticPhase.PARTIAL; page.items.isEmpty() && page.shows.isEmpty() -> DiagnosticPhase.EMPTY; else -> request.kind },
+                    value = (page.items.size + page.shows.size).toLong(), generation = generation)
                 cacheArtwork(page.items, page.shows)
             } catch (cancelled: CancellationException) {
                 mutableSearch.update { current ->
@@ -1183,18 +1214,20 @@ class AppContainer(
                 ?: podcastPage.notice ?: musicPage.notice)
     }
 
-    private fun discover(provider: SourceProvider, more: Boolean) {
+    private suspend fun discover(provider: SourceProvider, more: Boolean) {
         val before = mutableDiscovery.value
         if (more && (before.loading || before.page.nextPageToken == null)) return
         discoveryJob?.cancel()
         val generation = discoveryGeneration.value + 1
         discoveryGeneration.value = generation
         mutableDiscovery.value = CatalogUiState(provider, if (more) before.page else SourcePage(), loading = true, loaded = true)
-        discoveryJob = effects.launch {
+        discoveryJob = effects.launch(currentCoroutineContext()[DiagnosticContext] ?: EmptyCoroutineContext) {
             try {
                 val language = effectiveLanguage(store.state.value.settings.language)
-                val page = online { source(provider).browse(BrowseRequest(pageToken = if (more) before.page.nextPageToken else null,
-                    language = if (language == LanguagePreference.ARABIC) "ar" else "en")) }
+                val page = diagnostics.trace(Component.NETWORK, DISCOVER, phase = provider) {
+                    online { source(provider).browse(BrowseRequest(pageToken = if (more) before.page.nextPageToken else null,
+                        language = if (language == LanguagePreference.ARABIC) "ar" else "en")) }
+                }
                 rememberPage(page)
                 if (generation == discoveryGeneration.value) mutableDiscovery.update { it.copy(loading = false,
                     page = if (more) mergePages(before.page, page) else page) }
@@ -1209,16 +1242,18 @@ class AppContainer(
         }
     }
 
-    private fun loadCollection(collection: MediaCollection, more: Boolean) {
+    private suspend fun loadCollection(collection: MediaCollection, more: Boolean) {
         val before = mutableCollections.value[collection.id] ?: CollectionUiState(collection)
         if (more && (before.loading || before.page.nextPageToken == null)) return
         collectionJobs.value[collection.id]?.cancel()
         mutableCollections.update { it + (collection.id to before.copy(loading = true, failure = null)) }
-        val job = effects.launch(start = CoroutineStart.LAZY) {
+        val job = effects.launch(currentCoroutineContext()[DiagnosticContext] ?: EmptyCoroutineContext, start = CoroutineStart.LAZY) {
             val thisJob = currentCoroutineContext()[Job]
             try {
-                val page = online { source(collection.source.provider).browse(BrowseRequest(collection.kind,
-                    collection.source.canonicalId, if (more) before.page.nextPageToken else null)) }
+                val page = diagnostics.trace(Component.NETWORK, COLLECTION, phase = collection.source.provider) {
+                    online { source(collection.source.provider).browse(BrowseRequest(collection.kind,
+                        collection.source.canonicalId, if (more) before.page.nextPageToken else null)) }
+                }
                 rememberPage(page)
                 if (collectionJobs.value[collection.id] === thisJob) mutableCollections.update { it + (collection.id to before.copy(
                     loading = false, loaded = true, failure = null, page = if (more) mergePages(before.page, page)
@@ -1238,17 +1273,17 @@ class AppContainer(
         job.start()
     }
 
-    private fun openShow(id: String) {
+    private suspend fun openShow(id: String) {
         navigate { it.open(AppDetail(DetailKind.SHOW, id)) }
         val show = store.state.value.shows[id] ?: return
         cacheArtwork(emptyList(), listOf(show))
         if (show.lastRefreshEpochMs == null && !store.state.value.settings.offlineOnly) refreshShow(id)
     }
 
-    private fun refreshShow(id: String) {
+    private suspend fun refreshShow(id: String) {
         if (id in mutablePodcastDetails.value.refreshing) return
         mutablePodcastDetails.update { it.copy(refreshing = it.refreshing + id, failures = it.failures - id) }
-        effects.launch {
+        effects.launch(currentCoroutineContext()[DiagnosticContext] ?: EmptyCoroutineContext) {
             try { loadShow(id) }
             catch (cancelled: CancellationException) {
                 if (store.state.value.settings.offlineOnly) mutablePodcastDetails.update { it.copy(failures = it.failures + (id to AppFailure(FailureCode.OFFLINE_POLICY))) }
@@ -1259,7 +1294,7 @@ class AppContainer(
         }
     }
 
-    private suspend fun loadShow(id: String) {
+    private suspend fun loadShow(id: String) = diagnostics.trace(Component.NETWORK, SHOW) {
         val snapshot = store.state.value
         val show = snapshot.shows[id] ?: throw VeyraException(AppFailure(FailureCode.NOT_FOUND))
         val feed = online { podcastsSource.refreshFeed(show.feedUrl, show, snapshot.media.values.filter { it.showId == id }) }
@@ -1267,10 +1302,10 @@ class AppContainer(
         cacheArtwork(emptyList(), listOf(feed.show))
     }
 
-    private fun refreshFollowedShows() {
+    private suspend fun refreshFollowedShows() {
         if (refreshJob?.isActive == true) return
         mutablePodcasts.update { it.copy(isRefreshing = true, failure = null) }
-        refreshJob = effects.launch {
+        refreshJob = effects.launch(currentCoroutineContext()[DiagnosticContext] ?: EmptyCoroutineContext) {
             try {
                 for (id in store.state.value.followedShowIds) {
                     try { loadShow(id) }
@@ -1284,17 +1319,19 @@ class AppContainer(
         }
     }
 
-    private fun addFeed(url: String) {
+    private suspend fun addFeed(url: String) {
         if (feedJob?.isActive == true) return
         mutablePodcasts.update { it.copy(addFeed = AddPodcastFeedUiState(url, isSubmitting = true)) }
-        feedJob = effects.launch {
+        feedJob = effects.launch(currentCoroutineContext()[DiagnosticContext] ?: EmptyCoroutineContext) {
             try {
-                val feed = online { podcastsSource.refreshFeed(url) }
-                rememberPage(SourcePage(items = feed.episodes, shows = listOf(feed.show)))
-                store.update { it.copy(followedShowIds = it.followedShowIds + feed.show.id) }.getOrThrow()
-                mutablePodcasts.update { it.copy(addFeed = null) }
-                navigate { it.open(AppDetail(DetailKind.SHOW, feed.show.id)) }
-                cacheArtwork(emptyList(), listOf(feed.show))
+                diagnostics.trace(Component.NETWORK, FEED) {
+                    val feed = online { podcastsSource.refreshFeed(url) }
+                    rememberPage(SourcePage(items = feed.episodes, shows = listOf(feed.show)))
+                    store.update { it.copy(followedShowIds = it.followedShowIds + feed.show.id) }.getOrThrow()
+                    mutablePodcasts.update { it.copy(addFeed = null) }
+                    navigate { it.open(AppDetail(DetailKind.SHOW, feed.show.id)) }
+                    cacheArtwork(emptyList(), listOf(feed.show))
+                }
             } catch (cancelled: CancellationException) {
                 mutablePodcasts.update { state ->
                     val feed = state.addFeed
@@ -1319,14 +1356,18 @@ class AppContainer(
         (items.distinctBy { it.id }.map { suspend { artwork.cacheMedia(current(it)); Unit } } +
             shows.distinctBy { it.id }.map { show -> suspend { artwork.cacheShow(store.state.value.shows[show.id] ?: show); Unit } })
             .forEach { fetch -> effects.launch {
-                try { artworkPermits.withPermit { online(fetch) } }
+                try { diagnostics.trace(Component.NETWORK, ARTWORK) { artworkPermits.withPermit { online(fetch) } } }
                 catch (cancelled: CancellationException) { throw cancelled }
                 catch (_: Exception) { /* Honest monogram placeholder; no fake cover success. */ }
             } }
     }
 
     /** An active offline-policy change cancels the actual request coroutine, not just its spinner. */
-    private suspend fun <T> online(block: suspend () -> T): T = coroutineScope {
+    private suspend fun <T> online(block: suspend () -> T): T = diagnostics.trace(Component.NETWORK, ONLINE_ACCESS) {
+        onlineAllowed(block)
+    }
+
+    private suspend fun <T> onlineAllowed(block: suspend () -> T): T = coroutineScope {
         if (closed) throw VeyraException(AppFailure(FailureCode.INVALID_STATE))
         if (store.state.value.settings.offlineOnly) throw VeyraException(AppFailure(FailureCode.OFFLINE_POLICY))
         val owner = currentCoroutineContext()[Job]!!
@@ -1348,9 +1389,9 @@ class AppContainer(
         platform.openExternalUrl(safe)
     }
 
-    private fun openExternalInBackground(url: String) {
-        effects.launch {
-            try { withTimeout(30_000) { openExternal(url) } }
+    private suspend fun openExternalInBackground(url: String) {
+        effects.launch(currentCoroutineContext()[DiagnosticContext] ?: EmptyCoroutineContext) {
+            try { diagnostics.trace(Component.NETWORK, OPEN_EXTERNAL) { withTimeout(30_000) { openExternal(url) } } }
             catch (cancelled: CancellationException) {
                 currentCoroutineContext().ensureActive()
                 fail(AppFailure(if (store.state.value.settings.offlineOnly) FailureCode.OFFLINE_POLICY else FailureCode.NETWORK_UNAVAILABLE))
@@ -1366,6 +1407,7 @@ class AppContainer(
 
     private fun inform(text: TextKey) { mutableNotice.value = AppNotice(text = text) }
     private fun fail(failure: AppFailure) {
+        diagnostics.record(Component.UI, NOTICE, DiagnosticOutcome.FAILED, failure = failure.code)
         val message = AppNotice(failure = failure)
         mutableFailureNotices.update { notices ->
             if (notices.lastOrNull()?.failure == failure) notices else (notices + message).takeLast(32)
