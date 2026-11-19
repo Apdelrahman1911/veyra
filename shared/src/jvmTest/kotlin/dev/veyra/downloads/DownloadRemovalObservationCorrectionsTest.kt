@@ -101,6 +101,33 @@ class DownloadRemovalObservationCorrectionsTest {
         }
     }
 
+    @Test fun aLateRemovalObserverWaitsForTheSuccessorAfterTheFirstOwnerHasDrained() = physicalRuntimeCase(removalOwnerGraceMs = 40) {
+        val pending = currentJob().copy(status = DownloadStatus.NEEDS_FOREGROUND, cleanupPending = true,
+            ownershipGeneration = 1, leaseOwner = null, maintenanceKind = null)
+        repository.state.value = repository.state.value.copy(
+            physicalDownloads = mapOf(PhysicalRuntimeFixture.JOB to pending))
+        val epoch = runtime.epochs.begin(PhysicalRuntimeFixture.JOB, producer(contextR1), 1, null, null, null)
+        val cleanup = DownloadPhysicalCleanup(runtime, epoch, emptyList(), acceptedDurableOwner = true) {
+            AcquisitionDownloadDurableSettlement.Confirmed(1)
+        }
+        host.cleanupRegistry.register(cleanup)
+        runtime.epochs.retain(epoch, cleanup.token, cleanup, completesAcquisition = true)
+        runtime.epochs.finishAdmission(epoch)
+        runtime.attemptCleanup(cleanup, report = false)
+        assertTrue(host.cleanupRegistry.owners.value.isEmpty())
+
+        coroutineScope {
+            val observed = async(start = CoroutineStart.UNDISPATCHED) {
+                runtime.awaitRemovalOutcome(PhysicalRuntimeFixture.JOB)
+            }
+            delay(100)
+            assertFalse(observed.isCompleted, "The successor can arrive after the initial owner-observation deadline")
+            repository.state.value = repository.state.value.copy(physicalDownloads =
+                mapOf(PhysicalRuntimeFixture.JOB to pending.copy(cleanupPending = false)))
+            assertNull(observed.await())
+        }
+    }
+
     @Test fun interruptedRemovalWithoutAnOwnerStillFailsBoundedAndPreservesIntent() = physicalRuntimeCase(removalOwnerGraceMs = 40) {
         val pending = currentJob().copy(status = DownloadStatus.CANCELLED, cleanupPending = true,
             ownershipGeneration = 1, leaseOwner = null, maintenanceKind = null)

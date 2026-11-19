@@ -8,11 +8,17 @@
   UI still resolves from Maven Central.
 - Upstream development can continue on `source-vMAJOR.MINOR.PATCH` tags
   while the Central publishing limit is active. [Refresh and switchback](../README.md#update-kmpyt-or-return-to-maven-central)
-- The snapshot passed clean-checkout verification and all six kmpYT downloader JVM regressions
-  with real FFmpeg. Hosted Android and Windows checks passed with source mode. Local Android
-  lint and 922 unit tests passed, and the debug APK contains the pinned source receipt. The Linux
-  runtime inventory selects the composite module and the packaged app passed launch and native
-  fragmented-AAC playback and seeking checks. [Source-mode platform run](https://github.com/Apdelrahman1911/veyra/actions/runs/44483022252)
+- The snapshot passed clean-checkout verification and 380 bundled kmpYT JVM tests, including
+  downloader and playback tests using FFmpeg. A separate checkout resolved the previous published
+  kmpYT dependency after switching to Maven mode.
+- Android lint and 922 unit tests passed, and the debug APK contains the pinned source receipt.
+  Linux and Windows CI passed desktop tests. The Linux package passed launch, native MP3 and
+  fragmented-AAC playback, and seeking checks. [Source-mode platform run](https://github.com/Apdelrahman1911/veyra/actions/runs/44483022252)
+- The Intel and Apple Silicon desktop suites have both passed. The downloaded Apple Silicon DMG matches the hosted
+  package checksum, with the pinned source confirmed in its runtime inventory. The hosted iOS job
+  compiled native tests and built both unsigned Swift host targets without running them on a device.
+  [macOS and Windows packaging](https://github.com/Apdelrahman1911/veyra/actions/runs/44484715719) ·
+  [iOS](https://github.com/Apdelrahman1911/veyra/actions/runs/44485261475)
 
 ## Download and playback hardening — 2026-11-19
 
@@ -26,6 +32,9 @@
 - Pausing a batch with a failed retained file preserves the failed state and its local validation
   path. On restart the scheduler repairs older rows left spuriously queued with a rejected file.
   Room restart and desktop download UI regressions passed.
+- Remove now keeps observing accepted work during a bounded foreground cleanup handoff, even if
+  the original owner drains before the caller begins observing. Successful removal still requires
+  durable confirmation. The focused ownership, maintenance, and removal regressions passed.
 - Playback startup timing distinguishes selection, source preparation, native readiness and
   playing. Android and iOS debug logs record the timings without media IDs or stream URLs.
   A stalled startup reports an error after a bounded active wait. Native lock-screen seek

@@ -223,12 +223,9 @@ internal class DownloadPhysicalCommands(
                 val settled = cleaned ?: pending.epoch
                 if (cleaned == null && !stopped || cleaned != null && !runtime.epochs.drain(cleaned)) {
                     val state = host.state()
-                    if (discard && remove && state.started && !state.closed && !state.suspended &&
-                        state.drainsInFlight == 0 && state.failure == null) {
-                        // An expired foreground epoch may refuse its own ACK after a new
-                        // foreground epoch has resumed. The active caller can still await
-                        // authoritative removal by that healthy host; never infer deletion
-                        // from the old owner's cancellation or consume its failed receipt.
+                    if (discard && remove && state.started && !state.closed && state.failure == null) {
+                        // The old owner can expire before the foreground resumes. The durable
+                        // removal intent still lets the caller await a bounded cleanup handoff.
                         awaitRemoval(id, tolerateTransientCleanupFailure = true)
                         return
                     }
@@ -237,9 +234,6 @@ internal class DownloadPhysicalCommands(
                 // A normal remove return must mean actual authoritative removal for EVERY
                 // retained/staged/finalization shape, not just a prior failure-backed row.
                 if (discard && remove && repository.physicalDownload(id)?.job?.cleanupPending == true) {
-                    val state = host.state()
-                    if (!state.started || state.suspended || state.failure != null)
-                        fail(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")
                     awaitRemoval(id)
                 }
                 when (val durable = runtime.epochs.durableSettlement(settled)) {
@@ -252,9 +246,6 @@ internal class DownloadPhysicalCommands(
                 // The intent may already have advanced beyond this caller's local observation
                 // epoch. The durable cleanupPending row is still the authority; never treat a
                 // detached null durable settlement as completion.
-                val state = host.state()
-                if (!state.started || state.suspended || state.failure != null)
-                    fail(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")
                 awaitRemoval(id)
             }
         } catch (error: CancellationException) {
@@ -274,7 +265,9 @@ internal class DownloadPhysicalCommands(
      * observation or a missing owner within the bounded handoff is a real failure.
      */
     private suspend fun awaitRemoval(id: String, tolerateTransientCleanupFailure: Boolean = false) {
-        host.state().failure?.let { throw VeyraException(it) }
+        val state = host.state()
+        state.failure?.let { throw VeyraException(it) }
+        if (!state.started || state.closed) fail(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")
         runtime.awaitRemovalOutcome(id, failedIsTerminal = !tolerateTransientCleanupFailure)
             ?.let { throw VeyraException(it) }
         val current = repository.physicalDownload(id)

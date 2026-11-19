@@ -1278,20 +1278,15 @@ internal class DownloadPhysicalRuntime(
             DownloadRemovalSnapshot(isPending, observation, hasOwner || deleting)
         }
         val initial = withTimeoutOrNull(removalOwnerGraceMs) {
-            observed.first { !it.pending || it.ownerPresent ||
+            observed.first { !it.pending || it.ownerPresent || it.observation == DownloadCleanupObservation.InProgress ||
                 failedIsTerminal && it.observation is DownloadCleanupObservation.Failed }
         } ?: return AppFailure(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")
         if (failedIsTerminal) (initial.observation as? DownloadCleanupObservation.Failed)?.let { return it.failure }
         if (!initial.pending) return null
-        if (!initial.ownerPresent)
-            return AppFailure(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")
-        // An owner is actually doing the removal; wait for its durable pending/observation
-        // settlement rather than for an owner registry that is legitimately consumed afterwards.
-        // A terminal Failed observation settles immediately even if its owner stays registered.
-        // A consumed owner with cleanup still pending is not terminal: the scheduler may have
-        // already handed the exact deletion to a newer owner. Wait within the same bound for
-        // either durable completion or a terminal failure.
-        val settled = withTimeoutOrNull(removalOwnerGraceMs) {
+        // The original owner can finish unwinding before this observer attaches. Its cleanup
+        // observation is enough to wait for the successor, whose first recheck can be deferred
+        // by LOCAL_RECHECK_MS. Keep that deferral separate from the time allowed to delete.
+        val settled = withTimeoutOrNull(removalOwnerGraceMs + LOCAL_RECHECK_MS) {
             observed.first { !it.pending || failedIsTerminal && it.observation is DownloadCleanupObservation.Failed }
         } ?: return AppFailure(FailureCode.BACKGROUND_RESTRICTED, "download_owner_drain_unconfirmed")
         if (failedIsTerminal) (settled.observation as? DownloadCleanupObservation.Failed)?.let { return it.failure }
