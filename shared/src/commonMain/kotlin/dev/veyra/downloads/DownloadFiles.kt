@@ -140,7 +140,7 @@ class DownloadFiles internal constructor(directory: String, val fileSystem: File
         val path = value.toPath(normalize = true)
         fun containerPath(candidate: Path): String {
             val native = candidate.toString()
-            return if (candidate.volumeLetter() != null) native.replace('\\', '/') else native
+            return if (candidate.volumeLetter != null) native.replace('\\', '/') else native
         }
         val current = IOS_MEDIA_DIRECTORY.matchEntire(containerPath(root)) ?: return path
         if (current.groupValues[2].isNotEmpty()) return path
