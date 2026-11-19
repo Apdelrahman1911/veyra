@@ -16,23 +16,28 @@ WORKFLOW = (ROOT / ".github/workflows/verify.yml").read_text()
 BUILD_RETENTION = (ROOT / "scripts/build-retention.sh").read_text()
 
 class RetentionWorkflowTest(unittest.TestCase):
-    def test_linux_scope_runs_and_retains_only_linux(self):
+    def test_single_os_scopes_match_their_retained_lanes(self):
         expression = WORKFLOW.split("        include: ${{ fromJSON(", 1)[1].split(" }}", 1)[0]
-        linux = json.loads(expression.split("inputs.scope == 'linux' && '", 1)[1].split("'", 1)[0])
-        self.assertEqual([("desktop-linux-x64", "ubuntu-24.04")],
-                         [(lane["platform"], lane["runner"]) for lane in linux])
-        for job in ("desktop", "android", "ios"):
-            condition = WORKFLOW.split("  " + job + ":\n", 1)[1].split("    name:", 1)[0]
-            self.assertEqual(job == "desktop", "inputs.scope == 'linux'" in condition)
-
         marker = "      - name: Compute exact expected lane set"
         code = textwrap.dedent(WORKFLOW.split(marker, 1)[1].split("<<'PY'\n", 1)[1].split("          PY", 1)[0])
-        with tempfile.TemporaryDirectory(dir=ROOT / ".work/tmp", prefix="linux-plan-") as tmp:
-            result = subprocess.run([__import__("sys").executable, "-B", "-c", code],
-                env=dict(os.environ, SCOPE="linux", PACKAGE_DESKTOP="true", GITHUB_OUTPUT=str(Path(tmp) / "output")),
-                capture_output=True, text=True, timeout=10)
-            self.assertEqual(0, result.returncode, result.stderr)
-            self.assertEqual(["desktop-linux-x64"], json.loads(result.stdout))
+        cases = {
+            "linux": [("desktop-linux-x64", "ubuntu-24.04")],
+            "macos": [("desktop-macos-arm64", "macos-15"), ("desktop-macos-x64", "macos-15-intel")],
+        }
+        with tempfile.TemporaryDirectory(dir=ROOT / ".work/tmp", prefix="desktop-os-plan-") as tmp:
+            for scope, expected in cases.items():
+                with self.subTest(scope=scope):
+                    condition = f"inputs.scope == '{scope}'"
+                    matrix = json.loads(expression.split(condition + " && '", 1)[1].split("'", 1)[0])
+                    self.assertEqual(expected, [(lane["platform"], lane["runner"]) for lane in matrix])
+                    for job in ("desktop", "android", "ios"):
+                        job_condition = WORKFLOW.split("  " + job + ":\n", 1)[1].split("    name:", 1)[0]
+                        self.assertEqual(job == "desktop", condition in job_condition)
+                    result = subprocess.run([__import__("sys").executable, "-B", "-c", code],
+                        env=dict(os.environ, SCOPE=scope, PACKAGE_DESKTOP="true", GITHUB_OUTPUT=str(Path(tmp) / "output")),
+                        capture_output=True, text=True, timeout=10)
+                    self.assertEqual(0, result.returncode, result.stderr)
+                    self.assertEqual([platform for platform, _ in expected], json.loads(result.stdout))
 
     def test_combined_scope_retains_exactly_android_linux_and_windows(self):
         marker = "      - name: Compute exact expected lane set"

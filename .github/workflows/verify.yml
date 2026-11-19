@@ -8,7 +8,7 @@ on:
       scope:
         description: Target group to verify
         type: choice
-        options: [all, desktop, linux, android-desktop, android-linux-windows, windows, windows-recovery, windows-macos-arm64, windows-session-probe, installers, android, ios]
+        options: [all, desktop, linux, macos, android-desktop, android-linux-windows, windows, windows-recovery, windows-macos-arm64, windows-session-probe, installers, android, ios]
         default: all
       package_desktop:
         description: Generate native installers (no upload or OS installation)
@@ -82,7 +82,7 @@ jobs:
           PY
 
   desktop:
-    if: ${{ github.event.repository.private == false && inputs.retention_canary != true && (inputs.scope == 'all' || inputs.scope == 'installers' || inputs.scope == 'desktop' || inputs.scope == 'linux' || inputs.scope == 'android-desktop' || inputs.scope == 'android-linux-windows' || inputs.scope == 'windows' || inputs.scope == 'windows-recovery' || inputs.scope == 'windows-macos-arm64') }}
+    if: ${{ github.event.repository.private == false && inputs.retention_canary != true && (inputs.scope == 'all' || inputs.scope == 'installers' || inputs.scope == 'desktop' || inputs.scope == 'linux' || inputs.scope == 'macos' || inputs.scope == 'android-desktop' || inputs.scope == 'android-linux-windows' || inputs.scope == 'windows' || inputs.scope == 'windows-recovery' || inputs.scope == 'windows-macos-arm64') }}
     name: Desktop (${{ matrix.label }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
@@ -92,7 +92,7 @@ jobs:
       fail-fast: false
       max-parallel: ${{ inputs.scope == 'installers' && 4 || 2 }}
       matrix:
-        include: ${{ fromJSON(inputs.scope == 'linux' && '[{"label":"Linux x64","runner":"ubuntu-24.04","system":"Linux","arch":"x64","platform":"desktop-linux-x64"}]' || (inputs.scope == 'windows' || inputs.scope == 'windows-recovery') && '[{"label":"Windows x64","runner":"windows-2022","system":"Windows","arch":"x64","platform":"desktop-windows-x64"}]' || inputs.scope == 'windows-macos-arm64' && '[{"label":"Windows x64","runner":"windows-2022","system":"Windows","arch":"x64","platform":"desktop-windows-x64"},{"label":"macOS arm64","runner":"macos-15","system":"Darwin","arch":"arm64","platform":"desktop-macos-arm64"}]' || inputs.scope == 'android-linux-windows' && '[{"label":"Linux x64","runner":"ubuntu-24.04","system":"Linux","arch":"x64","platform":"desktop-linux-x64"},{"label":"Windows x64","runner":"windows-2022","system":"Windows","arch":"x64","platform":"desktop-windows-x64"}]' || '[{"label":"Linux x64","runner":"ubuntu-24.04","system":"Linux","arch":"x64","platform":"desktop-linux-x64"},{"label":"Windows x64","runner":"windows-2022","system":"Windows","arch":"x64","platform":"desktop-windows-x64"},{"label":"macOS arm64","runner":"macos-15","system":"Darwin","arch":"arm64","platform":"desktop-macos-arm64"},{"label":"macOS x64","runner":"macos-15-intel","system":"Darwin","arch":"x64","platform":"desktop-macos-x64"}]') }}
+        include: ${{ fromJSON(inputs.scope == 'macos' && '[{"label":"macOS arm64","runner":"macos-15","system":"Darwin","arch":"arm64","platform":"desktop-macos-arm64"},{"label":"macOS x64","runner":"macos-15-intel","system":"Darwin","arch":"x64","platform":"desktop-macos-x64"}]' || inputs.scope == 'linux' && '[{"label":"Linux x64","runner":"ubuntu-24.04","system":"Linux","arch":"x64","platform":"desktop-linux-x64"}]' || (inputs.scope == 'windows' || inputs.scope == 'windows-recovery') && '[{"label":"Windows x64","runner":"windows-2022","system":"Windows","arch":"x64","platform":"desktop-windows-x64"}]' || inputs.scope == 'windows-macos-arm64' && '[{"label":"Windows x64","runner":"windows-2022","system":"Windows","arch":"x64","platform":"desktop-windows-x64"},{"label":"macOS arm64","runner":"macos-15","system":"Darwin","arch":"arm64","platform":"desktop-macos-arm64"}]' || inputs.scope == 'android-linux-windows' && '[{"label":"Linux x64","runner":"ubuntu-24.04","system":"Linux","arch":"x64","platform":"desktop-linux-x64"},{"label":"Windows x64","runner":"windows-2022","system":"Windows","arch":"x64","platform":"desktop-windows-x64"}]' || '[{"label":"Linux x64","runner":"ubuntu-24.04","system":"Linux","arch":"x64","platform":"desktop-linux-x64"},{"label":"Windows x64","runner":"windows-2022","system":"Windows","arch":"x64","platform":"desktop-windows-x64"},{"label":"macOS arm64","runner":"macos-15","system":"Darwin","arch":"arm64","platform":"desktop-macos-arm64"},{"label":"macOS x64","runner":"macos-15-intel","system":"Darwin","arch":"x64","platform":"desktop-macos-x64"}]') }}
     env:
       VEYRA_EXPECTED_OS: ${{ matrix.system }}
       VEYRA_EXPECTED_ARCH: ${{ matrix.arch }}
@@ -756,6 +756,8 @@ jobs:
               raise SystemExit("installer scope requires desktop packaging")
           if scope in ("all", "desktop", "android-desktop", "installers") and package:
               platforms += ["desktop-linux-x64", "desktop-windows-x64", "desktop-macos-arm64", "desktop-macos-x64"]
+          if scope == "macos" and package:
+              platforms += ["desktop-macos-arm64", "desktop-macos-x64"]
           if scope == "linux" and package:
               platforms += ["desktop-linux-x64"]
           if scope in ("windows", "windows-recovery") and package:

@@ -1265,13 +1265,17 @@ internal class DownloadPhysicalRuntime(
         val ownerPresent = host.cleanupRegistry.owners.map { owners ->
             owners.values.any { it is DownloadPhysicalCleanup && it.epoch.downloadId == id }
         }
-        val observed = combine(pending, cleanupObservations, ownerPresent) { current, observations, hasOwner ->
+        val observed = combine(pending, cleanupObservations, ownerPresent, runs) { current, observations, hasOwner, active ->
             val (isPending, generation) = current
             val observation = observations[id]?.let { stored ->
                 // A terminal observation from an older removal generation cannot settle this one.
                 if (generation == null || stored.ownershipGeneration >= generation) stored.observation else null
             }
-            DownloadRemovalSnapshot(isPending, observation, hasOwner)
+            // The maintenance action owns the path while it drains playback and deletes files.
+            // The cleanup registry tracks the finalizer only after that action returns.
+            val deleting = active[id]?.let { it.kind == PhysicalDownloadMaintenanceKind.CLEANUP &&
+                it.fence.ownershipGeneration == generation } == true
+            DownloadRemovalSnapshot(isPending, observation, hasOwner || deleting)
         }
         val initial = withTimeoutOrNull(removalOwnerGraceMs) {
             observed.first { !it.pending || it.ownerPresent ||
