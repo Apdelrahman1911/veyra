@@ -302,6 +302,9 @@ class RetentionWorkflowTest(unittest.TestCase):
         ios = WORKFLOW.split("  ios:", 1)[1].split("  # Nonproduction canary", 1)[0]
         self.assertIn("id: ios_tests", ios)
         self.assertIn("id: ios_build", ios)
+        simulator_tests = ios.split("id: ios_tests", 1)[1].split("      - name:", 1)[0]
+        self.assertIn("scripts/ci.sh ios --tests-only", simulator_tests)
+        self.assertNotIn("continue-on-error", simulator_tests)
         self.assertIn("always() && inputs.retain_builds == true", ios)
         self.assertIn("id: retain_simulator", ios)
         self.assertIn("id: retain_device", ios)
@@ -309,7 +312,7 @@ class RetentionWorkflowTest(unittest.TestCase):
     def test_build_and_test_steps_do_not_receive_the_token(self):
         for name in ("Run bounded desktop tests", "Build desktop installer independently of test outcome",
                      "Build APK and execute JVM Android tests",
-                     "Execute native simulator tests and build unsigned applications"):
+                     "Execute native simulator tests", "Build unsigned iOS simulator and device applications"):
             block = WORKFLOW.split("name: " + name, 1)[1].split("- name:", 1)[0]
             self.assertNotIn("GH_TOKEN", block)
             self.assertNotIn("github.token", block)

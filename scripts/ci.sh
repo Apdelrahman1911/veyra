@@ -7,10 +7,14 @@ cd "$VEYRA_PROJECT_ROOT"
 mode="${1:-}"
 case "$mode" in
     desktop|android|ios) shift ;;
-    *) printf '%s\n' 'Usage: scripts/ci.sh desktop|android|ios [--package]' >&2; exit 2 ;;
+    *) printf '%s\n' 'Usage: scripts/ci.sh desktop [--package] | android | ios [--tests-only]' >&2; exit 2 ;;
 esac
 package=false
-if [ "${1:-}" = --package ]; then package=true; shift; fi
+ios_tests_only=false
+case "$mode:${1:-}" in
+    desktop:--package) package=true; shift ;;
+    ios:--tests-only) ios_tests_only=true; shift ;;
+esac
 [ "$#" -eq 0 ] || { printf '%s\n' 'Unexpected CI argument.' >&2; exit 2; }
 
 command -v java >/dev/null 2>&1 || { printf '%s\n' 'No existing JDK; no global installation is permitted.' >&2; exit 1; }
@@ -104,8 +108,10 @@ subprocess.run(["xcrun", "simctl", "bootstatus", sys.argv[1], "-b"], timeout=360
 PYTHON
         "$SCRIPT_DIR/gradle.sh" --continue :shared:iosSimulatorArm64Test :composeApp:iosSimulatorArm64Test \
             "-PiosSimulatorDevice=$simulator"
-        "$SCRIPT_DIR/build-ios.sh" simulator
-        "$SCRIPT_DIR/build-ios.sh" device
         python3 -B scripts/verification-summary.py --phase ios --require-tests shared composeApp
+        if [ "$ios_tests_only" = false ]; then
+            "$SCRIPT_DIR/build-ios.sh" simulator
+            "$SCRIPT_DIR/build-ios.sh" device
+        fi
         ;;
 esac

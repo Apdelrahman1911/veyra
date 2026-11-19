@@ -360,21 +360,17 @@ jobs:
       - name: Verify checkout, wrapper and pinned publication notices
         id: bootstrap
         run: scripts/verify-checkout.sh
-      - name: Execute native simulator tests and build unsigned applications
+      - name: Execute native simulator tests
         id: ios_tests
         timeout-minutes: 65
-        continue-on-error: true
-        run: scripts/ci.sh ios
-      - name: Rebuild unsigned iOS outputs independently of test outcome
+        run: scripts/ci.sh ios --tests-only
+      - name: Build unsigned iOS simulator and device applications
         id: ios_build
-        if: ${{ always() && inputs.retain_builds == true && steps.bootstrap.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.bootstrap.outcome == 'success' && (steps.ios_tests.outcome == 'success' || inputs.retain_builds == true) }}
         timeout-minutes: 40
-        continue-on-error: true
         run: |
-          if [ "${{ steps.ios_tests.outcome }}" != success ]; then
-            scripts/build-ios.sh simulator
-            scripts/build-ios.sh device
-          fi
+          scripts/build-ios.sh simulator
+          scripts/build-ios.sh device
       - name: Generate iOS inventory and inventory-backed legal copy
         id: ios_inventory
         if: ${{ always() && inputs.retain_builds == true && steps.bootstrap.outcome == 'success' }}
@@ -447,8 +443,8 @@ jobs:
         if: ${{ always() }}
         run: |
           test "${{ steps.ios_tests.outcome }}" = success
+          test "${{ steps.ios_build.outcome }}" = success
           if [ "${{ inputs.retain_builds }}" = true ]; then
-            test "${{ steps.ios_build.outcome }}" = success
             test "${{ steps.ios_inventory.outcome }}" = success
             find .work/xcode -type d -path "*DerivedData-simulator-arm64/Build/Products/*-iphonesimulator/Veyra.app" -print -quit | grep -q .
             find .work/xcode -type d -path "*DerivedData-device-arm64/Build/Products/*-iphoneos/Veyra.app" -print -quit | grep -q .
