@@ -19,7 +19,11 @@ allprojects {
 
 subprojects {
     tasks.withType<KotlinNativeSimulatorTest>().configureEach {
-        providers.gradleProperty("iosSimulatorDevice").orNull?.let { device.set(it) }
+        providers.gradleProperty("iosSimulatorDevice").orNull?.let { bootedDevice ->
+            device.set(bootedDevice)
+            // The caller already booted the device. Native playback needs its running media services.
+            standalone.set(false)
+        }
         testLogging {
             events("failed")
             exceptionFormat = TestExceptionFormat.FULL
