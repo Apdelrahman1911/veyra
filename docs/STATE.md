@@ -1,5 +1,29 @@
 # Veyra — resumable state
 
+## iOS download finalization — 2026-11-19
+
+- Veyra uses the checked-in kmpYT `0.1.7` snapshot at `088077261e038529a441a0d28d137b096ed12d4a`.
+  The `source-v0.1.7` tag is for the Gradle composite. Maven Central publishing is paused.
+- iOS uses AVFoundation for segmented audio export and AudioToolbox for local decode validation.
+  Export now has a 120-second deadline and a bounded cancellation drain. Veyra also bounds the
+  source handoff after a known last byte and waits at most 45 seconds for synchronous decoder work.
+  If release cannot be confirmed, cleanup retains the exact native owner's file until it releases
+  or the application process restarts.
+- Veyra can recover an atomically staged kmpYT output if source preparation confirms the same
+  representation. Room publishes the offline asset only after file, decoder and ownership checks.
+  Downloads display separate processing, validation and saving states.
+- Linux passed 1,287 shared tests, 505 Compose Desktop tests and 6 bundled downloader tests at
+  `c044752`. At that revision Android passed 922 unit tests plus build and lint, and Windows passed
+  10 targeted recovery tests. The later snapshot updates iOS implementation and fixtures only,
+  with accompanying version, notice and documentation changes.
+  [Android and Windows CI](https://github.com/Apdelrahman1911/veyra/actions/runs/44579816359)
+- Native iOS test sources compile. The native suites and unsigned iOS host builds need their own
+  hosted receipts. [Veyra iOS CI](https://github.com/Apdelrahman1911/veyra/actions/runs/44584302654) ·
+  [kmpYT CI](https://github.com/Apdelrahman1911/kmpYT/actions/runs/44584271514)
+- The original iPhone stall still needs a device observation. The scoped Debug console messages
+  and manual cases are in the [iPhone download checklist](verification/iphone-download-finalization.md).
+  App-wide opt-in diagnostics and in-app export follow native download verification.
+
 ## kmpYT checked-in source integration — 2026-11-19
 
 - Veyra temporarily builds kmpYT `0.1.3` at `8b4bc1307cdd7d37ca167cdc51465f07604e8f97`
