@@ -89,7 +89,7 @@ class VeyraApplication : Application() {
             language = nativeLanguage,
             dispatch = ::dispatch,
             activityIntent = activityIntent(),
-            mediaLookup = { container?.store?.state?.value?.media?.get(it) },
+            mediaLookup = { id -> container?.store?.state?.value?.let { snapshot -> snapshot.media[id] } },
             skipBackSeconds = { container?.store?.state?.value?.settings?.skipBackSeconds ?: 15 },
             skipForwardSeconds = { container?.store?.state?.value?.settings?.skipForwardSeconds ?: 30 },
             cachedArtwork = { id ->

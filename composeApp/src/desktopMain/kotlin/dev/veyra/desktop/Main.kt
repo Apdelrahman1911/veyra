@@ -110,7 +110,8 @@ fun main(args: Array<String>) {
     val pendingReport = AtomicReference<String?>()
     var finalReport: DesktopVerificationOutcome? = null
     try {
-        application {
+        // Own the exit code so the acknowledged cleanup and smoke result reach the caller.
+        application(exitProcessOnExit = false) {
             var visible by remember { mutableStateOf(true) }
             var confirmQuit by remember { mutableStateOf(false) }
             var closing by remember { mutableStateOf(false) }

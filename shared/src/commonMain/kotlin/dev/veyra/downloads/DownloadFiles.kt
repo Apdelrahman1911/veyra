@@ -138,9 +138,13 @@ class DownloadFiles internal constructor(directory: String, val fileSystem: File
 
     private fun relocateContainerPath(value: String): Path {
         val path = value.toPath(normalize = true)
-        val current = IOS_MEDIA_DIRECTORY.matchEntire(root.toString()) ?: return path
+        fun containerPath(candidate: Path): String {
+            val native = candidate.toString()
+            return if (candidate.volumeLetter() != null) native.replace('\\', '/') else native
+        }
+        val current = IOS_MEDIA_DIRECTORY.matchEntire(containerPath(root)) ?: return path
         if (current.groupValues[2].isNotEmpty()) return path
-        val previous = IOS_MEDIA_DIRECTORY.matchEntire(path.toString()) ?: return path
+        val previous = IOS_MEDIA_DIRECTORY.matchEntire(containerPath(path)) ?: return path
         fun containerNamespace(prefix: String): String =
             if (prefix.startsWith("/private/var/")) prefix.removePrefix("/private") else prefix
         if (containerNamespace(current.groupValues[1]) != containerNamespace(previous.groupValues[1])) return path

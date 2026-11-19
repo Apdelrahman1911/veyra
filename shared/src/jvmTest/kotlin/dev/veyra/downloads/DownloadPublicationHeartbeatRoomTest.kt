@@ -17,7 +17,8 @@ class DownloadPublicationHeartbeatRoomTest {
         val intercepted = AtomicBoolean()
         val observedFiles = object : ForwardingFileSystem(FileSystem.SYSTEM) {
             override fun source(file: okio.Path): Source {
-                if ("/media/files/" in file.toString() && intercepted.compareAndSet(false, true)) onFinalRead()
+                if (file.parent?.segments?.takeLast(2) == listOf("media", "files") &&
+                    intercepted.compareAndSet(false, true)) onFinalRead()
                 return super.source(file)
             }
         }

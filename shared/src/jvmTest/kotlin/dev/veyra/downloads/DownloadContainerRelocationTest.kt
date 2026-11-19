@@ -6,6 +6,7 @@ import dev.veyra.model.VeyraException
 import dev.veyra.playback.LocalMediaValidationInput
 import kotlinx.coroutines.runBlocking
 import okio.ByteString.Companion.toByteString
+import java.io.File
 import java.nio.file.Files
 import kotlin.test.*
 
@@ -30,11 +31,12 @@ class DownloadContainerRelocationTest {
     }
 
     @Test fun relocationCannotCrossApplicationNamespacesOrOwnedDirectories() = relocationCase {
+        val separator = File.separator
         for (path in listOf(
-            historical.replace("/Containers/Data/", "/Unrelated/Data/"),
-            historical.replace("/Veyra/media/", "/AnotherApp/media/"),
+            historical.replace("Containers", "Unrelated"),
+            historical.replace("${separator}Veyra${separator}", "${separator}AnotherApp${separator}"),
             historical.replace(OLD_CONTAINER, "not-a-container"),
-            historical.replace("/files/", "/../files/"),
+            historical.replace("${separator}files${separator}", "${separator}..${separator}files${separator}"),
             "file://$historical",
         )) assertEquals(FailureCode.CORRUPT_MEDIA, assertFailsWith<VeyraException> { files.ownedPath(path) }.failure.code)
     }
