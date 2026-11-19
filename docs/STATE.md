@@ -15,6 +15,19 @@
   and skip commands carry the occurrence and generation they were issued for.
 - Search retires superseded requests and can return a successful provider when the other
   fails. Action failures remain visible in order even when later actions finish.
+- Linux passed 1,283 shared tests and 505 desktop tests. The pending-cleanup follow-up passed
+  the focused recovery and removal tests. Local Android unit tests and lint passed. The hosted
+  iOS run compiled the unsigned Swift host for arm64 device and simulator targets.
+  [Linux CI](https://github.com/Apdelrahman1911/veyra/actions/runs/44474503933) ·
+  [iOS build job](https://github.com/Apdelrahman1911/veyra/actions/runs/44473537404/job/135388500307)
+- The Linux installer passed an extracted-image smoke test and silent native playback, pause,
+  seek and rate checks with authored MP3 and fragmented AAC. The build used the bundled libmpv
+  runtime and verified the embedded notices.
+- kmpYT `v0.1.3` fixed stalled desktop FFmpeg remuxes. All release checks passed and Sonatype
+  validated its signed bundle. A publishing limit then stopped the deployment. All six
+  `0.1.3` Maven POMs returned HTTP 404, so Veyra retains the published `0.1.2` pin.
+  [Release run](https://github.com/Apdelrahman1911/kmpYT/actions/runs/44470407123) ·
+  [Central failure](https://github.com/Apdelrahman1911/kmpYT/actions/runs/44480625841)
 - Installable release signing, real-source startup timings for this revision, and physical
   Android/iOS background audio, headset controls and interruptions remain open.
 
@@ -33,7 +46,8 @@
   The signed debug APK contains both compiled libraries and their original notice bytes.
   The desktop run passed 500 of 503 tests on its first pass. Both license screen cases
   passed with the new notice expectations, and the native seek case passed on rerun.
-  Both iOS Kotlin targets compiled. Xcode linking and physical-device runs are open.
+  Both iOS Kotlin targets compiled at that checkpoint. The later hosted Xcode compile is
+  recorded above. Physical-device runs remain open.
 
 ## Player, tabs, search scope and downloaded playback — 2026-11-17
 
