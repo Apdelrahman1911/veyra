@@ -53,6 +53,10 @@ case "$mode" in
         python3 -B native/test_bundle.py
         python3 -B native/test_windows_toolchain.py
         python3 -B native/ffmpeg/test_build.py
+        desktop_checks=(--continue :shared:jvmTest :composeApp:desktopTest)
+        if [ "$(tr -d '\r' < gradle/kmpyt.mode)" = source ]; then
+            desktop_checks+=(:kmpYT:kmpyt:jvmTest --tests 'dev.kmpyt.jvm.JvmYouTubeDownloaderTest')
+        fi
         # Compose tests need a display on Linux; use already installed Xvfb,
         # never apt. A verified private read-only mount guard gives Xorg's
         # hard-coded scratch paths repository backing; there is no fallback.
@@ -63,9 +67,9 @@ case "$mode" in
             if [ -n "$audio_libraries" ]; then
                 export LD_LIBRARY_PATH="$audio_libraries${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
             fi
-            "$SCRIPT_DIR/with-display.sh" "$SCRIPT_DIR/gradle.sh" --continue :shared:jvmTest :composeApp:desktopTest
+            "$SCRIPT_DIR/with-display.sh" "$SCRIPT_DIR/gradle.sh" "${desktop_checks[@]}"
         else
-            "$SCRIPT_DIR/gradle.sh" --continue :shared:jvmTest :composeApp:desktopTest
+            "$SCRIPT_DIR/gradle.sh" "${desktop_checks[@]}"
         fi
         python3 -B scripts/verification-summary.py --phase desktop --require-tests shared composeApp
         if [ "$package" = true ]; then "$SCRIPT_DIR/package.sh"; fi

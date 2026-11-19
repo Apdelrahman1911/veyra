@@ -1,0 +1,199 @@
+package dev.kmpyt.jvm
+
+import dev.kmpyt.YouTubeDownloadProgress
+import dev.kmpyt.extraction.*
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.cio.CIO
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import okhttp3.mockwebserver.Dispatcher
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
+import dev.kmpyt.testfixtures.startLoopback
+import dev.kmpyt.testfixtures.loopbackUrl
+import okhttp3.mockwebserver.RecordedRequest
+import okio.Buffer
+import org.junit.Assume.assumeTrue
+import java.io.File
+import java.nio.file.Files
+import java.util.concurrent.TimeUnit
+import kotlin.test.*
+
+class JvmYouTubeDownloaderTest {
+    @Test fun stalledRemuxStopsTheProcessAndDiscardsPartialOutput(): Unit = runBlocking {
+        assumeTrue(File("/bin/sh").canExecute() && File("/bin/sleep").canExecute())
+        val directory = Files.createTempDirectory("kmpyt-stalled-remux-").toFile()
+        val output = File(directory, "partial.mp4")
+        val executable = File(directory, "authored-remux")
+        executable.writeText("""#!/bin/sh
+for output do :; done
+printf '%s' "${'$'}${'$'}" > "${'$'}0.pid"
+printf 'partial output' > "${'$'}output"
+exec /bin/sleep 60
+""")
+        check(executable.setExecutable(true))
+        try {
+            val primary = Representation("v", "https://example.invalid/video", TrackRole.VIDEO)
+            val audio = Representation("a", "https://example.invalid/audio", TrackRole.AUDIO)
+            val failure = assertFailsWith<IllegalStateException> {
+                withTimeout(8_000) {
+                    JvmMediaProcessor(executable.absolutePath, remuxStallTimeoutMs = 300)
+                        .materialize(primary, audio, { _, resource -> resource.writeText("authored bytes") }, output)
+                }
+            }
+            assertContains(failure.message.orEmpty(), "stopped producing output")
+            val pid = File(directory, "authored-remux.pid").readText().toLong()
+            assertFalse(ProcessHandle.of(pid).map { it.isAlive }.orElse(false))
+            assertFalse(output.exists())
+            assertFalse(directory.listFiles().orEmpty().any { it.name.startsWith("processing-") })
+        } finally { directory.deleteRecursively() }
+    }
+
+    private fun media(name: String) = requireNotNull(javaClass.getResourceAsStream("/research/$name")).use { it.readBytes() }
+    private fun plan(server: MockWebServer, audio: Boolean = false): PlannedDownload {
+        val video = Representation("video", server.loopbackUrl("/video").toString(), if (audio) TrackRole.VIDEO else TrackRole.MUXED,
+            mimeType = "video/mp4", codecs = "avc1.4d401e", sizeBytes = media("video.mp4").size.toLong())
+        val sound = if (audio) Representation("audio", server.loopbackUrl("/audio").toString(), TrackRole.AUDIO,
+            mimeType = "audio/mp4", codecs = "mp4a.40.2", sizeBytes = media("audio.m4a").size.toLong()) else null
+        return PlannedDownload(video, sound, inspectionUrl = server.loopbackUrl("/owned").toString(), mediaId = "owned")
+    }
+
+    @Test fun aChunkedPrefixCannotBePublishedAsTheInspectedCompleteFile(): Unit = runBlocking {
+        val body = media("video.mp4")
+        val directory = Files.createTempDirectory("kmpyt-truncated-publication-").toFile()
+        val output = File(directory, "saved.mp4")
+        val server = MockWebServer()
+        repeat(3) {
+            server.enqueue(MockResponse().setHeader("Content-Type", "video/mp4").setHeader("ETag", "\"owned\"")
+                .setChunkedBody(Buffer().write(body.copyOf(100)), 25))
+        }
+        server.startLoopback()
+        val http = HttpClient(CIO)
+        try {
+            assertFailsWith<java.io.IOException> {
+                withTimeout(10_000) {
+                    JvmYouTubeDownloader(http, allowLocalHttp = true).download(plan(server), output.path) { }
+                }
+            }
+            assertFalse(output.exists())
+            assertEquals(3, server.requestCount)
+            assertContentEquals(body.copyOf(100), File(directory, ".saved.mp4.kmpyt/0-0").readBytes())
+        } finally { http.close(); server.shutdown(); directory.deleteRecursively() }
+    }
+
+    @Test fun independentDownloaderInstancesCannotMixTheSameCanonicalDestination(): Unit = runBlocking {
+        val body = media("video.mp4")
+        val directory = Files.createTempDirectory("kmpyt-exclusive-test").toFile()
+        val output = File(directory, "saved.mp4")
+        val server = MockWebServer()
+        server.enqueue(MockResponse().setHeader("Content-Type", "video/mp4").setHeader("ETag", "\"owned\"")
+            .setBody(Buffer().write(body)))
+        server.startLoopback()
+        val http = HttpClient(CIO)
+        val firstBytes = CompletableDeferred<Unit>()
+        val continueFirst = CompletableDeferred<Unit>()
+        try {
+            val selected = plan(server)
+            val first = async {
+                JvmYouTubeDownloader(http, allowLocalHttp = true).download(selected, output.path) {
+                    if (it.bytesDownloaded > 0 && !firstBytes.isCompleted) {
+                        firstBytes.complete(Unit)
+                        continueFirst.await()
+                    }
+                }
+            }
+            try {
+                withTimeout(10_000) { firstBytes.await() }
+                val alias = File(directory, "unused/../saved.mp4")
+                val failure = assertFailsWith<IllegalStateException> {
+                    JvmYouTubeDownloader(http, allowLocalHttp = true).download(selected, alias.path) { }
+                }
+                assertTrue(failure.message.orEmpty().contains("Another download"))
+                assertEquals(1, server.requestCount)
+            } finally { continueFirst.complete(Unit) }
+            first.await()
+            assertContentEquals(body, output.readBytes())
+        } finally { continueFirst.complete(Unit); http.close(); server.shutdown(); directory.deleteRecursively() }
+    }
+
+    @Test fun cancellationLeavesPrivateCheckpointAndNextCallResumesExactFile(): Unit = runBlocking {
+        val body = media("video.mp4")
+        val directory = Files.createTempDirectory("kmpyt-download-test").toFile()
+        val destination = File(directory, "saved.mp4")
+        val server = MockWebServer()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val offset = request.getHeader("Range")?.removePrefix("bytes=")?.substringBefore('-')?.toInt() ?: 0
+                return MockResponse().setResponseCode(if (offset == 0) 200 else 206)
+                    .setHeader("Content-Type", "video/mp4").setHeader("ETag", "\"owned\"")
+                    .apply { if (offset > 0) setHeader("Content-Range", "bytes $offset-${body.lastIndex}/${body.size}") }
+                    .setBody(Buffer().write(body, offset, body.size - offset))
+                    .throttleBody(4096, 10, TimeUnit.MILLISECONDS)
+            }
+        }
+        server.startLoopback()
+        val http = HttpClient(CIO)
+        try {
+            val selected = plan(server)
+            val downloader = JvmYouTubeDownloader(http, allowLocalHttp = true)
+            assertFailsWith<CancellationException> {
+                downloader.download(selected, destination.path) { if (it.bytesDownloaded > 0) throw CancellationException("Authored cancellation") }
+            }
+            assertFalse(destination.exists())
+            val checkpoint = File(directory, ".saved.mp4.kmpyt/checkpoint.json")
+            assertTrue(checkpoint.isFile)
+            assertFalse(checkpoint.readText().contains(server.loopbackUrl("/").toString()))
+            val progress = mutableListOf<YouTubeDownloadProgress>()
+            val result = downloader.download(selected, destination.path) { progress += it }
+            assertContentEquals(body, destination.readBytes())
+            assertEquals(body.size.toLong(), result.bytesWritten)
+            assertEquals(body.size.toLong(), progress.last().totalBytes)
+            server.takeRequest()
+            val resumed = server.takeRequest()
+            assertTrue(resumed.getHeader("Range")!!.startsWith("bytes="))
+            assertEquals("\"owned\"", resumed.getHeader("If-Range"))
+            assertFalse(checkpoint.exists())
+        } finally { http.close(); server.shutdown(); directory.deleteRecursively() }
+    }
+
+    @Test fun actualSeparateVideoAndAudioAreDownloadedAndCombinedByCallerFfmpeg(): Unit = runBlocking {
+        val ffmpeg = System.getenv("KMPYT_FFMPEG")
+        assumeTrue("CI supplies FFmpeg explicitly", ffmpeg != null && File(ffmpeg).isFile)
+        val video = media("video.mp4"); val audio = media("audio.m4a")
+        val directory = Files.createTempDirectory("kmpyt-mux-test").toFile()
+        val output = File(directory, "saved.mp4")
+        val server = MockWebServer()
+        server.enqueue(MockResponse().setHeader("Content-Type", "video/mp4").setBody(Buffer().write(video)))
+        server.enqueue(MockResponse().setHeader("Content-Type", "audio/mp4").setBody(Buffer().write(audio)))
+        server.startLoopback()
+        val http = HttpClient(CIO)
+        try {
+            val progress = mutableListOf<YouTubeDownloadProgress>()
+            val result = JvmYouTubeDownloader(http, ffmpeg, true).download(plan(server, true), output.path) { progress += it }
+            assertEquals("video/mp4", result.mimeType)
+            assertTrue(output.length() > maxOf(video.size, audio.size))
+            assertEquals((video.size + audio.size).toLong(), progress.first().totalBytes)
+            assertEquals((video.size + audio.size).toLong(), progress.last().bytesDownloaded)
+            val check = ProcessBuilder(ffmpeg!!, "-v", "error", "-i", output.path, "-map", "0:v:0", "-map", "0:a:0", "-f", "null", "-")
+                .redirectError(File(directory, "decode.log")).redirectOutput(ProcessBuilder.Redirect.DISCARD).start()
+            try { assertTrue(check.waitFor(30, TimeUnit.SECONDS)); assertEquals(0, check.exitValue()) }
+            finally { if (check.isAlive) check.destroyForcibly() }
+            assertEquals(2, server.requestCount)
+        } finally { http.close(); server.shutdown(); directory.deleteRecursively() }
+    }
+
+    @Test fun missingMuxerFailsBeforeDownloadingEitherTrack(): Unit = runBlocking {
+        val server = MockWebServer(); server.startLoopback()
+        val http = HttpClient(CIO)
+        val directory = Files.createTempDirectory("kmpyt-preflight-test").toFile()
+        try {
+            assertFailsWith<IllegalStateException> {
+                JvmYouTubeDownloader(http, null, true).download(plan(server, true), File(directory, "saved.mp4").path) { }
+            }
+            assertEquals(0, server.requestCount)
+        } finally { http.close(); server.shutdown(); directory.deleteRecursively() }
+    }
+}

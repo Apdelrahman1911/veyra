@@ -1,5 +1,14 @@
 # Veyra — resumable state
 
+## kmpYT checked-in source integration — 2026-11-19
+
+- Veyra temporarily builds kmpYT `0.1.3` at `8b4bc1307cdd7d37ca167cdc51465f07604e8f97`
+  through a Gradle composite. The catalog, commit pin and source-tree digest
+  bind the app and its notices to that upstream snapshot. NativeCmpKit Kira
+  UI still resolves from Maven Central.
+- Upstream development can continue on `source-vMAJOR.MINOR.PATCH` tags
+  while the Central publishing limit is active. [Refresh and switchback](../README.md#update-kmpyt-or-return-to-maven-central)
+
 ## Download and playback hardening — 2026-11-19
 
 - A Download tap now renews a cancelled standalone claim in Room and waits for its identified
@@ -25,13 +34,13 @@
   runtime and verified the embedded notices.
 - kmpYT `v0.1.3` fixed stalled desktop FFmpeg remuxes. All release checks passed and Sonatype
   validated its signed bundle. A publishing limit then stopped the deployment. All six
-  `0.1.3` Maven POMs returned HTTP 404, so Veyra retains the published `0.1.2` pin.
+  `0.1.3` Maven POMs returned HTTP 404. Veyra used published `0.1.2` before the source integration above.
   [Release run](https://github.com/Apdelrahman1911/kmpYT/actions/runs/44470407123) ·
   [Central failure](https://github.com/Apdelrahman1911/kmpYT/actions/runs/44480625841)
 - Installable release signing, real-source startup timings for this revision, and physical
   Android/iOS background audio, headset controls and interruptions remain open.
 
-## Maven library integration — 2026-11-19
+## Previous Maven library integration — 2026-11-19
 
 - `:shared` uses kmpYT `0.1.2`, and `:nativeComponents` uses NativeCmpKit Kira UI
   `0.1.0-preview.1` with Kira Core resolved transitively. Gradle resolves both from Maven Central.

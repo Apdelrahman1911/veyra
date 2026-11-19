@@ -217,10 +217,20 @@ gradle.projectsEvaluated {
             components.keySet().findAll { !it.startsWith('project:') && !poms.containsKey(it) }.each { pomFailures.add(it) }
 
             def requiredInputNames = ['settings.gradle.kts', 'build.gradle.kts', 'gradle.properties',
-                'gradle/libs.versions.toml', 'gradle/kmpyt.commit', 'gradle/nativecmpkit.commit',
+                'gradle/libs.versions.toml', 'gradle/kmpyt.mode', 'gradle/kmpyt.commit', 'gradle/nativecmpkit.commit',
                 'gradle/wrapper/gradle-wrapper.properties', 'third_party/notices/published-libraries.json',
                 'composeApp/build.gradle.kts', 'shared/build.gradle.kts', 'nativeComponents/build.gradle.kts',
                 'scripts/runtime-inventory.init.gradle']
+            def kmpytMode = new File(root.toFile(), 'gradle/kmpyt.mode').getText('UTF-8').trim()
+            if (kmpytMode == 'source') {
+                requiredInputNames.addAll(['source-tree.json', 'LICENSE', 'THIRD_PARTY_NOTICES.md',
+                    'settings.gradle.kts', 'build.gradle.kts', 'gradle.properties', 'kmpyt/build.gradle.kts']
+                    .collect { "third_party/kmpYT/${it}".toString() })
+                if (!components.containsKey('project::kmpYT:kmpyt') ||
+                    components.keySet().any { it.startsWith('io.github.apdelrahman1911.kmpyt:') }) {
+                    throw new GradleException('Production graph does not exclusively use the checked-in kmpYT project')
+                }
+            }
             if (requiredInputNames.any { !new File(root.toFile(), it).isFile() }) {
                 throw new GradleException('Critical production build/pin fingerprint input is missing')
             }
@@ -230,7 +240,7 @@ gradle.projectsEvaluated {
             def result = [schemaVersion: 1, type: 'veyra-production-dependencies', platform: platform,
                 project: app.path, configuration: configuration.name, configurationKind: definition[1],
                 resolved: true, testConfigurationIncluded: false,
-                source: [kmpytPin: pin, buildInputs: buildInputs],
+                source: [kmpytPin: pin, kmpytMode: kmpytMode, buildInputs: buildInputs],
                 components: components.values().toList(), artifacts: artifacts, poms: poms.values().toList(),
                 missingPoms: pomFailures.toList(),
                 claims: [finalPackageInventory: false, nativeClosureVerified: false,

@@ -1,11 +1,11 @@
 # Offline notices and production inventories
 
-`scripts/package-notices.py` checks the retained publication notices against
-the Gradle catalog, recorded upstream source revisions and original text hashes.
-The checksum record identifies the kmpYT Maven JAR and NativeCmpKit UI notices
-archive the texts came from. The collector also reads Veyra’s grant, retained
-asset terms and explicitly supplied production inventories. All inputs are
-available offline in the app checkout. [Publication notice record](../../third_party/notices/published-libraries.json)
+`scripts/package-notices.py` checks publication notices against the Gradle catalog,
+recorded upstream revisions and original text hashes. In source mode it uses
+kmpYT’s checked-in MIT license and notices and records the snapshot digest.
+The publication notice record identifies the NativeCmpKit UI archive and the
+kmpYT JAR used in Maven mode. The collector also reads Veyra’s grant, retained
+asset terms and explicitly supplied production inventories. [Publication notice record](../../third_party/notices/published-libraries.json)
 
 ## Source-only check (current CI)
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Validate the checked-in Gradle wrapper and Maven build inputs.
+# Validate the checked-in Gradle wrapper and dependency inputs.
 set -euo pipefail
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=env.sh
@@ -20,4 +20,9 @@ for file in settings.gradle.kts build.gradle.kts shared/build.gradle.kts compose
         fail 'MavenLocal is not permitted in the reproducible Veyra dependency graph.'
     fi
 done
-printf '%s\n' 'Veyra bootstrap OK: pinned Maven dependencies, Gradle 9.7.1, and project-owned tool directories.'
+case "$(tr -d '\r' < "$ROOT/gradle/kmpyt.mode")" in
+    source) python3 -B "$SCRIPT_DIR/kmpyt-source.py" check ;;
+    maven) ;;
+    *) fail 'gradle/kmpyt.mode must be source or maven.' ;;
+esac
+printf '%s\n' 'Veyra bootstrap OK: pinned dependencies, Gradle 9.7.1, and project-owned tool directories.'

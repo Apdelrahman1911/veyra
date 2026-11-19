@@ -8,6 +8,7 @@ import importlib.util
 import io
 import json
 from pathlib import Path
+import re
 import shutil
 import stat
 import subprocess
@@ -60,9 +61,15 @@ class PackageNoticeTests(unittest.TestCase):
         for name in (Path("gradle/libs.versions.toml"), Path("gradle/kmpyt.commit"),
                      Path("gradle/nativecmpkit.commit"), NOTICES.PUBLISHED_NOTICES):
             write(cls.seed / name, (ROOT / name).read_bytes())
-        cls.pin = (cls.seed / "gradle/kmpyt.commit").read_text().strip()
-        cls.kit_pin = (cls.seed / "gradle/nativecmpkit.commit").read_text().strip()
         cls.releases = json.loads((cls.seed / NOTICES.PUBLISHED_NOTICES).read_bytes())
+        cls.pin = cls.releases["kmpyt"]["sourceRevision"]
+        cls.kit_pin = (cls.seed / "gradle/nativecmpkit.commit").read_text().strip()
+        write(cls.seed / "gradle/kmpyt.commit", (cls.pin + "\n").encode())
+        write(cls.seed / NOTICES.KMPYT_MODE, b"maven\n")
+        catalog = cls.seed / "gradle/libs.versions.toml"
+        published_version = cls.releases["kmpyt"]["coordinate"].rsplit(":", 1)[1]
+        write(catalog, re.sub(r'^kmpyt = "[^"]+"$', f'kmpyt = "{published_version}"',
+                              catalog.read_text(), flags=re.M).encode())
         for release in cls.releases.values():
             for checksum in release["documents"].values():
                 name = NOTICES.PUBLISHED_NOTICES.parent / "texts" / f"{checksum}.txt"
@@ -241,6 +248,34 @@ class PackageNoticeTests(unittest.TestCase):
                 path.write_bytes(original[:120])
                 with self.assertRaises(NOTICES.NoticeError): self.generated()
                 path.write_bytes(original)
+
+    def test_source_mode_uses_the_snapshot_and_rejects_a_maven_inventory(self):
+        write(self.root / NOTICES.KMPYT_MODE, b"source\n")
+        for name in NOTICES.KMPYT_SOURCE_INPUTS:
+            write(self.root / name, b"Authored fingerprint fixture\n")
+        vendor = self.root / NOTICES.KMPYT_SOURCE
+        write(vendor / "LICENSE", self.mit)
+        write(vendor / "THIRD_PARTY_NOTICES.md", b"Authored source notices.\n")
+        version = self.releases["kmpyt"]["coordinate"].rsplit(":", 1)[1]
+        self.save(vendor / "source-tree.json",
+                  {"revision": self.pin, "version": version, "treeSha256": "1" * 64})
+        files, report = self.generated()
+        self.assertEqual(b"Authored source notices.\n", files["kmpYT-THIRD_PARTY_NOTICES.md"])
+        self.assertEqual("pinned-kmpyt-source", report["source"]["mode"])
+        self.assertNotIn("kmpyt", report["source"]["releases"])
+        path, inventory = self.inventory()
+        inventory["source"]["buildInputs"] += [
+            self.record(self.root / name) for name in sorted(NOTICES.KMPYT_SOURCE_INPUTS)
+        ]
+        self.save(path, inventory)
+        with self.assertRaisesRegex(NOTICES.NoticeError, "checked-in kmpYT project"):
+            NOTICES.generate(self.root, [path])
+        inventory["components"] = [{"id": NOTICES.KMPYT_PROJECT, "kind": "project"}]
+        inventory["artifacts"][0]["component"] = NOTICES.KMPYT_PROJECT
+        inventory["poms"] = []
+        self.save(path, inventory)
+        _, report = NOTICES.generate(self.root, [path])
+        self.assertEqual("kmpYT-LICENSE", report["sourceProjectArtifacts"][0]["sourceGrantResource"])
 
     def test_releases_must_match_their_source_revisions(self):
         for key in ("kmpyt", "nativecmpkit"):

@@ -96,7 +96,7 @@
   "fileHashes": {
     "INDEX.txt": "1647e803253673eab76457bc23be91198bcbae4116642cd2afe4b4652d5a6732",
     "LICENSE": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
-    "NOTICE.md": "b980b3b19bb8d35ade6437e0f4a019607a0ba7b378eeae23a49e29dae0015a8c",
+    "NOTICE.md": "3b700543ec48ed3332a536e8b80325ad6b400f84086145d763a4abb24c076a39",
     "THIRD_PARTY_NOTICES.txt": "81ec4529c9dfa3ed46fa7f42ddf535411fa881ab93e40293b62bbb49df66f8cc",
     "kmpYT-LICENSE": "2b48ffd17a0263667e7df9b64b277520776571b1ce73365134b7e92a6d114bcb",
     "kmpYT-THIRD_PARTY_NOTICES.md": "08b4452d51cb19117fe6ec956d98c2eaf4fa6e0fe4a6ea21eeb90e3bae8c34a0",
@@ -131,24 +131,17 @@
   "platforms": [],
   "schemaVersion": 1,
   "source": {
-    "kmpytNoticeRevision": "cf1856a425045e6269f65ab5ab6b5d698586e307",
-    "kmpytPin": "cf1856a425045e6269f65ab5ab6b5d698586e307",
-    "mode": "pinned-maven-publications",
+    "kmpytNoticeRevision": "8b4bc1307cdd7d37ca167cdc51465f07604e8f97",
+    "kmpytPin": "8b4bc1307cdd7d37ca167cdc51465f07604e8f97",
+    "kmpytSnapshot": {
+      "revision": "8b4bc1307cdd7d37ca167cdc51465f07604e8f97",
+      "treeSha256": "5a03c8c409510e19b717f7e37d67c32edaba81b6f7e95429e5c37d9957d9d772",
+      "version": "0.1.3"
+    },
+    "mode": "pinned-kmpyt-source",
     "nativecmpkitPin": "6fac2815a6e3e7cdb1d1d5dd5259ac59e8663eaa",
     "publicationVerified": false,
     "releases": {
-      "kmpyt": {
-        "archive": {
-          "sha256": "a80bbf529d2226d36deb50ecd5fc34a7ad9327269d0cbcd77cef993bd74affe6",
-          "url": "https://repo.maven.apache.org/maven2/io/github/apdelrahman1911/kmpyt/kmpyt-jvm/0.1.2/kmpyt-jvm-0.1.2.jar"
-        },
-        "coordinate": "io.github.apdelrahman1911.kmpyt:kmpyt:0.1.2",
-        "documents": {
-          "META-INF/kmpyt/LICENSE": "2b48ffd17a0263667e7df9b64b277520776571b1ce73365134b7e92a6d114bcb",
-          "META-INF/kmpyt/THIRD_PARTY_NOTICES.md": "08b4452d51cb19117fe6ec956d98c2eaf4fa6e0fe4a6ea21eeb90e3bae8c34a0"
-        },
-        "sourceRevision": "cf1856a425045e6269f65ab5ab6b5d698586e307"
-      },
       "nativecmpkit": {
         "archive": {
           "sha256": "077c846729be8d2e6198c64c3b0f329f79cdc9b64a9339a4ffbab8f4d3a6c202",

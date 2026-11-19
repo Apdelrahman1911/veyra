@@ -30,6 +30,13 @@ MIT_SHA256 = "2b48ffd17a0263667e7df9b64b277520776571b1ce73365134b7e92a6d114bcb"
 # Complete Apache-2.0 text in the published NativeCmpKit notices archive.
 APACHE_SHA256 = "188187b988999fc9f6ecdae6ba6e49e4f53f0488ec5af68acbfff3b2cf0c8722"
 PUBLISHED_NOTICES = Path("third_party/notices/published-libraries.json")
+KMPYT_SOURCE = Path("third_party/kmpYT")
+KMPYT_MODE = Path("gradle/kmpyt.mode")
+KMPYT_PROJECT = "project::kmpYT:kmpyt"
+KMPYT_SOURCE_INPUTS = frozenset((KMPYT_SOURCE / name).as_posix() for name in (
+    "source-tree.json", "LICENSE", "THIRD_PARTY_NOTICES.md", "settings.gradle.kts",
+    "build.gradle.kts", "gradle.properties", "kmpyt/build.gradle.kts",
+))
 PUBLISHED_RESOURCES = {
     "kmpyt": ("kmpyt", {
         "META-INF/kmpyt/LICENSE": "kmpYT-LICENSE",
@@ -52,7 +59,7 @@ REQUIRED_BUILD_INPUTS = frozenset((
     "settings.gradle.kts", "build.gradle.kts", "gradle.properties", "gradle/libs.versions.toml",
     "gradle/kmpyt.commit", "gradle/nativecmpkit.commit", "gradle/wrapper/gradle-wrapper.properties",
     "composeApp/build.gradle.kts", "shared/build.gradle.kts", "nativeComponents/build.gradle.kts",
-    "scripts/runtime-inventory.init.gradle", PUBLISHED_NOTICES.as_posix(),
+    "scripts/runtime-inventory.init.gradle", PUBLISHED_NOTICES.as_posix(), KMPYT_MODE.as_posix(),
 ))
 CONFIGURATIONS = {
     "desktop-linux-x64": "desktopRuntimeClasspath",
@@ -148,7 +155,25 @@ def source_notices(root: Path) -> tuple[dict[str, bytes], dict, list[tuple[bytes
     releases = read_json(owned(root, root / PUBLISHED_NOTICES))
     files = {name: read_bounded(owned(root, root / name)) for name in ("LICENSE", "NOTICE.md")}
     supplementary = []
+    mode = read_bounded(owned(root, root / KMPYT_MODE), 32).decode("ascii").strip()
+    if mode not in ("source", "maven"):
+        raise NoticeError("Unknown kmpYT dependency mode")
+    snapshot = None
+    kmpyt_pin = read_bounded(owned(root, root / "gradle/kmpyt.commit"), 128).decode("ascii").strip()
+    if not re.fullmatch(r"[a-f0-9]{40}", kmpyt_pin):
+        raise NoticeError("Full immutable kmpYT revision required")
+    if mode == "source":
+        snapshot = read_json(owned(root, root / KMPYT_SOURCE / "source-tree.json"))
+        if (snapshot.get("revision") != kmpyt_pin or snapshot.get("version") != catalog["versions"]["kmpyt"]
+                or not re.fullmatch(r"[a-f0-9]{64}", snapshot.get("treeSha256", ""))):
+            raise NoticeError("kmpYT source notice provenance differs from the pinned source snapshot")
+        files["kmpYT-LICENSE"] = read_bounded(owned(root, root / KMPYT_SOURCE / "LICENSE"))
+        files["kmpYT-THIRD_PARTY_NOTICES.md"] = read_bounded(
+            owned(root, root / KMPYT_SOURCE / "THIRD_PARTY_NOTICES.md"))
+        releases = {key: value for key, value in releases.items() if key != "kmpyt"}
     for key, (alias, resources) in PUBLISHED_RESOURCES.items():
+        if key == "kmpyt" and mode == "source":
+            continue
         release = releases[key]
         library = catalog["libraries"][alias]
         coordinate = library["module"] + ":" + catalog["versions"][library["version"]["ref"]]
@@ -174,10 +199,12 @@ def source_notices(root: Path) -> tuple[dict[str, bytes], dict, list[tuple[bytes
     for file, checksum in (("LICENSE", GPL_SHA256), ("kmpYT-LICENSE", MIT_SHA256), ("nativeCmpkit-LICENSE", APACHE_SHA256)):
         if digest(files[file]) != checksum:
             raise NoticeError(f"{file} differs from the complete reviewed license")
-    source = {"kmpytPin": releases["kmpyt"]["sourceRevision"],
-              "kmpytNoticeRevision": releases["kmpyt"]["sourceRevision"],
+    source = {"kmpytPin": kmpyt_pin, "kmpytNoticeRevision": kmpyt_pin,
               "nativecmpkitPin": releases["nativecmpkit"]["sourceRevision"],
-              "mode": "pinned-maven-publications", "releases": releases, "publicationVerified": False}
+              "mode": "pinned-kmpyt-source" if snapshot else "pinned-maven-publications",
+              "releases": releases, "publicationVerified": False}
+    if snapshot:
+        source["kmpytSnapshot"] = snapshot
     return files, source, supplementary
 
 
@@ -206,7 +233,9 @@ def load_inventory(root: Path, path: Path, pin: str) -> dict:
     if not isinstance(inputs, list) or not inputs or len(inputs) > 256 or any(not isinstance(item, dict) for item in inputs):
         raise NoticeError("Inventory build-input fingerprints are missing")
     input_names = [relative_name(item.get("path", "")) for item in inputs]
-    if len(input_names) != len(set(input_names)) or not REQUIRED_BUILD_INPUTS.issubset(input_names):
+    source_mode = read_bounded(owned(root, root / KMPYT_MODE), 32).decode("ascii").strip() == "source"
+    required = REQUIRED_BUILD_INPUTS | (KMPYT_SOURCE_INPUTS if source_mode else frozenset())
+    if len(input_names) != len(set(input_names)) or not required.issubset(input_names):
         raise NoticeError("Critical production build/pin fingerprints are missing or duplicated")
     for record in inputs:
         verified_file(root, record)
@@ -253,6 +282,9 @@ def load_inventory(root: Path, path: Path, pin: str) -> dict:
         if type(record.get("bytes")) is not int or not 0 < record["bytes"] <= MAX_DOCUMENT:
             raise NoticeError("Empty/oversized POM document")
         verified_file(root, record)
+    if source_mode and (KMPYT_PROJECT not in seen or any(
+            component.startswith("io.github.apdelrahman1911.kmpyt:") for component in seen)):
+        raise NoticeError("Production inventory must use the checked-in kmpYT project")
     return inventory
 
 
@@ -854,7 +886,8 @@ def generate(root: Path, inventory_paths: list[Path], supplements: list[Path] | 
                 # unsafe entries. Do not feed our own generated legal resources
                 # back into themselves on every package/inventory cycle.
                 grant = {"project::": "LICENSE", "project::composeApp": "LICENSE",
-                         "project::shared": "LICENSE", "project::nativeComponents": "LICENSE"}.get(component["id"])
+                         "project::shared": "LICENSE", "project::nativeComponents": "LICENSE",
+                         KMPYT_PROJECT: "kmpYT-LICENSE"}.get(component["id"])
                 if grant is None:
                     issues.add(platform + ": source-project grant mapping needs review for " + component["id"])
                 for artifact in inventory["artifacts"]:

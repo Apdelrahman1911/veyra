@@ -17,6 +17,8 @@ composeApp/src/commonMain/composeResources/files/legal/kmpYT-* -text whitespace=
 composeApp/src/commonMain/composeResources/files/legal/nativeCmpkit-* -text whitespace=-blank-at-eol,-blank-at-eof,cr-at-eol
 composeApp/src/commonMain/composeResources/files/legal/notices/*.txt -text whitespace=-blank-at-eol,-blank-at-eof,cr-at-eol
 third_party/notices/texts/*.txt -text whitespace=-blank-at-eol,-blank-at-eof,cr-at-eol
+# Preserve the exact upstream snapshot bytes on Windows as well.
+third_party/kmpYT/** -text
 *.ttf binary
 *.jar binary
 *.m4a binary

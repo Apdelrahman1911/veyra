@@ -19,14 +19,29 @@ scripts/gradle.sh :composeApp:assembleDebug
 
 Use `scripts/gradle.sh` to validate the Gradle wrapper and confine tool homes, caches and temporary files to the ignored `.work/` directory. On Windows, use Git Bash with the preinstalled JDK and SDK. Use Xcode 26.4.1 for iOS builds. The iOS targets are arm64 for devices and Apple Silicon simulators.
 
-Gradle downloads two pinned libraries from Maven Central. A plain clone contains all Veyra sources required to build the app.
+Veyra builds kmpYT from the checked-in upstream snapshot while Maven Central publishing is paused. NativeCmpKit Kira UI resolves from Maven Central. A plain clone includes the kmpYT source.
 
-| Library | Maven coordinate | Use in Veyra |
+| Library | Dependency | Use in Veyra |
 | --- | --- | --- |
-| [kmpYT](https://central.sonatype.com/artifact/io.github.apdelrahman1911.kmpyt/kmpyt/0.1.2) | `io.github.apdelrahman1911.kmpyt:kmpyt:0.1.2` | Media search, source resolution and downloads |
+| [kmpYT](https://github.com/Apdelrahman1911/kmpYT) | [0.1.3 source snapshot](third_party/kmpYT/source-tree.json) | Media search, source resolution and downloads |
 | [NativeCmpKit Kira UI](https://central.sonatype.com/artifact/io.github.apdelrahman1911.nativecmpkit/kira-ui/0.1.0-preview.1) | `io.github.apdelrahman1911.nativecmpkit:kira-ui:0.1.0-preview.1` | Adaptive UI components, with Kira Core resolved transitively |
 
 Android uses Media3. iOS uses AVPlayer. Desktop distribution builds use a pinned native libmpv runtime and include a JVM. Build native distributions on the target operating system.
+
+### Update kmpYT or return to Maven Central
+
+Make library changes upstream and run kmpYT CI. While publication is paused, tag each new tested version upstream as `source-vMAJOR.MINOR.PATCH`, for example `source-v0.1.4`. Those tags identify versions for source integration. The publisher uses regular release tags such as `v0.1.4`.
+
+Use the maintainer checkout in `.work/kmpYT` to refresh Veyra's snapshot. The refresh records the version, full commit, and source digest. Commit the snapshot and generated notices together.
+
+```sh
+git -C .work/kmpYT fetch --tags origin
+python3 -B scripts/kmpyt-source.py refresh source-v0.1.4
+python3 -B scripts/package-notices.py
+scripts/verify-checkout.sh
+```
+
+Once the desired version is public, set `gradle/kmpyt.mode` to `maven`. Update the catalog version, `gradle/kmpyt.commit`, and the kmpYT entry in the publication notice record from the verified Maven POM and JAR. Retain the exact notice bytes by SHA-256, regenerate the app notices, and verify that the app selects the published coordinate. The snapshot can then be removed. [Publication notice record](third_party/notices/published-libraries.json) · [Notice verification](docs/verification/package-notices.md)
 
 ## Data and privacy
 

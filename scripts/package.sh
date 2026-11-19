@@ -26,7 +26,11 @@ rm -f "$inventory"
 # The inventory resolves the production runtime classpath, so the selected
 # project JARs must already exist. This does not compile the app or run tests;
 # the installer task performs its normal single application build afterwards.
-"$SCRIPT_DIR/gradle.sh" :shared:jvmJar :nativeComponents:desktopJar
+jar_tasks=(:shared:jvmJar :nativeComponents:desktopJar)
+if [ "$(tr -d '\r' < gradle/kmpyt.mode)" = source ]; then
+    jar_tasks+=(:kmpYT:kmpyt:jvmJar)
+fi
+"$SCRIPT_DIR/gradle.sh" "${jar_tasks[@]}"
 "$SCRIPT_DIR/gradle.sh" -I scripts/runtime-inventory.init.gradle \
     :composeApp:exportProductionInventory -Pveyra.inventory.platform="$platform"
 python3 -B scripts/package-notices.py \
