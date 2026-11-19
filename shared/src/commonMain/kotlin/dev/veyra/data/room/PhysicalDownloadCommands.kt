@@ -112,6 +112,9 @@ internal fun AcquisitionGraph.reconcileJob(join: PhysicalDownloadJoin, now: Long
         job = job.copy(leaseOwner = null, leaseExpiresEpochMs = null, activeAttemptId = null, maintenanceKind = null,
             status = if (join.finalization == null && job.assetId == null && job.status in setOf(DownloadStatus.RESOLVING, DownloadStatus.RUNNING, DownloadStatus.VERIFYING)) DownloadStatus.QUEUED else job.status)
     }
+    if (!job.cleanupPending && join.finalization == null && job.misclassifiedRetainedFailure) {
+        job = job.copy(status = DownloadStatus.FAILED)
+    }
     val blocked = job.status == DownloadStatus.FAILED || job.status == DownloadStatus.NEEDS_FOREGROUND || job.failure?.code == FailureCode.BACKGROUND_RESTRICTED
     // A complete asset's denied/interrupted recheck is allowed to be rechecked only after a real
     // foreground return. The marker is set by the validation finalizer; a retained local failure is
@@ -146,7 +149,7 @@ internal fun AcquisitionGraph.reconcileJob(join: PhysicalDownloadJoin, now: Long
                 else -> job.nextRetryEpochMs
             })
         DownloadClaimDemand.PAUSE_AND_RETAIN -> job.copy(userPaused = true,
-            status = if (job.status == DownloadStatus.COMPLETE) job.status else DownloadStatus.PAUSED)
+            status = if (job.assetId != null || job.status == DownloadStatus.COMPLETE) job.status else DownloadStatus.PAUSED)
         DownloadClaimDemand.CANCEL_UNFINISHED_KEEP_COMPLETE -> job.copy(userPaused = true,
             status = if (job.assetId != null) DownloadStatus.COMPLETE else DownloadStatus.CANCELLED,
             cleanupPending = job.stagingPath != null || join.finalization != null || job.cleanupPending,

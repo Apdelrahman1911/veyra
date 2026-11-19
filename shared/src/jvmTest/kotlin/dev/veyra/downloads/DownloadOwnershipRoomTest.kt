@@ -322,12 +322,16 @@ class DownloadOwnershipRoomTest {
         assertTrue(b.gateway.transfers.isEmpty())
         assertNull(probeFiles.tryTransferSlot(1))
         assertFalse(retiredTransfer.operation.isCompleted)
+        // Disconnect both schedulers before releasing the slot so the deadline jump
+        // cannot also expire a successor lease that has already been acquired.
+        a.network.value = DownloadNetworkState.DISCONNECTED
+        b.network.value = DownloadNetworkState.DISCONNECTED
         zombie.release()
-        // Either live coordinator may admit the retry after the old OS slot is released.
-        // Await this exact retired transfer rather than requiring its gateway history to
-        // stay a singleton while that legitimate retry is already being recorded.
         awaitCondition { retiredTransfer.operation.isCompleted }
         advance(5_100)
+        a.network.value = DownloadNetworkState.CONNECTED
+        b.network.value = DownloadNetworkState.CONNECTED
+        // Either live coordinator may admit the retry after the old OS slot is released.
         val completed = complete(b, id, evidenceOwners = listOf(a, b))
         assertEquals(DownloadStatus.COMPLETE, completed.job.status)
         assertEquals(1, b.store.acquisitionView().acquisition.physicalDownloads.size)

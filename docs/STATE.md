@@ -8,6 +8,11 @@
   UI still resolves from Maven Central.
 - Upstream development can continue on `source-vMAJOR.MINOR.PATCH` tags
   while the Central publishing limit is active. [Refresh and switchback](../README.md#update-kmpyt-or-return-to-maven-central)
+- The snapshot passed clean-checkout verification and all six kmpYT downloader JVM regressions
+  with real FFmpeg. Hosted Android and Windows checks passed with source mode. Local Android
+  lint and 922 unit tests passed, and the debug APK contains the pinned source receipt. The Linux
+  runtime inventory selects the composite module and the packaged app passed launch and native
+  fragmented-AAC playback and seeking checks. [Source-mode platform run](https://github.com/Apdelrahman1911/veyra/actions/runs/44483022252)
 
 ## Download and playback hardening — 2026-11-19
 
@@ -18,6 +23,9 @@
   cooperative timeout and reports a retryable recovery failure. Cancellation still retains
   the exact file and native ownership until their cleanup is acknowledged. Orderly shutdown
   leaves unfinished local finalization eligible when the app next opens offline.
+- Pausing a batch with a failed retained file preserves the failed state and its local validation
+  path. On restart the scheduler repairs older rows left spuriously queued with a rejected file.
+  Room restart and desktop download UI regressions passed.
 - Playback startup timing distinguishes selection, source preparation, native readiness and
   playing. Android and iOS debug logs record the timings without media IDs or stream URLs.
   A stalled startup reports an error after a bounded active wait. Native lock-screen seek

@@ -77,6 +77,10 @@ data class PhysicalDownloadJob(
     override fun toString() = "PhysicalDownloadJob(status=$status,identity=redacted,paths=redacted)"
 }
 
+// Older pause and resume logic could leave a rejected local asset in a transfer status.
+internal val PhysicalDownloadJob.misclassifiedRetainedFailure: Boolean
+    get() = assetId != null && failure != null && (status == DownloadStatus.PAUSED || status == DownloadStatus.QUEUED)
+
 data class PhysicalDownloadAttempt(
     val id: String,
     val downloadId: String,

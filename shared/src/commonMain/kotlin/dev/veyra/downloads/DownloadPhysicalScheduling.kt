@@ -76,7 +76,8 @@ internal object DownloadPhysicalClaimRules {
     fun needsIntentReconciliation(record: DownloadPhysicalScheduleRecord): Boolean = with(record) {
         if (job.maintenanceKind == PhysicalDownloadMaintenanceKind.CLEANUP) return@with false
         when (demand(record)) {
-            DownloadClaimDemand.CONTINUE -> job.userPaused && !backgroundBlocked(job)
+            DownloadClaimDemand.CONTINUE -> job.userPaused && !backgroundBlocked(job) ||
+                !job.cleanupPending && finalization == null && job.misclassifiedRetainedFailure
             DownloadClaimDemand.PAUSE_AND_RETAIN -> !job.userPaused && job.status != DownloadStatus.COMPLETE
             DownloadClaimDemand.CANCEL_UNFINISHED_KEEP_COMPLETE ->
                 job.status != DownloadStatus.COMPLETE && (!job.userPaused || job.status != DownloadStatus.CANCELLED ||

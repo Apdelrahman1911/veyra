@@ -2,6 +2,7 @@ package dev.veyra.downloads
 
 import dev.veyra.acquisition.*
 import dev.veyra.data.*
+import dev.veyra.data.room.AcquisitionMutation
 import dev.veyra.model.*
 import dev.veyra.playback.*
 import kotlinx.coroutines.*
@@ -14,6 +15,26 @@ import kotlin.test.*
  * are authored NON-AUDIO fakes; these cases do not establish native/audio/live-source behavior.
  */
 class DownloadRetainedFailureRevalidationRoomTest {
+    @Test fun restartRestoresTheFailureOfARetainedAssetLeftInQueuedByAnOlderBuild() = acquisitionDownloadRoomCase {
+        val original = owner()
+        val (id, _) = retainedStandaloneFailure(original)
+        original.coordinator.close()
+        val failed = join(original, id)
+        // Model the durable row produced when an older build resumed a paused batch.
+        original.store.transactAcquisition { graph ->
+            AcquisitionMutation(graph.withJob(failed.job.copy(status = DownloadStatus.QUEUED))) { }
+        }
+
+        val restarted = owner(store())
+        restarted.coordinator.start(DownloadActivation.DURABLE_WORK)
+        val restored = awaitJob(restarted, id) { it.job.status == DownloadStatus.FAILED }
+        assertEquals(failed.job.failure, restored.job.failure)
+        assertNotNull(restored.asset)
+        assertEquals(failed.asset, restored.asset)
+        assertTrue(restarted.gateway.transfers.isEmpty())
+        assertTrue(restarted.validations.isEmpty())
+    }
+
     @Test fun retainedValidationFailureRecoversOnlyThroughExplicitLocalValidation() = acquisitionDownloadRoomCase {
         val owner = owner()
         val accepted = acceptNeutral(owner)

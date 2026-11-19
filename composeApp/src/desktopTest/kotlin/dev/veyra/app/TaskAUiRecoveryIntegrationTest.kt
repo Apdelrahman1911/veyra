@@ -222,9 +222,13 @@ class TaskAUiRecoveryIntegrationTest {
                 val stale = support.setBatchIntent(batch.id, fresh.intentRevision,
                     DownloadBatchIntent.PAUSED, retainCompletedAssets = true)
                 assertTrue(stale.intentRevision > fresh.intentRevision)
-                val current = entry(support.awaitPresentation {
-                    it.view.acquisition.batches.getValue(batch.id).intentRevision == stale.intentRevision
-                }, job.id)
+                val paused = support.awaitPresentation {
+                    it.view.acquisition.batches.getValue(batch.id).intentRevision == stale.intentRevision &&
+                        it.states[job.id]?.userPaused == true
+                }
+                val current = entry(paused, job.id)
+                assertEquals(DownloadStatus.FAILED, current.status,
+                    "Pausing must preserve the rejected asset's durable validation state")
                 assertNull(current.retainedValidation,
                     "A paused batch must not offer validation that its authoritative intent rejects")
                 assertTrue(current.retainedValidationChoices.isEmpty())
@@ -250,12 +254,13 @@ class TaskAUiRecoveryIntegrationTest {
                     DownloadBatchIntent.ACTIVE, retainCompletedAssets = true)
                 assertTrue(active.intentRevision > stale.intentRevision)
                 val activeEntry = entry(support.awaitPresentation {
-                    it.view.acquisition.batches.getValue(batch.id).intentRevision == active.intentRevision
+                    it.view.acquisition.batches.getValue(batch.id).intentRevision == active.intentRevision &&
+                        it.states[job.id]?.userPaused == false
                 }, job.id)
+                val activeTarget = assertNotNull(activeEntry.retainedValidation)
                 support.platform.validateLocal = { AssetValidation.Valid(12_345L) }
                 support.app.onMusicAction(MusicUiAction.ValidateRetainedDownload(job.id, binding.value,
-                    activeEntry.retainedValidation?.batchId, activeEntry.retainedValidation?.memberPosition,
-                    activeEntry.retainedValidation?.expectedIntentRevision))
+                    activeTarget.batchId, activeTarget.memberPosition, activeTarget.expectedIntentRevision))
                 val recovered = try {
                     support.awaitPresentation { it.states[job.id]?.status == DownloadStatus.COMPLETE }
                 } catch (timeout: kotlinx.coroutines.TimeoutCancellationException) {
