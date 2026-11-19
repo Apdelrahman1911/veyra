@@ -35,6 +35,8 @@ Make library changes upstream and run kmpYT CI. While publication is paused, tag
 Use the maintainer checkout in `.work/kmpYT` to refresh Veyra's snapshot. The refresh records the version, full commit, and source digest. Commit the snapshot and generated notices together.
 
 ```sh
+# On a fresh maintainer checkout, first clone the upstream repository into .work/kmpYT.
+# git clone https://github.com/Apdelrahman1911/kmpYT.git .work/kmpYT
 git -C .work/kmpYT fetch --tags origin
 python3 -B scripts/kmpyt-source.py refresh source-v0.1.4
 python3 -B scripts/package-notices.py

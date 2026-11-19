@@ -184,7 +184,8 @@ class DownloadOwnershipRoomTest {
         assertEquals(clock.epochMs() + 5_000, afterOldFinish.job.nextRetryEpochMs,
             "The old validator's primitive failure carries the real bounded local recheck")
         assertFalse(Files.exists(Path.of(intent.finalPath)))
-        advance(5_000)
+        // Removal is eligible immediately. A clock jump here can expire a cleanup
+        // claim whose timestamp has already been captured at the blocked Room call.
         cleanupClaim.entered.await()
         cleanupClaim.release()
         cleanup.entered.await()
