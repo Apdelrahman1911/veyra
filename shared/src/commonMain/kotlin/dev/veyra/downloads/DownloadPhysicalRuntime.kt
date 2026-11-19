@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -39,10 +40,11 @@ class DownloadAcquisitionDependencies(
     internal val validationTimeoutMs: Long = 120_000,
     /** Only platforms whose downloader writes the staging destination by an atomic completed-file move. */
     internal val atomicSourceStaging: Boolean = false,
+    internal val sourceFinishingTimeoutMs: Long = 150_000,
 ) {
     init {
         require(compatibilityPolicyVersion >= 1)
-        require(validationTimeoutMs > 0)
+        require(validationTimeoutMs > 0 && sourceFinishingTimeoutMs > 0)
         require(acquisition.transactionOwner === repository.transactionOwner && batches.transactionOwner === repository.transactionOwner &&
             materializationEvidence.transactionOwner === repository.transactionOwner) {
             "Download acquisition, batches and materialization evidence require the same Room transaction owner"
@@ -1506,7 +1508,7 @@ internal class DownloadPhysicalRuntime(
                         recordDiagnostic(DownloadDiagnosticStage.STAGED_FILE_RECOVERED, run = run, outcome = DownloadDiagnosticOutcome.SETTLED)
                         Transferred(size, prepared.representation)
                     } else run.validationReaders.validate {
-                        prepared.transfer(part.toString()) { progress ->
+                        transferWithFinishingDeadline(prepared, part.toString()) { progress ->
                             val now = clock.monotonicMs()
                             // A restarted transport (fewer bytes than saved) is recorded at once.
                             val due = lastProgress == null || now - lastProgress!! >= PROGRESS_CHECKPOINT_MS ||
@@ -1603,6 +1605,55 @@ internal class DownloadPhysicalRuntime(
         // A native cleanup failure raised while cancellation was unwinding still owns the path.
         run.validationReaders.requireReleased()
         return validated.durationMs
+    }
+
+    /** Wait independently once iOS reports every byte. Synchronous native/file work can
+     * outlive cancellation, so it must still own staging until the original worker releases.
+     */
+    private suspend fun transferWithFinishingDeadline(
+        prepared: Prepared,
+        path: String,
+        onProgress: suspend (AcquisitionTransferProgress) -> Unit,
+    ): Transferred {
+        if (!dependencies.atomicSourceStaging) return prepared.transfer(path, onProgress)
+        val completeBytes = CompletableDeferred<Unit>()
+        val retained = MutableStateFlow<LocalMediaValidationReaderUnacknowledged?>(null)
+        val owner = SupervisorJob()
+        val worker = CoroutineScope(currentCoroutineContext() + owner).async {
+            try {
+                prepared.transfer(path) { progress ->
+                    if (progress.totalBytes != null && progress.totalBytes > 0 &&
+                        progress.bytesDownloaded == progress.totalBytes) completeBytes.complete(Unit)
+                    onProgress(progress)
+                }
+            } catch (unconfirmed: LocalMediaValidationReaderUnacknowledged) {
+                retained.value = unconfirmed
+                throw unconfirmed
+            }
+        }
+        try {
+            val immediate = select<Transferred?> {
+                worker.onAwait { it }
+                completeBytes.onAwait { null }
+            }
+            return immediate ?: withTimeoutOrNull(dependencies.sourceFinishingTimeoutMs) { worker.await() }
+                ?: fail(FailureCode.RECOVERY_REQUIRED, "ios_download_finishing_timeout")
+        } finally {
+            owner.cancel()
+            if (!worker.isCompleted) withContext(NonCancellable) {
+                withTimeoutOrNull(12_000) { worker.join() }
+            }
+            if (!worker.isCompleted) {
+                throw LocalMediaValidationReaderUnacknowledged(
+                    LocalMediaValidationInput(path, OfflineAssetKind.FILE, 0, prepared.representation.mimeType,
+                        prepared.representation.codecs, null, prepared.representation.representationId, 0),
+                    LocalMediaValidationReaderRelease {
+                        worker.isCompleted && (retained.value?.reader?.isReleased() ?: true)
+                    },
+                )
+            }
+            retained.value?.let { throw it }
+        }
     }
 
     private class Prepared(

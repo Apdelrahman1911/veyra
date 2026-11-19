@@ -29,6 +29,22 @@ class DownloadIntegrityRoomTest {
         assertNull(failed.finalization)
     }
 
+    @Test fun finalByteWithoutAResultFailsTheIosFinishingDeadlineWithoutPublishing() = executorSchema3Case {
+        val workerStopped = CompletableDeferred<Unit>()
+        val a = owner(atomicSourceStaging = true, sourceFinishingTimeoutMs = 300)
+        a.gateway.transfer = { call ->
+            call.complete()
+            try { awaitCancellation() } finally { workerStopped.complete(Unit) }
+        }
+        val (id, _) = enqueue(a)
+        a.coordinator.start(DownloadActivation.USER_SESSION)
+        val failed = awaitJob(a, id) { it.job.status == DownloadStatus.FAILED }
+        assertTrue(workerStopped.isCompleted)
+        assertEquals("ios_download_finishing_timeout", failed.job.failure?.detail)
+        assertNull(failed.asset)
+        assertNull(failed.finalization)
+    }
+
     @Test fun completedAtomicStageIsValidatedAfterRestartWithoutRetransferring() = executorSchema3Case {
         val first = owner(atomicSourceStaging = true)
         val landed = CompletableDeferred<Unit>()

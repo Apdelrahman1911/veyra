@@ -66,7 +66,7 @@ data class DownloadDiagnosticFailure private constructor(
                     DownloadDiagnosticReason.ACQUISITION_IDENTITY
                 "YOUTUBE_INVALID_SELECTION" -> DownloadDiagnosticReason.SELECTION_REJECTED
                 "download_validation_timed_out", "local_validation_reader_unacknowledged",
-                "ios_download_export_timeout", "ios_download_export_failed", "ios_download_export_cancelled",
+                "ios_download_finishing_timeout", "ios_download_export_timeout", "ios_download_export_failed", "ios_download_export_cancelled",
                 "invalid_interrupted_staging_output", "owned_file_integrity" -> DownloadDiagnosticReason.OWNED_FILE_INTEGRITY
                 else -> DownloadDiagnosticReason.UNCLASSIFIED
             }

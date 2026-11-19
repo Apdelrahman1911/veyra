@@ -793,7 +793,7 @@ class AppStrings(
         // must not tell the user their saved data is damaged.
         FailureCode.RECOVERY_REQUIRED -> when (failure.detail) {
             "download_validation_timed_out" -> TextKey.DownloadValidationTimedOut
-            "ios_download_export_timeout" -> TextKey.DownloadExportTimedOut
+            "ios_download_export_timeout", "ios_download_finishing_timeout" -> TextKey.DownloadExportTimedOut
             "ios_download_export_failed", "ios_download_export_cancelled" -> TextKey.DownloadExportFailed
             "download_admission_not_visible" -> TextKey.DownloadAdmissionNotVisible
             "YOUTUBE_SOURCE_EXPIRED", "kmpyt_source_expired" -> TextKey.SourceLinkExpired

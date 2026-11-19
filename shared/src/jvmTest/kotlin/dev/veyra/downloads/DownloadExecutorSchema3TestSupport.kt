@@ -67,8 +67,9 @@ internal class DownloadExecutorSchema3Fixture(
         schedulerClock: Clock = clock,
         validationTimeoutMs: Long = 120_000,
         atomicSourceStaging: Boolean = false,
+        sourceFinishingTimeoutMs: Long = 150_000,
     ): DownloadExecutorSchema3Owner = DownloadExecutorSchema3Owner(this, store, gateway, executionGate,
-        capabilities, parentScope, heartbeatMs, leaseDurationMs, schedulerClock, validationTimeoutMs, atomicSourceStaging).also { owners += it }
+        capabilities, parentScope, heartbeatMs, leaseDurationMs, schedulerClock, validationTimeoutMs, atomicSourceStaging, sourceFinishingTimeoutMs).also { owners += it }
 
     fun extraScope(): CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default).also { additionalScopes += it }
     fun barrier(): DownloadBarrier = DownloadBarrier().also { barriers += it }
@@ -302,6 +303,7 @@ internal class DownloadExecutorSchema3Owner(
     schedulerClock: Clock,
     validationTimeoutMs: Long,
     atomicSourceStaging: Boolean,
+    sourceFinishingTimeoutMs: Long,
 ) {
     val repository = DownloadExecutorRepositoryFaults(store.acquisition)
     val answers = java.util.concurrent.ConcurrentHashMap<AcquisitionRequestId, SourceAcquisitionResult>()
@@ -326,7 +328,8 @@ internal class DownloadExecutorSchema3Owner(
     val materializationEvidence = DownloadMaterializationEvidence(store.transactionOwner)
     val dependencies = DownloadAcquisitionDependencies(repository, gateway, localValidator, { beforeDelete(it) },
         { beforeAdoption(it) }, { coverageChecks.incrementAndGet(); admission() }, acquisition, batches, materializationEvidence,
-        validationTimeoutMs = validationTimeoutMs, atomicSourceStaging = atomicSourceStaging)
+        validationTimeoutMs = validationTimeoutMs, atomicSourceStaging = atomicSourceStaging,
+        sourceFinishingTimeoutMs = sourceFinishingTimeoutMs)
     val resolver = AppSourceResolver(store, fixture.files, legacyValidator, legacy, schedulerClock, materializationEvidence)
     val coordinator = DownloadCoordinator(store, fixture.files, resolver, legacy, legacyValidator, capabilities,
         parentScope, executionGate ?: gate, schedulerClock, pollingMs = 30, leaseDurationMs = leaseDurationMs,
