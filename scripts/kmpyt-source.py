@@ -10,13 +10,13 @@ from pathlib import Path, PurePosixPath
 import re
 import subprocess
 import tarfile
-import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 VENDOR = ROOT / "third_party/kmpYT"
 MANIFEST = VENDOR / "source-tree.json"
 EXPORT = ("LICENSE", "THIRD_PARTY_NOTICES.md", "README.md", "kmpyt")
 VERSION_TAG = re.compile(r"(?:source-)?v((?:0|[1-9][0-9]*)(?:\.(?:0|[1-9][0-9]*)){2})")
+CATALOG_VERSION = re.compile(r'^kmpyt = "([^"]+)"$', re.MULTILINE)
 
 
 def fingerprint(files):
@@ -49,7 +49,11 @@ def snapshot():
 
 
 def catalog_version():
-    return tomllib.loads((ROOT / "gradle/libs.versions.toml").read_text(encoding="utf-8"))["versions"]["kmpyt"]
+    # Xcode invokes bootstrap with its bundled Python, which can predate tomllib.
+    versions = CATALOG_VERSION.findall((ROOT / "gradle/libs.versions.toml").read_text(encoding="utf-8"))
+    if len(versions) != 1:
+        raise ValueError("Expected one kmpYT catalog version")
+    return versions[0]
 
 
 def check():
@@ -94,7 +98,7 @@ def refresh(tag):
     version = match[1]
     catalog = ROOT / "gradle/libs.versions.toml"
     previous = catalog.read_text(encoding="utf-8")
-    content, count = re.subn(r'^kmpyt = "[^"]+"$', f'kmpyt = "{version}"', previous, flags=re.M)
+    content, count = CATALOG_VERSION.subn(f'kmpyt = "{version}"', previous)
     if count != 1:
         raise ValueError("Expected one kmpYT catalog version")
     for name in current.keys() - files.keys():
@@ -104,11 +108,10 @@ def refresh(tag):
         path.parent.mkdir(parents=True, exist_ok=True)
         if current.get(name) != data:
             path.write_bytes(data)
-    MANIFEST.write_text(json.dumps({"revision": revision, "version": version,
-                                   "treeSha256": fingerprint(files)}, indent=2) + "\n",
-                        encoding="utf-8", newline="\n")
-    (ROOT / "gradle/kmpyt.commit").write_text(revision + "\n", encoding="ascii", newline="\n")
-    catalog.write_text(content, encoding="utf-8", newline="\n")
+    receipt = {"revision": revision, "version": version, "treeSha256": fingerprint(files)}
+    MANIFEST.write_bytes((json.dumps(receipt, indent=2) + "\n").encode("utf-8"))
+    (ROOT / "gradle/kmpyt.commit").write_bytes((revision + "\n").encode("ascii"))
+    catalog.write_bytes(content.encode("utf-8"))
     check()
 
 
