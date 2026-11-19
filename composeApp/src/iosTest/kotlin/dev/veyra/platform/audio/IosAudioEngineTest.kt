@@ -40,6 +40,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
+import okio.FileSystem
+import okio.Path.Companion.toPath
 import platform.AVFAudio.*
 import platform.Foundation.*
 import platform.QuartzCore.CACurrentMediaTime
@@ -294,7 +297,8 @@ class IosAudioEngineTest {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
         var finished = false
         var failure: Throwable? = null
-        val directory = NSTemporaryDirectory().trimEnd('/') + "/veyra-native-${NSUUID().UUIDString}"
+        val temp = FileSystem.SYSTEM.canonicalize(NSTemporaryDirectory().toPath())
+        val directory = (temp / "veyra-native-${NSUUID().UUIDString}").toString()
         check(NSFileManager.defaultManager.createDirectoryAtPath(directory, true, null, null))
         val file = "$directory/tone.wav"
         writeBytes(file, authoredWaveBytes())
@@ -340,11 +344,11 @@ class IosAudioEngineTest {
         fun source(id: String, kind: MediaKind = MediaKind.MUSIC) = ResolvedPlayable(id, file,
             mimeType = "audio/wav", codecs = "pcm", isLocal = true,
             item = MediaItem(id, "Authored native test tone", kind, SourceRef(SourceProvider.LOCAL, id)))
-        suspend fun await(predicate: (EngineEvent) -> Boolean): EngineEvent = withTimeout(15_000) {
+        suspend fun await(predicate: (EngineEvent) -> Boolean): EngineEvent = withTimeoutOrNull(15_000) {
             var event = events.receive()
             while (!predicate(event)) event = events.receive()
             event
-        }
+        } ?: fail("Timed out waiting for a native event. Observed ${observed.takeLast(12)}")
         suspend fun preparePair(generation: Long, nextGeneration: Long) {
             engine.prepare(source("outgoing"), 0, generation)
             await { it is EngineEvent.Ready && it.generation == generation }

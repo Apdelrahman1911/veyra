@@ -1,4 +1,5 @@
 import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest
+import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 
 plugins {
     alias(libs.plugins.kotlin.multiplatform) apply false
@@ -19,5 +20,9 @@ allprojects {
 subprojects {
     tasks.withType<KotlinNativeSimulatorTest>().configureEach {
         providers.gradleProperty("iosSimulatorDevice").orNull?.let { device.set(it) }
+        testLogging {
+            events("failed")
+            exceptionFormat = TestExceptionFormat.FULL
+        }
     }
 }

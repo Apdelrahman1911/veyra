@@ -73,7 +73,12 @@ class IosDownloadExecutionGate internal constructor(
         val current = Allowance()
         task = current
         current.identifier = try {
-            host.begin { scope.launch(Dispatchers.Main.immediate) { expire(current, systemDeadline = true) } }
+            host.begin {
+                // Main.immediate can still queue a launch behind the enclosing coroutine's
+                // event loop. A synchronous expiration must retire the allowance before begin returns.
+                if (NSThread.isMainThread) expire(current, systemDeadline = true)
+                else scope.launch(Dispatchers.Main.immediate) { expire(current, systemDeadline = true) }
+            }
         } catch (_: Exception) {
             // UIKit normally returns the invalid identifier. An unavailable host is the same
             // bounded-execution denial, never a partially accepted lease or a renewed budget.
