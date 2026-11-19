@@ -309,7 +309,7 @@ class RetentionWorkflowTest(unittest.TestCase):
     def test_build_and_test_steps_do_not_receive_the_token(self):
         for name in ("Run bounded desktop tests", "Build desktop installer independently of test outcome",
                      "Build APK and execute JVM Android tests",
-                     "Compile native tests and full unsigned simulator/device applications"):
+                     "Execute native simulator tests and build unsigned applications"):
             block = WORKFLOW.split("name: " + name, 1)[1].split("- name:", 1)[0]
             self.assertNotIn("GH_TOKEN", block)
             self.assertNotIn("github.token", block)

@@ -295,6 +295,15 @@ class PhysicalDownloadCommandTest {
         proof.invalidate()
     }
 
+    internal fun stagedPublication(): Pair<AcquisitionGraph, PublishPhysicalDownloadFinalization> {
+        val setup = prepared()
+        val graph = setup.fixture.graph
+        val join = checkNotNull(graph.physicalJoin(setup.admission.physical.job.id))
+        val intent = checkNotNull(join.finalization)
+        return graph to PublishPhysicalDownloadFinalization(physicalFence(join.job, join.activeAttempt),
+            intent, asset(intent, 124_050), 124_050)
+    }
+
     private data class Setup(val fixture: AcquisitionCommandFixture, val admission: StandalonePhysicalDownloadAdmission)
 
     private fun typed(): Setup {

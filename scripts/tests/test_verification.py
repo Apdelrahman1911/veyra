@@ -37,9 +37,9 @@ class VerificationReportingTests(unittest.TestCase):
     def test_missing_tests_are_zero_not_a_synthetic_pass(self) -> None:
         self.assertEqual(REPORT.collect_tests("composeApp", "desktop", self.root)["tests"], 0)
 
-    def test_compiled_ios_sources_are_not_executed_test_counts(self) -> None:
+    def test_ios_counts_only_simulator_execution_xml(self) -> None:
         self.write("shared", "iosSimulatorArm64Test", '<testsuite tests="99"/>')
-        self.assertEqual(REPORT.collect_tests("shared", "ios", self.root)["tests"], 0)
+        self.assertEqual(REPORT.collect_tests("shared", "ios", self.root)["tests"], 99)
 
     def test_multiple_suites_aggregate_once(self) -> None:
         self.write("composeApp", "desktopTest", '<testsuites><testsuite tests="2"/><testsuite tests="3" errors="1"/></testsuites>')
